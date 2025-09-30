@@ -559,5 +559,5 @@ function ClipPageContent() {
 
 // Expose to router
 (App as any).FeedPage = FeedPageWrapper;
-(App as any).ClipPage = ClipPage;
+(App as any).ClipPageContent = ClipPageContent;
 export type {};

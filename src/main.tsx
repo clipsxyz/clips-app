@@ -17,7 +17,7 @@ if (import.meta.env.PROD) {
 }
 
 const FeedPage = lazy(() => import('./App').then(m => ({ default: m.FeedPage })));
-const ClipPage = lazy(() => import('./App').then(m => ({ default: m.ClipPage })));
+const ClipPage = lazy(() => import('./App').then(m => ({ default: m.ClipPageContent })));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage'));
 const Placeholder = ({ name }: { name: string }) => <div className="p-6">{name}</div>;
