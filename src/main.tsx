@@ -19,8 +19,6 @@ if (import.meta.env.PROD) {
 const FeedPage = lazy(() => import('./App').then(m => ({ default: m.FeedPage })));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage'));
-import ClipPage from './pages/ClipPage';
-import TestPage from './pages/TestPage';
 const Placeholder = ({ name }: { name: string }) => <div className="p-6">{name}</div>;
 
 const Root = () => (
@@ -34,9 +32,8 @@ const Root = () => (
                 <Route index element={<Navigate to="/feed" replace />} />
                 <Route path="feed" element={<FeedPage />} />
                 <Route path="login" element={<LoginPage />} />
-                <Route path="boost" element={<TestPage />} />
-                <Route path="clip" element={<ClipPage />} />
-                <Route path="test-clip" element={<ClipPage />} />
+                <Route path="boost" element={<Placeholder name="Boost" />} />
+                <Route path="clip" element={<Placeholder name="Clip+" />} />
                 <Route path="search" element={<Placeholder name="Search" />} />
                 <Route path="profile" element={<ProfilePage />} />
               </Route>
