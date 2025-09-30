@@ -35,6 +35,7 @@ const Root = () => (
                 <Route path="login" element={<LoginPage />} />
                 <Route path="boost" element={<Placeholder name="Boost" />} />
                 <Route path="clip" element={<ClipPage />} />
+                <Route path="test-clip" element={<ClipPage />} />
                 <Route path="search" element={<Placeholder name="Search" />} />
                 <Route path="profile" element={<ProfilePage />} />
               </Route>
