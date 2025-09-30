@@ -33,7 +33,7 @@ const Root = () => (
                 <Route index element={<Navigate to="/feed" replace />} />
                 <Route path="feed" element={<FeedPage />} />
                 <Route path="login" element={<LoginPage />} />
-                <Route path="boost" element={<Placeholder name="Boost" />} />
+                <Route path="boost" element={<ClipPage />} />
                 <Route path="clip" element={<ClipPage />} />
                 <Route path="test-clip" element={<ClipPage />} />
                 <Route path="search" element={<Placeholder name="Search" />} />
