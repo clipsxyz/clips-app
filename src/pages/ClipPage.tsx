@@ -26,8 +26,8 @@ export default function ClipPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // TODO: Submit story to API
     console.log('Story submitted:', { text, location, mediaFile });
+    alert('Story shared! (Check console for data)');
   };
 
   return (
