@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body { @apply bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100 antialiased; }
+  h1,h2,h3 { @apply tracking-tight; }
+  *:focus-visible { @apply outline-none ring-2 ring-brand-600 ring-offset-2 ring-offset-white dark:ring-offset-gray-950; }
+}
+
+/* Respect users who prefer less motion */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hover-lift:hover { transform: translateY(-1px); transition: transform .15s ease, box-shadow .15s ease; }
+}
