@@ -31,3 +31,4 @@ export async function drain(handler: (m: Mutation) => Promise<void>) {
 export async function all(): Promise<Mutation[]> { 
   return (await db.get(QKEY)) ?? []; 
 }
+

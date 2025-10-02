@@ -1,8 +1,22 @@
 import React from 'react';
 import * as Sentry from '@sentry/react';
+import { apiClient } from '../utils/api';
 
-type User = { id: string; name: string };
-type AuthCtx = { user: User | null; login: (name: string) => void; logout: () => void };
+type User = { 
+  id: string; 
+  name: string; 
+  username?: string;
+  bio?: string;
+  website?: string;
+  location?: string;
+  profileImage?: string;
+};
+type AuthCtx = { 
+  user: User | null; 
+  login: (name: string) => void; 
+  logout: () => void;
+  updateUser: (updates: Partial<User>) => void;
+};
 const Ctx = React.createContext<AuthCtx | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -11,23 +25,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return s ? JSON.parse(s) : null;
   });
   
-  const login = (name: string) => {
-    const u = { 
-      id: name.trim().toLowerCase() || 'me', 
-      name: name.trim() || 'Me' 
-    };
-    setUser(u);
-    localStorage.setItem('user', JSON.stringify(u));
-    Sentry.setUser({ id: u.id, username: u.name });
+  const login = async (credentials: { login: string; password: string; remember_me?: boolean }) => {
+    try {
+      const response = await apiClient.login(credentials);
+      if (response.success && response.user) {
+        const u = {
+          id: response.user.id,
+          name: response.user.name,
+          username: response.user.username,
+          bio: response.user.bio,
+          website: response.user.website,
+          location: response.user.location,
+          profileImage: response.user.profile_image
+        };
+        setUser(u);
+        localStorage.setItem('user', JSON.stringify(u));
+        Sentry.setUser({ id: u.id, username: u.name });
+        return response;
+      }
+      throw new Error(response.message || 'Login failed');
+    } catch (error) {
+      console.error('Login error:', error);
+      throw error;
+    }
   };
   
-  const logout = () => {
-    setUser(null);
-    localStorage.removeItem('user');
-    Sentry.setUser(null);
+  const updateUser = (updates: Partial<User>) => {
+    if (!user) return;
+    const updatedUser = { ...user, ...updates };
+    setUser(updatedUser);
+    localStorage.setItem('user', JSON.stringify(updatedUser));
+    Sentry.setUser({ id: updatedUser.id, username: updatedUser.name });
   };
   
-  return <Ctx.Provider value={{ user, login, logout }}>{children}</Ctx.Provider>;
+  const logout = async () => {
+    try {
+      await apiClient.logout();
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      setUser(null);
+      localStorage.removeItem('user');
+      Sentry.setUser(null);
+    }
+  };
+  
+  return <Ctx.Provider value={{ user, login, logout, updateUser }}>{children}</Ctx.Provider>;
 }
 
 export function useAuth() {

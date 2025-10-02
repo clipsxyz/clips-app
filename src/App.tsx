@@ -6,39 +6,78 @@ import { BsBookmarkFill } from 'react-icons/bs';
 import TopBar from './components/TopBar';
 import { useAuth } from './context/Auth';
 import { useOnline } from './hooks/useOnline';
+import { useOfflineMode } from './hooks/useOfflineMode';
+import { useTouchGestures } from './hooks/useTouchGestures';
 import { fetchPostsPage, toggleBookmark, toggleFollowForPost, toggleLike } from './api/posts';
 import { saveFeed, loadFeed } from './utils/feedCache';
 import { enqueue, drain } from './utils/mutationQueue';
+import InstallPrompt from './components/InstallPrompt';
+import OfflineIndicator from './components/OfflineIndicator';
+import PullToRefresh from './components/PullToRefresh';
+import TouchFeedback from './components/TouchFeedback';
+import { Button, IconButton } from './components/ui/Button';
+import { Card, PostCard } from './components/ui/Card';
+import { FeedSkeleton, InlineLoader } from './components/ui/LoadingState';
+import { cn } from './utils/cn';
 import type { Post } from './types';
 
-type Tab = 'Finglas' | 'Dublin' | 'Ireland' | 'Following';
+type Tab = string;
 
 function BottomNav() {
   const nav = useNavigate();
   const loc = useLocation();
   
-  const item = (path: string, label: string, icon: React.ReactNode) => {
-    const active = loc.pathname === path;
+  const item = (path: string, label: string, icon: React.ReactNode, badge?: number) => {
+    const active = loc.pathname === path || loc.pathname.startsWith(path + '/');
     return (
-      <button 
-        onClick={() => nav(path)} 
-        className={`flex flex-col items-center justify-center flex-1 py-2 ${active ? 'text-brand-600 font-semibold' : 'text-gray-500'} transition-colors`}
-        aria-current={active ? 'page' : undefined}
-        title={label}
-      >
-        {icon}
-        <span className="text-xs mt-1">{label}</span>
-      </button>
+      <TouchFeedback onTap={() => nav(path)}>
+        <div className={cn(
+          'flex flex-col items-center justify-center flex-1 py-3 relative transition-all duration-200',
+          'hover:bg-gray-50 dark:hover:bg-gray-900/50 rounded-xl mx-1',
+          active 
+            ? 'text-indigo-600 dark:text-indigo-400 font-semibold' 
+            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+        )}>
+          <div className="relative">
+            <div className={cn(
+              'transition-all duration-200',
+              active ? 'animate-bounce' : 'hover:scale-110'
+            )}>
+              {icon}
+            </div>
+            {badge && badge > 0 && (
+              <div className="absolute -top-2 -right-2 bg-gradient-to-r from-red-500 to-pink-500 text-white text-xs rounded-full min-w-[16px] h-4 flex items-center justify-center px-1 animate-pulse shadow-lg">
+                {badge > 99 ? '99+' : badge}
+              </div>
+            )}
+            {active && (
+              <div className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-1 h-1 bg-indigo-600 dark:bg-indigo-400 rounded-full animate-ping"></div>
+            )}
+          </div>
+          <span className={cn(
+            'text-xs mt-1 transition-all duration-200',
+            active ? 'font-semibold' : 'font-medium'
+          )}>
+            {label}
+          </span>
+        </div>
+      </TouchFeedback>
     );
   };
 
   return (
-    <nav aria-label="Primary navigation" className="fixed bottom-0 inset-x-0 bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 z-40 pb-safe">
-      <div className="mx-auto max-w-md flex">
+    <nav 
+      aria-label="Primary navigation" 
+      className="fixed bottom-0 inset-x-0 bg-white/80 dark:bg-gray-950/80 backdrop-blur-xl border-t border-gray-200/50 dark:border-gray-800/50 z-40 pb-safe"
+    >
+      {/* Gradient Border */}
+      <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-indigo-500/20 to-transparent"></div>
+      
+      <div className="mx-auto max-w-md flex px-2 py-1">
         {item('/feed', 'Home', <FiHome size={22} />)}
-        {item('/boost', 'Boost !', <FiZap size={22} />)}
-        {item('/clip', 'Clip+', <FiPlusSquare size={22} />)}
-        {item('/search', 'Search', <FiSearch size={22} />)}
+        {item('/messages', 'Messages', <FiMessageSquare size={22} />, 3)}
+        {item('/clip', 'Create', <FiPlusSquare size={22} />)}
+        {item('/live', 'Live', <FiVideo size={22} />)}
         {item('/profile', 'Profile', <FiUser size={22} />)}
       </div>
     </nav>
@@ -47,32 +86,87 @@ function BottomNav() {
 
 export default function App() {
   const location = useLocation();
+  const [showInstallPrompt, setShowInstallPrompt] = React.useState(false);
   
   // Handle Clip+ route directly
   if (location.pathname === '/clip') {
     return (
-      <main id="main" className="mx-auto max-w-md min-h-screen pb-[calc(64px+theme(spacing.safe))] md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800 md:bg-white md:dark:bg-gray-950">
-        <TopBar />
-        <ClipPageContent />
-        <BottomNav />
-      </main>
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-indigo-50 dark:from-gray-900 dark:via-gray-950 dark:to-gray-900">
+        <main 
+          id="main" 
+          className={cn(
+            'mx-auto max-w-md min-h-screen relative',
+            'pb-[calc(80px+env(safe-area-inset-bottom))]',
+            'md:shadow-2xl md:rounded-3xl md:border md:border-gray-200/50 md:dark:border-gray-800/50',
+            'md:bg-white/80 md:dark:bg-gray-950/80 md:backdrop-blur-xl',
+            'md:my-8 md:min-h-[calc(100vh-4rem)]',
+            'animate-fade-in'
+          )}
+        >
+          <TopBar />
+          <div className="animate-fade-in-up">
+            <ClipPageContent />
+          </div>
+          <BottomNav />
+        </main>
+        <OfflineIndicator />
+        <InstallPrompt onDismiss={() => setShowInstallPrompt(false)} />
+      </div>
     );
   }
   
   return (
-    <main id="main" className="mx-auto max-w-md min-h-screen pb-[calc(64px+theme(spacing.safe))] md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800 md:bg-white md:dark:bg-gray-950">
-      <TopBar />
-      <Outlet />
-      <BottomNav />
-    </main>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-indigo-50 dark:from-gray-900 dark:via-gray-950 dark:to-gray-900">
+      <main 
+        id="main" 
+        className={cn(
+          'mx-auto max-w-md min-h-screen relative',
+          'pb-[calc(80px+env(safe-area-inset-bottom))]',
+          'md:shadow-2xl md:rounded-3xl md:border md:border-gray-200/50 md:dark:border-gray-800/50',
+          'md:bg-white/80 md:dark:bg-gray-950/80 md:backdrop-blur-xl',
+          'md:my-8 md:min-h-[calc(100vh-4rem)]',
+          'animate-fade-in'
+        )}
+      >
+        <TopBar />
+        <div className="animate-fade-in-up">
+          <Outlet />
+        </div>
+        <BottomNav />
+        
+        {/* Floating Gradient Orbs */}
+        <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
+          <div className="absolute top-1/4 -left-20 w-40 h-40 bg-gradient-to-r from-indigo-400/20 to-purple-400/20 rounded-full blur-3xl animate-float"></div>
+          <div className="absolute bottom-1/4 -right-20 w-32 h-32 bg-gradient-to-r from-pink-400/20 to-rose-400/20 rounded-full blur-3xl animate-float" style={{ animationDelay: '2s' }}></div>
+          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-24 h-24 bg-gradient-to-r from-cyan-400/10 to-blue-400/10 rounded-full blur-2xl animate-pulse"></div>
+        </div>
+      </main>
+      <OfflineIndicator />
+      <InstallPrompt onDismiss={() => setShowInstallPrompt(false)} />
+    </div>
   );
 }
 
 function PillTabs(props: { active: Tab; onChange: (t: Tab) => void }) {
-  const tabs: Tab[] = ['Finglas', 'Dublin', 'Ireland', 'Following'];
+  // Get user's location preferences from localStorage (set during signup)
+  const getUserTabs = (): Tab[] => {
+    try {
+      const locationPrefs = localStorage.getItem('userLocationPreferences');
+      if (locationPrefs) {
+        const prefs = JSON.parse(locationPrefs);
+        return [prefs.local, prefs.regional, prefs.national, 'Following'];
+      }
+    } catch (error) {
+      console.warn('Error loading user location preferences:', error);
+    }
+    // Fallback to default tabs
+    return ['Finglas', 'Dublin', 'Ireland', 'Following'];
+  };
+
+  const tabs = getUserTabs();
   
   return (
-    <div role="tablist" aria-label="Locations" className="grid grid-cols-4 gap-2 px-3">
+    <div role="tablist" aria-label="Locations" className="grid grid-cols-4 gap-2 px-4 py-2">
       {tabs.map(t => {
         const active = props.active === t;
         const id = `tab-${t}`;
@@ -87,12 +181,19 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void }) {
             aria-controls={panelId}
             tabIndex={active ? 0 : -1}
             onClick={() => props.onChange(t)}
-            className={`rounded-md border text-sm py-2 font-medium transition-transform active:scale-[.98]
-              ${active 
-                ? 'bg-gray-900 text-white border-gray-900 dark:bg-white dark:text-gray-900 dark:border-white shadow-sm' 
-                : 'bg-white border-gray-300 text-gray-800 hover:bg-gray-50 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800'}`}
+            className={cn(
+              'rounded-xl text-sm py-3 px-2 font-semibold transition-all duration-200 relative overflow-hidden',
+              'hover:scale-105 active:scale-95',
+              active 
+                ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg hover:shadow-xl' 
+                : 'bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800 hover:shadow-md'
+            )}
           >
-            {t}
+            {/* Active indicator */}
+            {active && (
+              <div className="absolute inset-0 bg-gradient-to-r from-indigo-600/20 to-purple-600/20 animate-pulse"></div>
+            )}
+            <span className="relative truncate">{t}</span>
           </button>
         );
       })}
@@ -102,12 +203,15 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void }) {
 
 function DiscoverBanner() {
   return (
-    <button 
-      className="mx-3 mt-3 w-[calc(100%-1.5rem)] rounded-md border border-gray-300 py-2 text-center font-semibold bg-white hover:bg-gray-50 dark:bg-gray-900 dark:hover:bg-gray-800 dark:border-gray-700 hover-lift"
+    <Button 
+      variant="outline"
+      fullWidth
+      className="mx-4 mt-4 hover-lift animate-fade-in-up"
       aria-label="Discover other locations"
     >
+      <FiSearch className="mr-2" size={16} />
       Discover other locations
-    </button>
+    </Button>
   );
 }
 
@@ -167,37 +271,25 @@ function TagRow({ tags }: { tags: string[] }) {
 
 function Media({ url, liked, onDoubleLike }: { url: string; liked: boolean; onDoubleLike: () => Promise<void> }) {
   const [burst, setBurst] = React.useState(false);
-  const lastTap = React.useRef<number>(0);
 
-  async function handleTap() {
-    const now = Date.now();
-    if (now - lastTap.current < 300) {
-      setBurst(true);
-      try { 
-        await onDoubleLike(); 
-      } finally {
-        setTimeout(() => setBurst(false), 600);
-      }
+  const handleDoubleTap = async () => {
+    setBurst(true);
+    try { 
+      await onDoubleLike(); 
+    } finally {
+      setTimeout(() => setBurst(false), 600);
     }
-    lastTap.current = now;
-  }
+  };
 
   return (
     <div className="mx-4 mt-4 select-none">
       <h2 className="text-xl font-semibold text-center mb-2">Post</h2>
-      <div
-        role="button"
-        tabIndex={0}
-        aria-label="Open media. Double tap or press to like"
-        onKeyDown={(e) => { 
-          if (e.key === 'Enter' || e.key === ' ') { 
-            e.preventDefault(); 
-            onDoubleLike(); 
-          } 
-        }}
-        onClick={handleTap}
-        onTouchEnd={handleTap}
+      <TouchFeedback
+        onDoubleTap={handleDoubleTap}
         className="relative w-full aspect-square rounded-2xl ring-1 ring-gray-200/60 dark:ring-gray-700/60 overflow-hidden bg-gray-50 dark:bg-gray-900"
+        hapticFeedback={true}
+        rippleEffect={true}
+        scaleEffect={true}
       >
         <img 
           src={url} 
@@ -209,11 +301,11 @@ function Media({ url, liked, onDoubleLike }: { url: string; liked: boolean; onDo
         />
         {/* heart burst */}
         <div className={`absolute inset-0 flex items-center justify-center pointer-events-none transition-opacity duration-300 ${burst ? 'opacity-100' : 'opacity-0'}`}>
-          <svg className="w-24 h-24 text-red-500 drop-shadow" viewBox="0 0 24 24" fill="currentColor">
+          <svg className="w-24 h-24 text-red-500 drop-shadow animate-pulse" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z"/>
           </svg>
         </div>
-      </div>
+      </TouchFeedback>
     </div>
   );
 }
@@ -258,39 +350,69 @@ function EngagementBar({
   }
 
   return (
-    <div className="px-4 mt-3">
-      <div className="flex items-center gap-5 text-sm text-gray-700 dark:text-gray-200">
-        <button 
-          className="min-h-10 min-w-10 px-2 flex items-center gap-1 transition-transform active:scale-[.98]" 
-          onClick={likeClick} 
-          aria-pressed={liked}
-          aria-label={liked ? 'Unlike' : 'Like'}
-          title={liked ? 'Unlike' : 'Like'}
-        >
-          {liked ? <AiFillHeart className="text-red-500" /> : <FiHeart />} Like
-        </button>
-        <span className="flex items-center gap-1"><FiEye /> Views</span>
-        <button className="min-h-10 min-w-10 px-2 flex items-center gap-1 transition-transform active:scale-[.98]" aria-label="Comments"><FiMessageSquare /> Comment</button>
-        <button 
-          className="min-h-10 min-w-10 px-2 flex items-center gap-1 transition-transform active:scale-[.98]" 
-          onClick={onShare}
-          aria-label="Share"
-        >
-          <FiShare2 /> Share
-        </button>
-        <button 
-          className="ml-auto min-h-10 min-w-10 px-2 flex items-center gap-1 transition-transform active:scale-[.98]" 
-          onClick={bookmarkClick} 
+    <div className="p-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1">
+          <IconButton
+            variant="ghost"
+            size="sm"
+            onClick={likeClick}
+            disabled={busy}
+            aria-pressed={liked}
+            aria-label={liked ? 'Unlike' : 'Like'}
+            className={cn(
+              'hover-scale transition-all duration-200',
+              liked ? 'text-red-500 animate-heart-beat' : 'hover:text-red-500'
+            )}
+          >
+            {liked ? <AiFillHeart size={18} /> : <FiHeart size={18} />}
+          </IconButton>
+          
+          <IconButton
+            variant="ghost"
+            size="sm"
+            aria-label="Comments"
+            className="hover-scale hover:text-blue-500"
+          >
+            <FiMessageSquare size={18} />
+          </IconButton>
+          
+          <IconButton
+            variant="ghost"
+            size="sm"
+            onClick={onShare}
+            aria-label="Share"
+            className="hover-scale hover:text-green-500"
+          >
+            <FiShare2 size={18} />
+          </IconButton>
+        </div>
+
+        <IconButton
+          variant="ghost"
+          size="sm"
+          onClick={bookmarkClick}
+          disabled={busy}
           aria-pressed={bookmarked}
           aria-label={bookmarked ? 'Remove bookmark' : 'Bookmark'}
-          title={bookmarked ? 'Remove bookmark' : 'Bookmark'}
+          className={cn(
+            'hover-scale transition-all duration-200',
+            bookmarked ? 'text-indigo-500' : 'hover:text-indigo-500'
+          )}
         >
-          {bookmarked ? <BsBookmarkFill /> : <FiBookmark />} Reclip
-        </button>
+          {bookmarked ? <BsBookmarkFill size={18} /> : <FiBookmark size={18} />}
+        </IconButton>
       </div>
-      <div className="flex gap-8 mt-1 text-xs text-gray-500 dark:text-gray-400">
-        <span>{likes}</span>
-        <span>{post.stats.views}</span>
+      
+      <div className="flex items-center gap-6 mt-3 text-sm text-gray-600 dark:text-gray-400">
+        <span className="flex items-center gap-1">
+          <span className="font-semibold text-gray-900 dark:text-gray-100">{likes.toLocaleString()}</span>
+          <span>likes</span>
+        </span>
+        <span className="flex items-center gap-1">
+          <FiEye size={14} />
+          <span>{post.stats.views.toLocaleString()}</span>
+        </span>
       </div>
     </div>
   );
@@ -306,12 +428,15 @@ const FeedCard = React.memo(function FeedCard({ post, onLike, onBookmark, onFoll
   const titleId = `post-title-${post.id}`;
   
   return (
-    <article aria-labelledby={titleId} className="pb-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 hover-lift">
+    <PostCard 
+      aria-labelledby={titleId} 
+      className="mx-4 mb-6 animate-fade-in-up overflow-hidden"
+    >
       <PostHeader post={post} onFollow={onFollow} />
       <TagRow tags={post.tags} />
       <Media url={post.mediaUrl} liked={post.userLiked} onDoubleLike={onLike} />
       <EngagementBar post={post} onLike={onLike} onBookmark={onBookmark} onShare={onShare} />
-    </article>
+    </PostCard>
   );
 });
 
@@ -319,12 +444,29 @@ function FeedPageWrapper() {
   const { user } = useAuth();
   const userId = user?.id ?? 'anon';
   const online = useOnline();
-  const [active, setActive] = React.useState<Tab>('Dublin');
+  const { queueAction, isOnline } = useOfflineMode();
+  
+  // Get initial active tab from user preferences
+  const getInitialTab = (): Tab => {
+    try {
+      const locationPrefs = localStorage.getItem('userLocationPreferences');
+      if (locationPrefs) {
+        const prefs = JSON.parse(locationPrefs);
+        return prefs.regional; // Default to regional (Dublin-equivalent)
+      }
+    } catch (error) {
+      console.warn('Error loading initial tab:', error);
+    }
+    return 'Dublin'; // Fallback
+  };
+
+  const [active, setActive] = React.useState<Tab>(getInitialTab());
   const [pages, setPages] = React.useState<Post[][]>([]);
   const [cursor, setCursor] = React.useState<number | null>(0);
   const [loading, setLoading] = React.useState(false);
   const [end, setEnd] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [refreshing, setRefreshing] = React.useState(false);
 
   // Load from cache on mount/tab change
   React.useEffect(() => {
@@ -374,6 +516,44 @@ function FeedPageWrapper() {
 
   const flat = React.useMemo(() => pages.flat(), [pages]);
 
+  // Pull to refresh handler
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    setError(null);
+    try {
+      // Reset pagination and fetch fresh data
+      setCursor(0);
+      setEnd(false);
+      const page = await fetchPostsPage(active, 0, 5, userId);
+      setPages([page.items]);
+      setCursor(page.nextCursor);
+      setEnd(page.nextCursor === null);
+      saveFeed(userId, active, [page.items]);
+    } catch (e: any) {
+      setError(e?.message ?? 'Failed to refresh feed.');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  // Touch gesture handlers for tab switching
+  const feedContainerRef = useTouchGestures<HTMLDivElement>({
+    onSwipeLeft: () => {
+      const tabs: Tab[] = ['Finglas', 'Dublin', 'Ireland', 'Following'];
+      const currentIndex = tabs.indexOf(active);
+      if (currentIndex < tabs.length - 1) {
+        setActive(tabs[currentIndex + 1]);
+      }
+    },
+    onSwipeRight: () => {
+      const tabs: Tab[] = ['Finglas', 'Dublin', 'Ireland', 'Following'];
+      const currentIndex = tabs.indexOf(active);
+      if (currentIndex > 0) {
+        setActive(tabs[currentIndex - 1]);
+      }
+    }
+  });
+
   // Not logged in
   if (!user) {
     return (
@@ -384,97 +564,180 @@ function FeedPageWrapper() {
   }
 
   return (
-    <div id={`panel-${active}`} role="tabpanel" aria-labelledby={`tab-${active}`} className="pb-2">
-      <div className="h-2" />
+    <PullToRefresh onRefresh={handleRefresh} disabled={loading || refreshing}>
+      <div 
+        ref={feedContainerRef}
+        id={`panel-${active}`} 
+        role="tabpanel" 
+        aria-labelledby={`tab-${active}`} 
+        className="pb-2"
+      >
+        <div className="h-2" />
+        
+        <PillTabs active={active} onChange={setActive} />
+        <DiscoverBanner />
       
-      {/* Offline banner */}
-      {!online && (
-        <div className="mx-3 mt-2 rounded-md bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-200 border border-amber-200 dark:border-amber-800 px-3 py-2 text-xs">
-          You're offline. Actions will sync when back online.
-        </div>
-      )}
-      
-      <PillTabs active={active} onChange={setActive} />
-      <DiscoverBanner />
-      
-      {error && (
-        <div className="mx-4 my-3 p-3 rounded-md border border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-sm">{error}</span>
-            <button 
-              onClick={() => { setError(null); loadMore(); }} 
-              className="px-3 py-1.5 rounded bg-red-600 text-white text-sm hover:bg-red-500"
-            >
-              Retry
-            </button>
-          </div>
-        </div>
-      )}
+            {error && (
+              <Card className="mx-4 my-4 p-4 border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/50 animate-fade-in-up">
+                <div className="flex items-start gap-3">
+                  <div className="flex-shrink-0 w-8 h-8 bg-red-100 dark:bg-red-900 rounded-full flex items-center justify-center">
+                    <svg className="w-4 h-4 text-red-600 dark:text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="font-semibold text-red-800 dark:text-red-200 mb-1">
+                      Something went wrong
+                    </h4>
+                    <p className="text-sm text-red-700 dark:text-red-300 mb-3">
+                      {error}
+                    </p>
+                    <Button 
+                      variant="danger"
+                      size="sm"
+                      onClick={() => { setError(null); loadMore(); }}
+                      className="hover-scale"
+                    >
+                      Try Again
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            )}
 
       {flat.map(p => (
         <FeedCard
           key={p.id}
           post={p}
           onLike={async () => {
-            if (!online) {
-              await enqueue({ type: 'like', postId: p.id, userId });
-              return;
-            }
+            // Optimistic update
             updateOne(p.id, post => {
               const next = !post.userLiked;
               post.userLiked = next;
               post.stats.likes += next ? 1 : -1;
               return post;
             });
-            await toggleLike(userId, p.id);
+
+            if (!isOnline) {
+              await queueAction({ 
+                type: 'like', 
+                data: { postId: p.id }, 
+                userId 
+              });
+              return;
+            }
+            
+            try {
+              await toggleLike(userId, p.id);
+            } catch (error) {
+              // Revert optimistic update on error
+              updateOne(p.id, post => {
+                const next = !post.userLiked;
+                post.userLiked = next;
+                post.stats.likes += next ? 1 : -1;
+                return post;
+              });
+            }
           }}
           onBookmark={async () => {
-            if (!online) {
-              await enqueue({ type: 'bookmark', postId: p.id, userId });
+            // Optimistic update
+            updateOne(p.id, post => ({ ...post, isBookmarked: !post.isBookmarked }));
+
+            if (!isOnline) {
+              await queueAction({ 
+                type: 'bookmark', 
+                data: { postId: p.id }, 
+                userId 
+              });
               return;
             }
-            updateOne(p.id, post => ({ ...post, isBookmarked: !post.isBookmarked }));
-            await toggleBookmark(userId, p.id);
+            
+            try {
+              await toggleBookmark(userId, p.id);
+            } catch (error) {
+              // Revert optimistic update on error
+              updateOne(p.id, post => ({ ...post, isBookmarked: !post.isBookmarked }));
+            }
           }}
           onFollow={async () => {
-            if (!online) {
-              await enqueue({ type: 'follow', postId: p.id, userId });
+            // Optimistic update
+            updateOne(p.id, post => ({ ...post, isFollowing: !post.isFollowing }));
+
+            if (!isOnline) {
+              await queueAction({ 
+                type: 'follow', 
+                data: { postId: p.id }, 
+                userId 
+              });
               return;
             }
-            updateOne(p.id, post => ({ ...post, isFollowing: !post.isFollowing }));
-            await toggleFollowForPost(userId, p.id);
+            
+            try {
+              await toggleFollowForPost(userId, p.id);
+            } catch (error) {
+              // Revert optimistic update on error
+              updateOne(p.id, post => ({ ...post, isFollowing: !post.isFollowing }));
+            }
           }}
           onShare={async () => {
             if (navigator.share) {
               try {
-                await navigator.share({ url: window.location.href, title: 'Post', text: '' });
-              } catch {}
+                await navigator.share({ 
+                  url: window.location.href, 
+                  title: `Post by ${p.userHandle}`, 
+                  text: p.tags.join(' ') 
+                });
+              } catch (error) {
+                // User cancelled or share failed
+                console.log('Share cancelled or failed');
+              }
             } else {
-              await navigator.clipboard.writeText(window.location.href);
+              try {
+                await navigator.clipboard.writeText(window.location.href);
+                // Show toast notification
+                alert('Link copied to clipboard!');
+              } catch (error) {
+                console.error('Failed to copy to clipboard:', error);
+              }
             }
           }}
         />
       ))}
 
-      {loading && (
-        <div className="px-4 py-6 animate-pulse">
-          <div className="h-4 w-40 bg-gray-200 dark:bg-gray-800 rounded mb-2" />
-          <div className="h-4 w-24 bg-gray-200 dark:bg-gray-800 rounded mb-4" />
-          <div className="w-full aspect-square bg-gray-200 dark:bg-gray-800 rounded-xl" />
-        </div>
-      )}
+            {loading && <FeedSkeleton count={2} />}
 
       {end && flat.length === 0 && (
-        <div className="p-8 text-center text-gray-600 dark:text-gray-300">
-          <div className="text-lg font-semibold mb-1">No posts yet</div>
-          <div className="text-sm">Try another location or check back later.</div>
-        </div>
+        <Card className="mx-4 my-8 p-8 text-center animate-fade-in-up">
+          <div className="w-16 h-16 bg-gradient-to-br from-indigo-100 to-purple-100 dark:from-indigo-900 dark:to-purple-900 rounded-full flex items-center justify-center mx-auto mb-4">
+            <FiZap size={24} className="text-indigo-600 dark:text-indigo-400" />
+          </div>
+          <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-2">
+            No posts yet
+          </h3>
+          <p className="text-gray-600 dark:text-gray-400 mb-4">
+            Be the first to share something amazing in {active}!
+          </p>
+          <Button 
+            variant="primary"
+            size="sm"
+            className="hover-scale"
+            onClick={() => window.location.href = '/clip'}
+          >
+            Create Post
+          </Button>
+        </Card>
       )}
       
       {end && flat.length > 0 && (
-        <div className="p-4 text-center text-xs text-gray-500 dark:text-gray-400">You're all caught up.</div>
+        <div className="p-6 text-center animate-fade-in">
+          <div className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-800 rounded-full text-sm text-gray-600 dark:text-gray-400">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            You're all caught up!
+          </div>
+        </div>
       )}
-    </div>
+      </div>
+    </PullToRefresh>
   );
 }
 

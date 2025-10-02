@@ -14,3 +14,4 @@ export async function loadFeed(userId: string, tab: string): Promise<Post[][]> {
 export async function clearFeed(userId: string, tab: string) {
   await db.del(key(userId, tab));
 }
+

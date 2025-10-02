@@ -5,3 +5,4 @@ export function initVitals(log = (n: string, v: number) => console.log(n, v)) {
   onFID(d => log('FID', d.value));
   onLCP(d => log('LCP', d.value));
 }
+

@@ -70,3 +70,4 @@ export async function toggleFollowForPost(userId: string, id: string): Promise<P
   s.follows[p.userHandle] = !s.follows[p.userHandle];
   return decorateForUser(userId, p);
 }
+

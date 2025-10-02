@@ -9,3 +9,4 @@ export type Post = {
   isFollowing: boolean;
   userLiked: boolean;
 };
+

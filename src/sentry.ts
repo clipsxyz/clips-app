@@ -16,3 +16,4 @@ export function initSentry() {
     environment: import.meta.env.MODE
   });
 }
+
