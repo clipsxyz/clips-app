@@ -1,15 +1,15 @@
 import React, { Suspense, lazy } from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import * as Sentry from '@sentry/react';
+// import * as Sentry from '@sentry/react';
 import App from './App';
 import { ThemeProvider } from './theme/ThemeProvider';
 import { AuthProvider } from './context/Auth';
-import { initSentry } from './sentry';
+// import { initSentry } from './sentry';
 import './index.css';
 
 // Initialize Sentry early
-initSentry();
+// initSentry();
 
 // Initialize Web Vitals in production
 if (import.meta.env.PROD) {
@@ -30,7 +30,7 @@ const GroupsPage = lazy(() => import('./components/GroupsPage'));
 const Placeholder = ({ name }: { name: string }) => <div className="p-6">{name}</div>;
 
 const Root = () => (
-  <Sentry.ErrorBoundary fallback={<div className="p-6">Something went wrong.</div>}>
+  // <Sentry.ErrorBoundary fallback={<div className="p-6">Something went wrong.</div>}>
     <AuthProvider>
       <ThemeProvider>
         <BrowserRouter>
@@ -62,7 +62,7 @@ const Root = () => (
         </BrowserRouter>
       </ThemeProvider>
     </AuthProvider>
-  </Sentry.ErrorBoundary>
+  // </Sentry.ErrorBoundary>
 );
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

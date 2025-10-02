@@ -1,5 +1,5 @@
 import React from 'react';
-import * as Sentry from '@sentry/react';
+// import * as Sentry from '@sentry/react';
 import { apiClient } from '../utils/api';
 
 type User = { 
@@ -40,7 +40,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
         setUser(u);
         localStorage.setItem('user', JSON.stringify(u));
-        Sentry.setUser({ id: u.id, username: u.name });
+        // Sentry.setUser({ id: u.id, username: u.name });
         return response;
       }
       throw new Error(response.message || 'Login failed');
@@ -55,7 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const updatedUser = { ...user, ...updates };
     setUser(updatedUser);
     localStorage.setItem('user', JSON.stringify(updatedUser));
-    Sentry.setUser({ id: updatedUser.id, username: updatedUser.name });
+    // Sentry.setUser({ id: updatedUser.id, username: updatedUser.name });
   };
   
   const logout = async () => {
@@ -66,7 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setUser(null);
       localStorage.removeItem('user');
-      Sentry.setUser(null);
+      // Sentry.setUser(null);
     }
   };
   
