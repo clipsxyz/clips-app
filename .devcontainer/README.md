@@ -95,3 +95,6 @@ npm run lint
 Your Codespace is fully configured for developing the Gossapp authentication system. Everything should work out of the box!
 
 **Happy coding!** 🚀✨
+
+
+

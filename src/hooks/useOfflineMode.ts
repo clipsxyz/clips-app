@@ -163,14 +163,13 @@ export const useOfflineMode = () => {
           });
           break;
 
-        case 'comment':
-          response = await fetch('/api/comments', {
+        case 'view':
+          response = await fetch(`/api/posts/${action.data.postId}/view`, {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${token}`,
               'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(action.data)
+            }
           });
           break;
 
@@ -325,3 +324,4 @@ export const useOfflineMode = () => {
     offlineFetch
   };
 };
+

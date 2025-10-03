@@ -164,3 +164,6 @@ export function SyncSuccessIndicator({ show, onHide }: { show: boolean; onHide: 
     </div>
   );
 }
+
+
+

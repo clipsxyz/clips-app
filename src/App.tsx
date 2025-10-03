@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiEye, FiMessageSquare, FiShare2, FiBookmark, FiCamera, FiMapPin, FiVideo } from 'react-icons/fi';
+import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiEye, FiMessageSquare, FiShare2, FiBookmark, FiCamera, FiMapPin, FiVideo, FiRepeat, FiX } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import { BsBookmarkFill } from 'react-icons/bs';
 import TopBar from './components/TopBar';
@@ -8,13 +8,19 @@ import { useAuth } from './context/Auth';
 import { useOnline } from './hooks/useOnline';
 import { useOfflineMode } from './hooks/useOfflineMode';
 import { useTouchGestures } from './hooks/useTouchGestures';
-import { fetchPostsPage, toggleBookmark, toggleFollowForPost, toggleLike } from './api/posts';
+import { useViewTracking } from './hooks/useViewTracking';
+import { fetchPostsPage, toggleBookmark, toggleFollowForPost, toggleLike, reclipPost, unreclipPost } from './api/posts';
 import { saveFeed, loadFeed } from './utils/feedCache';
 import { enqueue, drain } from './utils/mutationQueue';
 import InstallPrompt from './components/InstallPrompt';
 import OfflineIndicator from './components/OfflineIndicator';
 import PullToRefresh from './components/PullToRefresh';
 import TouchFeedback from './components/TouchFeedback';
+import { ViewTrackingDebug } from './components/ViewTrackingDebug';
+import CommentsModal from './components/CommentsModal';
+import ShareModal from './components/ShareModal';
+import { useToast } from './components/Toast';
+import { shareAnalytics } from './utils/shareAnalytics';
 import { Button, IconButton } from './components/ui/Button';
 import { Card, PostCard } from './components/ui/Card';
 import { FeedSkeleton, InlineLoader } from './components/ui/LoadingState';
@@ -111,6 +117,7 @@ export default function App() {
         </main>
         <OfflineIndicator />
         <InstallPrompt onDismiss={() => setShowInstallPrompt(false)} />
+        <ViewTrackingDebug />
       </div>
     );
   }
@@ -143,12 +150,13 @@ export default function App() {
       </main>
       <OfflineIndicator />
       <InstallPrompt onDismiss={() => setShowInstallPrompt(false)} />
+      <ViewTrackingDebug />
     </div>
   );
 }
 
-function PillTabs(props: { active: Tab; onChange: (t: Tab) => void }) {
-  // Get user's location preferences from localStorage (set during signup)
+function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; tabs?: Tab[] }) {
+  // Use provided tabs or get user's location preferences from localStorage
   const getUserTabs = (): Tab[] => {
     try {
       const locationPrefs = localStorage.getItem('userLocationPreferences');
@@ -163,10 +171,10 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void }) {
     return ['Finglas', 'Dublin', 'Ireland', 'Following'];
   };
 
-  const tabs = getUserTabs();
+  const tabs = props.tabs || getUserTabs();
   
   return (
-    <div role="tablist" aria-label="Locations" className="grid grid-cols-4 gap-2 px-4 py-2">
+    <div role="tablist" aria-label="Locations" className={`grid gap-2 px-4 py-2 ${tabs.length === 2 ? 'grid-cols-2' : 'grid-cols-4'}`}>
       {tabs.map(t => {
         const active = props.active === t;
         const id = `tab-${t}`;
@@ -201,13 +209,14 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void }) {
   );
 }
 
-function DiscoverBanner() {
+function DiscoverBanner({ onDiscover }: { onDiscover: () => void }) {
   return (
     <Button 
       variant="outline"
       fullWidth
       className="mx-4 mt-4 hover-lift animate-fade-in-up"
       aria-label="Discover other locations"
+      onClick={onDiscover}
     >
       <FiSearch className="mr-2" size={16} />
       Discover other locations
@@ -253,8 +262,8 @@ function PostHeader({ post, onFollow }: { post: Post; onFollow: () => Promise<vo
   return (
     <div className="flex items-start justify-between px-4 mt-4">
       <div>
-        <h3 id={titleId} className="font-semibold">{post.userHandle}</h3>
-        <div className="text-xs text-gray-600 dark:text-gray-300">{post.locationLabel}</div>
+        <h3 id={titleId} className="font-semibold">{post.userHandle}@{post.locationLabel.toLowerCase().replace(/\s+/g, '')}</h3>
+        <div className="text-xs text-gray-600 dark:text-gray-300">{post.storyLocation}</div>
       </div>
       <FollowButton initial={post.isFollowing} onToggle={onFollow} />
     </div>
@@ -314,16 +323,22 @@ function EngagementBar({
   post,
   onLike,
   onBookmark,
-  onShare
+  onShare,
+  onComment,
+  onReclip
 }: {
   post: Post;
   onLike: () => Promise<void>;
   onBookmark: () => Promise<void>;
-  onShare: () => Promise<void>;
+  onShare: () => void;
+  onComment: () => void;
+  onReclip: () => void;
 }) {
   const [liked, setLiked] = React.useState(post.userLiked);
   const [likes, setLikes] = React.useState(post.stats.likes);
   const [bookmarked, setBookmarked] = React.useState(post.isBookmarked);
+  const [reclipped, setReclipped] = React.useState(post.userReclipped);
+  const [reclips, setReclips] = React.useState(post.stats.reclips);
   const [busy, setBusy] = React.useState(false);
 
   async function likeClick() {
@@ -344,6 +359,18 @@ function EngagementBar({
     setBookmarked(v => !v);
     try { 
       await onBookmark(); 
+    } finally { 
+      setBusy(false); 
+    }
+  }
+
+  async function reclipClick() {
+    if (busy) return;
+    setBusy(true);
+    setReclipped(v => !v);
+    setReclips(n => (reclipped ? n - 1 : n + 1));
+    try { 
+      await onReclip(); 
     } finally { 
       setBusy(false); 
     }
@@ -371,6 +398,7 @@ function EngagementBar({
           <IconButton
             variant="ghost"
             size="sm"
+            onClick={onComment}
             aria-label="Comments"
             className="hover-scale hover:text-blue-500"
           >
@@ -380,11 +408,29 @@ function EngagementBar({
           <IconButton
             variant="ghost"
             size="sm"
+            onClick={reclipClick}
+            disabled={busy || post.isOwnPost}
+            aria-label={post.isOwnPost ? "Cannot reclip your own post" : (reclipped ? "Unreclip" : "Reclip")}
+            className={cn(
+              "hover-scale transition-all duration-200",
+              post.isOwnPost 
+                ? "opacity-50 cursor-not-allowed" 
+                : reclipped 
+                  ? "text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20" 
+                  : "hover:text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20"
+            )}
+          >
+            <FiRepeat size={18} className={cn(reclipped && "rotate-180 transition-transform duration-200")} />
+          </IconButton>
+          
+          <IconButton
+            variant="ghost"
+            size="sm"
             onClick={onShare}
             aria-label="Share"
-            className="hover-scale hover:text-green-500"
+            className="hover-scale hover:text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 transition-all duration-200"
           >
-            <FiShare2 size={18} />
+            <FiShare2 size={18} className="hover:rotate-12 transition-transform duration-200" />
           </IconButton>
         </div>
 
@@ -413,29 +459,64 @@ function EngagementBar({
           <FiEye size={14} />
           <span>{post.stats.views.toLocaleString()}</span>
         </span>
+        <span className="flex items-center gap-1">
+          <FiMessageSquare size={14} />
+          <span>{post.stats.comments.toLocaleString()}</span>
+        </span>
+        <span className="flex items-center gap-1">
+          <FiRepeat size={14} />
+          <span>{reclips.toLocaleString()}</span>
+        </span>
       </div>
     </div>
   );
 }
 
-const FeedCard = React.memo(function FeedCard({ post, onLike, onBookmark, onFollow, onShare }: {
+const FeedCard = React.memo(function FeedCard({ post, onLike, onBookmark, onFollow, onShare, onComment, onReclip }: {
   post: Post;
   onLike: () => Promise<void>;
   onBookmark: () => Promise<void>;
   onFollow: () => Promise<void>;
-  onShare: () => Promise<void>;
+  onShare: () => void;
+  onComment: () => void;
+  onReclip: () => Promise<void>;
 }) {
   const titleId = `post-title-${post.id}`;
+  const { observePost, unobservePost, hasViewedPost } = useViewTracking();
+  const cardRef = useRef<HTMLDivElement>(null);
+  const isViewed = hasViewedPost(post.id);
+  
+  // Set up intersection observer for automatic view tracking
+  React.useEffect(() => {
+    const element = cardRef.current;
+    if (element) {
+      observePost(element, post.id);
+      
+      return () => {
+        unobservePost(element);
+      };
+    }
+  }, [post.id, observePost, unobservePost]);
   
   return (
     <PostCard 
+      ref={cardRef}
       aria-labelledby={titleId} 
-      className="mx-4 mb-6 animate-fade-in-up overflow-hidden"
+      className={cn(
+        "mx-4 mb-6 animate-fade-in-up overflow-hidden",
+        isViewed && "opacity-90" // Slightly dim viewed posts
+      )}
     >
       <PostHeader post={post} onFollow={onFollow} />
       <TagRow tags={post.tags} />
       <Media url={post.mediaUrl} liked={post.userLiked} onDoubleLike={onLike} />
-      <EngagementBar post={post} onLike={onLike} onBookmark={onBookmark} onShare={onShare} />
+      <EngagementBar post={post} onLike={onLike} onBookmark={onBookmark} onShare={onShare} onComment={onComment} onReclip={onReclip} />
+      
+      {/* View indicator */}
+      {isViewed && (
+        <div className="absolute top-2 right-2 w-2 h-2 bg-green-500 rounded-full opacity-60" 
+             title="Post viewed" />
+      )}
     </PostCard>
   );
 });
@@ -467,6 +548,13 @@ function FeedPageWrapper() {
   const [end, setEnd] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [refreshing, setRefreshing] = React.useState(false);
+  const [selectedPost, setSelectedPost] = React.useState<Post | null>(null);
+  const [showComments, setShowComments] = React.useState(false);
+  const [showShare, setShowShare] = React.useState(false);
+  const [sharePost, setSharePost] = React.useState<Post | null>(null);
+  const [showDiscover, setShowDiscover] = React.useState(false);
+  const [discoveredLocation, setDiscoveredLocation] = React.useState<string | null>(null);
+  const { ToastContainer, success, error: showError } = useToast();
 
   // Load from cache on mount/tab change
   React.useEffect(() => {
@@ -516,6 +604,68 @@ function FeedPageWrapper() {
 
   const flat = React.useMemo(() => pages.flat(), [pages]);
 
+  // Comment handler
+  const handleComment = (post: Post) => {
+    setSelectedPost(post);
+    setShowComments(true);
+  };
+
+  // Update comment count
+  const handleCommentCountUpdate = (newCount: number) => {
+    if (selectedPost) {
+      updateOne(selectedPost.id, post => ({
+        ...post,
+        stats: { ...post.stats, comments: newCount }
+      }));
+    }
+  };
+
+  // Share handler
+  const handleShare = (post: Post) => {
+    setSharePost(post);
+    setShowShare(true);
+  };
+
+  // Handle share analytics
+  const handleShareAnalytics = (platform: string) => {
+    if (sharePost) {
+      shareAnalytics.trackShare(sharePost.id, platform, user?.id);
+      
+      // Show success message
+      switch (platform) {
+        case 'copy':
+          success('Link copied to clipboard!');
+          break;
+        case 'native':
+          success('Shared successfully!');
+          break;
+        default:
+          success(`Shared to ${platform}!`);
+      }
+    }
+  };
+
+  // Reclip handler
+  const handleReclip = async (post: Post) => {
+    if (post.isOwnPost) {
+      showError('You cannot reclip your own posts');
+      return;
+    }
+
+    try {
+      if (post.userReclipped) {
+        await unreclipPost(post.id);
+        success('Post unreclipped successfully!');
+      } else {
+        await reclipPost(post.id);
+        success('Post reclipped! Your followers will see this.');
+      }
+    } catch (error) {
+      console.error('Failed to reclip post:', error);
+      showError('Failed to reclip post. Please try again.');
+    }
+  };
+
   // Pull to refresh handler
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -536,17 +686,50 @@ function FeedPageWrapper() {
     }
   };
 
+  // Handle discover location
+  const handleDiscover = () => {
+    setShowDiscover(true);
+  };
+
+  const handleLocationDiscover = (location: string) => {
+    setDiscoveredLocation(location);
+    setActive(location as Tab);
+    setShowDiscover(false);
+    // Clear existing pages to load new location
+    setPages([]);
+    setCursor(0);
+    setEnd(false);
+    success(`Switched to ${location} feed!`);
+  };
+
+  const handleResetLocation = () => {
+    setDiscoveredLocation(null);
+    setActive(getInitialTab());
+    setPages([]);
+    setCursor(0);
+    setEnd(false);
+    success('Reset to your default locations!');
+  };
+
+  // Get current tabs based on discovered location
+  const getCurrentTabs = (): Tab[] => {
+    if (discoveredLocation) {
+      return [discoveredLocation as Tab, 'Following'];
+    }
+    return ['Finglas', 'Dublin', 'Ireland', 'Following'];
+  };
+
   // Touch gesture handlers for tab switching
   const feedContainerRef = useTouchGestures<HTMLDivElement>({
     onSwipeLeft: () => {
-      const tabs: Tab[] = ['Finglas', 'Dublin', 'Ireland', 'Following'];
+      const tabs = getCurrentTabs();
       const currentIndex = tabs.indexOf(active);
       if (currentIndex < tabs.length - 1) {
         setActive(tabs[currentIndex + 1]);
       }
     },
     onSwipeRight: () => {
-      const tabs: Tab[] = ['Finglas', 'Dublin', 'Ireland', 'Following'];
+      const tabs = getCurrentTabs();
       const currentIndex = tabs.indexOf(active);
       if (currentIndex > 0) {
         setActive(tabs[currentIndex - 1]);
@@ -564,6 +747,7 @@ function FeedPageWrapper() {
   }
 
   return (
+    <>
     <PullToRefresh onRefresh={handleRefresh} disabled={loading || refreshing}>
       <div 
         ref={feedContainerRef}
@@ -574,8 +758,26 @@ function FeedPageWrapper() {
       >
         <div className="h-2" />
         
-        <PillTabs active={active} onChange={setActive} />
-        <DiscoverBanner />
+        <PillTabs active={active} onChange={setActive} tabs={getCurrentTabs()} />
+        {discoveredLocation && (
+          <div className="mx-4 mt-2 mb-2">
+            <div className="flex items-center justify-between bg-blue-50 dark:bg-blue-950/50 rounded-lg p-3">
+              <div className="flex items-center gap-2">
+                <FiMapPin className="text-blue-600 dark:text-blue-400" size={16} />
+                <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                  Exploring: {discoveredLocation}
+                </span>
+              </div>
+              <button
+                onClick={handleResetLocation}
+                className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 underline"
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+        )}
+        <DiscoverBanner onDiscover={handleDiscover} />
       
             {error && (
               <Card className="mx-4 my-4 p-4 border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/50 animate-fade-in-up">
@@ -679,28 +881,9 @@ function FeedPageWrapper() {
               updateOne(p.id, post => ({ ...post, isFollowing: !post.isFollowing }));
             }
           }}
-          onShare={async () => {
-            if (navigator.share) {
-              try {
-                await navigator.share({ 
-                  url: window.location.href, 
-                  title: `Post by ${p.userHandle}`, 
-                  text: p.tags.join(' ') 
-                });
-              } catch (error) {
-                // User cancelled or share failed
-                console.log('Share cancelled or failed');
-              }
-            } else {
-              try {
-                await navigator.clipboard.writeText(window.location.href);
-                // Show toast notification
-                alert('Link copied to clipboard!');
-              } catch (error) {
-                console.error('Failed to copy to clipboard:', error);
-              }
-            }
-          }}
+          onShare={() => handleShare(p)}
+          onComment={() => handleComment(p)}
+          onReclip={() => handleReclip(p)}
         />
       ))}
 
@@ -718,9 +901,8 @@ function FeedPageWrapper() {
             Be the first to share something amazing in {active}!
           </p>
           <Button 
-            variant="primary"
             size="sm"
-            className="hover-scale"
+            className="hover-scale bg-brand-600 text-white hover:bg-brand-700"
             onClick={() => window.location.href = '/clip'}
           >
             Create Post
@@ -738,17 +920,190 @@ function FeedPageWrapper() {
       )}
       </div>
     </PullToRefresh>
+    
+    {/* Comments Modal */}
+    {selectedPost && (
+      <CommentsModal
+        post={selectedPost}
+        isOpen={showComments}
+        onClose={() => {
+          setShowComments(false);
+          setSelectedPost(null);
+        }}
+        onCommentCountUpdate={handleCommentCountUpdate}
+      />
+    )}
+    
+    {/* Share Modal */}
+    {sharePost && (
+      <ShareModal
+        post={sharePost}
+        isOpen={showShare}
+        onClose={() => {
+          setShowShare(false);
+          setSharePost(null);
+        }}
+        onShare={handleShareAnalytics}
+      />
+    )}
+    
+    {/* Discover Location Modal */}
+    {showDiscover && (
+      <DiscoverLocationModal 
+        onClose={() => setShowDiscover(false)}
+        onDiscover={handleLocationDiscover}
+      />
+    )}
+
+    {/* Toast Container */}
+    <ToastContainer />
+    </>
+  );
+}
+
+function DiscoverLocationModal({ onClose, onDiscover }: { 
+  onClose: () => void; 
+  onDiscover: (location: string) => void; 
+}) {
+  const [searchTerm, setSearchTerm] = React.useState('');
+  const [isSearching, setIsSearching] = React.useState(false);
+
+  // Popular locations for suggestions
+  const popularLocations = [
+    'New York', 'London', 'Paris', 'Tokyo', 'Sydney', 'Toronto', 'Berlin', 'Madrid',
+    'Rome', 'Amsterdam', 'Barcelona', 'Vienna', 'Prague', 'Stockholm', 'Copenhagen',
+    'Los Angeles', 'Chicago', 'Boston', 'San Francisco', 'Seattle', 'Miami', 'Austin'
+  ];
+
+  const handleSearch = async () => {
+    if (!searchTerm.trim()) return;
+    
+    setIsSearching(true);
+    try {
+      // Simulate API call to validate location
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // For now, just use the search term as the location
+      onDiscover(searchTerm.trim());
+    } catch (error) {
+      console.error('Failed to search location:', error);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleLocationSelect = (location: string) => {
+    onDiscover(location);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-end justify-center z-50">
+      <div className="bg-white dark:bg-gray-900 rounded-t-3xl w-full max-w-md max-h-[80vh] overflow-hidden animate-slide-up">
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+            Discover Location
+          </h2>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors"
+          >
+            <FiX size={20} className="text-gray-500 dark:text-gray-400" />
+          </button>
+        </div>
+
+        {/* Search Input */}
+        <div className="p-4">
+          <div className="relative">
+            <FiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search for a city or location..."
+              className="w-full pl-10 pr-3 py-3 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+              onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+            />
+          </div>
+          
+          <button
+            onClick={handleSearch}
+            disabled={!searchTerm.trim() || isSearching}
+            className="w-full mt-3 px-4 py-3 bg-brand-600 text-white rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-brand-700 transition-colors"
+          >
+            {isSearching ? 'Searching...' : 'Search Location'}
+          </button>
+        </div>
+
+        {/* Popular Locations */}
+        <div className="px-4 pb-4">
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+            Popular Locations
+          </h3>
+          <div className="grid grid-cols-2 gap-2">
+            {popularLocations.map((location) => (
+              <button
+                key={location}
+                onClick={() => handleLocationSelect(location)}
+                className="p-3 text-left rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <FiMapPin size={14} className="text-gray-400" />
+                  <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {location}
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
 function ClipPageContent() {
   const { user } = useAuth();
   const [text, setText] = React.useState('');
-  const [location, setLocation] = React.useState('');
+  const [storyLocation, setStoryLocation] = React.useState('');
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    alert('Story shared! Text: ' + text + ', Location: ' + location);
+    if (!text.trim() || isSubmitting) return;
+    
+    setIsSubmitting(true);
+    try {
+      // Import the addPost function
+      const { addPost } = await import('./api/posts');
+      
+      // Create the new post
+      await addPost({
+        userHandle: user?.name || 'darraghdublin',
+        locationLabel: user?.location || user?.regional_location || 'Unknown Location', // User's regional location
+        storyLocation: storyLocation || 'Unknown Location', // Specific post location
+        mediaUrl: 'https://picsum.photos/400/400?random=' + Math.random(),
+        tags: text.split(' ').filter(word => word.startsWith('#')).slice(0, 5),
+        userLiked: false,
+        isBookmarked: false,
+        isFollowing: false
+      });
+      
+      // Show success message
+      alert('Story shared successfully!');
+      
+      // Clear form
+      setText('');
+      setStoryLocation('');
+      
+      // Navigate back to feed
+      window.location.href = '/feed';
+    } catch (error) {
+      console.error('Failed to create post:', error);
+      alert('Failed to share story. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -758,9 +1113,10 @@ function ClipPageContent() {
         <h1 className="text-xl font-bold">Create Story</h1>
         <button 
           onClick={handleSubmit}
-          className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium"
+          disabled={isSubmitting || !text.trim()}
+          className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Post
+          {isSubmitting ? 'Posting...' : 'Post'}
         </button>
       </div>
 
@@ -792,18 +1148,18 @@ function ClipPageContent() {
         />
       </div>
 
-      {/* Location Input */}
+      {/* Story Location Input */}
       <div>
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Location
+          Story Location
         </label>
         <div className="relative">
           <FiMapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
           <input
             type="text"
-            value={location}
-            onChange={(e) => setLocation(e.target.value)}
-            placeholder="Add Story Location"
+            value={storyLocation}
+            onChange={(e) => setStoryLocation(e.target.value)}
+            placeholder="Add Story Location (e.g., Central Park, NYC)"
             className="w-full pl-10 pr-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
           />
         </div>
@@ -812,9 +1168,10 @@ function ClipPageContent() {
       {/* Submit Button */}
       <button
         onClick={handleSubmit}
-        className="w-full py-3 rounded-lg bg-brand-600 text-white font-medium hover:bg-brand-700 transition-colors"
+        disabled={isSubmitting || !text.trim()}
+        className="w-full py-3 rounded-lg bg-brand-600 text-white font-medium hover:bg-brand-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        Share Story
+        {isSubmitting ? 'Sharing...' : 'Share Story'}
       </button>
     </div>
   );

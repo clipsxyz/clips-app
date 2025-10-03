@@ -249,9 +249,43 @@ class ApiClient {
     });
   }
 
-  async likePost(postId: string): Promise<ApiResponse> {
-    return this.request<ApiResponse>(`/posts/${postId}/like`, {
+  async getFollowingPosts(params: Record<string, any> = {}): Promise<ApiResponse & { posts: any[] }> {
+    const queryString = new URLSearchParams(params).toString();
+    return this.request<ApiResponse & { posts: any[] }>(`/posts/following${queryString ? `?${queryString}` : ''}`);
+  }
+
+  async getPost(postId: string): Promise<ApiResponse & { post: any }> {
+    return this.request<ApiResponse & { post: any }>(`/posts/${postId}`);
+  }
+
+  async trackPostView(postId: string): Promise<ApiResponse> {
+    return this.request<ApiResponse>(`/posts/${postId}/view`, {
       method: 'POST',
+    });
+  }
+
+  // Comment methods
+  async getComments(postId: string, params: Record<string, any> = {}): Promise<ApiResponse & { comments: any[] }> {
+    const queryString = new URLSearchParams(params).toString();
+    return this.request<ApiResponse & { comments: any[] }>(`/posts/${postId}/comments${queryString ? `?${queryString}` : ''}`);
+  }
+
+  async addComment(postId: string, commentData: Record<string, any>): Promise<ApiResponse & { comment: any }> {
+    return this.request<ApiResponse & { comment: any }>(`/posts/${postId}/comments`, {
+      method: 'POST',
+      body: JSON.stringify(commentData),
+    });
+  }
+
+  async likeComment(commentId: string): Promise<ApiResponse> {
+    return this.request<ApiResponse>(`/comments/${commentId}/like`, {
+      method: 'POST',
+    });
+  }
+
+  async deleteComment(commentId: string): Promise<ApiResponse> {
+    return this.request<ApiResponse>(`/comments/${commentId}`, {
+      method: 'DELETE',
     });
   }
 
@@ -384,6 +418,166 @@ class ApiClient {
       method: 'DELETE',
     });
   }
+
+  // Email verification
+  async sendEmailVerification(email: string): Promise<ApiResponse> {
+    return this.request<ApiResponse>('/auth/email/send', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async verifyEmail(data: {
+    id: string;
+    hash: string;
+    expires: number;
+    signature: string;
+  }): Promise<ApiResponse & { user: any }> {
+    return this.request<ApiResponse & { user: any }>('/auth/email/verify', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async resendEmailVerification(email: string): Promise<ApiResponse> {
+    return this.request<ApiResponse>('/auth/email/resend', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async getEmailVerificationStatus(email: string): Promise<ApiResponse & { verified: boolean }> {
+    return this.request<ApiResponse & { verified: boolean }>(`/auth/email/status?email=${encodeURIComponent(email)}`);
+  }
+
+  // Two-factor authentication
+  async enableTwoFactor(): Promise<ApiResponse & { data: { secret: string; qr_code_url: string; recovery_codes: string[] } }> {
+    return this.request<ApiResponse & { data: { secret: string; qr_code_url: string; recovery_codes: string[] } }>('/auth/2fa/enable', {
+      method: 'POST',
+    });
+  }
+
+  async confirmTwoFactor(code: string): Promise<ApiResponse> {
+    return this.request<ApiResponse>('/auth/2fa/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+  }
+
+  async disableTwoFactor(code: string): Promise<ApiResponse> {
+    return this.request<ApiResponse>('/auth/2fa/disable', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+  }
+
+  async getTwoFactorStatus(): Promise<ApiResponse & { data: { enabled: boolean; confirmed_at: string; recovery_codes_count: number } }> {
+    return this.request<ApiResponse & { data: { enabled: boolean; confirmed_at: string; recovery_codes_count: number } }>('/auth/2fa/status');
+  }
+
+  async regenerateRecoveryCodes(): Promise<ApiResponse & { data: { recovery_codes: string[] } }> {
+    return this.request<ApiResponse & { data: { recovery_codes: string[] } }>('/auth/2fa/regenerate-recovery-codes', {
+      method: 'POST',
+    });
+  }
+
+  async verifyTwoFactor(code: string): Promise<ApiResponse> {
+    return this.request<ApiResponse>('/auth/2fa/verify', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+  }
+
+  // Social authentication
+  async getSocialRedirectUrl(provider: string): Promise<ApiResponse & { redirect_url: string }> {
+    return this.request<ApiResponse & { redirect_url: string }>(`/auth/social/${provider}/redirect`);
+  }
+
+  async linkSocialAccount(provider: string): Promise<ApiResponse> {
+    return this.request<ApiResponse>(`/auth/social/${provider}/link`, {
+      method: 'POST',
+    });
+  }
+
+  async unlinkSocialAccount(provider: string): Promise<ApiResponse> {
+    return this.request<ApiResponse>(`/auth/social/${provider}/unlink`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getSocialAccounts(): Promise<ApiResponse & { data: { accounts: any[] } }> {
+    return this.request<ApiResponse & { data: { accounts: any[] } }>('/auth/social/accounts');
+  }
+
+  // Password reset
+  async sendPasswordResetLink(email: string): Promise<ApiResponse> {
+    return this.request<ApiResponse>('/auth/password/send-reset-link', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async resetPassword(data: {
+    token: string;
+    email: string;
+    password: string;
+    password_confirmation: string;
+  }): Promise<ApiResponse> {
+    return this.request<ApiResponse>('/auth/password/reset', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async verifyPasswordResetToken(token: string, email: string): Promise<ApiResponse> {
+    return this.request<ApiResponse>('/auth/password/verify-token', {
+      method: 'POST',
+      body: JSON.stringify({ token, email }),
+    });
+  }
+
+  // Account recovery
+  async requestAccountRecovery(data: {
+    email: string;
+    reason: string;
+    description?: string;
+  }): Promise<ApiResponse> {
+    return this.request<ApiResponse>('/auth/recovery/request', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async verifyRecoveryToken(token: string): Promise<ApiResponse & { data: { user: any; reason: string; description: string } }> {
+    return this.request<ApiResponse & { data: { user: any; reason: string; description: string } }>('/auth/recovery/verify-token', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    });
+  }
+
+  async completeAccountRecovery(data: {
+    token: string;
+    action: string;
+    password?: string;
+    password_confirmation?: string;
+    verification_code?: string;
+  }): Promise<ApiResponse> {
+    return this.request<ApiResponse>('/auth/recovery/complete', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getRecoveryStatus(token: string): Promise<ApiResponse & { data: any }> {
+    return this.request<ApiResponse & { data: any }>(`/auth/recovery/status?token=${encodeURIComponent(token)}`);
+  }
+
+  async cancelRecovery(token: string): Promise<ApiResponse> {
+    return this.request<ApiResponse>('/auth/recovery/cancel', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    });
+  }
 }
 
 // Create and export a singleton instance
@@ -394,3 +588,4 @@ export { ApiClient };
 
 // Export types
 export type { ApiResponse, AuthTokens };
+

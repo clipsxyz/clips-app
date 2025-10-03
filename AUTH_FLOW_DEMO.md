@@ -245,3 +245,6 @@ Your users now get:
 4. **Continue** to user details page
 5. **Complete signup** with your information
 6. **Login** and see your custom feed tabs! ✨
+
+
+
