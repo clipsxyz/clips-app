@@ -1,14 +1,17 @@
 import React from 'react';
 import { useTheme } from '../theme/ThemeProvider';
-import { FiSun, FiMoon, FiBell, FiSearch, FiMenu } from 'react-icons/fi';
-import { useLocation } from 'react-router-dom';
+import { FiSun, FiMoon, FiBell, FiSearch, FiMenu, FiActivity } from 'react-icons/fi';
+import { useLocation, useNavigate } from 'react-router-dom';
 import Logo from './Logo';
 import { IconButton } from './ui/Button';
 import { cn } from '../utils/cn';
+import { useHealthCheck } from '../hooks/useHealthCheck';
 
 export default function TopBar() {
   const { theme, toggle } = useTheme();
   const location = useLocation();
+  const navigate = useNavigate();
+  const { healthStatus, alerts } = useHealthCheck();
   
   // Get page title based on current route
   const getPageTitle = () => {
@@ -19,6 +22,7 @@ export default function TopBar() {
     if (path.startsWith('/live')) return 'Live';
     if (path.startsWith('/groups')) return 'Groups';
     if (path.startsWith('/profile')) return 'Profile';
+    if (path.startsWith('/health')) return 'System Health';
     return 'Gossapp';
   };
 
@@ -50,6 +54,26 @@ export default function TopBar() {
 
         {/* Right Section */}
         <div className="flex items-center gap-2">
+          {/* Health Status Button */}
+          <IconButton 
+            variant="ghost" 
+            size="sm"
+            className={cn(
+              "hover-scale relative",
+              healthStatus?.status === 'unhealthy' && "text-red-500",
+              healthStatus?.status === 'degraded' && "text-yellow-500",
+              healthStatus?.status === 'healthy' && "text-green-500"
+            )}
+            aria-label="System Health"
+            onClick={() => navigate('/health')}
+            title={`System Health: ${healthStatus?.status || 'Unknown'}`}
+          >
+            <FiActivity size={18} />
+            {alerts.filter(alert => !alert.resolved && (alert.level === 'critical' || alert.level === 'error')).length > 0 && (
+              <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-ping"></span>
+            )}
+          </IconButton>
+
           {/* Search Button */}
           <IconButton 
             variant="ghost" 

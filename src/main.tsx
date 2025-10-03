@@ -27,6 +27,7 @@ const FollowersPage = lazy(() => import('./pages/FollowersPage'));
 const MessagesPage = lazy(() => import('./components/MessagesPage'));
 const LiveStreamPage = lazy(() => import('./components/LiveStreamPage'));
 const GroupsPage = lazy(() => import('./components/GroupsPage'));
+const HealthPage = lazy(() => import('./pages/HealthPage'));
 const Placeholder = ({ name }: { name: string }) => <div className="p-6">{name}</div>;
 
 const Root = () => (
@@ -56,6 +57,7 @@ const Root = () => (
                       <Route path="groups" element={<GroupsPage />} />
                       <Route path="groups/:groupId" element={<GroupsPage />} />
                       <Route path="search" element={<Placeholder name="Search" />} />
+                      <Route path="health" element={<HealthPage />} />
                     </Route>
                   </Routes>
           </Suspense>

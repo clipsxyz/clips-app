@@ -20,6 +20,7 @@ import { ViewTrackingDebug } from './components/ViewTrackingDebug';
 import CommentsModal from './components/CommentsModal';
 import ShareModal from './components/ShareModal';
 import { useToast } from './components/Toast';
+import HealthStatus from './components/HealthStatus';
 import { shareAnalytics } from './utils/shareAnalytics';
 import { Button, IconButton } from './components/ui/Button';
 import { Card, PostCard } from './components/ui/Card';
@@ -118,6 +119,7 @@ export default function App() {
         <OfflineIndicator />
         <InstallPrompt onDismiss={() => setShowInstallPrompt(false)} />
         <ViewTrackingDebug />
+        <HealthStatus compact={true} className="fixed top-4 right-4 z-50" />
       </div>
     );
   }
@@ -151,6 +153,7 @@ export default function App() {
       <OfflineIndicator />
       <InstallPrompt onDismiss={() => setShowInstallPrompt(false)} />
       <ViewTrackingDebug />
+      <HealthStatus compact={true} className="fixed top-4 right-4 z-50" />
     </div>
   );
 }
