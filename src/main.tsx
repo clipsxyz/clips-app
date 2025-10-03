@@ -16,7 +16,7 @@ if (import.meta.env.PROD) {
   import('./utils/vitals').then(m => m.initVitals());
 }
 
-const FeedPage = lazy(() => import('./App').then(m => ({ default: m.FeedPage })));
+const FeedPage = lazy(() => import('./App').then(m => ({ default: m.FeedPageWrapper })));
 const ClipPage = lazy(() => import('./pages/ClipPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const SignupPage = lazy(() => import('./pages/SignupPage'));

@@ -3,7 +3,7 @@ import { get, set, del, keys } from 'idb-keyval';
 
 interface OfflineAction {
   id: string;
-  type: 'like' | 'bookmark' | 'follow' | 'post' | 'comment';
+  type: 'like' | 'bookmark' | 'follow' | 'post' | 'comment' | 'view';
   data: any;
   timestamp: number;
   userId: string;

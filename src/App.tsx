@@ -521,7 +521,7 @@ const FeedCard = React.memo(function FeedCard({ post, onLike, onBookmark, onFoll
   );
 });
 
-function FeedPageWrapper() {
+export function FeedPageWrapper() {
   const { user } = useAuth();
   const userId = user?.id ?? 'anon';
   const online = useOnline();
