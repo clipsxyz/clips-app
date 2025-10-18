@@ -1,5 +1,5 @@
 {
-  "name": "newsfeed",
+  "name": "gazetteer",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -49,13 +49,13 @@
       "limit": "150 KB"
     },
     {
-      "name": "entry js", 
+      "name": "entry js",
       "path": "dist/assets/*-[a-f0-9].js",
       "limit": "150 KB"
     },
     {
       "name": "async chunks",
-      "path": "dist/assets/chunk-*.js", 
+      "path": "dist/assets/chunk-*.js",
       "limit": "200 KB"
     },
     {

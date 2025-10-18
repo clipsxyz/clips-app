@@ -3,9 +3,21 @@
     "id": "1",
     "userHandle": "Username@Dublin",
     "locationLabel": "Story location",
-    "tags": ["Text", "text", "text", "text", "text"],
+    "tags": [
+      "Text",
+      "text",
+      "text",
+      "text",
+      "text"
+    ],
     "mediaUrl": "https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?q=80&w=800",
-    "stats": { "likes": 14, "views": 42, "comments": 3 },
+    "stats": {
+      "likes": 14,
+      "views": 42,
+      "comments": 3,
+      "shares": 2,
+      "reclips": 1
+    },
     "isBookmarked": false,
     "isFollowing": false,
     "userLiked": false
@@ -14,20 +26,159 @@
     "id": "2",
     "userHandle": "Alice@Finglas",
     "locationLabel": "Near Phoenix Park",
-    "tags": ["Food", "cafe", "brunch", "city", "friends"],
+    "tags": [
+      "Food",
+      "cafe",
+      "brunch",
+      "city",
+      "friends"
+    ],
     "mediaUrl": "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=800",
-    "stats": { "likes": 87, "views": 534, "comments": 12 },
+    "stats": {
+      "likes": 87,
+      "views": 534,
+      "comments": 12,
+      "shares": 8,
+      "reclips": 5
+    },
     "isBookmarked": true,
-    "isFollowing": true,
+    "isFollowing": false,
     "userLiked": true
   },
   {
     "id": "3",
     "userHandle": "Bob@Ireland",
     "locationLabel": "Seaside",
-    "tags": ["Travel", "sea", "wind", "walk", "sun"],
+    "tags": [
+      "Travel",
+      "sea",
+      "wind",
+      "walk",
+      "sun"
+    ],
     "mediaUrl": "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?q=80&w=800",
-    "stats": { "likes": 12, "views": 150, "comments": 1 },
+    "stats": {
+      "likes": 12,
+      "views": 150,
+      "comments": 1,
+      "shares": 0,
+      "reclips": 0
+    },
+    "isBookmarked": false,
+    "isFollowing": false,
+    "userLiked": false
+  },
+  {
+    "id": "4",
+    "userHandle": "Sarah@NewYork",
+    "locationLabel": "Central Park",
+    "tags": [
+      "City",
+      "park",
+      "nature",
+      "urban",
+      "green"
+    ],
+    "mediaUrl": "https://images.unsplash.com/photo-1494522358652-f30e61a0b1b0?q=80&w=800",
+    "stats": {
+      "likes": 45,
+      "views": 234,
+      "comments": 8,
+      "shares": 3,
+      "reclips": 2
+    },
+    "isBookmarked": false,
+    "isFollowing": false,
+    "userLiked": false
+  },
+  {
+    "id": "5",
+    "userHandle": "Mike@London",
+    "locationLabel": "Thames River",
+    "tags": [
+      "River",
+      "bridge",
+      "architecture",
+      "history",
+      "water"
+    ],
+    "mediaUrl": "https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?q=80&w=800",
+    "stats": {
+      "likes": 67,
+      "views": 345,
+      "comments": 15,
+      "shares": 4,
+      "reclips": 3
+    },
+    "isBookmarked": false,
+    "isFollowing": false,
+    "userLiked": false
+  },
+  {
+    "id": "6",
+    "userHandle": "Emma@Paris",
+    "locationLabel": "Eiffel Tower",
+    "tags": [
+      "Landmark",
+      "tower",
+      "architecture",
+      "france",
+      "city"
+    ],
+    "mediaUrl": "https://images.unsplash.com/photo-1511739001486-6bfe10ce785f?q=80&w=800",
+    "stats": {
+      "likes": 89,
+      "views": 456,
+      "comments": 22,
+      "shares": 6,
+      "reclips": 4
+    },
+    "isBookmarked": false,
+    "isFollowing": false,
+    "userLiked": false
+  },
+  {
+    "id": "7",
+    "userHandle": "John@Tokyo",
+    "locationLabel": "Shibuya Crossing",
+    "tags": [
+      "City",
+      "crossing",
+      "neon",
+      "busy",
+      "urban"
+    ],
+    "mediaUrl": "https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?q=80&w=800",
+    "stats": {
+      "likes": 34,
+      "views": 178,
+      "comments": 6,
+      "shares": 1,
+      "reclips": 0
+    },
+    "isBookmarked": false,
+    "isFollowing": false,
+    "userLiked": false
+  },
+  {
+    "id": "8",
+    "userHandle": "Lisa@Sydney",
+    "locationLabel": "Opera House",
+    "tags": [
+      "Architecture",
+      "opera",
+      "harbor",
+      "australia",
+      "landmark"
+    ],
+    "mediaUrl": "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?q=80&w=800",
+    "stats": {
+      "likes": 56,
+      "views": 289,
+      "comments": 11,
+      "shares": 2,
+      "reclips": 1
+    },
     "isBookmarked": false,
     "isFollowing": false,
     "userLiked": false

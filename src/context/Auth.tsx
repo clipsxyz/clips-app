@@ -1,32 +1,94 @@
 import React from 'react';
 import * as Sentry from '@sentry/react';
 
-type User = { id: string; name: string };
-type AuthCtx = { user: User | null; login: (name: string) => void; logout: () => void };
+type User = {
+  id: string;
+  name: string;
+  email: string;
+  password: string;
+  age: number;
+  interests: string[];
+  local: string;
+  regional: string;
+  national: string;
+  handle: string;
+};
+type AuthCtx = { user: User | null; login: (userData: any) => void; logout: () => void };
 const Ctx = React.createContext<AuthCtx | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = React.useState<User | null>(() => {
-    const s = localStorage.getItem('user');
-    return s ? JSON.parse(s) : null;
-  });
-  
-  const login = (name: string) => {
-    const u = { 
-      id: name.trim().toLowerCase() || 'me', 
-      name: name.trim() || 'Me' 
+  const [user, setUser] = React.useState<User | null>(null);
+
+  React.useEffect(() => {
+    try {
+      const s = localStorage.getItem('user');
+      if (!s) {
+        // Create a test user if no user exists
+        const testUser = {
+          id: 'test-user',
+          name: 'Test User',
+          email: 'test@example.com',
+          password: '',
+          age: 25,
+          interests: ['Technology', 'Travel', 'Food'],
+          local: 'Finglas',
+          regional: 'Dublin',
+          national: 'Ireland',
+          handle: 'TestUser@Dublin'
+        };
+        setUser(testUser);
+        localStorage.setItem('user', JSON.stringify(testUser));
+        return;
+      }
+
+      const parsed = JSON.parse(s);
+      // Handle backward compatibility for old user format
+      if (parsed && !parsed.local) {
+        // Old format - create new format with defaults
+        setUser({
+          id: parsed.id || parsed.name?.toLowerCase() || 'me',
+          name: parsed.name || 'Me',
+          email: parsed.email || '',
+          password: '',
+          age: parsed.age || 18,
+          interests: parsed.interests || [],
+          local: '',
+          regional: '',
+          national: '',
+          handle: `${parsed.name || 'User'}@Unknown`
+        });
+      } else {
+        setUser(parsed);
+      }
+    } catch (error) {
+      console.error('Error loading user from localStorage:', error);
+    }
+  }, []);
+
+  const login = (userData: any) => {
+    const u = {
+      id: userData.name.trim().toLowerCase() || 'me',
+      name: userData.name.trim() || 'Me',
+      email: userData.email || '',
+      password: userData.password || '',
+      age: userData.age || 18,
+      interests: userData.interests || [],
+      local: userData.local || '',
+      regional: userData.regional || '',
+      national: userData.national || '',
+      handle: userData.handle || `${userData.name.trim()}@Unknown`
     };
     setUser(u);
     localStorage.setItem('user', JSON.stringify(u));
     Sentry.setUser({ id: u.id, username: u.name });
   };
-  
+
   const logout = () => {
     setUser(null);
     localStorage.removeItem('user');
     Sentry.setUser(null);
   };
-  
+
   return <Ctx.Provider value={{ user, login, logout }}>{children}</Ctx.Provider>;
 }
 
