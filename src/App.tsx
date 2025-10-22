@@ -7,7 +7,6 @@ import CommentsModal from './components/CommentsModal';
 import { useAuth } from './context/Auth';
 import { useOnline } from './hooks/useOnline';
 import { fetchPostsPage, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost } from './api/posts';
-import { saveFeed, loadFeed } from './utils/feedCache';
 import { enqueue, drain } from './utils/mutationQueue';
 import type { Post } from './types';
 
@@ -36,8 +35,8 @@ function BottomNav() {
     <nav aria-label="Primary navigation" className="fixed bottom-0 inset-x-0 bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 z-40 pb-safe">
       <div className="mx-auto max-w-md flex">
         {item('/feed', 'Home', <FiHome size={22} />)}
+        {item('/create', 'Create', <FiPlusSquare size={22} />)}
         {item('/boost', 'Boost !', <FiZap size={22} />)}
-        {item('/clip', 'Clip+', <FiPlusSquare size={22} />)}
         {item('/search', 'Search', <FiSearch size={22} />)}
         {item('/profile', 'Profile', <FiUser size={22} />)}
       </div>
@@ -148,7 +147,10 @@ function PostHeader({ post, onFollow }: { post: Post; onFollow: () => Promise<vo
     <div className="flex items-start justify-between px-4 mt-4">
       <div>
         <h3 id={titleId} className="font-semibold">{post.userHandle}</h3>
-        <div className="text-xs text-gray-600 dark:text-gray-300">{post.locationLabel}</div>
+        <div className="text-xs text-gray-600 dark:text-gray-300 flex items-center gap-1">
+          <FiMapPin className="w-3 h-3" />
+          {post.locationLabel || 'No location set'}
+        </div>
       </div>
       <FollowButton initial={post.isFollowing} onToggle={onFollow} />
     </div>
@@ -163,15 +165,37 @@ function TagRow({ tags }: { tags: string[] }) {
   );
 }
 
-function Media({ url, onDoubleLike }: { url: string; onDoubleLike: () => Promise<void> }) {
+function TextCard({ text, onDoubleLike }: { text: string; onDoubleLike: () => Promise<void> }) {
   const [burst, setBurst] = React.useState(false);
+  const [isExpanded, setIsExpanded] = React.useState(false);
   const lastTap = React.useRef<number>(0);
   const touchHandled = React.useRef<boolean>(false);
 
+  const shouldTruncate = text.length > 100;
+  const displayText = shouldTruncate && !isExpanded ? text.substring(0, 100) + '...' : text;
+
+  // Dark blue backgrounds inspired by your reference image
+  const backgrounds = [
+    '#1e3a8a', // Deep blue
+    '#1e40af', // Rich blue
+    '#1d4ed8', // Vibrant blue
+    '#2563eb', // Electric blue
+    '#3b82f6', // Bright blue
+    '#1e293b', // Dark slate blue
+    '#0f172a', // Very dark blue
+    '#1a202c', // Dark navy
+  ];
+
+  // Select background based on text content (consistent for same text)
+  const backgroundIndex = text.length % backgrounds.length;
+  const selectedBackground = backgrounds[backgroundIndex];
+
   async function handleTap() {
     const now = Date.now();
-    if (now - lastTap.current < 300) {
-      // Double tap detected
+    const timeSinceLastTap = now - lastTap.current;
+
+    if (timeSinceLastTap < 300) {
+      // Double tap detected - only call onDoubleLike here
       setBurst(true);
       try {
         await onDoubleLike();
@@ -179,10 +203,11 @@ function Media({ url, onDoubleLike }: { url: string; onDoubleLike: () => Promise
         setTimeout(() => setBurst(false), 600);
       }
     }
+    // Always update lastTap for next potential double-tap
     lastTap.current = now;
   }
 
-  function handleTouchEnd(e: React.TouchEvent) {
+  function handleTouchEnd(_e: React.TouchEvent) {
     touchHandled.current = true;
     handleTap();
     // Prevent click event from firing after touch
@@ -200,9 +225,167 @@ function Media({ url, onDoubleLike }: { url: string; onDoubleLike: () => Promise
     handleTap();
   }
 
+  function handleMoreClick(e: React.MouseEvent) {
+    e.stopPropagation(); // Prevent triggering double-tap like
+    setIsExpanded(!isExpanded);
+  }
+
   return (
     <div className="mx-4 mt-4 select-none">
-      <h2 className="text-xl font-semibold text-center mb-2">Post</h2>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label="Double tap or press to like"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onDoubleLike();
+          }
+        }}
+        onClick={handleClick}
+        onTouchEnd={handleTouchEnd}
+        className="relative p-6 rounded-2xl min-h-[120px] flex items-center justify-center shadow-2xl hover:shadow-3xl transition-all duration-300"
+        style={{
+          background: selectedBackground,
+          boxShadow: `0 0 30px ${selectedBackground}40, 0 0 60px ${selectedBackground}20`
+        }}
+      >
+        <div className="text-center w-full">
+          <div className="text-xl text-white leading-relaxed whitespace-pre-wrap font-bold drop-shadow-lg">
+            {displayText}
+          </div>
+          {shouldTruncate && (
+            <button
+              onClick={handleMoreClick}
+              className="mt-3 text-white text-sm font-medium hover:underline focus:outline-none focus:ring-0 focus:border-0 drop-shadow-sm px-3 py-1 rounded-full transition-all duration-200 hover:scale-105 border-0"
+              style={{
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                border: 'none',
+                outline: 'none'
+              }}
+              aria-label={isExpanded ? 'Show less' : 'Show more'}
+            >
+              {isExpanded ? 'Show less' : 'Show more'}
+            </button>
+          )}
+        </div>
+
+        {/* Enhanced heart burst animation */}
+        <div className={`absolute inset-0 flex items-center justify-center pointer-events-none transition-all duration-300 ${burst ? 'opacity-100 scale-100' : 'opacity-0 scale-50'}`}>
+          <div className="relative">
+            {/* Main heart */}
+            <svg className="w-20 h-20 text-red-500 drop-shadow-lg animate-pulse" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+            </svg>
+
+            {/* Floating hearts */}
+            <div className="absolute inset-0">
+              <div className={`absolute top-2 left-2 w-4 h-4 text-red-400 transition-all duration-500 ${burst ? 'opacity-100 translate-y-[-20px]' : 'opacity-0 translate-y-0'}`}>
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+                </svg>
+              </div>
+              <div className={`absolute top-4 right-2 w-3 h-3 text-red-300 transition-all duration-700 delay-100 ${burst ? 'opacity-100 translate-y-[-25px] translate-x-[10px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+                </svg>
+              </div>
+              <div className={`absolute bottom-2 left-4 w-2 h-2 text-red-200 transition-all duration-600 delay-200 ${burst ? 'opacity-100 translate-y-[-15px] translate-x-[-8px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+                </svg>
+              </div>
+              <div className={`absolute bottom-4 right-4 w-3 h-3 text-red-400 transition-all duration-500 delay-150 ${burst ? 'opacity-100 translate-y-[-20px] translate-x-[5px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+                </svg>
+              </div>
+            </div>
+
+            {/* Pulse rings */}
+            <div className={`absolute inset-0 border-2 border-red-400 rounded-full transition-all duration-1000 ${burst ? 'opacity-0 scale-150' : 'opacity-100 scale-100'}`}></div>
+            <div className={`absolute inset-0 border border-red-300 rounded-full transition-all duration-1200 delay-100 ${burst ? 'opacity-0 scale-200' : 'opacity-100 scale-100'}`}></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CaptionText({ caption }: { caption: string }) {
+  const [isExpanded, setIsExpanded] = React.useState(false);
+  const maxLength = 100;
+
+  if (caption.length <= maxLength) {
+    return (
+      <div className="text-gray-900 dark:text-gray-100 text-sm leading-relaxed">
+        {caption}
+      </div>
+    );
+  }
+
+  const displayText = isExpanded ? caption : caption.substring(0, maxLength) + '...';
+
+  return (
+    <div className="text-gray-900 dark:text-gray-100 text-sm leading-relaxed">
+      {displayText}
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="mt-2 text-white text-sm font-medium hover:underline focus:outline-none focus:ring-0 focus:border-0"
+      >
+        {isExpanded ? 'Show less' : 'Show more'}
+      </button>
+    </div>
+  );
+}
+
+function Media({ url, mediaType, text, imageText, onDoubleLike }: { url: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; onDoubleLike: () => Promise<void> }) {
+  const [burst, setBurst] = React.useState(false);
+  const lastTap = React.useRef<number>(0);
+  const touchHandled = React.useRef<boolean>(false);
+
+  async function handleTap() {
+    const now = Date.now();
+    const timeSinceLastTap = now - lastTap.current;
+
+    if (timeSinceLastTap < 300) {
+      // Double tap detected - only call onDoubleLike here
+      setBurst(true);
+      try {
+        await onDoubleLike();
+      } finally {
+        setTimeout(() => setBurst(false), 600);
+      }
+    }
+    // Always update lastTap for next potential double-tap
+    lastTap.current = now;
+  }
+
+  function handleTouchEnd(_e: React.TouchEvent) {
+    touchHandled.current = true;
+    handleTap();
+    // Prevent click event from firing after touch
+    setTimeout(() => {
+      touchHandled.current = false;
+    }, 300);
+  }
+
+  function handleClick(e: React.MouseEvent) {
+    // Prevent click if touch was already handled
+    if (touchHandled.current) {
+      e.preventDefault();
+      return;
+    }
+    handleTap();
+  }
+
+  // If this is a text-only post, render TextCard
+  if (text && !url) {
+    return <TextCard text={text} onDoubleLike={onDoubleLike} />;
+  }
+
+  return (
+    <div className="mx-4 mt-4 select-none">
       <div
         role="button"
         tabIndex={0}
@@ -217,14 +400,42 @@ function Media({ url, onDoubleLike }: { url: string; onDoubleLike: () => Promise
         onTouchEnd={handleTouchEnd}
         className="relative w-full aspect-square rounded-2xl ring-1 ring-gray-200/60 dark:ring-gray-700/60 overflow-hidden bg-gray-50 dark:bg-gray-900"
       >
-        <img
-          src={url}
-          alt=""
-          loading="lazy"
-          decoding="async"
-          className="absolute inset-0 w-full h-full object-cover"
-          draggable={false}
-        />
+        {mediaType === 'video' ? (
+          <video
+            src={url}
+            className="absolute inset-0 w-full h-full object-cover"
+            controls
+            preload="metadata"
+            playsInline
+          />
+        ) : (
+          <img
+            src={url}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            className="absolute inset-0 w-full h-full object-cover"
+            draggable={false}
+          />
+        )}
+        {/* Image Text Overlay */}
+        {imageText && mediaType === 'image' && (
+          <div className="absolute bottom-4 left-4 right-4">
+            <div
+              className="px-3 py-2 text-lg font-bold drop-shadow-lg"
+              style={{
+                background: 'linear-gradient(45deg, #ff6b6b, #4ecdc4, #45b7d1, #96ceb4, #feca57, #ff9ff3)',
+                backgroundSize: '300% 300%',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+                animation: 'gradientShift 3s ease-in-out infinite'
+              }}
+            >
+              {imageText}
+            </div>
+          </div>
+        )}
         {/* Enhanced heart burst animation */}
         <div className={`absolute inset-0 flex items-center justify-center pointer-events-none transition-all duration-300 ${burst ? 'opacity-100 scale-100' : 'opacity-0 scale-50'}`}>
           <div className="relative">
@@ -474,7 +685,13 @@ const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare,
     <article ref={articleRef} aria-labelledby={titleId} className="pb-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 hover-lift">
       <PostHeader post={post} onFollow={onFollow} />
       <TagRow tags={post.tags} />
-      <Media url={post.mediaUrl} onDoubleLike={onLike} />
+      <Media url={post.mediaUrl} mediaType={post.mediaType} text={post.text} imageText={post.imageText} onDoubleLike={onLike} />
+      {/* Caption for image/video posts */}
+      {post.caption && post.mediaUrl && (
+        <div className="px-4 py-3">
+          <CaptionText caption={post.caption} />
+        </div>
+      )}
       <EngagementBar post={post} onLike={onLike} onShare={onShare} onOpenComments={onOpenComments} onReclip={onReclip} />
     </article>
   );
@@ -506,7 +723,8 @@ function FeedPageWrapper() {
 
     // Don't load cached data for Following tab - always fetch fresh
     if (currentFilter.toLowerCase() !== 'following') {
-      loadFeed(userId, currentFilter).then(p => p.length && setPages(p));
+      // Temporarily disable feed cache loading to avoid duplicates
+      // loadFeed(userId, currentFilter).then(p => p.length && setPages(p));
     }
   }, [userId, currentFilter]);
 
@@ -549,24 +767,61 @@ function FeedPageWrapper() {
   };
 
   async function loadMore() {
-    if (loading || end || cursor === null) return;
+    console.log('loadMore called with:', { loading, end, cursor, currentFilter });
+    if (loading || end || cursor === null) {
+      console.log('loadMore early return:', { loading, end, cursor });
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
+      console.log('Calling fetchPostsPage with:', { currentFilter, cursor, userId });
       const page = await fetchPostsPage(currentFilter, cursor, 5, userId, user?.local || '', user?.regional || '', user?.national || '');
+      console.log('fetchPostsPage returned:', { itemsCount: page.items.length, nextCursor: page.nextCursor });
       setPages(prev => {
         const next = [...prev, page.items];
-        saveFeed(userId, currentFilter, next);
+        console.log('Setting pages:', { prevLength: prev.length, newLength: next.length });
+        // Temporarily disable feed cache to avoid duplicates
+        // saveFeed(userId, currentFilter, next);
         return next;
       });
       setCursor(page.nextCursor);
       setEnd(page.nextCursor === null);
     } catch (e: any) {
+      console.error('loadMore error:', e);
       setError(e?.message ?? 'Failed to load posts.');
     } finally {
       setLoading(false);
     }
   }
+
+  // Listen for new posts and refresh feed
+  React.useEffect(() => {
+    console.log('Setting up postCreated event listener');
+    const handlePostCreated = () => {
+      console.log('PostCreated event received - refreshing feed');
+      console.log('Current filter:', currentFilter);
+      console.log('User data:', { userId, userLocal: user?.local, userRegional: user?.regional, userNational: user?.national });
+
+      // Reset and reload feed to show new post
+      setPages([]);
+      setCursor(0);
+      setEnd(false);
+      setLoading(false);
+      setError(null);
+
+      // Load fresh data
+      console.log('About to call loadMore from handlePostCreated');
+      loadMore();
+    };
+
+    window.addEventListener('postCreated', handlePostCreated);
+    console.log('postCreated event listener added');
+    return () => {
+      console.log('Removing postCreated event listener');
+      window.removeEventListener('postCreated', handlePostCreated);
+    };
+  }, [currentFilter, userId, user]);
 
   // Initial load
   React.useEffect(() => {
@@ -574,12 +829,51 @@ function FeedPageWrapper() {
   }, [cursor, currentFilter]);
 
   function updateOne(id: string, updater: (p: Post) => Post) {
-    setPages(cur =>
-      cur.map(group => group.map(p => (p.id === id ? updater({ ...p }) : p)))
-    );
+    console.log('updateOne called for post:', id);
+    setPages(cur => {
+      const updated = cur.map(group => group.map(p => {
+        if (p.id === id) {
+          console.log('Updating post:', id, 'from likes:', p.stats.likes, 'to:', updater({ ...p }).stats.likes);
+          return updater({ ...p });
+        }
+        return p;
+      }));
+
+      // Check for duplicates after update
+      const allPosts = updated.flat();
+      const duplicates = allPosts.filter((p, i) => allPosts.findIndex(other => other.id === p.id) !== i);
+      if (duplicates.length > 0) {
+        console.error('DUPLICATES AFTER UPDATE:', duplicates.map(p => p.id));
+      }
+
+      return updated;
+    });
   }
 
-  const flat = React.useMemo(() => pages.flat(), [pages]);
+  const flat = React.useMemo(() => {
+    const flattened = pages.flat();
+
+    // Always remove duplicates first, before any other processing
+    const uniquePosts = flattened.filter((p, i) => flattened.findIndex(other => other.id === p.id) === i);
+
+    const duplicateIDs = flattened.filter((p, i) => flattened.findIndex(other => other.id === p.id) !== i).map(p => p.id);
+
+    console.log('Flattening pages:', {
+      pagesCount: pages.length,
+      totalPosts: flattened.length,
+      uniquePosts: uniquePosts.length,
+      postIDs: uniquePosts.map(p => p.id),
+      duplicateIDs: duplicateIDs,
+      textPosts: uniquePosts.filter(p => p.text && !p.mediaUrl).length
+    });
+
+    if (duplicateIDs.length > 0) {
+      console.error('DUPLICATE POSTS DETECTED AND REMOVED:', duplicateIDs);
+      console.log('Text posts after deduplication:', uniquePosts.filter(p => p.text && !p.mediaUrl).map(p => ({ id: p.id, text: p.text?.substring(0, 50) + '...' })));
+    }
+
+    return uniquePosts;
+  }, [pages]);
 
   // Not logged in
   if (!user) {
@@ -622,25 +916,21 @@ function FeedPageWrapper() {
           key={p.id}
           post={p}
           onLike={async () => {
+            console.log('Like button clicked for post:', p.id, 'userLiked:', p.userLiked);
             if (!online) {
+              // Optimistically toggle icon only when offline; don't change counts
+              updateOne(p.id, post => ({ ...post, userLiked: !post.userLiked }));
               await enqueue({ type: 'like', postId: p.id, userId });
               return;
             }
-            let newLiked: boolean;
-            let newLikes: number;
-            updateOne(p.id, post => {
-              const next = !post.userLiked;
-              post.userLiked = next;
-              post.stats.likes += next ? 1 : -1;
-              newLiked = next;
-              newLikes = post.stats.likes;
-              return post;
-            });
-            await toggleLike(userId, p.id);
-            // Dispatch custom event for EngagementBar to update immediately
+            // Use server as source of truth to avoid double increments
+            const updated = await toggleLike(userId, p.id);
+            updateOne(p.id, _post => ({ ...updated }));
+            // Notify EngagementBar with authoritative values
             window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
-              detail: { liked: newLiked!, likes: newLikes! }
+              detail: { liked: updated.userLiked, likes: updated.stats.likes }
             }));
+            console.log('Like event dispatched for post:', p.id, 'with', { liked: updated.userLiked, likes: updated.stats.likes });
           }}
           onFollow={async () => {
             if (!online) {
@@ -712,8 +1002,8 @@ function FeedPageWrapper() {
 
       {end && flat.length === 0 && (
         <div className="p-8 text-center text-gray-600 dark:text-gray-300">
-          <div className="text-lg font-semibold mb-1">No posts yet</div>
-          <div className="text-sm">Try another location or check back later.</div>
+          <div className="text-lg font-semibold mb-1">Unlock Your Following News Feed</div>
+          <div className="text-gray-600 text-sm">This feed only populates with the accounts you follow. Start tapping Follow to personalize your stream</div>
         </div>
       )}
 
