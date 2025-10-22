@@ -4,6 +4,10 @@ export type Post = {
   locationLabel: string;
   tags: string[];
   mediaUrl: string;
+  mediaType?: 'image' | 'video'; // New field to distinguish media types
+  text?: string; // Text content of the post
+  imageText?: string; // Text overlay on images
+  caption?: string; // Caption/description for image/video posts
   stats: { likes: number; views: number; comments: number; shares: number; reclips: number };
   isBookmarked: boolean;
   isFollowing: boolean;
@@ -20,4 +24,9 @@ export type Comment = {
   userHandle: string;
   text: string;
   createdAt: number;
+  likes: number;
+  userLiked: boolean;
+  replies?: Comment[];
+  parentId?: string; // For nested replies
+  replyCount?: number; // Total number of replies
 };
