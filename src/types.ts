@@ -1,3 +1,17 @@
+export type User = {
+  id: string;
+  name: string;
+  email: string;
+  password: string;
+  age: number;
+  interests: string[];
+  local: string;
+  regional: string;
+  national: string;
+  handle: string;
+  avatarUrl?: string; // Profile picture URL
+};
+
 export type Post = {
   id: string;
   userHandle: string;

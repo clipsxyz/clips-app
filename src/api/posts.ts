@@ -131,76 +131,84 @@ function decorateForUser(userId: string, p: Post): Post {
 }
 
 export async function fetchPostsPage(tab: string, cursor: number | null, limit = 5, userId = 'me', userLocal = '', userRegional = '', userNational = ''): Promise<Page> {
-  await delay();
-  const t = tab.toLowerCase();
+  try {
+    await delay();
+    const t = tab.toLowerCase();
 
-  // Debug: Log posts array state
-  console.log('fetchPostsPage called with posts array length:', posts.length);
-  console.log('Current posts IDs:', posts.map(p => p.id));
+    // Debug: Log posts array state
+    console.log('fetchPostsPage called with posts array length:', posts.length);
+    console.log('Current posts IDs:', posts.map(p => p.id));
 
-  console.log('Fetching posts for tab:', t, 'with user data:', {
-    userId,
-    userLocal,
-    userRegional,
-    userNational,
-    totalPosts: posts.length
-  });
+    console.log('Fetching posts for tab:', t, 'with user data:', {
+      userId,
+      userLocal,
+      userRegional,
+      userNational,
+      totalPosts: posts.length
+    });
 
-  const filtered = posts.filter(p => {
-    if (t === 'following') {
-      const userState = getState(userId);
-      const isFollowing = userState.follows[p.userHandle];
-      // Only show posts from users you actually follow
-      return isFollowing === true;
-    }
-
-    // Check if this is a custom location search (not one of the predefined tabs)
-    const predefinedTabs = ['finglas', 'dublin', 'ireland', 'following'];
-    if (!predefinedTabs.includes(t)) {
-      // Custom location search - match any part of userHandle
-      return p.userHandle.toLowerCase().includes(t);
-    }
-
-    // Predefined tab filtering based on user's signup location choices
-    if (t === 'finglas') {
-      return p.userHandle.toLowerCase().includes('finglas') ||
-        (userLocal === 'Finglas' && p.userHandle.toLowerCase().includes('finglas'));
-    }
-    if (t === 'dublin') {
-      // Show posts from users whose handle contains 'dublin' OR from users who selected Dublin as regional
-      const handleContainsDublin = p.userHandle.toLowerCase().includes('dublin');
-      const userRegionalDublin = userRegional === 'Dublin';
-      const shouldShow = handleContainsDublin || userRegionalDublin;
-
-      // Debug logging
-      if (shouldShow) {
-        console.log('Dublin post found:', {
-          userHandle: p.userHandle,
-          handleContainsDublin,
-          userRegionalDublin,
-          text: p.text,
-          mediaUrl: p.mediaUrl
-        });
+    const filtered = posts.filter(p => {
+      if (t === 'following') {
+        const userState = getState(userId);
+        const isFollowing = userState.follows[p.userHandle];
+        // Only show posts from users you actually follow
+        return isFollowing === true;
       }
 
-      return shouldShow;
-    }
-    if (t === 'ireland') {
-      return p.userHandle.toLowerCase().includes('ireland') ||
-        (userNational === 'Ireland' && p.userHandle.toLowerCase().includes('ireland'));
-    }
+      // Check if this is a custom location search (not one of the predefined tabs)
+      const predefinedTabs = ['finglas', 'dublin', 'ireland', 'following'];
+      if (!predefinedTabs.includes(t)) {
+        // Custom location search - match any part of userHandle
+        return p.userHandle.toLowerCase().includes(t);
+      }
 
-    // Fallback
-    return p.userHandle.toLowerCase().includes(t);
-  });
+      // Predefined tab filtering based on user's signup location choices
+      if (t === 'finglas') {
+        return p.userHandle.toLowerCase().includes('finglas') ||
+          (userLocal === 'Finglas' && p.userHandle.toLowerCase().includes('finglas'));
+      }
+      if (t === 'dublin') {
+        // Show posts from users whose handle contains 'dublin' OR from users who selected Dublin as regional
+        const handleContainsDublin = p.userHandle.toLowerCase().includes('dublin');
+        const userRegionalDublin = userRegional === 'Dublin';
+        const shouldShow = handleContainsDublin || userRegionalDublin;
 
-  console.log('Filtered posts for', t, ':', filtered.length, 'posts');
-  console.log('All posts:', posts.map(p => ({ userHandle: p.userHandle, text: p.text, mediaUrl: p.mediaUrl })));
+        // Debug logging
+        if (shouldShow) {
+          console.log('Dublin post found:', {
+            userHandle: p.userHandle,
+            handleContainsDublin,
+            userRegionalDublin,
+            text: p.text,
+            mediaUrl: p.mediaUrl
+          });
+        }
 
-  const start = cursor ?? 0;
-  const slice = filtered.slice(start, start + limit).map(p => decorateForUser(userId, p));
-  const next = start + slice.length < filtered.length ? start + slice.length : null;
-  return { items: slice, nextCursor: next };
+        return shouldShow;
+      }
+      if (t === 'ireland') {
+        return p.userHandle.toLowerCase().includes('ireland') ||
+          (userNational === 'Ireland' && p.userHandle.toLowerCase().includes('ireland'));
+      }
+
+      // Fallback
+      return p.userHandle.toLowerCase().includes(t);
+    });
+
+    console.log('Filtered posts for', t, ':', filtered.length, 'posts');
+    console.log('All posts:', posts.map(p => ({ userHandle: p.userHandle, text: p.text, mediaUrl: p.mediaUrl })));
+    console.log('Filtered posts:', filtered.map(p => ({ userHandle: p.userHandle, text: p.text, mediaUrl: p.mediaUrl })));
+
+    const start = cursor ?? 0;
+    const slice = filtered.slice(start, start + limit).map(p => decorateForUser(userId, p));
+    const next = start + slice.length < filtered.length ? start + slice.length : null;
+
+    console.log('Returning page with:', { itemsCount: slice.length, nextCursor: next });
+    return { items: slice, nextCursor: next };
+  } catch (error) {
+    console.error('Error in fetchPostsPage:', error);
+    throw error;
+  }
 }
 
 export async function toggleLike(userId: string, id: string): Promise<Post> {
@@ -345,6 +353,25 @@ export async function toggleCommentLike(commentId: string): Promise<Comment> {
   comment.likes += comment.userLiked ? 1 : -1;
 
   return comment;
+}
+
+export async function toggleReplyLike(parentCommentId: string, replyId: string): Promise<Comment> {
+  await delay(100);
+  const parentComment = comments.find(c => c.id === parentCommentId);
+  if (!parentComment || !parentComment.replies) {
+    throw new Error('Parent comment or replies not found');
+  }
+
+  const reply = parentComment.replies.find(r => r.id === replyId);
+  if (!reply) {
+    throw new Error('Reply not found');
+  }
+
+  // Toggle the like state
+  reply.userLiked = !reply.userLiked;
+  reply.likes += reply.userLiked ? 1 : -1;
+
+  return parentComment;
 }
 
 export async function addReply(postId: string, parentId: string, userHandle: string, text: string): Promise<Comment> {

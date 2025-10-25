@@ -1,18 +1,6 @@
 import React from 'react';
 import * as Sentry from '@sentry/react';
-
-type User = {
-  id: string;
-  name: string;
-  email: string;
-  password: string;
-  age: number;
-  interests: string[];
-  local: string;
-  regional: string;
-  national: string;
-  handle: string;
-};
+import { User } from '../types';
 type AuthCtx = { user: User | null; login: (userData: any) => void; logout: () => void };
 const Ctx = React.createContext<AuthCtx | null>(null);
 
@@ -24,7 +12,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const s = localStorage.getItem('user');
       if (!s) {
         // Create a test user if no user exists
-        const testUser = {
+        const testUser: User = {
           id: 'test-user',
           name: 'Test User',
           email: 'test@example.com',
@@ -34,7 +22,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           local: 'Finglas',
           regional: 'Dublin',
           national: 'Ireland',
-          handle: 'TestUser@Dublin'
+          handle: 'TestUser@Dublin',
+          avatarUrl: undefined
         };
         setUser(testUser);
         localStorage.setItem('user', JSON.stringify(testUser));
@@ -45,7 +34,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Handle backward compatibility for old user format
       if (parsed && !parsed.local) {
         // Old format - create new format with defaults
-        setUser({
+        const convertedUser: User = {
           id: parsed.id || parsed.name?.toLowerCase() || 'me',
           name: parsed.name || 'Me',
           email: parsed.email || '',
@@ -55,8 +44,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           local: '',
           regional: '',
           national: '',
-          handle: `${parsed.name || 'User'}@Unknown`
-        });
+          handle: `${parsed.name || 'User'}@Unknown`,
+          avatarUrl: parsed.avatarUrl || undefined
+        };
+        setUser(convertedUser);
       } else {
         setUser(parsed);
       }
@@ -66,7 +57,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = (userData: any) => {
-    const u = {
+    const u: User = {
       id: userData.name.trim().toLowerCase() || 'me',
       name: userData.name.trim() || 'Me',
       email: userData.email || '',
@@ -76,7 +67,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       local: userData.local || '',
       regional: userData.regional || '',
       national: userData.national || '',
-      handle: userData.handle || `${userData.name.trim()}@Unknown`
+      handle: userData.handle || `${userData.name.trim()}@Unknown`,
+      avatarUrl: userData.avatarUrl || undefined
     };
     setUser(u);
     localStorage.setItem('user', JSON.stringify(u));

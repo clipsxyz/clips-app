@@ -1,6 +1,5 @@
 import React from 'react';
-import { useTheme } from '../theme/ThemeProvider';
-import { FiSun, FiMoon, FiCompass, FiX, FiSearch } from 'react-icons/fi';
+import { FiCompass, FiX, FiSearch, FiMapPin } from 'react-icons/fi';
 
 type TopBarProps = {
   activeTab?: string;
@@ -8,7 +7,6 @@ type TopBarProps = {
 };
 
 export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
-  const { theme, toggle } = useTheme();
   const [showDiscoverCard, setShowDiscoverCard] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState('');
 
@@ -52,16 +50,19 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
       <div className="sticky top-0 z-40 bg-white/80 dark:bg-gray-950/80 backdrop-blur border-b border-gray-200 dark:border-gray-800">
         <div className="mx-auto max-w-md px-4 h-11 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="font-bold text-lg text-brand-600 dark:text-brand-400">Gazetteer</span>
+            <span className="font-bold text-lg bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 bg-clip-text text-transparent">Gazetteer</span>
 
             <button
               onClick={handleDiscoverClick}
-              className="flex items-center gap-1 px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+              className="flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
               aria-label="Discover new locations"
             >
-              <div className="relative">
-                <FiCompass className="w-4 h-4 text-brand-500 animate-pulse" />
-                <div className="absolute inset-0 w-4 h-4 border-2 border-brand-500 rounded-full animate-ping opacity-20"></div>
+              <div className="relative w-6 h-6">
+                <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 p-0.5">
+                  <div className="w-full h-full rounded-full bg-gray-950 dark:bg-gray-950 flex items-center justify-center">
+                    <FiCompass className="w-3 h-3 text-white" />
+                  </div>
+                </div>
               </div>
               <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
                 Discover
@@ -70,13 +71,25 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
           </div>
 
           <button
-            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            aria-pressed={theme === 'dark'}
-            title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
-            onClick={toggle}
-            className="p-2 rounded-md border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-900"
+            onClick={() => {
+              // TODO: Navigate to stories page
+              console.log('Navigate to stories');
+            }}
+            className="flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            aria-label="View Stories"
+            title="Stories"
           >
-            {theme === 'dark' ? <FiSun /> : <FiMoon />}
+            {/* Story ring effect */}
+            <div className="relative w-6 h-6">
+              <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 p-0.5">
+                <div className="w-full h-full rounded-full bg-gray-950 dark:bg-gray-950 flex items-center justify-center">
+                  <FiMapPin className="w-3 h-3 text-white" />
+                </div>
+              </div>
+            </div>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              Stories
+            </span>
           </button>
         </div>
       </div>
