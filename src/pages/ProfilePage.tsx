@@ -1,10 +1,53 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
+import Avatar from '../components/Avatar';
+import { FiCamera, FiX } from 'react-icons/fi';
 
 export default function ProfilePage() {
-  const { user, logout } = useAuth();
+  const { user, logout, login } = useAuth();
   const nav = useNavigate();
+  const [isUpdatingProfile, setIsUpdatingProfile] = React.useState(false);
+
+  const handleProfilePictureSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    console.log('File selected:', file);
+
+    if (file) {
+      setIsUpdatingProfile(true);
+      try {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const newAvatarUrl = e.target?.result as string;
+          console.log('New avatar URL:', newAvatarUrl);
+
+          // Update user with new avatar
+          const updatedUser = {
+            ...user,
+            avatarUrl: newAvatarUrl
+          };
+
+          console.log('Updated user:', updatedUser);
+          login(updatedUser);
+          setIsUpdatingProfile(false);
+        };
+        reader.readAsDataURL(file);
+      } catch (error) {
+        console.error('Error updating profile picture:', error);
+        setIsUpdatingProfile(false);
+      }
+    }
+  };
+
+  const removeProfilePicture = () => {
+    setIsUpdatingProfile(true);
+    const updatedUser = {
+      ...user,
+      avatarUrl: undefined
+    };
+    login(updatedUser);
+    setIsUpdatingProfile(false);
+  };
 
   if (!user) {
     return (
@@ -33,11 +76,41 @@ export default function ProfilePage() {
       <div className="max-w-2xl mx-auto p-6">
         {/* Header */}
         <div className="text-center mb-8">
-          <div className="w-24 h-24 mx-auto mb-4 rounded-full bg-gradient-to-r from-brand-500 to-brand-600 flex items-center justify-center text-white text-3xl font-bold shadow-lg">
-            {user.name.slice(0, 1).toUpperCase()}
+          <div className="relative inline-block mb-4 mx-auto">
+            <label className="cursor-pointer group">
+              <Avatar
+                src={user.avatarUrl}
+                name={user.name}
+                size="xl"
+                className="border-4 border-white dark:border-gray-800 shadow-xl group-hover:shadow-2xl transition-all duration-200"
+              />
+              <div className="absolute inset-0 rounded-full bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-200 flex items-center justify-center">
+                <FiCamera className="w-6 h-6 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+              </div>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleProfilePictureSelect}
+                className="hidden"
+                disabled={isUpdatingProfile}
+              />
+            </label>
+            {user.avatarUrl && (
+              <button
+                onClick={removeProfilePicture}
+                disabled={isUpdatingProfile}
+                className="absolute -top-2 -right-2 w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors shadow-lg"
+                title="Remove profile picture"
+              >
+                <FiX className="w-4 h-4" />
+              </button>
+            )}
           </div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">{user.name}</h1>
           <p className="text-brand-600 dark:text-brand-400 font-medium">@{user.handle}</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+            Tap your profile picture to change it
+          </p>
         </div>
 
         {/* Profile Cards */}

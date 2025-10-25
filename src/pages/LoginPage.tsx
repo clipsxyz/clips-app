@@ -1,12 +1,13 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
-import { FiMapPin, FiUser, FiGlobe } from 'react-icons/fi';
+import { FiMapPin, FiUser, FiGlobe, FiCamera, FiX } from 'react-icons/fi';
+import Avatar from '../components/Avatar';
 
 export default function LoginPage() {
   const { login } = useAuth();
   const nav = useNavigate();
-  const [step, setStep] = React.useState(1); // 1 = location, 2 = account details
+  const [step, setStep] = React.useState(1); // 1 = location, 2 = account details, 3 = profile picture
 
   // Step 1: Location data
   const [name, setName] = React.useState('');
@@ -20,6 +21,9 @@ export default function LoginPage() {
   const [confirmPassword, setConfirmPassword] = React.useState('');
   const [age, setAge] = React.useState('');
   const [interests, setInterests] = React.useState<string[]>([]);
+
+  // Step 3: Profile picture
+  const [profilePicture, setProfilePicture] = React.useState<string | null>(null);
 
   const localOptions = [
     'Ballymun', 'Finglas', 'Cabra', 'Phibsborough', 'Drumcondra',
@@ -65,8 +69,13 @@ export default function LoginPage() {
       alert('You must be at least 13 years old');
       return;
     }
+    setStep(3);
+  }
 
-    // Create user with complete data
+  function handleProfilePictureSubmit(e: React.FormEvent) {
+    e.preventDefault();
+
+    // Create user with complete data including profile picture
     const userData = {
       name: name.trim(),
       email: email.trim(),
@@ -76,11 +85,27 @@ export default function LoginPage() {
       local: local,
       regional: regional,
       national: national,
-      handle: `${name.trim()}@${local}` // Generate handle like "John@Ballymun"
+      handle: `${name.trim()}@${local}`, // Generate handle like "John@Ballymun"
+      avatarUrl: profilePicture // Include profile picture
     };
 
     login(userData);
     nav('/profile', { replace: true });
+  }
+
+  function handleProfilePictureSelect(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setProfilePicture(e.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  }
+
+  function removeProfilePicture() {
+    setProfilePicture(null);
   }
 
   function toggleInterest(interest: string) {
@@ -93,21 +118,22 @@ export default function LoginPage() {
 
   return (
     <div className="mx-auto max-w-md min-h-screen flex items-center justify-center p-6">
-      <form onSubmit={step === 1 ? handleLocationSubmit : handleAccountSubmit} className="w-full bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-xl p-6 space-y-4">
+      <form onSubmit={step === 1 ? handleLocationSubmit : step === 2 ? handleAccountSubmit : handleProfilePictureSubmit} className="w-full bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-xl p-6 space-y-4">
         <div className="text-center mb-6">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">Join Clips</h1>
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            {step === 1 ? 'Connect with your local community' : 'Complete your profile'}
+            {step === 1 ? 'Connect with your local community' : step === 2 ? 'Complete your profile' : 'Add a profile picture'}
           </p>
           <div className="flex justify-center mt-3">
             <div className="flex space-x-2">
               <div className={`w-3 h-3 rounded-full ${step === 1 ? 'bg-brand-600' : 'bg-gray-300'}`}></div>
               <div className={`w-3 h-3 rounded-full ${step === 2 ? 'bg-brand-600' : 'bg-gray-300'}`}></div>
+              <div className={`w-3 h-3 rounded-full ${step === 3 ? 'bg-brand-600' : 'bg-gray-300'}`}></div>
             </div>
           </div>
         </div>
 
-        {step === 1 ? (
+        {step === 1 && (
           <>
             {/* Step 1: Location Selection */}
             {/* Name Input */}
@@ -182,7 +208,9 @@ export default function LoginPage() {
               </select>
             </div>
           </>
-        ) : (
+        )}
+
+        {step === 2 && (
           <>
             {/* Step 2: Account Details */}
             {/* Email */}
@@ -272,11 +300,66 @@ export default function LoginPage() {
           </>
         )}
 
+        {step === 3 && (
+          <>
+            {/* Step 3: Profile Picture */}
+            <div className="text-center">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+                Add a Profile Picture
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+                Choose a photo that represents you, or skip to use your initials
+              </p>
+
+              {/* Current Avatar Preview */}
+              <div className="flex justify-center mb-6">
+                <Avatar
+                  src={profilePicture || undefined}
+                  name={name || 'User'}
+                  size="xl"
+                  className="border-4 border-gray-200 dark:border-gray-700"
+                />
+              </div>
+
+              {/* Upload Button */}
+              <div className="space-y-4">
+                <label className="block">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleProfilePictureSelect}
+                    className="hidden"
+                  />
+                  <div className="w-full px-4 py-3 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors cursor-pointer text-center font-medium">
+                    <FiCamera className="inline w-4 h-4 mr-2" />
+                    Choose Photo
+                  </div>
+                </label>
+
+                {profilePicture && (
+                  <button
+                    type="button"
+                    onClick={removeProfilePicture}
+                    className="w-full px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors text-center font-medium"
+                  >
+                    <FiX className="inline w-4 h-4 mr-2" />
+                    Remove Photo
+                  </button>
+                )}
+
+                <div className="text-xs text-gray-500 dark:text-gray-400">
+                  Your initials will be used if no photo is selected
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
         <div className="flex space-x-3">
-          {step === 2 && (
+          {(step === 2 || step === 3) && (
             <button
               type="button"
-              onClick={() => setStep(1)}
+              onClick={() => setStep(step - 1)}
               className="flex-1 px-4 py-3 rounded-lg bg-gray-500 text-white font-medium hover:bg-gray-600 transition-colors"
             >
               Back
@@ -286,7 +369,7 @@ export default function LoginPage() {
             type="submit"
             className="flex-1 px-4 py-3 rounded-lg bg-brand-600 text-white font-medium hover:bg-brand-700 transition-colors"
           >
-            {step === 1 ? 'Continue' : 'Join Clips'}
+            {step === 1 ? 'Continue' : step === 2 ? 'Continue' : 'Join Clips'}
           </button>
         </div>
 

@@ -1,9 +1,11 @@
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiEye, FiMessageSquare, FiShare2, FiCamera, FiMapPin, FiRepeat } from 'react-icons/fi';
+import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiEye, FiMessageSquare, FiShare2, FiCamera, FiMapPin, FiRepeat, FiCompass } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import TopBar from './components/TopBar';
 import CommentsModal from './components/CommentsModal';
+import ShareModal from './components/ShareModal';
+import Avatar from './components/Avatar';
 import { useAuth } from './context/Auth';
 import { useOnline } from './hooks/useOnline';
 import { fetchPostsPage, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost } from './api/posts';
@@ -35,8 +37,8 @@ function BottomNav() {
     <nav aria-label="Primary navigation" className="fixed bottom-0 inset-x-0 bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 z-40 pb-safe">
       <div className="mx-auto max-w-md flex">
         {item('/feed', 'Home', <FiHome size={22} />)}
+        {item('/boost', 'Boost', <FiZap size={22} />)}
         {item('/create', 'Create', <FiPlusSquare size={22} />)}
-        {item('/boost', 'Boost !', <FiZap size={22} />)}
         {item('/search', 'Search', <FiSearch size={22} />)}
         {item('/profile', 'Profile', <FiUser size={22} />)}
       </div>
@@ -141,18 +143,30 @@ function FollowButton({ initial, onToggle }: { initial: boolean; onToggle: () =>
 }
 
 function PostHeader({ post, onFollow }: { post: Post; onFollow: () => Promise<void> }) {
+  const { user } = useAuth();
   const titleId = `post-title-${post.id}`;
+
+  // Check if this is the current user's post
+  const isCurrentUser = user?.handle === post.userHandle;
+  const avatarSrc = isCurrentUser ? user?.avatarUrl : undefined;
 
   return (
     <div className="flex items-start justify-between px-4 mt-4">
-      <div>
-        <h3 id={titleId} className="font-semibold">{post.userHandle}</h3>
-        <div className="text-xs text-gray-600 dark:text-gray-300 flex items-center gap-1">
-          <FiMapPin className="w-3 h-3" />
-          {post.locationLabel || 'No location set'}
+      <div className="flex items-center gap-3">
+        <Avatar
+          src={avatarSrc}
+          name={post.userHandle.split('@')[0]} // Extract name from handle like "John@Dublin"
+          size="sm"
+        />
+        <div>
+          <h3 id={titleId} className="font-semibold">{post.userHandle}</h3>
+          <div className="text-xs text-gray-600 dark:text-gray-300 flex items-center gap-1">
+            <FiMapPin className="w-3 h-3" />
+            {post.locationLabel || 'No location set'}
+          </div>
         </div>
       </div>
-      <FollowButton initial={post.isFollowing} onToggle={onFollow} />
+      {!isCurrentUser && <FollowButton initial={post.isFollowing} onToggle={onFollow} />}
     </div>
   );
 }
@@ -255,18 +269,15 @@ function TextCard({ text, onDoubleLike }: { text: string; onDoubleLike: () => Pr
             {displayText}
           </div>
           {shouldTruncate && (
-            <button
-              onClick={handleMoreClick}
-              className="mt-3 text-white text-sm font-medium hover:underline focus:outline-none focus:ring-0 focus:border-0 drop-shadow-sm px-3 py-1 rounded-full transition-all duration-200 hover:scale-105 border-0"
-              style={{
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                border: 'none',
-                outline: 'none'
-              }}
-              aria-label={isExpanded ? 'Show less' : 'Show more'}
-            >
-              {isExpanded ? 'Show less' : 'Show more'}
-            </button>
+            <div className="mt-3 flex justify-center">
+              <button
+                onClick={handleMoreClick}
+                className="px-4 py-2 bg-black bg-opacity-50 rounded-full text-white text-sm font-medium hover:bg-opacity-70 transition-all duration-200 hover:scale-105"
+                aria-label={isExpanded ? 'Show less' : 'Show more'}
+              >
+                {isExpanded ? 'Show less' : 'Show more'}
+              </button>
+            </div>
           )}
         </div>
 
@@ -331,7 +342,7 @@ function CaptionText({ caption }: { caption: string }) {
       {displayText}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="mt-2 text-white text-sm font-medium hover:underline focus:outline-none focus:ring-0 focus:border-0"
+        className="mt-2 text-white text-xs font-medium hover:underline focus:outline-none focus:ring-0 focus:border-0 ml-2"
       >
         {isExpanded ? 'Show less' : 'Show more'}
       </button>
@@ -341,8 +352,130 @@ function CaptionText({ caption }: { caption: string }) {
 
 function Media({ url, mediaType, text, imageText, onDoubleLike }: { url: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; onDoubleLike: () => Promise<void> }) {
   const [burst, setBurst] = React.useState(false);
+  const [isPlaying, setIsPlaying] = React.useState(false);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [hasError, setHasError] = React.useState(false);
+  const [showControls, setShowControls] = React.useState(false);
+  const [isMuted, setIsMuted] = React.useState(true);
   const lastTap = React.useRef<number>(0);
   const touchHandled = React.useRef<boolean>(false);
+  const videoRef = React.useRef<HTMLVideoElement>(null);
+  const observerRef = React.useRef<IntersectionObserver | null>(null);
+
+  // Video control functions
+  const togglePlayPause = () => {
+    if (videoRef.current) {
+      if (videoRef.current.paused) {
+        videoRef.current.play();
+        setIsPlaying(true);
+        setShowControls(false);
+      } else {
+        videoRef.current.pause();
+        setIsPlaying(false);
+        setShowControls(true);
+      }
+    }
+  };
+
+  const handleVideoClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const now = Date.now();
+    const timeSinceLastTap = now - lastTap.current;
+
+    if (timeSinceLastTap < 300) {
+      // Double tap detected - call onDoubleLike
+      setBurst(true);
+      onDoubleLike().finally(() => {
+        setTimeout(() => setBurst(false), 600);
+      });
+    } else {
+      // Single tap - toggle play/pause
+      togglePlayPause();
+    }
+    lastTap.current = now;
+  };
+
+  const handleVideoTouch = (e: React.TouchEvent) => {
+    e.stopPropagation();
+    const now = Date.now();
+    const timeSinceLastTap = now - lastTap.current;
+
+    if (timeSinceLastTap < 300) {
+      // Double tap detected - call onDoubleLike
+      setBurst(true);
+      onDoubleLike().finally(() => {
+        setTimeout(() => setBurst(false), 600);
+      });
+    } else {
+      // Single tap - toggle play/pause
+      togglePlayPause();
+    }
+    lastTap.current = now;
+  };
+
+  const toggleMute = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (videoRef.current) {
+      videoRef.current.muted = !videoRef.current.muted;
+      setIsMuted(videoRef.current.muted);
+    }
+  };
+
+  // Intersection Observer for auto-play
+  React.useEffect(() => {
+    if (mediaType === 'video' && videoRef.current) {
+      observerRef.current = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting) {
+              // Video is in view - play it
+              if (videoRef.current) {
+                videoRef.current.play();
+                setIsPlaying(true);
+              }
+            } else {
+              // Video is out of view - pause it
+              if (videoRef.current) {
+                videoRef.current.pause();
+                setIsPlaying(false);
+                setShowControls(false); // Don't show controls when auto-paused by scrolling
+              }
+            }
+          });
+        },
+        { threshold: 0.5 } // Play when 50% of video is visible
+      );
+
+      observerRef.current.observe(videoRef.current);
+    }
+
+    return () => {
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+      }
+    };
+  }, [mediaType]);
+
+  // Video event handlers
+  const handleVideoLoad = () => {
+    setIsLoading(false);
+    setHasError(false);
+  };
+
+  const handleVideoError = () => {
+    setIsLoading(false);
+    setHasError(true);
+  };
+
+  const handleVideoPlay = () => {
+    setIsPlaying(true);
+    setShowControls(false);
+  };
+
+  const handleVideoPause = () => {
+    setIsPlaying(false);
+    setShowControls(true);
+  };
 
   async function handleTap() {
     const now = Date.now();
@@ -401,13 +534,92 @@ function Media({ url, mediaType, text, imageText, onDoubleLike }: { url: string;
         className="relative w-full aspect-square rounded-2xl ring-1 ring-gray-200/60 dark:ring-gray-700/60 overflow-hidden bg-gray-50 dark:bg-gray-900"
       >
         {mediaType === 'video' ? (
-          <video
-            src={url}
-            className="absolute inset-0 w-full h-full object-cover"
-            controls
-            preload="metadata"
-            playsInline
-          />
+          <>
+            <video
+              ref={videoRef}
+              src={url}
+              className="absolute inset-0 w-full h-full object-cover"
+              preload="metadata"
+              playsInline
+              muted={isMuted}
+              loop
+              onClick={handleVideoClick}
+              onTouchEnd={handleVideoTouch}
+              onLoadedData={handleVideoLoad}
+              onError={handleVideoError}
+              onPlay={handleVideoPlay}
+              onPause={handleVideoPause}
+            />
+
+            {/* Loading Spinner */}
+            {isLoading && (
+              <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-50">
+                <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              </div>
+            )}
+
+            {/* Error State */}
+            {hasError && (
+              <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-75">
+                <div className="text-center text-white">
+                  <div className="text-2xl mb-2">⚠️</div>
+                  <div className="text-sm">Failed to load video</div>
+                </div>
+              </div>
+            )}
+
+            {/* Play/Pause Overlay */}
+            {!isLoading && !hasError && (
+              <div
+                className={`absolute inset-0 flex items-center justify-center transition-opacity duration-300 ${showControls || !isPlaying ? 'opacity-100' : 'opacity-0'
+                  }`}
+                onClick={handleVideoClick}
+                onTouchEnd={handleVideoTouch}
+              >
+                <div className={`w-16 h-16 bg-black bg-opacity-60 rounded-full flex items-center justify-center transition-all duration-300 hover:bg-opacity-80 hover:scale-110 active:scale-95 ${!isPlaying ? 'animate-[playButtonPulse_2s_ease-in-out_infinite] hover:animate-none' : 'hover:animate-[pauseButtonGlow_1.5s_ease-out_infinite]'
+                  }`}>
+                  {isPlaying ? (
+                    <div className="relative">
+                      <svg className="w-8 h-8 text-white transition-all duration-200 hover:scale-110 hover:animate-[iconBounce_0.6s_ease-in-out]" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+                      </svg>
+                      {/* Subtle glow effect */}
+                      <div className="absolute inset-0 w-8 h-8 bg-white opacity-20 rounded-full blur-sm scale-150 animate-ping"></div>
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <svg className="w-8 h-8 text-white ml-1 transition-all duration-200 hover:scale-110 hover:animate-[iconBounce_0.6s_ease-in-out]" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M8 5v14l11-7z" />
+                      </svg>
+                      {/* Subtle glow effect */}
+                      <div className="absolute inset-0 w-8 h-8 bg-white opacity-20 rounded-full blur-sm scale-150 animate-ping"></div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Mute/Unmute Button */}
+            {!isLoading && !hasError && (
+              <div className="absolute top-4 right-4">
+                <button
+                  onClick={toggleMute}
+                  className="w-10 h-10 bg-black bg-opacity-50 rounded-full flex items-center justify-center hover:bg-opacity-70 transition-all duration-200"
+                  aria-label={isMuted ? 'Unmute video' : 'Mute video'}
+                >
+                  {isMuted ? (
+                    <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+            )}
+          </>
         ) : (
           <img
             src={url}
@@ -579,66 +791,74 @@ function EngagementBar({
   }
 
   return (
-    <div className="px-4 mt-3">
-      <div className="flex items-center justify-between text-sm text-gray-700 dark:text-gray-200">
+    <div className="px-4 mt-4">
+      <div className="flex items-center justify-between">
         {/* Like */}
         <div className="flex flex-col items-center gap-1">
           <button
-            className="flex items-center gap-1 px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            className={`flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200 hover:scale-110 active:scale-95 ${liked
+              ? 'bg-red-500 hover:bg-red-600'
+              : 'bg-gray-800 hover:bg-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600'
+              }`}
             onClick={likeClick}
             aria-pressed={liked}
             aria-label={liked ? 'Unlike' : 'Like'}
             title={liked ? 'Unlike' : 'Like'}
           >
-            {liked ? <AiFillHeart className="text-red-500" /> : <FiHeart />}
+            {liked ? (
+              <AiFillHeart className="text-white w-4 h-4" />
+            ) : (
+              <FiHeart className="w-4 h-4 text-white" />
+            )}
           </button>
-          <span className="text-xs text-gray-500 dark:text-gray-400">{likes}</span>
+          <span className="text-xs font-medium text-gray-700 dark:text-gray-200">{likes}</span>
         </div>
 
         {/* Views */}
         <div className="flex flex-col items-center gap-1">
-          <div className="flex items-center gap-1 px-2 py-1">
-            <FiEye />
+          <div className="flex items-center justify-center w-8 h-8 rounded-full bg-gray-800 dark:bg-gray-700">
+            <FiEye className="w-4 h-4 text-white" />
           </div>
-          <span className="text-xs text-gray-500 dark:text-gray-400">{views}</span>
+          <span className="text-xs font-medium text-gray-700 dark:text-gray-200">{views}</span>
         </div>
 
         {/* Comments */}
         <div className="flex flex-col items-center gap-1">
           <button
-            className="flex items-center gap-1 px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            className="flex items-center justify-center w-8 h-8 rounded-full bg-gray-800 hover:bg-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 transition-all duration-200 hover:scale-110 active:scale-95"
             onClick={onOpenComments}
             aria-label="Comments"
+            title="Comments"
           >
-            <FiMessageSquare />
+            <FiMessageSquare className="w-4 h-4 text-white" />
           </button>
-          <span className="text-xs text-gray-500 dark:text-gray-400">{comments}</span>
+          <span className="text-xs font-medium text-gray-700 dark:text-gray-200">{comments}</span>
         </div>
 
         {/* Share */}
         <div className="flex flex-col items-center gap-1">
           <button
-            className="flex items-center gap-1 px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            className="flex items-center justify-center w-8 h-8 rounded-full bg-gray-800 hover:bg-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 transition-all duration-200 hover:scale-110 active:scale-95"
             onClick={shareClick}
             aria-label="Share post"
             title="Share post"
           >
-            <FiShare2 />
+            <FiShare2 className="w-4 h-4 text-white" />
           </button>
-          <span className="text-xs text-gray-500 dark:text-gray-400">{shares}</span>
+          <span className="text-xs font-medium text-gray-700 dark:text-gray-200">{shares}</span>
         </div>
 
         {/* Reclip */}
         <div className="flex flex-col items-center gap-1">
           <button
-            className="flex items-center gap-1 px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            className="flex items-center justify-center w-8 h-8 rounded-full bg-gray-800 hover:bg-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 transition-all duration-200 hover:scale-110 active:scale-95"
             onClick={reclipClick}
             aria-label="Reclip post"
             title="Reclip post"
           >
-            <FiRepeat />
+            <FiRepeat className="w-4 h-4 text-white" />
           </button>
-          <span className="text-xs text-gray-500 dark:text-gray-400">{reclips}</span>
+          <span className="text-xs font-medium text-gray-700 dark:text-gray-200">{reclips}</span>
         </div>
       </div>
     </div>
@@ -710,6 +930,8 @@ function FeedPageWrapper() {
   const [error, setError] = React.useState<string | null>(null);
   const [commentsModalOpen, setCommentsModalOpen] = React.useState(false);
   const [selectedPostId, setSelectedPostId] = React.useState<string | null>(null);
+  const [shareModalOpen, setShareModalOpen] = React.useState(false);
+  const [selectedPostForShare, setSelectedPostForShare] = React.useState<Post | null>(null);
 
   // Determine current filter - custom location overrides tabs
   const currentFilter = customLocation || active;
@@ -767,7 +989,7 @@ function FeedPageWrapper() {
   };
 
   async function loadMore() {
-    console.log('loadMore called with:', { loading, end, cursor, currentFilter });
+    console.log('loadMore called with:', { loading, end, cursor, currentFilter, customLocation, active });
     if (loading || end || cursor === null) {
       console.log('loadMore early return:', { loading, end, cursor });
       return;
@@ -775,7 +997,7 @@ function FeedPageWrapper() {
     setLoading(true);
     setError(null);
     try {
-      console.log('Calling fetchPostsPage with:', { currentFilter, cursor, userId });
+      console.log('Calling fetchPostsPage with:', { currentFilter, cursor, userId, customLocation, active });
       const page = await fetchPostsPage(currentFilter, cursor, 5, userId, user?.local || '', user?.regional || '', user?.national || '');
       console.log('fetchPostsPage returned:', { itemsCount: page.items.length, nextCursor: page.nextCursor });
       setPages(prev => {
@@ -895,7 +1117,29 @@ function FeedPageWrapper() {
         </div>
       )}
 
-      <PillTabs active={active} onChange={setActive} onClearCustom={() => setCustomLocation(null)} />
+      {/* Show location tabs only when not viewing a custom location */}
+      {!customLocation ? (
+        <PillTabs active={active} onChange={setActive} onClearCustom={() => setCustomLocation(null)} />
+      ) : (
+        /* Show back button and city header when viewing custom location */
+        <div className="px-3 py-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <FiMapPin className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                {customLocation} Feed
+              </span>
+            </div>
+            <button
+              onClick={() => setCustomLocation(null)}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+            >
+              <FiHome className="w-3 h-3" />
+              Back to Home Feed
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="mx-4 my-3 p-3 rounded-md border border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
@@ -941,26 +1185,8 @@ function FeedPageWrapper() {
             await toggleFollowForPost(userId, p.id);
           }}
           onShare={async () => {
-            if (!online) {
-              await enqueue({ type: 'share', postId: p.id, userId });
-              return;
-            }
-            updateOne(p.id, post => {
-              post.stats.shares += 1;
-              return post;
-            });
-            await incrementShares(userId, p.id);
-
-            // Notify EngagementBar to update share count
-            window.dispatchEvent(new CustomEvent(`shareAdded-${p.id}`));
-
-            if (navigator.share) {
-              try {
-                await navigator.share({ url: window.location.href, title: 'Post', text: '' });
-              } catch { }
-            } else {
-              await navigator.clipboard.writeText(window.location.href);
-            }
+            setSelectedPostForShare(p);
+            setShareModalOpen(true);
           }}
           onOpenComments={() => handleOpenComments(p.id)}
           onView={async () => {
@@ -1002,8 +1228,22 @@ function FeedPageWrapper() {
 
       {end && flat.length === 0 && (
         <div className="p-8 text-center text-gray-600 dark:text-gray-300">
-          <div className="text-lg font-semibold mb-1">Unlock Your Following News Feed</div>
-          <div className="text-gray-600 text-sm">This feed only populates with the accounts you follow. Start tapping Follow to personalize your stream</div>
+          {currentFilter.toLowerCase() === 'following' ? (
+            <>
+              <div className="text-lg font-semibold mb-1">Unlock Your Following News Feed</div>
+              <div className="text-gray-600 text-sm">This feed only populates with the accounts you follow. Start tapping Follow to personalize your stream</div>
+            </>
+          ) : customLocation ? (
+            <>
+              <div className="text-lg font-semibold mb-1">No posts from {customLocation} yet</div>
+              <div className="text-gray-600 text-sm">Be the first to share something from {customLocation}!</div>
+            </>
+          ) : (
+            <>
+              <div className="text-lg font-semibold mb-1">No posts yet</div>
+              <div className="text-gray-600 text-sm">No posts available for this location</div>
+            </>
+          )}
         </div>
       )}
 
@@ -1017,6 +1257,18 @@ function FeedPageWrapper() {
           postId={selectedPostId}
           isOpen={commentsModalOpen}
           onClose={handleCloseComments}
+        />
+      )}
+
+      {/* Share Modal */}
+      {selectedPostForShare && (
+        <ShareModal
+          post={selectedPostForShare}
+          isOpen={shareModalOpen}
+          onClose={() => {
+            setShareModalOpen(false);
+            setSelectedPostForShare(null);
+          }}
         />
       )}
     </div>

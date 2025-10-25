@@ -3,6 +3,7 @@ import { useAuth } from '../context/Auth';
 import { useNavigate } from 'react-router-dom';
 import { createPost } from '../api/posts';
 import { FiCamera, FiImage, FiMapPin, FiX } from 'react-icons/fi';
+import Avatar from '../components/Avatar';
 
 export default function CreatePage() {
     const { user } = useAuth();
@@ -110,11 +111,11 @@ export default function CreatePage() {
             <div className="mx-auto max-w-md px-4 py-6">
                 {/* User Info */}
                 <div className="flex items-center gap-3 mb-6">
-                    <div className="w-10 h-10 bg-brand-500 rounded-full flex items-center justify-center">
-                        <span className="text-white font-semibold text-sm">
-                            {user?.name?.charAt(0).toUpperCase() || 'U'}
-                        </span>
-                    </div>
+                    <Avatar
+                        src={user?.avatarUrl}
+                        name={user?.name || 'User'}
+                        size="md"
+                    />
                     <div>
                         <div className="font-medium text-gray-900 dark:text-gray-100">
                             {user?.name || 'User'}

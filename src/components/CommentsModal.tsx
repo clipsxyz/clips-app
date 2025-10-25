@@ -3,8 +3,9 @@ import { FiX, FiSend, FiMessageSquare, FiHeart, FiChevronDown, FiChevronUp } fro
 import { AiFillHeart } from 'react-icons/ai';
 import { useAuth } from '../context/Auth';
 import { useOnline } from '../hooks/useOnline';
-import { fetchComments, addComment, addReply, toggleCommentLike } from '../api/posts';
+import { fetchComments, addComment, addReply, toggleCommentLike, toggleReplyLike } from '../api/posts';
 import { enqueue } from '../utils/mutationQueue';
+import Avatar from './Avatar';
 import type { Comment } from '../types';
 
 interface CommentsModalProps {
@@ -28,17 +29,20 @@ function formatTime(timestamp: number): string {
 
 function CommentItem({
     comment,
-    onLike,
+    onLikeComment,
+    onLikeReply,
     onReply,
     userId,
     postId
 }: {
     comment: Comment;
-    onLike: (commentId: string) => Promise<void>;
+    onLikeComment: (commentId: string) => Promise<void>;
+    onLikeReply: (parentCommentId: string, replyId: string) => Promise<void>;
     onReply: (parentId: string, text: string) => Promise<void>;
     userId: string;
     postId: string;
 }) {
+    const { user } = useAuth(); // Add useAuth hook
     const [liked, setLiked] = React.useState(comment.userLiked);
     const [likes, setLikes] = React.useState(comment.likes);
     const [busy, setBusy] = React.useState(false);
@@ -53,23 +57,6 @@ function CommentItem({
         setLikes(comment.likes);
     }, [comment.userLiked, comment.likes]);
 
-    const handleLike = async () => {
-        if (busy) return;
-        setBusy(true);
-        try {
-            // Optimistic update
-            setLiked(!liked);
-            setLikes(liked ? likes - 1 : likes + 1);
-            await onLike(comment.id);
-        } catch (error) {
-            // Revert on error
-            setLiked(comment.userLiked);
-            setLikes(comment.likes);
-            console.error('Failed to like comment:', error);
-        } finally {
-            setBusy(false);
-        }
-    };
 
     const handleReply = async () => {
         if (!replyText.trim() || submittingReply) return;
@@ -94,6 +81,11 @@ function CommentItem({
             <div className="flex items-start justify-between">
                 <div className="flex-1">
                     <div className="flex items-center gap-2 mb-2">
+                        <Avatar
+                            src={user?.handle === comment.userHandle ? user?.avatarUrl : undefined}
+                            name={comment.userHandle?.split('@')[0] || 'User'} // Extract name from handle
+                            size="sm"
+                        />
                         <span className="font-medium text-sm">{comment.userHandle}</span>
                         <span className="text-xs text-gray-500 dark:text-gray-400">
                             {formatTime(comment.createdAt)}
@@ -105,7 +97,7 @@ function CommentItem({
                     <div className="flex items-center gap-4">
                         {/* Like Button */}
                         <button
-                            onClick={handleLike}
+                            onClick={() => onLikeComment(comment.id)}
                             disabled={busy}
                             className="flex items-center gap-1 px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
                             aria-pressed={liked}
@@ -168,6 +160,11 @@ function CommentItem({
                                     {comment.replies.map(reply => (
                                         <div key={reply.id} className="border-l-2 border-gray-200 dark:border-gray-700 pl-3">
                                             <div className="flex items-center gap-2 mb-1">
+                                                <Avatar
+                                                    src={user?.handle === reply.userHandle ? user?.avatarUrl : undefined}
+                                                    name={reply.userHandle?.split('@')[0] || 'User'} // Extract name from handle
+                                                    size="sm"
+                                                />
                                                 <span className="font-medium text-xs">{reply.userHandle}</span>
                                                 <span className="text-xs text-gray-500 dark:text-gray-400">
                                                     {formatTime(reply.createdAt)}
@@ -177,7 +174,7 @@ function CommentItem({
 
                                             {/* Reply Like Button */}
                                             <button
-                                                onClick={() => onLike(reply.id)}
+                                                onClick={() => onLikeReply(comment.id, reply.id)}
                                                 className="flex items-center gap-1 px-1 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                                             >
                                                 {reply.userLiked ? (
@@ -208,6 +205,7 @@ function CommentInput({
     onSubmit: (text: string) => void;
     isLoading: boolean;
 }) {
+    const { user } = useAuth();
     const [text, setText] = React.useState('');
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -220,6 +218,11 @@ function CommentInput({
 
     return (
         <form onSubmit={handleSubmit} className="flex items-center gap-2 p-3 border-t border-gray-200 dark:border-gray-700">
+            <Avatar
+                src={user?.avatarUrl}
+                name={user?.name || 'User'}
+                size="sm"
+            />
             <input
                 type="text"
                 value={text}
@@ -281,7 +284,7 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                 return;
             }
 
-            const newComment = await addComment(postId, user.name || 'darraghdublin', text);
+            const newComment = await addComment(postId, user.handle || 'darraghdublin', text);
             setComments(prev => [...prev, newComment]);
 
             // Notify EngagementBar to update comment count
@@ -307,12 +310,36 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                 return;
             }
 
-            const updatedComment = await toggleCommentLike(user.id, commentId);
+            const updatedComment = await toggleCommentLike(commentId);
             setComments(prev => prev.map(comment =>
                 comment.id === commentId ? updatedComment : comment
             ));
         } catch (error) {
             console.error('Failed to like comment:', error);
+        }
+    };
+
+    const handleLikeReply = async (parentCommentId: string, replyId: string) => {
+        if (!user) return;
+
+        try {
+            if (!online) {
+                // Queue for offline
+                await enqueue({
+                    type: 'replyLike',
+                    parentCommentId,
+                    replyId,
+                    userId: user.id
+                });
+                return;
+            }
+
+            const updatedParentComment = await toggleReplyLike(parentCommentId, replyId);
+            setComments(prev => prev.map(comment =>
+                comment.id === parentCommentId ? updatedParentComment : comment
+            ));
+        } catch (error) {
+            console.error('Failed to like reply:', error);
         }
     };
 
@@ -332,11 +359,29 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                 return;
             }
 
-            // The addReply function already updates the comments array, so we don't need to update UI here
-            await addReply(postId, parentId, user.name || 'darraghdublin', text);
+            const newReply = await addReply(postId, parentId, user.handle || 'darraghdublin', text);
 
-            // Just reload comments to get the updated state
-            loadComments();
+            // Update local state by adding the reply to the parent comment
+            setComments(prevComments =>
+                prevComments.map(comment => {
+                    if (comment.id === parentId) {
+                        // Check if reply already exists to avoid duplicates
+                        const existingReply = comment.replies?.find(r => r.id === newReply.id);
+                        if (existingReply) {
+                            return comment; // Reply already exists, don't add again
+                        }
+                        return {
+                            ...comment,
+                            replies: [...(comment.replies || []), newReply],
+                            replyCount: (comment.replyCount || 0) + 1
+                        };
+                    }
+                    return comment;
+                })
+            );
+
+            // Notify EngagementBar to update comment count
+            window.dispatchEvent(new CustomEvent(`commentAdded-${postId}`));
         } catch (error) {
             console.error('Failed to add reply:', error);
         }
@@ -386,7 +431,8 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                                 <CommentItem
                                     key={comment.id}
                                     comment={comment}
-                                    onLike={handleLikeComment}
+                                    onLikeComment={handleLikeComment}
+                                    onLikeReply={handleLikeReply}
                                     onReply={handleReplyToComment}
                                     userId={user?.id || ''}
                                     postId={postId}
