@@ -10,6 +10,7 @@ import CreatePage from '../pages/CreatePage';
 import LoginPage from '../pages/LoginPage';
 import ProfilePage from '../pages/ProfilePage';
 import SearchPage from '../pages/SearchPage';
+import StoriesPage from '../pages/StoriesPage';
 
 const Placeholder = ({ name }: { name: string }) => <div className="p-6">{name}</div>;
 
@@ -27,6 +28,7 @@ export default function Root() {
                                 <Route path="login" element={<LoginPage />} />
                                 <Route path="boost" element={<Placeholder name="Boost" />} />
                                 <Route path="clip" element={<ClipPage />} />
+                                <Route path="stories" element={<StoriesPage />} />
                                 <Route path="search" element={<SearchPage />} />
                                 <Route path="profile" element={<ProfilePage />} />
                             </Route>

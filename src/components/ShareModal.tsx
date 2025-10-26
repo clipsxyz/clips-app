@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { FiX, FiCopy, FiShare2, FiLink } from 'react-icons/fi';
+import { useNavigate } from 'react-router-dom';
 
 interface ShareModalProps {
     isOpen: boolean;
@@ -10,13 +11,17 @@ interface ShareModalProps {
         text?: string;
         mediaUrl?: string;
         locationLabel: string;
+        mediaType?: 'image' | 'video';
     };
 }
 
 const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
     const [copied, setCopied] = useState(false);
+    const navigate = useNavigate();
 
     if (!isOpen) return null;
+
+    console.log('ShareModal rendered with post:', post);
 
     const postUrl = `${window.location.origin}/post/${post.id}`;
     const postTitle = post.text ? post.text.substring(0, 100) + (post.text.length > 100 ? '...' : '') : 'Check out this post';
@@ -30,6 +35,38 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
         } catch (err) {
             console.error('Failed to copy link:', err);
         }
+    };
+
+    const handleShareToStory = () => {
+        console.log('Share to story clicked', post);
+
+        if (!post.mediaUrl) {
+            alert('This post has no media to share to story');
+            return;
+        }
+
+        // Truncate text to 200 characters for stories
+        const maxLength = 200;
+        const truncatedText = post.text && post.text.length > maxLength
+            ? post.text.substring(0, maxLength) + '...'
+            : post.text;
+
+        // Prepare story data including reference to original post
+        const storyData = {
+            mediaUrl: post.mediaUrl,
+            mediaType: post.mediaType || 'image',
+            text: truncatedText,
+            sharedFromPost: post.id, // Original post ID
+            sharedFromUser: post.userHandle // Original post author
+        };
+
+        console.log('Preparing to navigate with story data (text length:', truncatedText?.length || 0, ')');
+
+        // Close the modal first
+        onClose();
+
+        // Navigate with state instead of sessionStorage to avoid size limits
+        navigate('/clip', { state: { sharedStory: storyData } });
     };
 
     const handleShare = (platform: string) => {
@@ -61,7 +98,8 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
         window.open(shareUrl, '_blank', 'width=600,height=400');
     };
 
-    const shareOptions = [
+    // Only include "Share to Story" if post has media
+    const baseShareOptions = [
         {
             id: 'copy',
             name: 'Copy Link',
@@ -126,6 +164,22 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
         }
     ];
 
+    // Conditionally add "Share to Story" if post has media
+    const shareOptions = post.mediaUrl ? [
+        {
+            id: 'story',
+            name: 'Share to Story',
+            icon: (
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+            ),
+            color: 'bg-gradient-to-br from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white',
+            action: handleShareToStory
+        },
+        ...baseShareOptions
+    ] : baseShareOptions;
+
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-end justify-center z-50">
             <div className="bg-white dark:bg-gray-900 w-full max-w-md rounded-t-3xl shadow-2xl transform transition-transform duration-300 ease-out">
@@ -150,11 +204,15 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
 
                 {/* Share Options */}
                 <div className="p-6">
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-4 auto-rows-fr">
                         {shareOptions.map((option) => (
                             <button
                                 key={option.id}
-                                onClick={option.action}
+                                onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    option.action();
+                                }}
                                 className={`flex items-center gap-3 p-4 rounded-xl transition-all duration-200 hover:scale-105 ${option.color}`}
                             >
                                 {option.icon}

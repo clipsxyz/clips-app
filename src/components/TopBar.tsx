@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { FiCompass, FiX, FiSearch, FiMapPin } from 'react-icons/fi';
 
 type TopBarProps = {
@@ -7,6 +8,7 @@ type TopBarProps = {
 };
 
 export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
+  const navigate = useNavigate();
   const [showDiscoverCard, setShowDiscoverCard] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState('');
 
@@ -58,8 +60,15 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
               aria-label="Discover new locations"
             >
               <div className="relative w-6 h-6">
-                <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 p-0.5">
-                  <div className="w-full h-full rounded-full bg-gray-950 dark:bg-gray-950 flex items-center justify-center">
+                {/* Border beam effect */}
+                <div className="absolute inset-0 rounded-md bg-gradient-to-r from-emerald-500 via-blue-500 to-violet-500 opacity-75 blur-sm animate-pulse"></div>
+                <div className="absolute inset-[1px] rounded-md bg-gray-950 dark:bg-gray-950">
+                  <div className="absolute inset-0 rounded-md" style={{
+                    background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.5), transparent)',
+                    backgroundSize: '200% 100%',
+                    animation: 'shimmer 3s linear infinite',
+                  }}></div>
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
                     <FiCompass className="w-3 h-3 text-white" />
                   </div>
                 </div>
@@ -71,18 +80,21 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
           </div>
 
           <button
-            onClick={() => {
-              // TODO: Navigate to stories page
-              console.log('Navigate to stories');
-            }}
+            onClick={() => navigate('/stories')}
             className="flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             aria-label="View Stories"
             title="Stories"
           >
-            {/* Story ring effect */}
+            {/* Border beam effect */}
             <div className="relative w-6 h-6">
-              <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 p-0.5">
-                <div className="w-full h-full rounded-full bg-gray-950 dark:bg-gray-950 flex items-center justify-center">
+              <div className="absolute inset-0 rounded-md bg-gradient-to-r from-emerald-500 via-blue-500 to-violet-500 opacity-75 blur-sm animate-pulse"></div>
+              <div className="absolute inset-[1px] rounded-md bg-gray-950 dark:bg-gray-950">
+                <div className="absolute inset-0 rounded-md" style={{
+                  background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.5), transparent)',
+                  backgroundSize: '200% 100%',
+                  animation: 'shimmer 3s linear infinite',
+                }}></div>
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
                   <FiMapPin className="w-3 h-3 text-white" />
                 </div>
               </div>
