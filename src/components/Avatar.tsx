@@ -5,9 +5,11 @@ interface AvatarProps {
     name: string;
     size?: 'sm' | 'md' | 'lg' | 'xl';
     className?: string;
+    hasStory?: boolean;
+    onClick?: () => void;
 }
 
-export default function Avatar({ src, name, size = 'md', className = '' }: AvatarProps) {
+export default function Avatar({ src, name, size = 'md', className = '', hasStory = false, onClick }: AvatarProps) {
     // Get initials from name (first letter of first name + first letter of last name)
     const getInitials = (fullName: string): string => {
         const names = fullName.trim().split(' ');
@@ -29,31 +31,68 @@ export default function Avatar({ src, name, size = 'md', className = '' }: Avata
 
     const sizeClass = sizeClasses[size];
 
+    const Component = onClick ? 'button' : 'div';
+
+    // Wrap with border if hasStory
+    if (hasStory) {
+        return (
+            <Component
+                onClick={onClick}
+                className={`${sizeClass} ${className} ${onClick ? 'cursor-pointer hover:scale-105 transition-transform' : ''}`}
+            >
+                <div className="w-full h-full rounded-full bg-gradient-to-tr from-blue-400 via-cyan-400 to-green-400 p-[2.5px] animate-pulse">
+                    <div className="w-full h-full rounded-full bg-gradient-to-br from-gray-950 to-gray-900 flex items-center justify-center overflow-hidden">
+                        <div className={`${sizeClass} rounded-full overflow-hidden`}>
+                            {src ? (
+                                <img
+                                    src={src}
+                                    alt={`${name}'s profile picture`}
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                        (e.target as HTMLImageElement).style.display = 'none';
+                                    }}
+                                />
+                            ) : null}
+
+                            {/* Fallback initials */}
+                            <div
+                                className={`absolute inset-0 rounded-full flex items-center justify-center font-bold text-white ${src ? 'opacity-0' : 'opacity-100'
+                                    } transition-opacity duration-200`}
+                                style={{ background: '#000000' }}
+                            >
+                                {initials}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </Component>
+        );
+    }
+
     return (
-        <div className={`${sizeClass} ${className} rounded-full overflow-hidden flex items-center justify-center relative`}>
+        <Component
+            onClick={onClick}
+            className={`${sizeClass} ${className} rounded-full overflow-hidden flex items-center justify-center relative ${onClick ? 'cursor-pointer hover:scale-105 transition-transform' : ''}`}
+        >
             {src ? (
                 <img
                     src={src}
                     alt={`${name}'s profile picture`}
                     className="w-full h-full object-cover"
                     onError={(e) => {
-                        // If image fails to load, hide it to show fallback
                         (e.target as HTMLImageElement).style.display = 'none';
                     }}
                 />
             ) : null}
 
-            {/* Fallback initials - always rendered but hidden when image is present */}
+            {/* Fallback initials */}
             <div
                 className={`absolute inset-0 rounded-full flex items-center justify-center font-bold text-white ${src ? 'opacity-0' : 'opacity-100'
                     } transition-opacity duration-200`}
-                style={{
-                    background: 'linear-gradient(135deg, #10b981 0%, #3b82f6 50%, #1d4ed8 100%)', // Green to blue gradient
-                    boxShadow: '0 2px 8px rgba(16, 185, 129, 0.3)'
-                }}
+                style={{ background: '#000000' }}
             >
                 {initials}
             </div>
-        </div>
+        </Component>
     );
 }

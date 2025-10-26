@@ -1,6 +1,35 @@
 import raw from '../data/posts.json';
 import type { Post, Comment } from '../types';
 
+// Helper function to get user location data from handle
+function getUserLocationFromHandle(userHandle: string): { local: string; regional: string; national: string } {
+  const handleLower = userHandle.toLowerCase();
+
+  // Extract location from handle
+  if (handleLower.includes('finglas')) {
+    return { local: 'Finglas', regional: 'Dublin', national: 'Ireland' };
+  } else if (handleLower.includes('dublin')) {
+    return { local: 'Dublin', regional: 'Dublin', national: 'Ireland' };
+  } else if (handleLower.includes('ireland')) {
+    return { local: 'Various', regional: 'Various', national: 'Ireland' };
+  } else if (handleLower.includes('ballymun')) {
+    return { local: 'Ballymun', regional: 'Dublin', national: 'Ireland' };
+  } else if (handleLower.includes('newyork') || handleLower.includes('new york')) {
+    return { local: 'New York', regional: 'New York', national: 'USA' };
+  } else if (handleLower.includes('london')) {
+    return { local: 'London', regional: 'London', national: 'UK' };
+  } else if (handleLower.includes('paris')) {
+    return { local: 'Paris', regional: 'Paris', national: 'France' };
+  } else if (handleLower.includes('tokyo')) {
+    return { local: 'Tokyo', regional: 'Tokyo', national: 'Japan' };
+  } else if (handleLower.includes('sydney')) {
+    return { local: 'Sydney', regional: 'NSW', national: 'Australia' };
+  }
+
+  // Default - return empty locations
+  return { local: '', regional: '', national: '' };
+}
+
 // Create a persistent posts array that won't be reset
 let posts: Post[] = [];
 let postsInitialized = false;
@@ -8,10 +37,14 @@ let postsInitialized = false;
 // Initialize posts only once
 if (!postsInitialized) {
   console.log('Initializing posts array...');
-  posts = (raw as Post[]).map((p, index) => ({
-    ...p,
-    id: `post-${p.id}-${index}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}` // Make IDs truly unique
-  }));
+  posts = (raw as Post[]).map((p, index) => {
+    const location = getUserLocationFromHandle(p.userHandle);
+    return {
+      ...p,
+      id: `post-${p.id}-${index}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, // Make IDs truly unique
+      ...location
+    };
+  });
   postsInitialized = true;
 
   // Debug: Log initial posts
@@ -119,6 +152,13 @@ const delay = (ms = 250) => new Promise(r => setTimeout(r, ms));
 
 export type Page = { items: Post[]; nextCursor: number | null };
 
+// Get list of user handles that the current user follows
+export async function getFollowedUsers(userId: string): Promise<string[]> {
+  await delay();
+  const s = getState(userId);
+  return Object.keys(s.follows).filter(handle => s.follows[handle] === true);
+}
+
 // compute view for a user
 function decorateForUser(userId: string, p: Post): Post {
   const s = getState(userId);
@@ -158,41 +198,33 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       // Check if this is a custom location search (not one of the predefined tabs)
       const predefinedTabs = ['finglas', 'dublin', 'ireland', 'following'];
       if (!predefinedTabs.includes(t)) {
-        // Custom location search - match any part of userHandle
-        return p.userHandle.toLowerCase().includes(t);
+        // Custom location search - match user's location fields (case-insensitive)
+        const searchLocation = t;
+        const userLocalMatch = p.userLocal?.toLowerCase().includes(searchLocation);
+        const userRegionalMatch = p.userRegional?.toLowerCase().includes(searchLocation);
+        const userNationalMatch = p.userNational?.toLowerCase().includes(searchLocation);
+
+        return userLocalMatch || userRegionalMatch || userNationalMatch;
       }
 
-      // Predefined tab filtering based on user's signup location choices
+      // Predefined tab filtering - show only posts from users in that location
       if (t === 'finglas') {
-        return p.userHandle.toLowerCase().includes('finglas') ||
-          (userLocal === 'Finglas' && p.userHandle.toLowerCase().includes('finglas'));
+        // Show posts from users who selected Finglas as their local location
+        return p.userLocal === 'Finglas';
       }
       if (t === 'dublin') {
-        // Show posts from users whose handle contains 'dublin' OR from users who selected Dublin as regional
-        const handleContainsDublin = p.userHandle.toLowerCase().includes('dublin');
-        const userRegionalDublin = userRegional === 'Dublin';
-        const shouldShow = handleContainsDublin || userRegionalDublin;
-
-        // Debug logging
-        if (shouldShow) {
-          console.log('Dublin post found:', {
-            userHandle: p.userHandle,
-            handleContainsDublin,
-            userRegionalDublin,
-            text: p.text,
-            mediaUrl: p.mediaUrl
-          });
-        }
-
-        return shouldShow;
+        // Show posts from users who selected Dublin as their regional location
+        return p.userRegional === 'Dublin';
       }
       if (t === 'ireland') {
-        return p.userHandle.toLowerCase().includes('ireland') ||
-          (userNational === 'Ireland' && p.userHandle.toLowerCase().includes('ireland'));
+        // Show posts from users who selected Ireland as their national location
+        return p.userNational === 'Ireland';
       }
 
-      // Fallback
-      return p.userHandle.toLowerCase().includes(t);
+      // Fallback - check location fields
+      return p.userLocal?.toLowerCase().includes(t) ||
+        p.userRegional?.toLowerCase().includes(t) ||
+        p.userNational?.toLowerCase().includes(t);
     });
 
     console.log('Filtered posts for', t, ':', filtered.length, 'posts');
@@ -408,7 +440,10 @@ export async function createPost(
   imageUrl?: string,
   mediaType?: 'image' | 'video',
   imageText?: string,
-  caption?: string
+  caption?: string,
+  userLocal?: string,
+  userRegional?: string,
+  userNational?: string
 ): Promise<Post> {
   await delay(500);
 
@@ -420,8 +455,16 @@ export async function createPost(
     imageUrl,
     mediaType,
     imageText,
-    caption
+    caption,
+    userLocal,
+    userRegional,
+    userNational
   });
+
+  // Get location from user data if provided, otherwise infer from handle
+  const locationData = userLocal && userRegional && userNational
+    ? { userLocal, userRegional, userNational }
+    : getUserLocationFromHandle(userHandle);
 
   const newPost: Post = {
     id: `${crypto.randomUUID()}-${Date.now()}`,
@@ -442,7 +485,8 @@ export async function createPost(
     },
     isBookmarked: false,
     isFollowing: false,
-    userLiked: false
+    userLiked: false,
+    ...locationData
   };
 
   // Add to posts array (at the beginning for newest first)

@@ -1,28 +1,30 @@
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiEye, FiMessageSquare, FiShare2, FiCamera, FiMapPin, FiRepeat, FiCompass } from 'react-icons/fi';
+import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiEye, FiMessageSquare, FiShare2, FiMapPin, FiRepeat } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import TopBar from './components/TopBar';
 import CommentsModal from './components/CommentsModal';
 import ShareModal from './components/ShareModal';
+import CreateModal from './components/CreateModal';
 import Avatar from './components/Avatar';
 import { useAuth } from './context/Auth';
 import { useOnline } from './hooks/useOnline';
 import { fetchPostsPage, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost } from './api/posts';
+import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle } from './api/stories';
 import { enqueue, drain } from './utils/mutationQueue';
 import type { Post } from './types';
 
 type Tab = 'Finglas' | 'Dublin' | 'Ireland' | 'Following';
 
-function BottomNav() {
+function BottomNav({ onCreateClick }: { onCreateClick: () => void }) {
   const nav = useNavigate();
   const loc = useLocation();
 
-  const item = (path: string, label: string, icon: React.ReactNode) => {
+  const item = (path: string, label: string, icon: React.ReactNode, onClick?: () => void) => {
     const active = loc.pathname === path;
     return (
       <button
-        onClick={() => nav(path)}
+        onClick={onClick || (() => nav(path))}
         className={`flex flex-col items-center justify-center flex-1 py-2 ${active ? 'text-brand-600 font-semibold' : 'text-gray-500'} transition-colors`}
         aria-current={active ? 'page' : undefined}
         title={label}
@@ -38,7 +40,7 @@ function BottomNav() {
       <div className="mx-auto max-w-md flex">
         {item('/feed', 'Home', <FiHome size={22} />)}
         {item('/boost', 'Boost', <FiZap size={22} />)}
-        {item('/create', 'Create', <FiPlusSquare size={22} />)}
+        {item('/create', 'Create', <FiPlusSquare size={22} />, onCreateClick)}
         {item('/search', 'Search', <FiSearch size={22} />)}
         {item('/profile', 'Profile', <FiUser size={22} />)}
       </div>
@@ -47,30 +49,29 @@ function BottomNav() {
 }
 
 export default function App() {
-  const location = useLocation();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = React.useState<string>('Dublin');
   const [customLocation, setCustomLocation] = React.useState<string | null>(null);
+  const [showCreateModal, setShowCreateModal] = React.useState(false);
 
   // Determine current filter - custom location overrides tabs
   const currentFilter = customLocation || activeTab;
 
-  // Handle Clip+ route directly
-  if (location.pathname === '/clip') {
-    return (
+  return (
+    <>
       <main id="main" className="mx-auto max-w-md min-h-screen pb-[calc(64px+theme(spacing.safe))] md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800 md:bg-white md:dark:bg-gray-950">
         <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />
-        <ClipPageContent />
-        <BottomNav />
+        <Outlet context={{ activeTab, setActiveTab, customLocation, setCustomLocation }} />
+        <BottomNav onCreateClick={() => setShowCreateModal(true)} />
       </main>
-    );
-  }
 
-  return (
-    <main id="main" className="mx-auto max-w-md min-h-screen pb-[calc(64px+theme(spacing.safe))] md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800 md:bg-white md:dark:bg-gray-950">
-      <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />
-      <Outlet context={{ activeTab, setActiveTab, customLocation, setCustomLocation }} />
-      <BottomNav />
-    </main>
+      {/* Create Modal */}
+      <CreateModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onNavigate={(path) => navigate(path)}
+      />
+    </>
   );
 }
 
@@ -144,11 +145,71 @@ function FollowButton({ initial, onToggle }: { initial: boolean; onToggle: () =>
 
 function PostHeader({ post, onFollow }: { post: Post; onFollow: () => Promise<void> }) {
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const [hasStory, setHasStory] = React.useState(false);
   const titleId = `post-title-${post.id}`;
 
   // Check if this is the current user's post
   const isCurrentUser = user?.handle === post.userHandle;
   const avatarSrc = isCurrentUser ? user?.avatarUrl : undefined;
+
+  // Check if user has unviewed stories using API
+  React.useEffect(() => {
+    async function checkStory() {
+      try {
+        let result;
+        if (isCurrentUser) {
+          // For current user, check if they have any stories at all
+          result = await userHasStoriesByHandle(post.userHandle);
+        } else {
+          // For other users, check if current user has unviewed stories
+          result = await userHasUnviewedStoriesByHandle(post.userHandle);
+        }
+        setHasStory(result);
+      } catch (error) {
+        console.error('Error checking story:', error);
+      }
+    }
+
+    checkStory();
+  }, [post.userHandle, isCurrentUser]);
+
+  // Listen for stories viewed event
+  React.useEffect(() => {
+    function handleStoriesViewed(event: CustomEvent) {
+      if (event.detail?.userHandle === post.userHandle) {
+        // Re-check if user still has unviewed stories
+        userHasUnviewedStoriesByHandle(post.userHandle)
+          .then(setHasStory)
+          .catch(console.error);
+      }
+    }
+
+    function handleStoryCreated(event: CustomEvent) {
+      // Re-check story status when a new story is created
+      if (event.detail?.userHandle === post.userHandle) {
+        if (isCurrentUser) {
+          userHasStoriesByHandle(post.userHandle).then(setHasStory).catch(console.error);
+        } else {
+          userHasUnviewedStoriesByHandle(post.userHandle).then(setHasStory).catch(console.error);
+        }
+      }
+    }
+
+    window.addEventListener('storiesViewed', handleStoriesViewed as EventListener);
+    window.addEventListener('storyCreated', handleStoryCreated as EventListener);
+    return () => {
+      window.removeEventListener('storiesViewed', handleStoriesViewed as EventListener);
+      window.removeEventListener('storyCreated', handleStoryCreated as EventListener);
+    };
+  }, [post.userHandle, isCurrentUser]);
+
+  const handleAvatarClick = () => {
+    if (hasStory) {
+      // Navigate to stories page with state to auto-open this user's stories
+      navigate('/stories', { state: { openUserHandle: post.userHandle } });
+    }
+  };
 
   return (
     <div className="flex items-start justify-between px-4 mt-4">
@@ -157,6 +218,8 @@ function PostHeader({ post, onFollow }: { post: Post; onFollow: () => Promise<vo
           src={avatarSrc}
           name={post.userHandle.split('@')[0]} // Extract name from handle like "John@Dublin"
           size="sm"
+          hasStory={hasStory}
+          onClick={hasStory ? handleAvatarClick : undefined}
         />
         <div>
           <h3 id={titleId} className="font-semibold">{post.userHandle}</h3>
@@ -1275,88 +1338,8 @@ function FeedPageWrapper() {
   );
 }
 
-function ClipPageContent() {
-  const { user } = useAuth();
-  const [text, setText] = React.useState('');
-  const [location, setLocation] = React.useState('');
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    alert('Story shared! Text: ' + text + ', Location: ' + location);
-  };
-
-  return (
-    <div className="p-4 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold">Create Story</h1>
-        <button
-          onClick={handleSubmit}
-          className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium"
-        >
-          Post
-        </button>
-      </div>
-
-      {/* Username */}
-      <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-        {user?.name || 'darraghdublin'}
-      </div>
-
-      {/* Media Upload Area */}
-      <div className="relative">
-        <div className="w-full aspect-square rounded-xl border-2 border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-          <div className="text-center">
-            <FiCamera className="w-12 h-12 text-gray-400 mx-auto mb-2" />
-            <p className="text-sm text-gray-500 dark:text-gray-400">Tap to add photo or video</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Text Input */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Story Text
-        </label>
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Input Story Text"
-          className="w-full h-32 p-3 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 resize-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-        />
-      </div>
-
-      {/* Location Input */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Location
-        </label>
-        <div className="relative">
-          <FiMapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-          <input
-            type="text"
-            value={location}
-            onChange={(e) => setLocation(e.target.value)}
-            placeholder="Add Story Location"
-            className="w-full pl-10 pr-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-          />
-        </div>
-      </div>
-
-      {/* Submit Button */}
-      <button
-        onClick={handleSubmit}
-        className="w-full py-3 rounded-lg bg-brand-600 text-white font-medium hover:bg-brand-700 transition-colors"
-      >
-        Share Story
-      </button>
-    </div>
-  );
-}
-
 // Expose to router
 (App as any).FeedPage = FeedPageWrapper;
-(App as any).ClipPageContent = ClipPageContent;
 
 // Export for direct import
 export { FeedPageWrapper };

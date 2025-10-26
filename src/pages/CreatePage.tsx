@@ -58,7 +58,10 @@ export default function CreatePage() {
                 selectedMedia || undefined,
                 mediaType || undefined,
                 imageText.trim() || undefined,
-                selectedMedia ? text.trim() : undefined // Use text as caption if media is selected
+                selectedMedia ? text.trim() : undefined, // Use text as caption if media is selected
+                user.local,
+                user.regional,
+                user.national
             );
 
             // Reset form
