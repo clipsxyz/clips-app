@@ -19,6 +19,7 @@ class User extends Authenticatable
         'handle',
         'bio',
         'avatar_url',
+        'social_links', // JSON field for social media links
         'location_local',
         'location_regional',
         'location_national',
@@ -40,6 +41,7 @@ class User extends Authenticatable
         'followers_count' => 'integer',
         'following_count' => 'integer',
         'posts_count' => 'integer',
+        'social_links' => 'array', // Cast JSON to array
     ];
 
     // Relationships
@@ -85,17 +87,20 @@ class User extends Authenticatable
 
     public function shares()
     {
-        return $this->hasMany(PostShare::class);
+        return $this->belongsToMany(Post::class, 'post_shares')
+                    ->withTimestamps();
     }
 
     public function views()
     {
-        return $this->hasMany(PostView::class);
+        return $this->belongsToMany(Post::class, 'post_views')
+                    ->withTimestamps();
     }
 
     public function reclips()
     {
-        return $this->hasMany(PostReclip::class);
+        return $this->belongsToMany(Post::class, 'post_reclips')
+                    ->withTimestamps();
     }
 
     // Helper methods

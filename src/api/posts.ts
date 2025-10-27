@@ -1,6 +1,34 @@
 import raw from '../data/posts.json';
 import type { Post, Comment } from '../types';
 
+/**
+ * MOCK API - TO SWAP WITH REAL BACKEND
+ * 
+ * BACKEND ENDPOINTS (Laravel):
+ * - GET /api/posts?filter={filter}&cursor={cursor} - Fetch posts (filter: finglas, dublin, ireland, following)
+ * - POST /api/posts - Create new post
+ * - PUT /api/posts/{id}/like - Toggle like
+ * - PUT /api/posts/{id}/follow - Toggle follow author
+ * - POST /api/posts/{id}/comments - Add comment
+ * - POST /api/posts/{id}/views - Increment views
+ * - POST /api/posts/{id}/shares - Increment shares
+ * - POST /api/posts/{id}/reclips - Add reclip
+ * - GET /api/users/{handle} - Get user profile
+ * 
+ * FRONTEND -> BACKEND FIELD MAPPING:
+ * - userHandle -> user_handle (in posts table)
+ * - text -> text_content (in posts table)
+ * - stats.likes -> likes_count
+ * - stats.views -> views_count
+ * - stats.comments -> comments_count
+ * - stats.shares -> shares_count
+ * - stats.reclips -> reclips_count
+ * - mediaUrl -> media_url
+ * - mediaType -> media_type
+ * - locationLabel -> location_label
+ * - userLocal/userRegional/userNational -> stored in User model, not in posts
+ */
+
 // Helper function to get user location data from handle
 function getUserLocationFromHandle(userHandle: string): { local: string; regional: string; national: string } {
   const handleLower = userHandle.toLowerCase();
@@ -8,6 +36,8 @@ function getUserLocationFromHandle(userHandle: string): { local: string; regiona
   // Extract location from handle
   if (handleLower.includes('finglas')) {
     return { local: 'Finglas', regional: 'Dublin', national: 'Ireland' };
+  } else if (handleLower.includes('artane')) {
+    return { local: 'Artane', regional: 'Dublin', national: 'Ireland' };
   } else if (handleLower.includes('dublin')) {
     return { local: 'Dublin', regional: 'Dublin', national: 'Ireland' };
   } else if (handleLower.includes('ireland')) {
@@ -60,6 +90,102 @@ if (!postsInitialized) {
   } else {
     console.log('No duplicate IDs found in initial posts');
   }
+
+  // Add mock posts for test user from Artane
+  const artanePosts: Post[] = [
+    {
+      id: `artane-post-1-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      userHandle: 'Sarah@Artane',
+      locationLabel: 'Artane, Dublin',
+      tags: ['Dublin', 'local', 'community'],
+      text: 'Beautiful sunny day in Artane! The community here is amazing. Love living in this part of Dublin. The parks, the people, everything about this area makes it special. 📍',
+      stats: { likes: 23, views: 156, comments: 5, shares: 2, reclips: 1 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Artane',
+      userRegional: 'Dublin',
+      userNational: 'Ireland'
+    } as Post,
+    {
+      id: `artane-post-2-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      userHandle: 'Sarah@Artane',
+      locationLabel: 'Artane, Dublin',
+      tags: ['food', 'dublin', 'ireland'],
+      text: 'Just had the most amazing brunch at the local cafe! The Irish breakfast is unbeatable. Highly recommend this spot if you ever find yourself in the area. Full of flavour and the service is top-notch! 🍳🥓',
+      stats: { likes: 45, views: 312, comments: 12, shares: 8, reclips: 3 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Artane',
+      userRegional: 'Dublin',
+      userNational: 'Ireland'
+    } as Post,
+    {
+      id: `artane-post-3-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      userHandle: 'Sarah@Artane',
+      locationLabel: 'Artane, Dublin',
+      tags: ['travel', 'views', 'ireland'],
+      mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+      mediaType: 'video',
+      caption: 'Stunning views from Howth Hill looking back towards Dublin',
+      stats: { likes: 67, views: 445, comments: 8, shares: 4, reclips: 2 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Artane',
+      userRegional: 'Dublin',
+      userNational: 'Ireland'
+    },
+    {
+      id: `artane-post-4-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      userHandle: 'Sarah@Artane',
+      locationLabel: 'Dublin City Centre',
+      tags: ['city', 'dublin', 'architecture'],
+      mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+      mediaType: 'video',
+      caption: 'Walking through the vibrant streets of Dublin',
+      stats: { likes: 89, views: 678, comments: 15, shares: 7, reclips: 5 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Artane',
+      userRegional: 'Dublin',
+      userNational: 'Ireland'
+    },
+    {
+      id: `artane-post-5-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      userHandle: 'Sarah@Artane',
+      locationLabel: 'Artane, Dublin',
+      tags: ['thoughts', 'life', 'inspiration'],
+      text: 'Life in Dublin is never boring. There\'s always something happening, someone to meet, a new place to discover. Grateful to call this city home. The energy here is infectious! 🌟',
+      stats: { likes: 34, views: 189, comments: 6, shares: 3, reclips: 1 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Artane',
+      userRegional: 'Dublin',
+      userNational: 'Ireland'
+    } as Post,
+    {
+      id: `artane-post-6-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      userHandle: 'Sarah@Artane',
+      locationLabel: 'Phoenix Park, Dublin',
+      tags: ['nature', 'dublin', 'outdoors'],
+      mediaUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800',
+      mediaType: 'image',
+      caption: 'Perfect morning walk in Phoenix Park! The deer are out and about 🦌',
+      stats: { likes: 42, views: 287, comments: 7, shares: 4, reclips: 2 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Artane',
+      userRegional: 'Dublin',
+      userNational: 'Ireland'
+    }
+  ];
+
+  posts = [...posts, ...artanePosts];
 } else {
   console.log('Posts array already initialized, length:', posts.length);
 }

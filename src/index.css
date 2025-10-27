@@ -116,8 +116,30 @@
   }
 }
 
+/* Shimmer animation for tab gradient */
+@keyframes shimmerGradient {
+  0% {
+    background-position: 0% 0%;
+  }
+
+  100% {
+    background-position: 100% 0%;
+  }
+}
+
 /* Rotate the border itself around the circle */
 @keyframes rotateBorder {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Chasing border effect - colors move around the perimeter */
+@keyframes borderChase {
   from {
     transform: rotate(0deg);
   }

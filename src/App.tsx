@@ -85,6 +85,33 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
         const id = `tab-${t}`;
         const panelId = `panel-${t}`;
 
+        if (active) {
+          return (
+            <button
+              key={t}
+              id={id}
+              role="tab"
+              aria-selected={active}
+              aria-controls={panelId}
+              tabIndex={active ? 0 : -1}
+              onClick={(e) => {
+                e.stopPropagation();
+                props.onChange(t);
+                props.onClearCustom?.();
+              }}
+              className="rounded-lg p-[2px] animate-[shimmerGradient_3s_linear_infinite] transition-transform active:scale-[.98]"
+              style={{
+                background: 'linear-gradient(to right, #2A1FC2, #1FC2C2, #000000, #2A1FC2, #1FC2C2, #000000)',
+                backgroundSize: '400% 100%'
+              }}
+            >
+              <span className="block rounded-md bg-gray-900 text-white text-sm py-2 font-medium">
+                {t}
+              </span>
+            </button>
+          );
+        }
+
         return (
           <button
             key={t}
@@ -93,7 +120,8 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
             aria-selected={active}
             aria-controls={panelId}
             tabIndex={active ? 0 : -1}
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation();
               props.onChange(t);
               props.onClearCustom?.(); // Clear custom location when clicking tabs
             }}
@@ -213,7 +241,7 @@ function PostHeader({ post, onFollow }: { post: Post; onFollow: () => Promise<vo
 
   return (
     <div className="flex items-start justify-between px-4 mt-4">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-1">
         <Avatar
           src={avatarSrc}
           name={post.userHandle.split('@')[0]} // Extract name from handle like "John@Dublin"
@@ -221,12 +249,20 @@ function PostHeader({ post, onFollow }: { post: Post; onFollow: () => Promise<vo
           hasStory={hasStory}
           onClick={hasStory ? handleAvatarClick : undefined}
         />
-        <div>
-          <h3 id={titleId} className="font-semibold">{post.userHandle}</h3>
-          <div className="text-xs text-gray-600 dark:text-gray-300 flex items-center gap-1">
-            <FiMapPin className="w-3 h-3" />
-            {post.locationLabel || 'No location set'}
-          </div>
+        <div className="flex-1" onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`/user/${post.userHandle}`);
+            }}
+            className="text-left hover:opacity-70 transition-opacity w-full"
+          >
+            <h3 id={titleId} className="font-semibold">{post.userHandle}</h3>
+            <div className="text-xs text-gray-600 dark:text-gray-300 flex items-center gap-1">
+              <FiMapPin className="w-3 h-3" />
+              {post.locationLabel || 'No location set'}
+            </div>
+          </button>
         </div>
       </div>
       {!isCurrentUser && <FollowButton initial={post.isFollowing} onToggle={onFollow} />}
@@ -413,7 +449,7 @@ function CaptionText({ caption }: { caption: string }) {
   );
 }
 
-function Media({ url, mediaType, text, imageText, onDoubleLike }: { url: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; onDoubleLike: () => Promise<void> }) {
+function Media({ url, mediaType, text, imageText, onDoubleLike }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; onDoubleLike: () => Promise<void> }) {
   const [burst, setBurst] = React.useState(false);
   const [isPlaying, setIsPlaying] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -860,8 +896,8 @@ function EngagementBar({
         <div className="flex flex-col items-center gap-1">
           <button
             className={`flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200 hover:scale-110 active:scale-95 ${liked
-              ? 'bg-red-500 hover:bg-red-600'
-              : 'bg-gray-800 hover:bg-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600'
+              ? 'hover:opacity-90'
+              : ''
               }`}
             onClick={likeClick}
             aria-pressed={liked}
@@ -869,9 +905,9 @@ function EngagementBar({
             title={liked ? 'Unlike' : 'Like'}
           >
             {liked ? (
-              <AiFillHeart className="text-white w-4 h-4" />
+              <AiFillHeart className="text-red-500 w-4 h-4" />
             ) : (
-              <FiHeart className="w-4 h-4 text-white" />
+              <FiHeart className="w-4 h-4 text-gray-700 dark:text-gray-200" />
             )}
           </button>
           <span className="text-xs font-medium text-gray-700 dark:text-gray-200">{likes}</span>
@@ -879,8 +915,8 @@ function EngagementBar({
 
         {/* Views */}
         <div className="flex flex-col items-center gap-1">
-          <div className="flex items-center justify-center w-8 h-8 rounded-full bg-gray-800 dark:bg-gray-700">
-            <FiEye className="w-4 h-4 text-white" />
+          <div className="flex items-center justify-center w-8 h-8 rounded-full">
+            <FiEye className="w-4 h-4 text-gray-700 dark:text-gray-200" />
           </div>
           <span className="text-xs font-medium text-gray-700 dark:text-gray-200">{views}</span>
         </div>
@@ -888,12 +924,12 @@ function EngagementBar({
         {/* Comments */}
         <div className="flex flex-col items-center gap-1">
           <button
-            className="flex items-center justify-center w-8 h-8 rounded-full bg-gray-800 hover:bg-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 transition-all duration-200 hover:scale-110 active:scale-95"
+            className="flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200 hover:scale-110 active:scale-95"
             onClick={onOpenComments}
             aria-label="Comments"
             title="Comments"
           >
-            <FiMessageSquare className="w-4 h-4 text-white" />
+            <FiMessageSquare className="w-4 h-4 text-gray-700 dark:text-gray-200" />
           </button>
           <span className="text-xs font-medium text-gray-700 dark:text-gray-200">{comments}</span>
         </div>
@@ -901,12 +937,12 @@ function EngagementBar({
         {/* Share */}
         <div className="flex flex-col items-center gap-1">
           <button
-            className="flex items-center justify-center w-8 h-8 rounded-full bg-gray-800 hover:bg-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 transition-all duration-200 hover:scale-110 active:scale-95"
+            className="flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200 hover:scale-110 active:scale-95"
             onClick={shareClick}
             aria-label="Share post"
             title="Share post"
           >
-            <FiShare2 className="w-4 h-4 text-white" />
+            <FiShare2 className="w-4 h-4 text-gray-700 dark:text-gray-200" />
           </button>
           <span className="text-xs font-medium text-gray-700 dark:text-gray-200">{shares}</span>
         </div>
@@ -914,12 +950,12 @@ function EngagementBar({
         {/* Reclip */}
         <div className="flex flex-col items-center gap-1">
           <button
-            className="flex items-center justify-center w-8 h-8 rounded-full bg-gray-800 hover:bg-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 transition-all duration-200 hover:scale-110 active:scale-95"
+            className="flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200 hover:scale-110 active:scale-95"
             onClick={reclipClick}
             aria-label="Reclip post"
             title="Reclip post"
           >
-            <FiRepeat className="w-4 h-4 text-white" />
+            <FiRepeat className="w-4 h-4 text-gray-700 dark:text-gray-200" />
           </button>
           <span className="text-xs font-medium text-gray-700 dark:text-gray-200">{reclips}</span>
         </div>
@@ -950,6 +986,7 @@ const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare,
         entries.forEach((entry) => {
           if (entry.isIntersecting && !hasBeenViewed) {
             setHasBeenViewed(true);
+            observer.disconnect(); // Disconnect immediately after first view
             onView();
           }
         });
@@ -962,7 +999,7 @@ const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare,
     }
 
     return () => observer.disconnect();
-  }, [hasBeenViewed, onView]);
+  }, [hasBeenViewed]);
 
   return (
     <article ref={articleRef} aria-labelledby={titleId} className="pb-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 hover-lift">
