@@ -146,6 +146,39 @@ let stories: Story[] = [
         reactions: [],
         replies: [],
         userReaction: undefined
+    },
+    // Stories for Sarah@Artane
+    {
+        id: 'story-sarah-1',
+        userId: 'sarah-artane-1',
+        userHandle: 'Sarah@Artane',
+        mediaUrl: 'https://images.unsplash.com/photo-1543007631-283050bb3e8c?w=800',
+        mediaType: 'image',
+        text: 'Beautiful morning in Artane! ☀️',
+        createdAt: Date.now() - 5000,
+        expiresAt: Date.now() + (24 * 60 * 60 * 1000) - 5000,
+        location: 'Artane, Dublin',
+        views: 0,
+        hasViewed: false,
+        reactions: [],
+        replies: [],
+        userReaction: undefined
+    },
+    {
+        id: 'story-sarah-2',
+        userId: 'sarah-artane-1',
+        userHandle: 'Sarah@Artane',
+        mediaUrl: 'https://videos.pexels.com/video-files/5439112/5439112-uhd_3840_2160_30fps.mp4',
+        mediaType: 'video',
+        text: 'Exploring the beautiful coast! 🌊',
+        createdAt: Date.now() - 7000,
+        expiresAt: Date.now() + (24 * 60 * 60 * 1000) - 7000,
+        location: 'Howth, Dublin',
+        views: 0,
+        hasViewed: false,
+        reactions: [],
+        replies: [],
+        userReaction: undefined
     }
 ];
 

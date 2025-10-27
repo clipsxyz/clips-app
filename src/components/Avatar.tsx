@@ -38,31 +38,41 @@ export default function Avatar({ src, name, size = 'md', className = '', hasStor
         return (
             <Component
                 onClick={onClick}
-                className={`${sizeClass} ${className} ${onClick ? 'cursor-pointer hover:scale-105 transition-transform' : ''}`}
+                className={`${sizeClass} ${className} relative ${onClick ? 'cursor-pointer hover:scale-105 transition-transform' : ''}`}
             >
-                <div className="w-full h-full rounded-full bg-gradient-to-tr from-blue-400 via-cyan-400 to-green-400 p-[2.5px] animate-pulse">
-                    <div className="w-full h-full rounded-full bg-gradient-to-br from-gray-950 to-gray-900 flex items-center justify-center overflow-hidden">
-                        <div className={`${sizeClass} rounded-full overflow-hidden`}>
-                            {src ? (
-                                <img
-                                    src={src}
-                                    alt={`${name}'s profile picture`}
-                                    className="w-full h-full object-cover"
-                                    onError={(e) => {
-                                        (e.target as HTMLImageElement).style.display = 'none';
-                                    }}
-                                />
-                            ) : null}
+                {/* Outer shimmer border ring */}
+                <div
+                    className="absolute inset-0 rounded-full"
+                    style={{
+                        background: 'linear-gradient(90deg, #60a5fa, #34d399, #22d3ee, #60a5fa)',
+                        backgroundSize: '300% 100%',
+                        animation: 'shimmerGradient 2s linear infinite',
+                        padding: '3px'
+                    }}
+                >
+                    <div className="w-full h-full rounded-full bg-gray-900"></div>
+                </div>
 
-                            {/* Fallback initials */}
-                            <div
-                                className={`absolute inset-0 rounded-full flex items-center justify-center font-bold text-white ${src ? 'opacity-0' : 'opacity-100'
-                                    } transition-opacity duration-200`}
-                                style={{ background: '#000000' }}
-                            >
-                                {initials}
-                            </div>
-                        </div>
+                {/* Avatar content */}
+                <div className={`absolute inset-[3px] rounded-full overflow-hidden flex items-center justify-center`}>
+                    {src ? (
+                        <img
+                            src={src}
+                            alt={`${name}'s profile picture`}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                        />
+                    ) : null}
+
+                    {/* Fallback initials */}
+                    <div
+                        className={`absolute inset-0 rounded-full flex items-center justify-center font-bold text-white ${src ? 'opacity-0' : 'opacity-100'
+                            } transition-opacity duration-200`}
+                        style={{ background: '#000000' }}
+                    >
+                        {initials}
                     </div>
                 </div>
             </Component>

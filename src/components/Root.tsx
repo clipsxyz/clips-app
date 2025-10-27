@@ -11,6 +11,8 @@ import LoginPage from '../pages/LoginPage';
 import ProfilePage from '../pages/ProfilePage';
 import SearchPage from '../pages/SearchPage';
 import StoriesPage from '../pages/StoriesPage';
+import ViewProfilePage from '../pages/ViewProfilePage';
+import MessagesPage from '../pages/MessagesPage';
 
 const Placeholder = ({ name }: { name: string }) => <div className="p-6">{name}</div>;
 
@@ -31,7 +33,9 @@ export default function Root() {
                                 <Route path="stories" element={<StoriesPage />} />
                                 <Route path="search" element={<SearchPage />} />
                                 <Route path="profile" element={<ProfilePage />} />
+                                <Route path="user/:handle" element={<ViewProfilePage />} />
                             </Route>
+                            <Route path="messages/:handle" element={<MessagesPage />} />
                         </Routes>
                     </BrowserRouter>
                 </ThemeProvider>

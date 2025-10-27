@@ -8,6 +8,25 @@ export default function ProfilePage() {
   const { user, logout, login } = useAuth();
   const nav = useNavigate();
   const [isUpdatingProfile, setIsUpdatingProfile] = React.useState(false);
+  const [bio, setBio] = React.useState(user?.bio || '');
+  const [socialLinks, setSocialLinks] = React.useState({
+    website: user?.socialLinks?.website || '',
+    x: user?.socialLinks?.x || '',
+    instagram: user?.socialLinks?.instagram || '',
+    tiktok: user?.socialLinks?.tiktok || '',
+  });
+
+  React.useEffect(() => {
+    if (user?.bio) {
+      setBio(user.bio);
+    }
+  }, [user?.bio]);
+
+  React.useEffect(() => {
+    if (user?.socialLinks) {
+      setSocialLinks(user.socialLinks);
+    }
+  }, [user?.socialLinks]);
 
   const handleProfilePictureSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -111,6 +130,95 @@ export default function ProfilePage() {
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
             Tap your profile picture to change it
           </p>
+        </div>
+
+        {/* Bio Section */}
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700 mb-6">
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">Bio</h2>
+          <textarea
+            value={bio}
+            onChange={(e) => setBio(e.target.value)}
+            onBlur={() => {
+              const updatedUser = { ...user, bio };
+              login(updatedUser);
+            }}
+            placeholder="Tell us about yourself..."
+            className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 resize-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+            rows={4}
+          />
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">This will be visible on your profile</p>
+        </div>
+
+        {/* Social Links Section */}
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700 mb-6">
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">Social Links</h2>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm text-gray-700 dark:text-gray-300 mb-2">
+                Website
+              </label>
+              <input
+                type="text"
+                value={socialLinks.website}
+                onChange={(e) => setSocialLinks({ ...socialLinks, website: e.target.value })}
+                onBlur={() => {
+                  const updatedUser = { ...user, socialLinks };
+                  login(updatedUser);
+                }}
+                placeholder="https://example.com"
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-gray-700 dark:text-gray-300 mb-2">
+                X (Twitter)
+              </label>
+              <input
+                type="text"
+                value={socialLinks.x}
+                onChange={(e) => setSocialLinks({ ...socialLinks, x: e.target.value })}
+                onBlur={() => {
+                  const updatedUser = { ...user, socialLinks };
+                  login(updatedUser);
+                }}
+                placeholder="@username"
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-gray-700 dark:text-gray-300 mb-2">
+                Instagram
+              </label>
+              <input
+                type="text"
+                value={socialLinks.instagram}
+                onChange={(e) => setSocialLinks({ ...socialLinks, instagram: e.target.value })}
+                onBlur={() => {
+                  const updatedUser = { ...user, socialLinks };
+                  login(updatedUser);
+                }}
+                placeholder="@username"
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-gray-700 dark:text-gray-300 mb-2">
+                TikTok
+              </label>
+              <input
+                type="text"
+                value={socialLinks.tiktok}
+                onChange={(e) => setSocialLinks({ ...socialLinks, tiktok: e.target.value })}
+                onBlur={() => {
+                  const updatedUser = { ...user, socialLinks };
+                  login(updatedUser);
+                }}
+                placeholder="@username"
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+              />
+            </div>
+          </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">These will be visible on your profile</p>
         </div>
 
         {/* Profile Cards */}

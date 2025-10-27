@@ -1,35 +1,58 @@
 export type User = {
   id: string;
   name: string;
+  username?: string; // Backend field
   email: string;
   password: string;
-  age: number;
-  interests: string[];
+  age?: number;
+  interests?: string[];
   local: string;
   regional: string;
   national: string;
   handle: string;
   avatarUrl?: string; // Profile picture URL
+  bio?: string; // Bio/description
+  socialLinks?: {
+    website?: string;
+    x?: string; // Twitter/X
+    instagram?: string;
+    tiktok?: string;
+  };
+  is_verified?: boolean; // Backend field
+  followers_count?: number; // Backend field
+  following_count?: number; // Backend field
+  posts_count?: number; // Backend field
 };
 
 export type Post = {
   id: string;
+  user_id?: string; // Backend field
   userHandle: string;
   locationLabel: string;
   tags: string[];
-  mediaUrl: string;
+  mediaUrl?: string; // Optional for text-only posts
   mediaType?: 'image' | 'video'; // New field to distinguish media types
-  text?: string; // Text content of the post
+  text?: string; // Text content of the post (maps to text_content in DB)
+  text_content?: string; // Backend field
   imageText?: string; // Text overlay on images
   caption?: string; // Caption/description for image/video posts
   stats: { likes: number; views: number; comments: number; shares: number; reclips: number };
   isBookmarked: boolean;
   isFollowing: boolean;
   userLiked: boolean;
+  // Backend stat fields
+  likes_count?: number; // Backend field
+  views_count?: number; // Backend field
+  comments_count?: number; // Backend field
+  shares_count?: number; // Backend field
+  reclips_count?: number; // Backend field
   // Reclip functionality
   isReclipped?: boolean;
   originalPostId?: string;
+  original_post_id?: string; // Backend field
   reclippedBy?: string;
+  reclipped_by?: string; // Backend field
+  is_reclipped?: boolean; // Backend field
   // User location data for filtering
   userLocal?: string;
   userRegional?: string;
@@ -38,15 +61,22 @@ export type Post = {
 
 export type Comment = {
   id: string;
+  post_id?: string; // Backend field
   postId: string;
+  user_id?: string; // Backend field
   userHandle: string;
   text: string;
+  text_content?: string; // Backend field
   createdAt: number;
+  created_at?: string; // Backend field
   likes: number;
+  likes_count?: number; // Backend field
   userLiked: boolean;
   replies?: Comment[];
+  parent_id?: string; // Backend field
   parentId?: string; // For nested replies
   replyCount?: number; // Total number of replies
+  replies_count?: number; // Backend field
 };
 
 export type StoryReaction = {

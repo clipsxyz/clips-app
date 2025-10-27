@@ -68,7 +68,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       regional: userData.regional || '',
       national: userData.national || '',
       handle: userData.handle || `${userData.name.trim()}@Unknown`,
-      avatarUrl: userData.avatarUrl || undefined
+      avatarUrl: userData.avatarUrl || undefined,
+      bio: userData.bio || undefined,
+      socialLinks: userData.socialLinks || undefined
     };
     setUser(u);
     localStorage.setItem('user', JSON.stringify(u));

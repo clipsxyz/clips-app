@@ -64,17 +64,20 @@ class Post extends Model
 
     public function shares()
     {
-        return $this->hasMany(PostShare::class);
+        return $this->belongsToMany(User::class, 'post_shares')
+                    ->withTimestamps();
     }
 
     public function views()
     {
-        return $this->hasMany(PostView::class);
+        return $this->belongsToMany(User::class, 'post_views')
+                    ->withTimestamps();
     }
 
     public function reclips()
     {
-        return $this->hasMany(PostReclip::class);
+        return $this->belongsToMany(User::class, 'post_reclips')
+                    ->withTimestamps();
     }
 
     public function originalPost()
