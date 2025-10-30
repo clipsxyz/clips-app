@@ -1,0 +1,46 @@
+[
+    {
+        "name": "Finglas",
+        "type": "local",
+        "country": "Ireland",
+        "city": "Dublin"
+    },
+    {
+        "name": "Artane",
+        "type": "local",
+        "country": "Ireland",
+        "city": "Dublin"
+    },
+    {
+        "name": "Dublin",
+        "type": "city",
+        "country": "Ireland"
+    },
+    {
+        "name": "Cork",
+        "type": "city",
+        "country": "Ireland"
+    },
+    {
+        "name": "Paris",
+        "type": "city",
+        "country": "France"
+    },
+    {
+        "name": "London",
+        "type": "city",
+        "country": "United Kingdom"
+    },
+    {
+        "name": "Ireland",
+        "type": "country"
+    },
+    {
+        "name": "France",
+        "type": "country"
+    },
+    {
+        "name": "United Kingdom",
+        "type": "country"
+    }
+]

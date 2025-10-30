@@ -2,6 +2,8 @@ import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { FiChevronLeft, FiBell, FiShare2, FiMessageSquare, FiMoreHorizontal, FiX } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
+import { getFlagForHandle } from '../api/users';
+import Flag from '../components/Flag';
 import { useAuth } from '../context/Auth';
 import { fetchPostsPage, toggleFollowForPost } from '../api/posts';
 import { userHasStoriesByHandle } from '../api/stories';
@@ -201,7 +203,13 @@ export default function ViewProfilePage() {
                 {/* Username and Handle */}
                 <div className="text-center mb-4">
                     <h1 className="text-xl font-bold mb-1">{profileUser.name}</h1>
-                    <p className="text-sm text-gray-400">{profileUser.handle}</p>
+                    <p className="text-sm text-gray-400 flex items-center justify-center gap-1">
+                        <span>{profileUser.handle}</span>
+                        <Flag
+                            value={profileUser.handle === user?.handle ? (user?.countryFlag || '') : (getFlagForHandle(profileUser.handle) || '')}
+                            size={16}
+                        />
+                    </p>
                 </div>
 
                 {/* Statistics */}

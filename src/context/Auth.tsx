@@ -23,6 +23,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           regional: 'Dublin',
           national: 'Ireland',
           handle: 'TestUser@Dublin',
+          countryFlag: '🇮🇪',
           avatarUrl: undefined
         };
         setUser(testUser);
@@ -45,6 +46,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           regional: '',
           national: '',
           handle: `${parsed.name || 'User'}@Unknown`,
+          countryFlag: parsed.countryFlag || undefined,
           avatarUrl: parsed.avatarUrl || undefined
         };
         setUser(convertedUser);
@@ -68,6 +70,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       regional: userData.regional || '',
       national: userData.national || '',
       handle: userData.handle || `${userData.name.trim()}@Unknown`,
+      countryFlag: userData.countryFlag || undefined,
       avatarUrl: userData.avatarUrl || undefined,
       bio: userData.bio || undefined,
       socialLinks: userData.socialLinks || undefined

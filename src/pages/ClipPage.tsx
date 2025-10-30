@@ -179,7 +179,7 @@ export default function ClipPage() {
             </button>
 
             <h2 className="text-2xl font-bold text-white mb-3">
-              Add to Your Story
+              Add to your Clips page
             </h2>
             <p className="text-gray-400 mb-8">
               Share moments that disappear in 24 hours

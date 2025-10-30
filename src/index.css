@@ -127,6 +127,24 @@
   }
 }
 
+/* Pulsing glow for story ring */
+@keyframes pulseGlow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.45), 0 0 0 0 rgba(16, 185, 129, 0.35);
+    transform: scale(1);
+  }
+
+  70% {
+    box-shadow: 0 0 0 8px rgba(99, 102, 241, 0), 0 0 0 16px rgba(16, 185, 129, 0);
+    transform: scale(1.02);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0), 0 0 0 0 rgba(16, 185, 129, 0);
+    transform: scale(1);
+  }
+}
+
 /* Rotate the border itself around the circle */
 @keyframes rotateBorder {
   from {
@@ -176,5 +194,45 @@
   .hover-lift:hover {
     transform: translateY(-1px);
     transition: transform .15s ease, box-shadow .15s ease;
+  }
+}
+
+/* Animated gradient border utility for inputs */
+.animated-gradient-border {
+  position: relative;
+}
+
+.animated-gradient-border::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  /* border thickness */
+  border-radius: 9999px;
+  background: conic-gradient(from 0deg,
+      #22d3ee,
+      #3b82f6,
+      #8b5cf6,
+      #22d3ee);
+  background-size: 200% 200%;
+  animation: borderSpin 6s linear infinite;
+  z-index: 0;
+}
+
+.animated-gradient-border>* {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes borderSpin {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+
+  100% {
+    background-position: 0% 50%;
   }
 }

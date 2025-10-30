@@ -8,6 +8,8 @@ import ShareModal from './components/ShareModal';
 import CreateModal from './components/CreateModal';
 import Avatar from './components/Avatar';
 import { useAuth } from './context/Auth';
+import { getFlagForHandle } from './api/users';
+import Flag from './components/Flag';
 import { useOnline } from './hooks/useOnline';
 import { fetchPostsPage, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost } from './api/posts';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle } from './api/stories';
@@ -50,7 +52,8 @@ function BottomNav({ onCreateClick }: { onCreateClick: () => void }) {
 
 export default function App() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = React.useState<string>('Dublin');
+  const loc = useLocation();
+  const [activeTab, setActiveTab] = React.useState<string>('Ireland');
   const [customLocation, setCustomLocation] = React.useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = React.useState(false);
 
@@ -62,7 +65,9 @@ export default function App() {
       <main id="main" className="mx-auto max-w-md min-h-screen pb-[calc(64px+theme(spacing.safe))] md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800 md:bg-white md:dark:bg-gray-950">
         <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />
         <Outlet context={{ activeTab, setActiveTab, customLocation, setCustomLocation }} />
-        <BottomNav onCreateClick={() => setShowCreateModal(true)} />
+        {loc.pathname !== '/discover' && (
+          <BottomNav onCreateClick={() => setShowCreateModal(true)} />
+        )}
       </main>
 
       {/* Create Modal */}
@@ -257,7 +262,13 @@ function PostHeader({ post, onFollow }: { post: Post; onFollow: () => Promise<vo
             }}
             className="text-left hover:opacity-70 transition-opacity w-full"
           >
-            <h3 id={titleId} className="font-semibold">{post.userHandle}</h3>
+            <h3 id={titleId} className="font-semibold flex items-center gap-1">
+              <span>{post.userHandle}</span>
+              <Flag
+                value={isCurrentUser ? (user?.countryFlag || '') : (getFlagForHandle(post.userHandle) || '')}
+                size={16}
+              />
+            </h3>
             <div className="text-xs text-gray-600 dark:text-gray-300 flex items-center gap-1">
               <FiMapPin className="w-3 h-3" />
               {post.locationLabel || 'No location set'}
@@ -456,6 +467,7 @@ function Media({ url, mediaType, text, imageText, onDoubleLike }: { url?: string
   const [hasError, setHasError] = React.useState(false);
   const [showControls, setShowControls] = React.useState(false);
   const [isMuted, setIsMuted] = React.useState(true);
+  const [progress, setProgress] = React.useState(0); // 0..1 for video progress
   const lastTap = React.useRef<number>(0);
   const touchHandled = React.useRef<boolean>(false);
   const videoRef = React.useRef<HTMLVideoElement>(null);
@@ -648,6 +660,12 @@ function Media({ url, mediaType, text, imageText, onDoubleLike }: { url?: string
               onError={handleVideoError}
               onPlay={handleVideoPlay}
               onPause={handleVideoPause}
+              onTimeUpdate={() => {
+                const v = videoRef.current;
+                if (v && v.duration > 0) {
+                  setProgress(v.currentTime / v.duration);
+                }
+              }}
             />
 
             {/* Loading Spinner */}
@@ -716,6 +734,20 @@ function Media({ url, mediaType, text, imageText, onDoubleLike }: { url?: string
                     </svg>
                   )}
                 </button>
+              </div>
+            )}
+
+            {/* Gradient progress bar */}
+            {!isLoading && !hasError && (
+              <div className="absolute left-0 right-0 bottom-0 h-1.5 bg-black/30">
+                <div
+                  className="h-full"
+                  style={{
+                    width: `${Math.max(0, Math.min(100, progress * 100))}%`,
+                    background: 'linear-gradient(90deg, #10b981, #3b82f6, #8b5cf6, #ec4899, #f59e0b)',
+                    boxShadow: '0 0 12px rgba(139,92,246,0.45)'
+                  }}
+                />
               </div>
             )}
           </>
@@ -1021,7 +1053,9 @@ function FeedPageWrapper() {
   const { user } = useAuth();
   const userId = user?.id ?? 'anon';
   const online = useOnline();
-  const [active, setActive] = React.useState<Tab>('Dublin');
+  const routerLocation = useLocation();
+  const requestTokenRef = React.useRef(0);
+  const [active, setActive] = React.useState<Tab>('Ireland');
   const [customLocation, setCustomLocation] = React.useState<string | null>(null);
   const [pages, setPages] = React.useState<Post[][]>([]);
   const [cursor, setCursor] = React.useState<number | null>(0);
@@ -1036,12 +1070,42 @@ function FeedPageWrapper() {
   // Determine current filter - custom location overrides tabs
   const currentFilter = customLocation || active;
 
+  // Read location from URL query (?location=...) when arriving from Discover
+  React.useEffect(() => {
+    const params = new URLSearchParams(routerLocation.search);
+    const q = params.get('location');
+    console.log('URL params changed, location param:', q, 'current customLocation:', customLocation);
+
+    if (q) {
+      console.log('URL provided location:', q, 'setting customLocation...');
+      console.log('About to call setCustomLocation, will update from:', customLocation, 'to:', q);
+      setCustomLocation(q);
+      console.log('setCustomLocation called, customLocation should now be:', q);
+      // Also reset pages immediately when changing location
+      setPages([]);
+      setCursor(0);
+      setEnd(false);
+      setError(null);
+    } else if (customLocation) {
+      // URL param was cleared, clear customLocation too
+      console.log('URL param cleared, clearing customLocation...');
+      setCustomLocation(null);
+      setPages([]);
+      setCursor(0);
+      setEnd(false);
+      setError(null);
+    }
+  }, [routerLocation.search, customLocation]);
+
   // Load from cache on mount/tab change
   React.useEffect(() => {
     // Reset pages when changing tabs
     setPages([]);
     setCursor(0);
     setEnd(false);
+    console.log('Location changed to:', currentFilter, 'customLocation:', customLocation, 'active:', active, 'computed currentFilter:', currentFilter);
+    // Invalidate prior in-flight requests
+    requestTokenRef.current++;
 
     // Don't load cached data for Following tab - always fetch fresh
     if (currentFilter.toLowerCase() !== 'following') {
@@ -1050,18 +1114,43 @@ function FeedPageWrapper() {
     }
   }, [userId, currentFilter]);
 
-  // Sync with TopBar dropdown
+  // Sync with TopBar dropdown and Discover page
   React.useEffect(() => {
     const handleLocationChange = (event: CustomEvent) => {
       const location = event.detail.location;
+      console.log('Feed received location change:', location);
       setCustomLocation(location);
       setPages([]);
       setCursor(0);
       setEnd(false);
       setError(null);
+
+      // If we're not on the feed page yet, navigate to it
+      if (window.location.pathname !== '/feed') {
+        console.log('Navigating to feed page...');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      }
     };
 
     window.addEventListener('locationChange', handleLocationChange as EventListener);
+
+    // Check for pending location from Discover page
+    const pendingLocation = sessionStorage.getItem('pendingLocation');
+    console.log('Checking for pending location, found:', pendingLocation);
+    if (pendingLocation) {
+      console.log('Feed found pending location:', pendingLocation, 'setting customLocation...');
+      sessionStorage.removeItem('pendingLocation');
+      // Use a small delay to ensure the component is mounted before setting state
+      setTimeout(() => {
+        console.log('Actually setting customLocation to:', pendingLocation);
+        setCustomLocation(pendingLocation);
+        setPages([]);
+        setCursor(0);
+        setEnd(false);
+        setError(null);
+      }, 100);
+    }
+
     return () => window.removeEventListener('locationChange', handleLocationChange as EventListener);
   }, []);
 
@@ -1097,12 +1186,32 @@ function FeedPageWrapper() {
     setLoading(true);
     setError(null);
     try {
-      console.log('Calling fetchPostsPage with:', { currentFilter, cursor, userId, customLocation, active });
-      const page = await fetchPostsPage(currentFilter, cursor, 5, userId, user?.local || '', user?.regional || '', user?.national || '');
+      requestTokenRef.current++; // Invalidate any pending requests
+      const filterForRequest = currentFilter; // capture
+      console.log('=== ABOUT TO FETCH POSTS ===');
+      console.log('currentFilter:', currentFilter);
+      console.log('customLocation:', customLocation);
+      console.log('active:', active);
+      console.log('Calling fetchPostsPage with filter:', currentFilter);
+      const page = await fetchPostsPage(filterForRequest, cursor, 5, userId, user?.local || '', user?.regional || '', user?.national || '');
       console.log('fetchPostsPage returned:', { itemsCount: page.items.length, nextCursor: page.nextCursor });
+      // Drop stale results if currentFilter changed since we started (i.e., user changed location)
+      if (filterForRequest !== currentFilter) {
+        console.warn('Dropping stale page for filter', filterForRequest, 'current filter is now:', currentFilter);
+        return;
+      }
       setPages(prev => {
-        const next = [...prev, page.items];
-        console.log('Setting pages:', { prevLength: prev.length, newLength: next.length });
+        // If this is the first page (cursor === 0), replace; otherwise append for pagination
+        const next = cursor === 0 ? [page.items] : [...prev, page.items];
+        console.log('Setting pages:', {
+          prevLength: prev.length,
+          newLength: next.length,
+          cursor,
+          isFirstPage: cursor === 0,
+          filterForRequest,
+          currentFilter,
+          pageItemsCount: page.items.length
+        });
         // Temporarily disable feed cache to avoid duplicates
         // saveFeed(userId, currentFilter, next);
         return next;
@@ -1147,8 +1256,20 @@ function FeedPageWrapper() {
 
   // Initial load
   React.useEffect(() => {
-    if (cursor !== null && pages.length === 0) loadMore();
-  }, [cursor, currentFilter]);
+    console.log('Initial load effect triggered:', { cursor, pagesLength: pages.length, currentFilter });
+    // If arriving with ?location=... from Discover, wait until customLocation is set
+    const params = new URLSearchParams(routerLocation.search);
+    const pendingUrlLocation = params.get('location');
+    if (pendingUrlLocation && !customLocation) {
+      console.log('Deferring initial load until customLocation is applied for URL location:', pendingUrlLocation);
+      return;
+    }
+
+    if (cursor !== null && pages.length === 0) {
+      console.log('Calling loadMore from initial load effect');
+      loadMore();
+    }
+  }, [cursor, currentFilter, routerLocation.search, customLocation]);
 
   function updateOne(id: string, updater: (p: Post) => Post) {
     console.log('updateOne called for post:', id);
@@ -1207,7 +1328,7 @@ function FeedPageWrapper() {
   }
 
   return (
-    <div id={`panel-${active}`} role="tabpanel" aria-labelledby={`tab-${active}`} className="pb-2">
+    <div key={`${currentFilter}-${customLocation || 'default'}`} id={`panel-${active}`} role="tabpanel" aria-labelledby={`tab-${active}`} className="pb-2">
       <div className="h-2" />
 
       {/* Offline banner */}
@@ -1221,22 +1342,13 @@ function FeedPageWrapper() {
       {!customLocation ? (
         <PillTabs active={active} onChange={setActive} onClearCustom={() => setCustomLocation(null)} />
       ) : (
-        /* Show back button and city header when viewing custom location */
+        /* Show location header only when viewing custom location */
         <div className="px-3 py-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <FiMapPin className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                {customLocation} Feed
-              </span>
-            </div>
-            <button
-              onClick={() => setCustomLocation(null)}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-            >
-              <FiHome className="w-3 h-3" />
-              Back to Home Feed
-            </button>
+          <div className="flex items-center gap-2">
+            <FiMapPin className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {customLocation} Feed
+            </span>
           </div>
         </div>
       )}

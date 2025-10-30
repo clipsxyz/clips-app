@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { FiX, FiCopy, FiShare2, FiLink } from 'react-icons/fi';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/Auth';
+import { createStory } from '../api/stories';
+import { showToast } from '../utils/toast';
 
 interface ShareModalProps {
     isOpen: boolean;
@@ -18,6 +21,7 @@ interface ShareModalProps {
 const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
     const [copied, setCopied] = useState(false);
     const navigate = useNavigate();
+    const { user } = useAuth();
 
     if (!isOpen) return null;
 
@@ -37,13 +41,74 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
         }
     };
 
-    const handleShareToStory = () => {
-        console.log('Share to story clicked', post);
+    // Generate an image for text-only posts so they can be shared to stories
+    async function generateImageFromText(text: string): Promise<string> {
+        const width = 1080;
+        const height = 1920;
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d')!;
 
-        if (!post.mediaUrl) {
-            alert('This post has no media to share to story');
-            return;
+        // Background gradient
+        const grad = ctx.createLinearGradient(0, 0, width, height);
+        grad.addColorStop(0, '#0ea5e9');
+        grad.addColorStop(0.5, '#8b5cf6');
+        grad.addColorStop(1, '#f43f5e');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, width, height);
+
+        // Text styles
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const margin = 96;
+        const maxWidth = width - margin * 2;
+        let fontSize = 64;
+        ctx.font = `${fontSize}px Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial`;
+
+        // Wrap text into lines
+        function wrapLines(t: string): string[] {
+            const words = t.split(/\s+/);
+            const lines: string[] = [];
+            let line = '';
+            for (const w of words) {
+                const test = line ? line + ' ' + w : w;
+                const metrics = ctx.measureText(test);
+                if (metrics.width > maxWidth) {
+                    if (line) lines.push(line);
+                    line = w;
+                } else {
+                    line = test;
+                }
+            }
+            if (line) lines.push(line);
+            return lines;
         }
+
+        const safeText = (text || 'Shared from the feed').slice(0, 240);
+        let lines = wrapLines(safeText);
+        // If too many lines, reduce font size
+        while (lines.length > 10 && fontSize > 36) {
+            fontSize -= 6;
+            ctx.font = `${fontSize}px Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial`;
+            lines = wrapLines(safeText);
+        }
+
+        const lineHeight = fontSize * 1.35;
+        const totalHeight = lines.length * lineHeight;
+        let y = height / 2 - totalHeight / 2;
+        for (const ln of lines) {
+            ctx.fillText(ln, width / 2, y);
+            y += lineHeight;
+        }
+
+        return canvas.toDataURL('image/png');
+    }
+
+    const handleShareToStory = async () => {
+        console.log('Share to story clicked', post);
+        if (!user) { alert('Please sign in to share stories.'); return; }
 
         // Truncate text to 200 characters for stories
         const maxLength = 200;
@@ -51,22 +116,36 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
             ? post.text.substring(0, maxLength) + '...'
             : post.text;
 
-        // Prepare story data including reference to original post
-        const storyData = {
-            mediaUrl: post.mediaUrl,
-            mediaType: post.mediaType || 'image',
-            text: truncatedText,
-            sharedFromPost: post.id, // Original post ID
-            sharedFromUser: post.userHandle // Original post author
-        };
+        try {
+            let mediaUrl = post.mediaUrl;
+            let mediaType: 'image' | 'video' = (post.mediaType || 'image');
 
-        console.log('Preparing to navigate with story data (text length:', truncatedText?.length || 0, ')');
+            // If no media on post, render a text image
+            if (!mediaUrl) {
+                mediaUrl = await generateImageFromText(truncatedText || '');
+                mediaType = 'image';
+            }
 
-        // Close the modal first
-        onClose();
-
-        // Navigate with state instead of sessionStorage to avoid size limits
-        navigate('/clip', { state: { sharedStory: storyData } });
+            await createStory(
+                user.id,
+                user.handle,
+                mediaUrl,
+                mediaType,
+                truncatedText || undefined,
+                undefined,
+                undefined,
+                'medium',
+                post.id,
+                post.userHandle
+            );
+            window.dispatchEvent(new CustomEvent('storyCreated', { detail: { userHandle: user.handle } }));
+            onClose();
+            showToast('Shared to your stories');
+            navigate('/stories');
+        } catch (e) {
+            console.error('Failed to share to story:', e);
+            alert('Failed to share to stories. Please try again.');
+        }
     };
 
     const handleShare = (platform: string) => {
@@ -164,11 +243,11 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
         }
     ];
 
-    // Conditionally add "Share to Story" if post has media
-    const shareOptions = post.mediaUrl ? [
+    // Always include Share to Clip option (works for media and text-only)
+    const shareOptions = [
         {
             id: 'story',
-            name: 'Share to Story',
+            name: 'Share to Clip',
             icon: (
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -178,7 +257,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
             action: handleShareToStory
         },
         ...baseShareOptions
-    ] : baseShareOptions;
+    ];
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-end justify-center z-50">

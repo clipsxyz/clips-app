@@ -1,6 +1,9 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
-import { FiCompass, FiX, FiSearch, FiMapPin } from 'react-icons/fi';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { FiCompass, FiX, FiSearch, FiMapPin, FiMenu, FiHome, FiHeart } from 'react-icons/fi';
+import Avatar from './Avatar';
+import { getUnreadTotal } from '../api/messages';
+import { useAuth } from '../context/Auth';
 
 type TopBarProps = {
   activeTab?: string;
@@ -9,8 +12,47 @@ type TopBarProps = {
 
 export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { user } = useAuth();
   const [showDiscoverCard, setShowDiscoverCard] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState('');
+  const [hasInbox, setHasInbox] = React.useState(false);
+  const [unreadCount, setUnreadCount] = React.useState(0);
+  const [lastSender, setLastSender] = React.useState<string | null>(null);
+
+  // Listen for new messages/replies and unread count
+  React.useEffect(() => {
+    // Initialize unread on mount
+    if (user?.handle) {
+      getUnreadTotal(user.handle).then((n) => {
+        setUnreadCount(n);
+        setHasInbox(n > 0);
+      }).catch(() => { });
+    }
+    function onConversationUpdated(e: any) {
+      const msg = e.detail?.message;
+      const participants: string[] = e.detail?.participants || [];
+      if (!user?.handle) return;
+      if (!participants.includes(user.handle)) return;
+      if (msg?.senderHandle && msg.senderHandle !== user.handle) {
+        setHasInbox(true);
+        setLastSender(msg.senderHandle);
+      }
+    }
+    function onUnreadChanged(e: any) {
+      const handle = e.detail?.handle;
+      const unread = e.detail?.unread ?? 0;
+      if (handle !== user?.handle) return;
+      setHasInbox(unread > 0);
+      setUnreadCount(unread);
+    }
+    window.addEventListener('conversationUpdated', onConversationUpdated as any);
+    window.addEventListener('inboxUnreadChanged', onUnreadChanged as any);
+    return () => {
+      window.removeEventListener('conversationUpdated', onConversationUpdated as any);
+      window.removeEventListener('inboxUnreadChanged', onUnreadChanged as any);
+    };
+  }, [user?.handle]);
 
   const suggestedLocations = [
     { name: 'London', flag: '🇬🇧', posts: 12 },
@@ -44,123 +86,122 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
   };
 
   const handleDiscoverClick = () => {
-    setShowDiscoverCard(true);
+    navigate('/discover');
   };
 
   return (
     <>
       <div className="sticky top-0 z-40 bg-white/80 dark:bg-gray-950/80 backdrop-blur border-b border-gray-200 dark:border-gray-800">
-        <div className="mx-auto max-w-md px-4 h-11 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-lg bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 bg-clip-text text-transparent">Gazetteer</span>
+        {location.pathname.startsWith('/discover') ? (
+          <div className="mx-auto max-w-md px-4 h-11 flex items-center justify-between">
+            <button
+              onClick={() => navigate('/feed')}
+              className="p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
+              aria-label="Back to Feed"
+              title="Back to Feed"
+            >
+              <FiHome className="w-5 h-5 text-gray-700 dark:text-gray-200" />
+            </button>
 
             <button
-              onClick={handleDiscoverClick}
-              className="flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-              aria-label="Discover new locations"
+              onClick={() => navigate('/feed')}
+              className="font-bold text-lg bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 bg-clip-text text-transparent"
+              aria-label="Go to Home Feed"
+              title="Gazetteer"
             >
-              <div className="relative w-6 h-6">
-                {/* Border beam effect */}
-                <div className="absolute inset-0 rounded-md bg-gradient-to-r from-emerald-500 via-blue-500 to-violet-500 opacity-75 blur-sm animate-pulse"></div>
-                <div className="absolute inset-[1px] rounded-md bg-gray-950 dark:bg-gray-950">
-                  <div className="absolute inset-0 rounded-md" style={{
-                    background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.5), transparent)',
-                    backgroundSize: '200% 100%',
-                    animation: 'shimmer 3s linear infinite',
-                  }}></div>
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-                    <FiCompass className="w-3 h-3 text-white" />
+              Gazetteer
+            </button>
+
+            <div className="flex items-center">
+              <Avatar src={user?.avatarUrl} name={(user?.handle || 'User').split('@')[0]} size="sm" />
+            </div>
+          </div>
+        ) : (
+          <div className="mx-auto max-w-md px-4 h-11 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => navigate('/feed')}
+                className="font-bold text-lg bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 bg-clip-text text-transparent"
+                aria-label="Go to Home Feed"
+                title="Gazetteer"
+              >
+                Gazetteer
+              </button>
+
+              <button
+                onClick={handleDiscoverClick}
+                className="flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                aria-label="Discover new locations"
+              >
+                <div className="relative w-6 h-6">
+                  <div className="absolute inset-0 rounded-md bg-gradient-to-r from-emerald-500 via-blue-500 to-violet-500 opacity-75 blur-sm animate-pulse"></div>
+                  <div className="absolute inset-[1px] rounded-md bg-gray-950 dark:bg-gray-950">
+                    <div className="absolute inset-0 rounded-md" style={{
+                      background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.5), transparent)',
+                      backgroundSize: '200% 100%',
+                      animation: 'shimmer 3s linear infinite',
+                    }}></div>
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+                      <FiCompass className="w-3 h-3 text-white" />
+                    </div>
                   </div>
                 </div>
-              </div>
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Discover
-              </span>
-            </button>
-          </div>
-
-          <button
-            onClick={() => navigate('/stories')}
-            className="flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-            aria-label="View Stories"
-            title="Stories"
-          >
-            {/* Border beam effect */}
-            <div className="relative w-6 h-6">
-              <div className="absolute inset-0 rounded-md bg-gradient-to-r from-emerald-500 via-blue-500 to-violet-500 opacity-75 blur-sm animate-pulse"></div>
-              <div className="absolute inset-[1px] rounded-md bg-gray-950 dark:bg-gray-950">
-                <div className="absolute inset-0 rounded-md" style={{
-                  background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.5), transparent)',
-                  backgroundSize: '200% 100%',
-                  animation: 'shimmer 3s linear infinite',
-                }}></div>
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-                  <FiMapPin className="w-3 h-3 text-white" />
-                </div>
-              </div>
-            </div>
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-              Stories
-            </span>
-          </button>
-        </div>
-      </div>
-
-      {/* Discover Card Overlay */}
-      {showDiscoverCard && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm animate-in fade-in duration-300" onClick={() => setShowDiscoverCard(false)}>
-          <div
-            className="absolute bottom-0 left-0 right-0 bg-white dark:bg-gray-900 rounded-t-2xl shadow-2xl border-t border-gray-200 dark:border-gray-700 p-6 max-h-[70vh] overflow-y-auto animate-in slide-in-from-bottom duration-300"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Discover Locations</h2>
-              <button
-                onClick={() => setShowDiscoverCard(false)}
-                className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-              >
-                <FiX className="w-5 h-5 text-gray-500" />
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Discover
+                </span>
               </button>
             </div>
 
-            {/* Search Box */}
-            <form onSubmit={handleSearch} className="mb-6">
-              <div className="relative">
-                <FiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search for any location..."
-                  className="w-full pl-10 pr-4 py-3 text-gray-900 dark:text-gray-100 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-transparent placeholder-gray-500 dark:placeholder-gray-400"
-                  autoFocus
-                />
-              </div>
-            </form>
-
-            {/* Suggested Locations */}
-            <div>
-              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Popular Locations</h3>
-              <div className="grid grid-cols-2 gap-3">
-                {suggestedLocations.map((location) => (
-                  <button
-                    key={location.name}
-                    onClick={() => handleLocationSelect(location.name)}
-                    className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left"
-                  >
-                    <span className="text-2xl">{location.flag}</span>
-                    <div className="flex-1">
-                      <div className="font-medium text-gray-900 dark:text-gray-100">{location.name}</div>
-                      <div className="text-sm text-gray-500 dark:text-gray-400">{location.posts} posts</div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => navigate('/stories')}
+                className="flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                aria-label="View Stories"
+                title="Stories"
+              >
+                <div className="relative w-6 h-6">
+                  <div className="absolute inset-0 rounded-md bg-gradient-to-r from-emerald-500 via-blue-500 to-violet-500 opacity-75 blur-sm animate-pulse"></div>
+                  <div className="absolute inset-[1px] rounded-md bg-gray-950 dark:bg-gray-950">
+                    <div className="absolute inset-0 rounded-md" style={{
+                      background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.5), transparent)',
+                      backgroundSize: '200% 100%',
+                      animation: 'shimmer 3s linear infinite',
+                    }}></div>
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+                      <FiMapPin className="w-3 h-3 text-white" />
                     </div>
-                  </button>
-                ))}
-              </div>
+                  </div>
+                </div>
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Clips
+                </span>
+              </button>
+
+              {/* Inbox Heart Notification */}
+              <button
+                onClick={() => navigate('/inbox')}
+                className="relative p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                aria-label="Open latest messages"
+                title={hasInbox ? 'New messages' : 'Messages'}
+              >
+                <div className={`relative w-6 h-6 ${hasInbox ? '' : ''}`}>
+                  {hasInbox && (
+                    <div className="absolute -inset-1 rounded-full bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 opacity-80 blur-sm animate-pulse"></div>
+                  )}
+                  <FiHeart className={`relative w-6 h-6 ${hasInbox ? 'text-pink-500 animate-[pulseGlow_2s_ease-in-out_infinite]' : 'text-gray-600 dark:text-gray-300'}`} />
+                  {hasInbox && (
+                    <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 bg-pink-500 text-white text-[10px] leading-4 rounded-full text-center">
+                      {unreadCount > 9 ? '9+' : unreadCount}
+                    </span>
+                  )}
+                </div>
+              </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
+
+      {/* Discover overlay removed in favor of dedicated page */}
     </>
   );
 }

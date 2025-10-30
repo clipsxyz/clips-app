@@ -6,23 +6,21 @@ import { BsEmojiSmile } from 'react-icons/bs';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { fetchPostsPage } from '../api/posts';
+import { fetchConversation, appendMessage, type ChatMessage, markConversationRead } from '../api/messages';
+import { getAvatarForHandle } from '../api/users';
+import { isStoryMediaActive } from '../api/stories';
 
-interface Message {
-    id: string;
-    senderHandle: string;
-    senderAvatar?: string;
-    text: string;
-    imageUrl?: string;
-    timestamp: Date;
+interface MessageUI extends ChatMessage {
     isFromMe: boolean;
-    isSystemMessage?: boolean;
+    senderAvatar?: string;
 }
 
 export default function MessagesPage() {
     const navigate = useNavigate();
     const { handle } = useParams<{ handle: string }>();
     const { user } = useAuth();
-    const [messages, setMessages] = useState<Message[]>([]);
+    const [messages, setMessages] = useState<MessageUI[]>([]);
+    const [storyActiveByUrl, setStoryActiveByUrl] = useState<Record<string, boolean>>({});
     const [messageText, setMessageText] = useState('');
     const [loading, setLoading] = useState(true);
     const [otherUserAvatar, setOtherUserAvatar] = useState<string | undefined>(undefined);
@@ -55,110 +53,47 @@ export default function MessagesPage() {
 
         loadAvatar();
 
-        // Mock messages - in a real app, you'd fetch these from an API
-        const mockMessages: Message[] = [
-            {
-                id: '1',
-                senderHandle: 'system',
-                text: 'You replied to their story',
-                timestamp: new Date(Date.now() - 86400000),
-                isFromMe: false,
-                isSystemMessage: true
-            },
-            {
-                id: '2',
-                senderHandle: 'system',
-                text: 'Story unavailable',
-                timestamp: new Date(Date.now() - 86400000),
-                isFromMe: false,
-                isSystemMessage: true
-            },
-            {
-                id: '3',
-                senderHandle: user?.handle || 'me',
-                text: 'Good to hear, very brave ... What happened??',
-                timestamp: new Date(Date.now() - 86400000),
-                isFromMe: true
-            },
-            {
-                id: '4',
-                senderHandle: 'system',
-                text: 'You replied to their story',
-                timestamp: new Date(Date.now() - 86400000),
-                isFromMe: false,
-                isSystemMessage: true
-            },
-            {
-                id: '5',
-                senderHandle: 'system',
-                text: 'Story unavailable',
-                timestamp: new Date(Date.now() - 86400000),
-                isFromMe: false,
-                isSystemMessage: true
-            },
-            {
-                id: '6',
-                senderHandle: user?.handle || 'me',
-                text: 'Health or cosmetic?',
-                timestamp: new Date(Date.now() - 86400000),
-                isFromMe: true
-            },
-            {
-                id: '7',
-                senderHandle: handle || 'milania_stark',
-                senderAvatar: 'https://i.pravatar.cc/150?img=5',
-                text: 'Healt omg haha',
-                timestamp: new Date(Date.now() - 86400000),
-                isFromMe: false
-            },
-            {
-                id: '8',
-                senderHandle: user?.handle || 'me',
-                text: 'Wasn\'t sure ... I just thought what could be wrong with perfection 🤔... But glad your on the other side now and hope 🙏 your ok soon',
-                timestamp: new Date(Date.now() - 86400000),
-                isFromMe: true
-            },
-            {
-                id: '9',
-                senderHandle: 'system',
-                text: 'You replied to their story',
-                timestamp: new Date(Date.now() - 2 * 86400000),
-                isFromMe: false,
-                isSystemMessage: true
-            },
-            {
-                id: '10',
-                senderHandle: 'system',
-                text: 'Story unavailable',
-                timestamp: new Date(Date.now() - 2 * 86400000),
-                isFromMe: false,
-                isSystemMessage: true
-            },
-            {
-                id: '11',
-                senderHandle: user?.handle || 'me',
-                text: 'Your face is the best part ... Gorgeous 🥰',
-                timestamp: new Date(Date.now() - 2 * 86400000),
-                isFromMe: true
-            },
-        ];
+        // Load conversation from API
+        if (!handle || !user?.handle) return;
+        fetchConversation(user.handle, handle).then(items => {
+            const mapped: MessageUI[] = items.map(m => ({
+                ...m,
+                isFromMe: m.senderHandle === user.handle,
+                senderAvatar: m.senderHandle === user.handle ? (user.avatarUrl || getAvatarForHandle(user.handle)) : getAvatarForHandle(handle)
+            }));
+            setMessages(mapped);
+            setLoading(false);
+            // Mark as read on open
+            markConversationRead(user.handle, handle).catch(() => { });
+            const urls = Array.from(new Set(mapped.map(m => m.imageUrl).filter(Boolean) as string[]));
+            Promise.all(urls.map(async (u) => [u, await isStoryMediaActive(u)] as const))
+                .then(entries => setStoryActiveByUrl(Object.fromEntries(entries)));
+        });
 
-        setMessages(mockMessages);
-        setLoading(false);
+        // Live updates
+        const onUpdate = (e: any) => {
+            const participants: string[] = e.detail?.participants || [];
+            if (!participants.includes(user?.handle || '') || !participants.includes(handle || '')) return;
+            fetchConversation(user!.handle!, handle!).then(items => {
+                const mapped = items.map(m => ({
+                    ...m,
+                    isFromMe: m.senderHandle === user!.handle,
+                    senderAvatar: m.senderHandle === user!.handle ? (user!.avatarUrl || getAvatarForHandle(user!.handle)) : getAvatarForHandle(handle!)
+                }));
+                setMessages(mapped);
+                const urls = Array.from(new Set(mapped.map(m => m.imageUrl).filter(Boolean) as string[]));
+                Promise.all(urls.map(async (u) => [u, await isStoryMediaActive(u)] as const))
+                    .then(entries => setStoryActiveByUrl(Object.fromEntries(entries)));
+            });
+        };
+        window.addEventListener('conversationUpdated', onUpdate as any);
+        return () => window.removeEventListener('conversationUpdated', onUpdate as any);
     }, [handle, user?.handle]);
 
-    const handleSend = () => {
+    const handleSend = async () => {
         if (!messageText.trim()) return;
-
-        const newMessage: Message = {
-            id: Date.now().toString(),
-            senderHandle: user?.handle || 'me',
-            text: messageText,
-            timestamp: new Date(),
-            isFromMe: true
-        };
-
-        setMessages([newMessage, ...messages]);
+        if (!user?.handle || !handle) return;
+        await appendMessage(user.handle, handle, { text: messageText });
         setMessageText('');
     };
 
@@ -174,21 +109,14 @@ export default function MessagesPage() {
         const reader = new FileReader();
         reader.onloadend = () => {
             const imageUrl = reader.result as string;
-            const newMessage: Message = {
-                id: Date.now().toString(),
-                senderHandle: user?.handle || 'me',
-                text: '',
-                imageUrl: imageUrl,
-                timestamp: new Date(),
-                isFromMe: true
-            };
-
-            setMessages([newMessage, ...messages]);
+            if (!user?.handle || !handle) return;
+            appendMessage(user.handle, handle, { imageUrl });
         };
         reader.readAsDataURL(file);
     };
 
-    const formatTimestamp = (date: Date) => {
+    const formatTimestamp = (ts: number) => {
+        const date = new Date(ts);
         const now = new Date();
         const diff = now.getTime() - date.getTime();
         const daysDiff = Math.floor(diff / (1000 * 60 * 60 * 24));
@@ -203,15 +131,16 @@ export default function MessagesPage() {
         }
     };
 
+    // (unused helper retained for future grouping but updated to numbers)
     const getUniqueTimestamps = () => {
         const uniqueTimes: string[] = [];
         let lastTime = '';
         messages.forEach((msg, idx) => {
             const time = formatTimestamp(msg.timestamp);
             if (time !== lastTime && idx > 0) {
-                lastTime = messages[idx - 1].timestamp.toDateString();
+                lastTime = new Date(messages[idx - 1].timestamp).toDateString();
             }
-            const dateKey = msg.timestamp.toDateString();
+            const dateKey = new Date(msg.timestamp).toDateString();
             if (!uniqueTimes.includes(dateKey)) {
                 uniqueTimes.push(dateKey);
             }
@@ -260,7 +189,7 @@ export default function MessagesPage() {
                 <div className="space-y-3">
                     {messages.map((msg, idx) => {
                         const showTimestamp = idx === 0 ||
-                            messages[idx - 1].timestamp.getTime() - msg.timestamp.getTime() > 60000; // Show timestamp if more than 1 minute gap
+                            (messages[idx - 1].timestamp - msg.timestamp) > 60000; // Show timestamp if more than 1 minute gap
 
                         return (
                             <React.Fragment key={msg.id}>
@@ -279,7 +208,14 @@ export default function MessagesPage() {
                                         {msg.isFromMe ? (
                                             <div className="bg-purple-600 rounded-2xl px-4 py-2 max-w-[70%] break-words">
                                                 {msg.imageUrl && (
-                                                    <img src={msg.imageUrl} alt="Sent image" className="max-w-full rounded-lg mb-2" />
+                                                    <div className="relative mb-2">
+                                                        <img src={msg.imageUrl} alt="Sent image" className="max-w-full rounded-lg" />
+                                                        {msg.imageUrl && storyActiveByUrl[msg.imageUrl] === false && (
+                                                            <div className="absolute inset-0 bg-black/50 rounded-lg flex items-center justify-center">
+                                                                <span className="text-[10px] text-white/90 px-2 py-1 rounded">Story unavailable</span>
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 )}
                                                 {msg.text && <p className="text-white text-sm">{msg.text}</p>}
                                             </div>
@@ -294,7 +230,14 @@ export default function MessagesPage() {
                                                 )}
                                                 <div className="bg-gray-800 rounded-2xl px-4 py-2 break-words">
                                                     {msg.imageUrl && (
-                                                        <img src={msg.imageUrl} alt="Received image" className="max-w-full rounded-lg mb-2" />
+                                                        <div className="relative mb-2">
+                                                            <img src={msg.imageUrl} alt="Received image" className="max-w-full rounded-lg" />
+                                                            {msg.imageUrl && storyActiveByUrl[msg.imageUrl] === false && (
+                                                                <div className="absolute inset-0 bg-black/50 rounded-lg flex items-center justify-center">
+                                                                    <span className="text-[10px] text-white/90 px-2 py-1 rounded">Story unavailable</span>
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                     )}
                                                     {msg.text && <p className="text-white text-sm">{msg.text}</p>}
                                                 </div>
