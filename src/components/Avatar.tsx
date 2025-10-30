@@ -38,19 +38,26 @@ export default function Avatar({ src, name, size = 'md', className = '', hasStor
         return (
             <Component
                 onClick={onClick}
-                className={`${sizeClass} ${className} relative ${onClick ? 'cursor-pointer hover:scale-105 transition-transform' : ''}`}
+                className={`${sizeClass} ${className} relative rounded-full overflow-visible ${onClick ? 'cursor-pointer hover:scale-105 transition-transform' : ''}`}
             >
-                {/* Outer shimmer border ring */}
-                <div
-                    className="absolute inset-0 rounded-full"
-                    style={{
-                        background: 'linear-gradient(90deg, #60a5fa, #34d399, #22d3ee, #60a5fa)',
-                        backgroundSize: '300% 100%',
-                        animation: 'shimmerGradient 2s linear infinite',
-                        padding: '3px'
-                    }}
-                >
-                    <div className="w-full h-full rounded-full bg-gray-900"></div>
+                {/* Outer shimmer + pulse ring */}
+                <div className="absolute inset-0 rounded-full" style={{ padding: '3px' }}>
+                    {/* Shimmer border */}
+                    <div
+                        className="absolute inset-0 rounded-full"
+                        style={{
+                            background: 'linear-gradient(90deg, #60a5fa, #34d399, #22d3ee, #f472b6, #60a5fa)',
+                            backgroundSize: '300% 100%',
+                            animation: 'shimmerGradient 2s linear infinite'
+                        }}
+                    />
+                    {/* Inner mask */}
+                    <div className="absolute inset-[3px] rounded-full bg-gray-900" />
+                    {/* Pulsing glow halo */}
+                    <div
+                        className="absolute -inset-1 rounded-full"
+                        style={{ animation: 'pulseGlow 2.4s ease-out infinite' }}
+                    />
                 </div>
 
                 {/* Avatar content */}

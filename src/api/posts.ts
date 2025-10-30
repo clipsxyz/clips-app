@@ -324,13 +324,45 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       // Check if this is a custom location search (not one of the predefined tabs)
       const predefinedTabs = ['finglas', 'dublin', 'ireland', 'following'];
       if (!predefinedTabs.includes(t)) {
-        // Custom location search - match user's location fields (case-insensitive)
-        const searchLocation = t;
-        const userLocalMatch = p.userLocal?.toLowerCase().includes(searchLocation);
-        const userRegionalMatch = p.userRegional?.toLowerCase().includes(searchLocation);
-        const userNationalMatch = p.userNational?.toLowerCase().includes(searchLocation);
+        // Custom location search – map query to scope: national (country), regional (city), local (town)
+        const query = t.trim().toLowerCase();
+        console.log('=== CUSTOM LOCATION FILTER FOR:', query, '===');
 
-        return userLocalMatch || userRegionalMatch || userNationalMatch;
+        // Minimal lookups; can be expanded or sourced from backend later
+        const countries = new Set([
+          'ireland', 'uk', 'united kingdom', 'england', 'scotland', 'wales', 'france', 'spain', 'portugal', 'germany', 'netherlands', 'belgium', 'australia', 'usa', 'united states', 'canada'
+        ]);
+        const cities = new Set([
+          'dublin', 'london', 'paris', 'madrid', 'rome', 'berlin', 'amsterdam', 'lisbon', 'vienna', 'prague', 'budapest', 'copenhagen', 'stockholm', 'oslo', 'helsinki', 'zurich', 'new york', 'toronto', 'vancouver', 'mexico city', 'tokyo', 'seoul', 'beijing', 'shanghai', 'hong kong', 'singapore', 'sydney', 'melbourne', 'auckland'
+        ]);
+
+        const normalize = (v?: string) => (v || '').trim().toLowerCase();
+        const local = normalize(p.userLocal);
+        const regional = normalize(p.userRegional);
+        const national = normalize(p.userNational);
+
+        let match = false;
+        if (countries.has(query)) {
+          // National match
+          match = national === query || (query === 'uk' && (national === 'united kingdom' || national === 'uk')) || (query === 'usa' && (national === 'usa' || national === 'united states'));
+        } else if (cities.has(query)) {
+          // Regional (city) match
+          match = regional === query;
+        } else {
+          // Treat as local (town) match
+          match = local === query;
+        }
+
+        if (match) {
+          console.log('Post MATCHING for custom filter', query, ':', {
+            userHandle: p.userHandle,
+            userLocal: p.userLocal,
+            userRegional: p.userRegional,
+            userNational: p.userNational
+          });
+        }
+
+        return match;
       }
 
       // Predefined tab filtering - show only posts from users in that location
@@ -347,15 +379,23 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
         return p.userNational === 'Ireland';
       }
 
-      // Fallback - check location fields
-      return p.userLocal?.toLowerCase().includes(t) ||
-        p.userRegional?.toLowerCase().includes(t) ||
-        p.userNational?.toLowerCase().includes(t);
+      // Fallback - do not include any other posts for unknown tabs
+      return false;
     });
 
     console.log('Filtered posts for', t, ':', filtered.length, 'posts');
-    console.log('All posts:', posts.map(p => ({ userHandle: p.userHandle, text: p.text, mediaUrl: p.mediaUrl })));
-    console.log('Filtered posts:', filtered.map(p => ({ userHandle: p.userHandle, text: p.text, mediaUrl: p.mediaUrl })));
+    console.log('All posts with locations:', posts.map(p => ({
+      userHandle: p.userHandle,
+      userLocal: p.userLocal,
+      userRegional: p.userRegional,
+      userNational: p.userNational
+    })));
+    console.log('Filtered posts:', filtered.map(p => ({
+      userHandle: p.userHandle,
+      userLocal: p.userLocal,
+      userRegional: p.userRegional,
+      userNational: p.userNational
+    })));
 
     const start = cursor ?? 0;
     const slice = filtered.slice(start, start + limit).map(p => decorateForUser(userId, p));
@@ -475,6 +515,15 @@ export async function reclipPost(userId: string, originalPostId: string, userHan
 export async function fetchComments(postId: string): Promise<Comment[]> {
   await delay(200);
   return comments.filter(c => c.postId === postId);
+}
+
+export async function fetchPostsByUser(userHandle: string, limit = 30): Promise<Post[]> {
+  await delay(150);
+  const handle = userHandle.trim().toLowerCase();
+  const filtered = posts.filter(p => p.userHandle.toLowerCase() === handle);
+  // newest first (ids include timestamp; also fallback to original order)
+  const sorted = filtered.slice().reverse();
+  return sorted.slice(0, limit);
 }
 
 export async function addComment(postId: string, userHandle: string, text: string): Promise<Comment> {
@@ -625,4 +674,41 @@ export async function createPost(
   console.log('Posts array length after createPost:', posts.length);
 
   return decorateForUser(userId, newPost);
+}
+
+export type SearchResults = {
+  locations: string[];
+  users: string[];
+};
+
+export async function searchPostsAndUsers(query: string): Promise<SearchResults> {
+  await delay(150);
+  const q = query.trim().toLowerCase();
+  if (!q) return { locations: [], users: [] };
+
+  const locSet = new Set<string>();
+  const userSet = new Set<string>();
+
+  // Collect from posts
+  posts.forEach(p => {
+    if (p.locationLabel && p.locationLabel.toLowerCase().includes(q)) {
+      locSet.add(p.locationLabel);
+    }
+    if (p.userHandle.toLowerCase().includes(q)) {
+      userSet.add(p.userHandle);
+    }
+  });
+
+  // Prefix-first sorting
+  const sortPref = (a: string, b: string) => {
+    const aPrefix = a.toLowerCase().startsWith(q) ? 0 : 1;
+    const bPrefix = b.toLowerCase().startsWith(q) ? 0 : 1;
+    if (aPrefix !== bPrefix) return aPrefix - bPrefix;
+    return a.localeCompare(b);
+  };
+
+  const locations = Array.from(locSet).sort(sortPref).slice(0, 10);
+  const users = Array.from(userSet).sort(sortPref).slice(0, 10);
+
+  return { locations, users };
 }

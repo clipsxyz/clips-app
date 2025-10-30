@@ -10,6 +10,7 @@ export type User = {
   regional: string;
   national: string;
   handle: string;
+  countryFlag?: string; // Emoji flag for national country
   avatarUrl?: string; // Profile picture URL
   bio?: string; // Bio/description
   socialLinks?: {

@@ -14,6 +14,7 @@ export default function LoginPage() {
   const [local, setLocal] = React.useState('');
   const [regional, setRegional] = React.useState('');
   const [national, setNational] = React.useState('');
+  const [countryFlag, setCountryFlag] = React.useState('');
 
   // Step 2: Account details
   const [email, setEmail] = React.useState('');
@@ -86,6 +87,7 @@ export default function LoginPage() {
       regional: regional,
       national: national,
       handle: `${name.trim()}@${local}`, // Generate handle like "John@Ballymun"
+      countryFlag: countryFlag.trim(),
       avatarUrl: profilePicture // Include profile picture
     };
 
@@ -206,6 +208,21 @@ export default function LoginPage() {
                   <option key={option} value={option}>{option}</option>
                 ))}
               </select>
+            </div>
+
+            {/* Country Flag (Emoji) */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Country Flag (emoji)
+              </label>
+              <input
+                value={countryFlag}
+                onChange={e => setCountryFlag(e.target.value)}
+                maxLength={8}
+                placeholder="🇮🇪"
+                className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+              />
+              <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Tip: paste your country’s emoji flag</div>
             </div>
           </>
         )}

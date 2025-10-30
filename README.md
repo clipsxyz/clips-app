@@ -87,3 +87,25 @@ src/
 ## License
 
 MIT
+
+## Locations / Gazetteer (Backend)
+
+The backend provides `/api/locations/search?q=...&limit=20` to search locations. By default it uses a small fallback dataset.
+
+To import a full world gazetteer from GeoNames:
+
+1) Download and unzip into a folder, e.g. `backend/geonames`:
+   - Countries: http://download.geonames.org/export/dump/countryInfo.txt
+   - Cities: http://download.geonames.org/export/dump/cities5000.zip (or cities15000.zip)
+
+2) Run the importer (set the source folder if different):
+```
+GEONAMES_SRC=backend/geonames npm run --prefix backend gazetteer:import
+```
+
+This generates `backend/data/gazetteer.ndjson`. The API will auto-load it. You can also set `GAZETTEER_PATH` to point to a custom file.
+
+Countries-only (quick start):
+```
+GEONAMES_SRC=backend/geonames npm run --prefix backend gazetteer:import:countries
+```

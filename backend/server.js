@@ -13,6 +13,8 @@ import postsRoutes from './routes/posts.js';
 import commentsRoutes from './routes/comments.js';
 import usersRoutes from './routes/users.js';
 import uploadRoutes from './routes/upload.js';
+import locationsRoutes from './routes/locations.js';
+import searchRoutes from './routes/search.js';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler.js';
@@ -73,6 +75,8 @@ app.use('/api/posts', postsRoutes);
 app.use('/api/comments', commentsRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/locations', locationsRoutes);
+app.use('/api/search', searchRoutes);
 
 // Error handling middleware
 app.use(notFound);

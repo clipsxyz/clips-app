@@ -5,6 +5,8 @@ import { AiFillHeart } from 'react-icons/ai';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle } from '../api/stories';
+import { appendMessage } from '../api/messages';
+import { showToast } from '../utils/toast';
 import { getFollowedUsers } from '../api/posts';
 import type { Story, StoryGroup } from '../types';
 
@@ -24,6 +26,7 @@ export default function StoriesPage() {
     const [showEmojiPicker, setShowEmojiPicker] = React.useState(false);
     const [showReplyModal, setShowReplyModal] = React.useState(false);
     const [replyText, setReplyText] = React.useState('');
+    const [showControls, setShowControls] = React.useState(true);
     const videoRef = React.useRef<HTMLVideoElement>(null);
     const elapsedTimeRef = React.useRef<number>(0);
     const pausedRef = React.useRef<boolean>(false);
@@ -200,6 +203,14 @@ export default function StoriesPage() {
         if (!currentStory || !user?.id || !user?.handle || !replyText.trim()) return;
         try {
             await addStoryReply(currentStory.id, user.id, user.handle, replyText);
+            // Also append to chat between replier and story owner
+            const toHandle = currentGroup?.userHandle;
+            if (toHandle) {
+                await appendMessage(user.handle, toHandle, { text: replyText, imageUrl: currentStory.mediaUrl });
+                // Optional: system echo for owner (kept same conversation id)
+                await appendMessage(toHandle, user.handle, { text: `You replied to their story`, isSystemMessage: true });
+                showToast?.('Reply sent');
+            }
             setReplyText('');
             setShowReplyModal(false);
         } catch (error) {
@@ -248,11 +259,44 @@ export default function StoriesPage() {
         return () => clearInterval(timer);
     }, [viewingStories, currentGroupIndex, currentStoryIndex, storyGroups, user?.id]);
 
+    // Auto-hide controls on inactivity
+    React.useEffect(() => {
+        if (!viewingStories) return;
+
+        let hideTimer: number | undefined;
+
+        const resetTimer = () => {
+            setShowControls(true);
+            if (hideTimer) window.clearTimeout(hideTimer);
+            hideTimer = window.setTimeout(() => setShowControls(false), 2000);
+        };
+
+        // Show immediately when entering
+        resetTimer();
+
+        const onInteract = () => resetTimer();
+        window.addEventListener('mousemove', onInteract);
+        window.addEventListener('touchstart', onInteract, { passive: true } as any);
+        window.addEventListener('keydown', onInteract);
+
+        return () => {
+            if (hideTimer) window.clearTimeout(hideTimer);
+            window.removeEventListener('mousemove', onInteract);
+            window.removeEventListener('touchstart', onInteract as any);
+            window.removeEventListener('keydown', onInteract);
+        };
+    }, [viewingStories]);
+
     // Keyboard navigation
     React.useEffect(() => {
         if (!viewingStories) return;
 
         function handleKeyDown(e: KeyboardEvent) {
+            const target = e.target as HTMLElement | null;
+            const tag = target?.tagName?.toLowerCase();
+            if (tag === 'input' || tag === 'textarea' || (target as any)?.isContentEditable) {
+                return; // Don't hijack keys while typing
+            }
             if (e.key === 'ArrowLeft') {
                 e.preventDefault();
                 previousStory();
@@ -379,26 +423,31 @@ export default function StoriesPage() {
                         ))}
                     </div>
 
-                    {/* Story Media */}
+                    {/* Story Media with thick gradient frame */}
                     <div className="absolute inset-0 flex items-center justify-center">
-                        {currentStory?.mediaType === 'video' ? (
-                            <video
-                                ref={videoRef}
-                                src={currentStory?.mediaUrl}
-                                className="w-full h-full object-contain"
-                                autoPlay
-                                loop
-                                muted={isMuted}
-                                playsInline
-                            />
-                        ) : (
-                            <img
-                                src={currentStory?.mediaUrl}
-                                alt=""
-                                className="w-full h-full object-contain"
-                                draggable={false}
-                            />
-                        )}
+                        <div className="relative w-[90vw] max-w-[420px] aspect-[9/16] rounded-[32px] pt-[16px] pr-[16px] pl-[16px] pb-[40px] bg-gradient-to-b from-green-500 via-blue-500 to-blue-600 shadow-[0_0_64px_rgba(59,130,246,0.55)]">
+                            <div className="absolute inset-0 -z-10 rounded-[32px] blur-2xl opacity-50 bg-gradient-to-b from-green-500 via-blue-500 to-blue-600" />
+                            <div className="w-full h-full rounded-[24px] overflow-hidden bg-black/80">
+                                {currentStory?.mediaType === 'video' ? (
+                                    <video
+                                        ref={videoRef}
+                                        src={currentStory?.mediaUrl}
+                                        className="w-full h-full object-cover"
+                                        autoPlay
+                                        loop
+                                        muted={isMuted}
+                                        playsInline
+                                    />
+                                ) : (
+                                    <img
+                                        src={currentStory?.mediaUrl}
+                                        alt=""
+                                        className="w-full h-full object-cover select-none"
+                                        draggable={false}
+                                    />
+                                )}
+                            </div>
+                        </div>
                     </div>
 
                     {/* Story Overlay */}
@@ -466,73 +515,55 @@ export default function StoriesPage() {
                         </div>
                     )}
 
-                    {/* Action Buttons */}
-                    <div className="absolute bottom-6 left-0 right-0 px-6 z-[60] pointer-events-none">
-                        <div className="flex items-center justify-center gap-6">
-                            {/* Reaction Button */}
-                            <div className="relative z-[70]">
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        setShowEmojiPicker(!showEmojiPicker);
-                                    }}
-                                    className="pointer-events-auto w-12 h-12 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center hover:bg-white/30 transition-colors"
-                                >
-                                    {currentStory?.userReaction ? (
-                                        <span className="text-2xl">{currentStory.userReaction}</span>
-                                    ) : (
-                                        <FiHeart className="w-6 h-6 text-white" />
-                                    )}
-                                </button>
-
-                                {/* Emoji Picker */}
-                                {showEmojiPicker && (
-                                    <div className="absolute bottom-16 left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur-sm rounded-2xl px-4 py-3 shadow-xl flex gap-3 z-[80] pointer-events-auto">
-                                        {['❤️', '😍', '🔥', '👍', '😎', '😱'].map(emoji => (
-                                            <button
-                                                key={emoji}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleReaction(emoji);
-                                                }}
-                                                className="text-2xl hover:scale-125 transition-transform"
-                                            >
-                                                {emoji}
-                                            </button>
-                                        ))}
-                                    </div>
+                    {/* Action Buttons - vertical right side (auto-hide) */}
+                    <div className={`absolute right-4 bottom-10 z-[70] flex flex-col items-center gap-3 transition-opacity duration-200 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                        {/* Reaction Button (single like) */}
+                        <div className="relative p-[2px] rounded-full bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 shadow-lg">
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleReaction('❤️');
+                                }}
+                                className="pointer-events-auto w-12 h-12 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center hover:bg-white/20 transition-colors active:scale-95"
+                            >
+                                {currentStory?.userReaction ? (
+                                    <span className="text-2xl">{currentStory.userReaction}</span>
+                                ) : (
+                                    <FiHeart className="w-6 h-6 text-white" />
                                 )}
-                            </div>
+                            </button>
+                        </div>
 
-                            {/* Reply Button */}
+                        {/* Reply Button */}
+                        <div className="p-[2px] rounded-full bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 shadow-lg">
                             <button
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     setShowReplyModal(true);
                                 }}
-                                className="pointer-events-auto z-[70] w-12 h-12 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center hover:bg-white/30 transition-colors"
+                                className="pointer-events-auto w-12 h-12 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center hover:bg-white/20 transition-colors active:scale-95"
                             >
                                 <FiMessageCircle className="w-6 h-6 text-white" />
                             </button>
-
-                            {/* View Full Post Button - Only for shared stories */}
-                            {currentStory?.sharedFromPost && (
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        // Close stories view and navigate to feed
-                                        setViewingStories(false);
-                                        navigate('/feed');
-                                    }}
-                                    className="pointer-events-auto z-[70] w-12 h-12 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 flex items-center justify-center hover:opacity-90 transition-colors shadow-lg"
-                                    title="View full post"
-                                >
-                                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                                    </svg>
-                                </button>
-                            )}
                         </div>
+
+                        {/* View Full Post Button - Only for shared stories */}
+                        {currentStory?.sharedFromPost && (
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    // Close stories view and navigate to feed
+                                    setViewingStories(false);
+                                    navigate('/feed');
+                                }}
+                                className="pointer-events-auto w-12 h-12 rounded-full bg-gradient-to-r from-green-500 via-blue-500 to-blue-600 flex items-center justify-center hover:opacity-90 transition-colors shadow-lg active:scale-95"
+                                title="View full post"
+                            >
+                                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                </svg>
+                            </button>
+                        )}
                     </div>
 
                     {/* Tap Zones for Navigation and Pause */}
@@ -565,7 +596,7 @@ export default function StoriesPage() {
 
                 {/* Reply Modal - Inside story viewer */}
                 {showReplyModal && currentStory && (
-                    <div className="fixed inset-0 z-60 bg-black/60 backdrop-blur-sm flex items-end" onClick={() => setShowReplyModal(false)}>
+                    <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-end" onClick={() => setShowReplyModal(false)}>
                         <div className="w-full bg-white dark:bg-gray-900 rounded-t-3xl p-6 animate-in slide-in-from-bottom duration-300" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-between mb-4">
                                 <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
@@ -585,13 +616,27 @@ export default function StoriesPage() {
                                 className="w-full h-24 p-3 rounded-xl border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 resize-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
                                 autoFocus
                             />
-                            <button
-                                onClick={handleReply}
-                                disabled={!replyText.trim()}
-                                className="mt-4 w-full py-3 rounded-xl bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
-                            >
-                                Send Reply
-                            </button>
+                            <div className="mt-4 flex items-center gap-3">
+                                <button
+                                    onClick={handleReply}
+                                    disabled={!replyText.trim()}
+                                    className="flex-1 py-3 rounded-xl bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+                                >
+                                    Send Reply
+                                </button>
+                                {currentGroup?.userHandle && (
+                                    <button
+                                        onClick={() => {
+                                            setShowReplyModal(false);
+                                            setViewingStories(false);
+                                            navigate(`/messages/${encodeURIComponent(currentGroup.userHandle!)}`);
+                                        }}
+                                        className="px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                                    >
+                                        View in chat
+                                    </button>
+                                )}
+                            </div>
                         </div>
                     </div>
                 )}

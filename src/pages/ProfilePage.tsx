@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import Avatar from '../components/Avatar';
 import { FiCamera, FiX } from 'react-icons/fi';
+import Flag from '../components/Flag';
 
 export default function ProfilePage() {
   const { user, logout, login } = useAuth();
@@ -15,6 +16,7 @@ export default function ProfilePage() {
     instagram: user?.socialLinks?.instagram || '',
     tiktok: user?.socialLinks?.tiktok || '',
   });
+  const [countryFlag, setCountryFlag] = React.useState(user?.countryFlag || '');
 
   React.useEffect(() => {
     if (user?.bio) {
@@ -339,6 +341,49 @@ export default function ProfilePage() {
             >
               Sign Out
             </button>
+          </div>
+        </div>
+
+        {/* Country Flag */}
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center">
+            <div className="w-8 h-8 bg-brand-100 dark:bg-brand-900 rounded-lg flex items-center justify-center mr-3">
+              <Flag value={countryFlag || '🏳️'} size={18} />
+            </div>
+            Country Flag
+          </h2>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm text-gray-700 dark:text-gray-300 mb-2">Pick a flag</label>
+              <div className="grid grid-cols-8 gap-2">
+                {['IE', 'GB', 'FR', 'ES', 'IT', 'DE', 'PT', 'NL', 'US', 'CA', 'BR', 'MX', 'AU', 'NZ', 'JP', 'CN', 'IN', 'PK', 'ZA', 'KE', 'EG', 'TR', 'RU', 'UA'].map(f => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => {
+                      setCountryFlag(f);
+                      login({ ...user, countryFlag: f });
+                    }}
+                    className={`h-9 rounded-md flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-700 ${countryFlag === f ? 'ring-2 ring-brand-500' : ''} px-1`}
+                    aria-label={`Select flag ${f}`}
+                  >
+                    <Flag value={f} size={20} />
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm text-gray-700 dark:text-gray-300 mb-2">Or paste your flag emoji</label>
+              <input
+                value={countryFlag}
+                onChange={(e) => setCountryFlag(e.target.value)}
+                onBlur={() => login({ ...user, countryFlag })}
+                maxLength={8}
+                placeholder="🇮🇪"
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">This flag shows beside your handle on feed and profile.</p>
+            </div>
           </div>
         </div>
       </div>

@@ -410,3 +410,9 @@ export async function fetchFollowedUsersStoryGroups(userId: string, followedUser
 
     return groups;
 }
+
+// Utility: check if a story media is still active (not expired)
+export async function isStoryMediaActive(mediaUrl: string): Promise<boolean> {
+    const now = Date.now();
+    return stories.some(s => s.mediaUrl === mediaUrl && s.expiresAt > now);
+}

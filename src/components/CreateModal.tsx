@@ -55,7 +55,7 @@ export default function CreateModal({ isOpen, onClose, onNavigate }: CreateModal
                             </div>
                         </div>
                         <div className="flex-1 text-left">
-                            <div className="font-semibold text-gray-900 dark:text-gray-100">Create Story</div>
+                            <div className="font-semibold text-gray-900 dark:text-gray-100">Create Clip</div>
                             <div className="text-sm text-gray-600 dark:text-gray-400">
                                 Share a photo or video that disappears after 24 hours
                             </div>
