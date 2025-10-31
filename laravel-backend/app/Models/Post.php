@@ -24,6 +24,7 @@ class Post extends Model
         'reclips_count',
         'is_reclipped',
         'original_post_id',
+        'original_user_handle',
         'reclipped_by',
     ];
 

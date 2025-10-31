@@ -1,10 +1,11 @@
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiEye, FiMessageSquare, FiShare2, FiMapPin, FiRepeat } from 'react-icons/fi';
+import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiEye, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import TopBar from './components/TopBar';
 import CommentsModal from './components/CommentsModal';
 import ShareModal from './components/ShareModal';
+import ScenesModal from './components/ScenesModal';
 import CreateModal from './components/CreateModal';
 import Avatar from './components/Avatar';
 import { useAuth } from './context/Auth';
@@ -244,6 +245,9 @@ function PostHeader({ post, onFollow }: { post: Post; onFollow: () => Promise<vo
     }
   };
 
+  // Check if this is a reclipped post
+  const isReclippedPost = post.isReclipped && post.originalUserHandle;
+
   return (
     <div className="flex items-start justify-between px-4 mt-4">
       <div className="flex items-center gap-3 flex-1">
@@ -255,17 +259,25 @@ function PostHeader({ post, onFollow }: { post: Post; onFollow: () => Promise<vo
           onClick={hasStory ? handleAvatarClick : undefined}
         />
         <div className="flex-1" onClick={(e) => e.stopPropagation()}>
+          {/* Show reclip indicator if this is a reclipped post */}
+          {isReclippedPost && (
+            <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 flex items-center gap-1">
+              <FiRepeat className="w-3 h-3" />
+              <span>{post.userHandle} reclipped</span>
+            </div>
+          )}
           <button
             onClick={(e) => {
               e.stopPropagation();
-              navigate(`/user/${post.userHandle}`);
+              // Navigate to original poster if reclipped, otherwise to reclipper
+              navigate(`/user/${isReclippedPost ? post.originalUserHandle : post.userHandle}`);
             }}
             className="text-left hover:opacity-70 transition-opacity w-full"
           >
             <h3 id={titleId} className="font-semibold flex items-center gap-1">
-              <span>{post.userHandle}</span>
+              <span>{isReclippedPost ? post.originalUserHandle : post.userHandle}</span>
               <Flag
-                value={isCurrentUser ? (user?.countryFlag || '') : (getFlagForHandle(post.userHandle) || '')}
+                value={isCurrentUser ? (user?.countryFlag || '') : (getFlagForHandle(isReclippedPost ? post.originalUserHandle! : post.userHandle) || '')}
                 size={16}
               />
             </h3>
@@ -826,13 +838,15 @@ function EngagementBar({
   onLike,
   onShare,
   onOpenComments,
-  onReclip
+  onReclip,
+  currentUserHandle
 }: {
   post: Post;
   onLike: () => Promise<void>;
   onShare: () => Promise<void>;
   onOpenComments: () => void;
   onReclip: () => Promise<void>;
+  currentUserHandle?: string;
 }) {
   const [liked, setLiked] = React.useState(post.userLiked);
   const [likes, setLikes] = React.useState(post.stats.likes);
@@ -840,6 +854,7 @@ function EngagementBar({
   const [comments, setComments] = React.useState(post.stats.comments);
   const [shares, setShares] = React.useState(post.stats.shares);
   const [reclips, setReclips] = React.useState(post.stats.reclips);
+  const [userReclipped, setUserReclipped] = React.useState(post.userReclipped || false);
   const [busy, setBusy] = React.useState(false);
 
   // Sync with post data changes
@@ -850,7 +865,8 @@ function EngagementBar({
     setComments(post.stats.comments);
     setShares(post.stats.shares);
     setReclips(post.stats.reclips);
-  }, [post.userLiked, post.stats.likes, post.stats.views, post.stats.comments, post.stats.shares, post.stats.reclips]);
+    setUserReclipped(post.userReclipped || false);
+  }, [post.userLiked, post.stats.likes, post.stats.views, post.stats.comments, post.stats.shares, post.stats.reclips, post.userReclipped]);
 
   // Listen for engagement updates
   React.useEffect(() => {
@@ -982,12 +998,13 @@ function EngagementBar({
         {/* Reclip */}
         <div className="flex flex-col items-center gap-1">
           <button
-            className="flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200 hover:scale-110 active:scale-95"
+            className={`flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200 ${post.userHandle === currentUserHandle ? 'opacity-30 cursor-not-allowed' : 'hover:scale-110 active:scale-95'}`}
             onClick={reclipClick}
-            aria-label="Reclip post"
-            title="Reclip post"
+            disabled={post.userHandle === currentUserHandle}
+            aria-label={post.userHandle === currentUserHandle ? "Cannot reclip your own post" : "Reclip post"}
+            title={post.userHandle === currentUserHandle ? "Cannot reclip your own post" : "Reclip post"}
           >
-            <FiRepeat className="w-4 h-4 text-gray-700 dark:text-gray-200" />
+            <FiRepeat className={`w-4 h-4 ${userReclipped ? 'text-green-500' : 'text-gray-700 dark:text-gray-200'}`} />
           </button>
           <span className="text-xs font-medium text-gray-700 dark:text-gray-200">{reclips}</span>
         </div>
@@ -996,7 +1013,7 @@ function EngagementBar({
   );
 }
 
-const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare, onOpenComments, onView, onReclip }: {
+const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare, onOpenComments, onView, onReclip, onOpenScenes }: {
   post: Post;
   onLike: () => Promise<void>;
   onFollow: () => Promise<void>;
@@ -1004,7 +1021,9 @@ const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare,
   onOpenComments: () => void;
   onView: () => Promise<void>;
   onReclip: () => Promise<void>;
+  onOpenScenes: () => void;
 }) {
+  const { user } = useAuth();
   const titleId = `post-title-${post.id}`;
   const [hasBeenViewed, setHasBeenViewed] = React.useState(false);
   const articleRef = React.useRef<HTMLElement>(null);
@@ -1037,14 +1056,24 @@ const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare,
     <article ref={articleRef} aria-labelledby={titleId} className="pb-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 hover-lift">
       <PostHeader post={post} onFollow={onFollow} />
       <TagRow tags={post.tags} />
-      <Media url={post.mediaUrl} mediaType={post.mediaType} text={post.text} imageText={post.imageText} onDoubleLike={onLike} />
+      <div className="relative">
+        <Media url={post.mediaUrl} mediaType={post.mediaType} text={post.text} imageText={post.imageText} onDoubleLike={onLike} />
+        <button
+          onClick={onOpenScenes}
+          aria-label="Open in Scenes fullscreen"
+          title="Fullscreen"
+          className="absolute bottom-3 right-3 p-2 rounded-full bg-black/60 text-white hover:bg-black/70 focus:outline-none focus:ring-2 focus:ring-white/80"
+        >
+          <FiMaximize size={18} />
+        </button>
+      </div>
       {/* Caption for image/video posts */}
       {post.caption && post.mediaUrl && (
         <div className="px-4 py-3">
           <CaptionText caption={post.caption} />
         </div>
       )}
-      <EngagementBar post={post} onLike={onLike} onShare={onShare} onOpenComments={onOpenComments} onReclip={onReclip} />
+      <EngagementBar post={post} onLike={onLike} onShare={onShare} onOpenComments={onOpenComments} onReclip={onReclip} currentUserHandle={user?.handle} />
     </article>
   );
 });
@@ -1066,6 +1095,8 @@ function FeedPageWrapper() {
   const [selectedPostId, setSelectedPostId] = React.useState<string | null>(null);
   const [shareModalOpen, setShareModalOpen] = React.useState(false);
   const [selectedPostForShare, setSelectedPostForShare] = React.useState<Post | null>(null);
+  const [scenesOpen, setScenesOpen] = React.useState(false);
+  const [selectedPostForScenes, setSelectedPostForScenes] = React.useState<Post | null>(null);
 
   // Determine current filter - custom location overrides tabs
   const currentFilter = customLocation || active;
@@ -1416,16 +1447,55 @@ function FeedPageWrapper() {
             window.dispatchEvent(new CustomEvent(`viewAdded-${p.id}`));
           }}
           onReclip={async () => {
-            if (!online) {
-              await enqueue({ type: 'reclip', postId: p.id, userId, userHandle: user?.handle || 'Unknown@Unknown' });
+            // Prevent users from reclipping their own posts
+            if (p.userHandle === user?.handle) {
+              console.log('Cannot reclip your own post');
               return;
             }
-            const reclippedPost = await reclipPost(userId, p.id, user?.handle || 'Unknown@Unknown');
+            // Check if already reclipped - prevent multiple reclips
+            if (p.userReclipped) {
+              console.log('Post already reclipped by user, ignoring reclip request');
+              return;
+            }
+            if (!online) {
+              // Optimistically update userReclipped and reclip count
+              updateOne(p.id, post => ({
+                ...post,
+                userReclipped: true,
+                stats: { ...post.stats, reclips: post.stats.reclips + 1 }
+              }));
+              await enqueue({ type: 'reclip', postId: p.id, userId, userHandle: user?.handle || 'Unknown@Unknown' });
+              window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`));
+              return;
+            }
+            const { originalPost: updatedOriginalPost, reclippedPost } = await reclipPost(userId, p.id, user?.handle || 'Unknown@Unknown');
+
+            // Check if user already reclipped (reclippedPost will be null)
+            if (!reclippedPost) {
+              console.log('Post already reclipped by user, ignoring reclip request');
+              // Still update the UI to reflect the current state
+              updateOne(p.id, post => ({
+                ...post,
+                userReclipped: updatedOriginalPost.userReclipped,
+                stats: updatedOriginalPost.stats
+              }));
+              return;
+            }
+
+            // New reclip was created - update the original post and add reclipped post to feed
+            updateOne(p.id, post => ({
+              ...post,
+              userReclipped: updatedOriginalPost.userReclipped,
+              stats: updatedOriginalPost.stats
+            }));
             // Add the reclipped post to the current feed
             setPages(prev => [[reclippedPost], ...prev]);
-
             // Notify EngagementBar to update reclip count
             window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`));
+          }}
+          onOpenScenes={() => {
+            setSelectedPostForScenes(p);
+            setScenesOpen(true);
           }}
         />
       ))}
@@ -1483,6 +1553,126 @@ function FeedPageWrapper() {
           }}
         />
       )}
+
+      {/* Scenes Modal (fullscreen) */}
+      {selectedPostForScenes && (() => {
+        const p = selectedPostForScenes;
+        return (
+          <ScenesModal
+            post={p}
+            isOpen={scenesOpen}
+            onClose={() => {
+              setScenesOpen(false);
+              setSelectedPostForScenes(null);
+            }}
+            onLike={async () => {
+              console.log('Like button clicked for post:', p.id, 'userLiked:', p.userLiked);
+              if (!online) {
+                const optimisticPost = { ...p, userLiked: !p.userLiked };
+                updateOne(p.id, post => ({ ...post, userLiked: !post.userLiked }));
+                // Update selectedPostForScenes if this post is currently open in Scenes
+                if (selectedPostForScenes?.id === p.id) {
+                  setSelectedPostForScenes(optimisticPost);
+                }
+                // Dispatch event for ScenesModal to update state
+                window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
+                  detail: { liked: optimisticPost.userLiked, likes: p.stats.likes }
+                }));
+                await enqueue({ type: 'like', postId: p.id, userId });
+                return;
+              }
+              const updated = await toggleLike(userId, p.id);
+              updateOne(p.id, _post => ({ ...updated }));
+              // Update selectedPostForScenes if this post is currently open in Scenes
+              if (selectedPostForScenes?.id === p.id) {
+                setSelectedPostForScenes(updated);
+              }
+              window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
+                detail: { liked: updated.userLiked, likes: updated.stats.likes }
+              }));
+            }}
+            onFollow={async () => {
+              if (!online) {
+                updateOne(p.id, post => ({ ...post, isFollowing: !post.isFollowing }));
+                await enqueue({ type: 'follow', postId: p.id, userId });
+                return;
+              }
+              const updated = await toggleFollowForPost(userId, p.id);
+              updateOne(p.id, _post => ({ ...updated }));
+            }}
+            onShare={async () => {
+              setSelectedPostForShare(p);
+              setShareModalOpen(true);
+            }}
+            onOpenComments={() => handleOpenComments(p.id)}
+            onReclip={async () => {
+              // Prevent users from reclipping their own posts
+              if (p.userHandle === user?.handle) {
+                console.log('Cannot reclip your own post');
+                return;
+              }
+              // Check if already reclipped - prevent multiple reclips
+              if (p.userReclipped) {
+                console.log('Post already reclipped by user, ignoring reclip request');
+                return;
+              }
+              const newReclipsCount = p.stats.reclips + 1;
+              if (!online) {
+                // Optimistically update userReclipped and reclip count
+                const optimisticPost = { ...p, userReclipped: true, stats: { ...p.stats, reclips: newReclipsCount } };
+                updateOne(p.id, post => ({
+                  ...post,
+                  userReclipped: true,
+                  stats: { ...post.stats, reclips: newReclipsCount }
+                }));
+                // Update selectedPostForScenes if this post is currently open in Scenes
+                if (selectedPostForScenes?.id === p.id) {
+                  setSelectedPostForScenes(optimisticPost);
+                }
+                await enqueue({ type: 'reclip', postId: p.id, userId, userHandle: user?.handle || 'Unknown@Unknown' });
+                window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`, {
+                  detail: { reclips: newReclipsCount }
+                }));
+                return;
+              }
+              const { originalPost: updatedOriginalPost, reclippedPost } = await reclipPost(userId, p.id, user?.handle || 'Unknown@Unknown');
+
+              // Check if user already reclipped (reclippedPost will be null)
+              if (!reclippedPost) {
+                console.log('Post already reclipped by user, ignoring reclip request');
+                // Still update the UI to reflect the current state
+                updateOne(p.id, post => ({
+                  ...post,
+                  userReclipped: updatedOriginalPost.userReclipped,
+                  stats: updatedOriginalPost.stats
+                }));
+                // Update selectedPostForScenes if this post is currently open in Scenes
+                if (selectedPostForScenes?.id === p.id) {
+                  setSelectedPostForScenes(updatedOriginalPost);
+                }
+                return;
+              }
+
+              // New reclip was created - update the original post and add reclipped post to feed
+              updateOne(p.id, post => ({
+                ...post,
+                userReclipped: updatedOriginalPost.userReclipped,
+                stats: updatedOriginalPost.stats
+              }));
+              // Update selectedPostForScenes if this post is currently open in Scenes
+              if (selectedPostForScenes?.id === p.id) {
+                setSelectedPostForScenes(updatedOriginalPost);
+              }
+              // Add the reclipped post to the feed
+              setPages(prev => [[reclippedPost], ...prev]);
+              // Notify UI to update reclip count with the new value
+              window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`, {
+                detail: { reclips: updatedOriginalPost.stats.reclips }
+              }));
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }

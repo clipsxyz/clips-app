@@ -7,6 +7,8 @@ use App\Http\Controllers\Api\PostController;
 use App\Http\Controllers\Api\CommentController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\UploadController;
+use App\Http\Controllers\Api\LocationController;
+use App\Http\Controllers\Api\SearchController;
 
 /*
 |--------------------------------------------------------------------------
@@ -27,6 +29,10 @@ Route::get('/health', function () {
         'environment' => app()->environment()
     ]);
 });
+
+// Public search and location routes
+Route::get('/locations/search', [LocationController::class, 'search']);
+Route::get('/search', [SearchController::class, 'unified']);
 
 // Public routes
 Route::prefix('auth')->group(function () {

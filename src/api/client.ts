@@ -1,5 +1,5 @@
-// Updated API client for production backend
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+// Updated API client for Laravel backend
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
 // Helper function to make API requests
 async function apiRequest(endpoint: string, options: RequestInit = {}) {

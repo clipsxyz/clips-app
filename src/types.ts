@@ -41,6 +41,7 @@ export type Post = {
   isBookmarked: boolean;
   isFollowing: boolean;
   userLiked: boolean;
+  userReclipped?: boolean;
   // Backend stat fields
   likes_count?: number; // Backend field
   views_count?: number; // Backend field
@@ -51,6 +52,7 @@ export type Post = {
   isReclipped?: boolean;
   originalPostId?: string;
   original_post_id?: string; // Backend field
+  originalUserHandle?: string; // Original poster's handle (for reclipped posts)
   reclippedBy?: string;
   reclipped_by?: string; // Backend field
   is_reclipped?: boolean; // Backend field
