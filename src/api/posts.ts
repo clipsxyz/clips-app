@@ -262,14 +262,15 @@ let comments: Comment[] = [
 type UserState = {
   likes: Record<string, boolean>;
   bookmarks: Record<string, boolean>;
-  follows: Record<string, boolean>
+  follows: Record<string, boolean>;
+  reclips: Record<string, boolean>;
 };
 
 const userState: Record<string, UserState> = {};
 
 function getState(userId: string): UserState {
   if (!userState[userId]) {
-    userState[userId] = { likes: {}, bookmarks: {}, follows: {} };
+    userState[userId] = { likes: {}, bookmarks: {}, follows: {}, reclips: {} };
   }
   return userState[userId];
 }
@@ -292,7 +293,8 @@ function decorateForUser(userId: string, p: Post): Post {
     ...p,
     userLiked: !!s.likes[p.id],
     isBookmarked: !!s.bookmarks[p.id],
-    isFollowing: !!s.follows[p.userHandle]
+    isFollowing: !!s.follows[p.userHandle],
+    userReclipped: !!s.reclips[p.id]
   };
 }
 
@@ -480,13 +482,30 @@ export async function incrementReclips(userId: string, id: string): Promise<Post
   return decorateForUser(userId, p);
 }
 
-export async function reclipPost(userId: string, originalPostId: string, userHandle: string): Promise<Post> {
+export async function reclipPost(userId: string, originalPostId: string, userHandle: string): Promise<{ originalPost: Post; reclippedPost: Post | null }> {
   await delay(200);
   const originalPost = posts.find(x => x.id === originalPostId);
   if (!originalPost) {
     console.error('Original post not found for reclipPost:', originalPostId);
     throw new Error(`Original post with id ${originalPostId} not found`);
   }
+
+  // Prevent users from reclipping their own posts
+  if (originalPost.userHandle === userHandle) {
+    console.log('Cannot reclip your own post:', originalPostId);
+    throw new Error('Cannot reclip your own post');
+  }
+
+  // Check if user has already reclipped this post
+  const s = getState(userId);
+  if (s.reclips[originalPostId]) {
+    // User has already reclipped this post - return the original post decorated
+    console.log('User has already reclipped this post:', originalPostId);
+    return { originalPost: decorateForUser(userId, originalPost), reclippedPost: null };
+  }
+
+  // Track that user has reclipped this post
+  s.reclips[originalPostId] = true;
 
   // Increment reclip count on original post
   originalPost.stats.reclips += 1;
@@ -495,20 +514,26 @@ export async function reclipPost(userId: string, originalPostId: string, userHan
   const reclippedPost: Post = {
     ...originalPost,
     id: `reclip-${userId}-${originalPostId}-${Date.now()}`,
-    userHandle: userHandle, // Current user's handle
+    userHandle: userHandle, // Current user's handle (person who reclipped it)
+    originalUserHandle: originalPost.userHandle, // Store original poster's handle
     isReclipped: true,
     originalPostId: originalPostId,
     reclippedBy: userId,
     isBookmarked: false,
     isFollowing: false,
     userLiked: false,
+    userReclipped: false, // Reclipped post itself is not reclipped by the user
     stats: { ...originalPost.stats } // Copy stats but don't inherit user interactions
   };
 
   // Add to posts array
   posts.push(reclippedPost);
 
-  return decorateForUser(userId, reclippedPost);
+  // Return both the updated original post (decorated) and the new reclipped post
+  return {
+    originalPost: decorateForUser(userId, originalPost),
+    reclippedPost: decorateForUser(userId, reclippedPost)
+  };
 }
 
 // Comment API functions (without replies)

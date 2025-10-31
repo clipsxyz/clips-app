@@ -47,6 +47,9 @@ class PostController extends Controller
             ->with(['bookmarks' => function ($q) use ($userId) {
                 $q->where('user_id', $userId);
             }])
+            ->with(['reclips' => function ($q) use ($userId) {
+                $q->where('user_id', $userId);
+            }])
             ->with(['user.followers' => function ($q) use ($userId) {
                 $q->where('follower_id', $userId);
             }]);
@@ -65,17 +68,20 @@ class PostController extends Controller
             ->get();
 
         // Transform posts to include user-specific data
-        $transformedPosts = $posts->map(function ($post) use ($userId) {
+        $userModel = $userId ? User::find($userId) : null;
+        $transformedPosts = $posts->map(function ($post) use ($userModel) {
             $postData = $post->toArray();
             
-            if ($userId) {
-                $postData['user_liked'] = $post->isLikedBy(User::find($userId));
-                $postData['is_bookmarked'] = $post->isBookmarkedBy(User::find($userId));
-                $postData['is_following'] = $post->isFollowingAuthor(User::find($userId));
+            if ($userModel) {
+                $postData['user_liked'] = $post->isLikedBy($userModel);
+                $postData['is_bookmarked'] = $post->isBookmarkedBy($userModel);
+                $postData['is_following'] = $post->isFollowingAuthor($userModel);
+                $postData['user_reclipped'] = $post->isReclippedBy($userModel);
             } else {
                 $postData['user_liked'] = false;
                 $postData['is_bookmarked'] = false;
                 $postData['is_following'] = false;
+                $postData['user_reclipped'] = false;
             }
 
             return $postData;
@@ -115,23 +121,29 @@ class PostController extends Controller
             ->with(['bookmarks' => function ($q) use ($userId) {
                 $q->where('user_id', $userId);
             }])
+            ->with(['reclips' => function ($q) use ($userId) {
+                $q->where('user_id', $userId);
+            }])
             ->with(['user.followers' => function ($q) use ($userId) {
                 $q->where('follower_id', $userId);
             }]);
         }
 
         $post = $query->findOrFail($id);
+        $userModel = $userId ? User::find($userId) : null;
 
         $postData = $post->toArray();
         
-        if ($userId) {
-            $postData['user_liked'] = $post->isLikedBy(User::find($userId));
-            $postData['is_bookmarked'] = $post->isBookmarkedBy(User::find($userId));
-            $postData['is_following'] = $post->isFollowingAuthor(User::find($userId));
+        if ($userModel) {
+            $postData['user_liked'] = $post->isLikedBy($userModel);
+            $postData['is_bookmarked'] = $post->isBookmarkedBy($userModel);
+            $postData['is_following'] = $post->isFollowingAuthor($userModel);
+            $postData['user_reclipped'] = $post->isReclippedBy($userModel);
         } else {
             $postData['user_liked'] = false;
             $postData['is_bookmarked'] = false;
             $postData['is_following'] = false;
+            $postData['user_reclipped'] = false;
         }
 
         return response()->json($postData);
@@ -277,12 +289,19 @@ class PostController extends Controller
         $user = Auth::user();
         $originalPost = Post::findOrFail($id);
 
+        // Prevent users from reclipping their own posts
+        if ($originalPost->user_handle === $user->handle) {
+            return response()->json(['error' => 'Cannot reclip your own post'], 400);
+        }
+
         $result = DB::transaction(function () use ($user, $originalPost) {
             // Check if already reclipped
             $existingReclip = $user->reclips()->where('post_id', $originalPost->id)->first();
             
             if ($existingReclip) {
-                throw new \Exception('Post already reclipped');
+                // Return the updated original post instead of error
+                $originalPost->refresh();
+                return $originalPost;
             }
 
             // Create reclipped post
@@ -295,6 +314,7 @@ class PostController extends Controller
                 'location_label' => $originalPost->location_label,
                 'is_reclipped' => true,
                 'original_post_id' => $originalPost->id,
+                'original_user_handle' => $originalPost->user_handle, // Original poster's handle
                 'reclipped_by' => $user->handle,
             ]);
 
@@ -309,6 +329,9 @@ class PostController extends Controller
 
             return $reclippedPost;
         });
+
+        // Refresh the post to get all relationships
+        $result->load(['user', 'originalPost']);
 
         return response()->json($result, 201);
     }

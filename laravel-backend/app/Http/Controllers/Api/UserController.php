@@ -40,21 +40,27 @@ class UserController extends Controller
             }])
             ->with(['bookmarks' => function ($q) use ($userId) {
                 $q->where('user_id', $userId);
+            }])
+            ->with(['reclips' => function ($q) use ($userId) {
+                $q->where('user_id', $userId);
             }]);
         }
 
         $posts = $query->get();
+        $userModel = $userId ? User::find($userId) : null;
 
         // Transform posts to include user-specific data
-        $transformedPosts = $posts->map(function ($post) use ($userId) {
+        $transformedPosts = $posts->map(function ($post) use ($userModel) {
             $postData = $post->toArray();
             
-            if ($userId) {
-                $postData['user_liked'] = $post->isLikedBy(User::find($userId));
-                $postData['is_bookmarked'] = $post->isBookmarkedBy(User::find($userId));
+            if ($userModel) {
+                $postData['user_liked'] = $post->isLikedBy($userModel);
+                $postData['is_bookmarked'] = $post->isBookmarkedBy($userModel);
+                $postData['user_reclipped'] = $post->isReclippedBy($userModel);
             } else {
                 $postData['user_liked'] = false;
                 $postData['is_bookmarked'] = false;
+                $postData['user_reclipped'] = false;
             }
 
             return $postData;
