@@ -134,4 +134,16 @@ class Post extends Model
     {
         return $this->user->followers()->where('follower_id', $user->id)->exists();
     }
+
+    // Notifications relationship
+    public function notifications()
+    {
+        return $this->hasMany(Notification::class);
+    }
+
+    // Stories relationship (posts that were shared as stories)
+    public function sharedAsStories()
+    {
+        return $this->hasMany(Story::class, 'shared_from_post_id');
+    }
 }

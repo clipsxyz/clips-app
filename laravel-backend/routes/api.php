@@ -9,6 +9,9 @@ use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\UploadController;
 use App\Http\Controllers\Api\LocationController;
 use App\Http\Controllers\Api\SearchController;
+use App\Http\Controllers\Api\NotificationController;
+use App\Http\Controllers\Api\MessageController;
+use App\Http\Controllers\Api\StoryController;
 
 /*
 |--------------------------------------------------------------------------
@@ -79,5 +82,30 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('upload')->group(function () {
         Route::post('/single', [UploadController::class, 'single']);
         Route::post('/multiple', [UploadController::class, 'multiple']);
+    });
+
+    // Notifications routes
+    Route::prefix('notifications')->group(function () {
+        Route::get('/', [NotificationController::class, 'index']);
+        Route::get('/unread-count', [NotificationController::class, 'unreadCount']);
+        Route::post('/{id}/read', [NotificationController::class, 'markRead']);
+        Route::post('/mark-all-read', [NotificationController::class, 'markAllRead']);
+    });
+
+    // Messages routes
+    Route::prefix('messages')->group(function () {
+        Route::get('/conversations', [MessageController::class, 'getConversations']);
+        Route::get('/conversation/{otherHandle}', [MessageController::class, 'getConversation']);
+        Route::post('/send', [MessageController::class, 'sendMessage']);
+    });
+
+    // Stories routes
+    Route::prefix('stories')->group(function () {
+        Route::get('/', [StoryController::class, 'index']);
+        Route::get('/user/{handle}', [StoryController::class, 'getUserStories']);
+        Route::post('/', [StoryController::class, 'store']);
+        Route::post('/{id}/view', [StoryController::class, 'view']);
+        Route::post('/{id}/reaction', [StoryController::class, 'addReaction']);
+        Route::post('/{id}/reply', [StoryController::class, 'addReply']);
     });
 });

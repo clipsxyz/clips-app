@@ -79,4 +79,10 @@ class Comment extends Model
     {
         return is_null($this->parent_id);
     }
+
+    // Notifications relationship
+    public function notifications()
+    {
+        return $this->hasMany(Notification::class);
+    }
 }
