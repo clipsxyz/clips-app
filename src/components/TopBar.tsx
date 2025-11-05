@@ -177,12 +177,12 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
                 </span>
               </button>
 
-              {/* Inbox Heart Notification */}
+              {/* Notifications Heart Icon */}
               <button
                 onClick={() => navigate('/inbox')}
                 className="relative p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                aria-label="Open latest messages"
-                title={hasInbox ? 'New messages' : 'Messages'}
+                aria-label="Open notifications"
+                title={hasInbox ? 'New notifications' : 'Notifications'}
               >
                 <div className={`relative w-6 h-6 ${hasInbox ? '' : ''}`}>
                   {hasInbox && (

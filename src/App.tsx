@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiEye, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize } from 'react-icons/fi';
@@ -66,7 +67,7 @@ export default function App() {
       <main id="main" className="mx-auto max-w-md min-h-screen pb-[calc(64px+theme(spacing.safe))] md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800 md:bg-white md:dark:bg-gray-950">
         <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />
         <Outlet context={{ activeTab, setActiveTab, customLocation, setCustomLocation }} />
-        {loc.pathname !== '/discover' && (
+        {loc.pathname !== '/discover' && loc.pathname !== '/create/filters' && loc.pathname !== '/create/instant' && (
           <BottomNav onCreateClick={() => setShowCreateModal(true)} />
         )}
       </main>
@@ -1257,6 +1258,9 @@ function FeedPageWrapper() {
     }
   }
 
+  // Track most recent post ID for polling
+  const latestPostIdRef = React.useRef<string | null>(null);
+
   // Listen for new posts and refresh feed
   React.useEffect(() => {
     console.log('Setting up postCreated event listener');
@@ -1271,6 +1275,7 @@ function FeedPageWrapper() {
       setEnd(false);
       setLoading(false);
       setError(null);
+      latestPostIdRef.current = null; // Reset tracking
 
       // Load fresh data
       console.log('About to call loadMore from handlePostCreated');
@@ -1284,6 +1289,67 @@ function FeedPageWrapper() {
       window.removeEventListener('postCreated', handlePostCreated);
     };
   }, [currentFilter, userId, user]);
+
+  // Poll for new posts every 10 seconds
+  React.useEffect(() => {
+    // Only poll if we have posts loaded and are on the feed page
+    if (pages.length === 0 || loading) return;
+    if (window.location.pathname !== '/feed') return;
+
+    // Update latest post ID from current posts
+    const allPosts = pages.flat();
+    if (allPosts.length > 0) {
+      // First post is the newest (posts are sorted newest first)
+      const firstPostId = allPosts[0].id;
+      if (latestPostIdRef.current === null || firstPostId !== latestPostIdRef.current) {
+        latestPostIdRef.current = firstPostId;
+      }
+    }
+
+    const pollInterval = setInterval(async () => {
+      // Skip if already loading or not on feed page
+      if (loading || end || window.location.pathname !== '/feed') return;
+
+      try {
+        // Fetch first page to check for new posts
+        const page = await fetchPostsPage(currentFilter, 0, 5, userId, user?.local || '', user?.regional || '', user?.national || '');
+
+        if (page.items.length > 0) {
+          const newestPostId = page.items[0].id;
+
+          // If we have a different first post ID, there are new posts
+          if (latestPostIdRef.current === null || newestPostId !== latestPostIdRef.current) {
+            console.log('New posts detected! Refreshing feed...', {
+              newestPostId,
+              currentLatest: latestPostIdRef.current
+            });
+            latestPostIdRef.current = newestPostId;
+
+            // Reset and reload feed
+            setPages([]);
+            setCursor(0);
+            setEnd(false);
+            setLoading(false);
+            setError(null);
+
+            // Load fresh data using the same pattern as loadMore
+            const filterForRequest = currentFilter;
+            const pageFresh = await fetchPostsPage(filterForRequest, 0, 5, userId, user?.local || '', user?.regional || '', user?.national || '');
+            setPages([pageFresh.items]);
+            setCursor(pageFresh.nextCursor);
+            setEnd(pageFresh.nextCursor === null);
+
+            // Scroll to top smoothly to show new posts
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }
+        }
+      } catch (e) {
+        console.error('Error polling for new posts:', e);
+      }
+    }, 10000); // Poll every 10 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [pages.length, loading, end, currentFilter, userId, user?.local, user?.regional, user?.national]);
 
   // Initial load
   React.useEffect(() => {

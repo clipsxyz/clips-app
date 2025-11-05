@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { FiChevronLeft, FiSend } from 'react-icons/fi';
+import { FiChevronLeft, FiSend, FiCornerUpLeft, FiCopy, FiMoreHorizontal } from 'react-icons/fi';
 import { IoMdPhotos } from 'react-icons/io';
 import { BsEmojiSmile } from 'react-icons/bs';
+import { FaPaperPlane, FaExclamationCircle } from 'react-icons/fa';
+import { MdStickyNote2, MdTranslate } from 'react-icons/md';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
-import { fetchPostsPage } from '../api/posts';
 import { fetchConversation, appendMessage, type ChatMessage, markConversationRead } from '../api/messages';
 import { getAvatarForHandle } from '../api/users';
-import { isStoryMediaActive } from '../api/stories';
+import { isStoryMediaActive, wasEverAStory } from '../api/stories';
 
 interface MessageUI extends ChatMessage {
     isFromMe: boolean;
@@ -25,25 +26,315 @@ export default function MessagesPage() {
     const [loading, setLoading] = useState(true);
     const [otherUserAvatar, setOtherUserAvatar] = useState<string | undefined>(undefined);
     const fileInputRef = React.useRef<HTMLInputElement>(null);
+    const listRef = React.useRef<HTMLDivElement>(null);
+
+    // Context menu state
+    const [contextMenu, setContextMenu] = useState<{
+        message: MessageUI | null;
+        x: number;
+        y: number;
+    } | null>(null);
+    const longPressTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+
+    // Sticker picker state
+    const [showStickerPicker, setShowStickerPicker] = useState(false);
+
+    const scrollToBottom = React.useCallback(() => {
+        const el = listRef.current;
+        if (!el) return;
+
+        // Multiple attempts to ensure scroll happens
+        const scroll = () => {
+            if (el) {
+                el.scrollTop = el.scrollHeight;
+            }
+        };
+
+        // Try immediately
+        scroll();
+
+        // Try after requestAnimationFrame
+        requestAnimationFrame(() => {
+            scroll();
+            // Try again after a small delay to ensure DOM is fully updated
+            setTimeout(() => {
+                scroll();
+            }, 100);
+        });
+    }, []);
+
+    // Track the last message ID to detect new messages (more reliable than count)
+    const lastMessageIdRef = React.useRef<string | null>(null);
+    const lastMessageCountRef = React.useRef<number>(0);
+    const lastMessageRef = React.useRef<HTMLDivElement | null>(null);
+
+    // Auto-scroll to bottom whenever messages change
+    // Use useLayoutEffect for immediate DOM updates
+    React.useLayoutEffect(() => {
+        if (messages.length > 0 && !loading) {
+            const currentCount = messages.length;
+            const lastMessage = messages[messages.length - 1];
+            const currentLastId = lastMessage?.id || null;
+
+            // Scroll if message count changed OR if the last message ID changed (new message added)
+            const countChanged = currentCount !== lastMessageCountRef.current;
+            const lastIdChanged = currentLastId !== lastMessageIdRef.current;
+
+            if (countChanged || lastIdChanged) {
+                lastMessageCountRef.current = currentCount;
+                lastMessageIdRef.current = currentLastId;
+
+                // Force scroll to bottom - use requestAnimationFrame for immediate execution
+                const forceScroll = () => {
+                    const el = listRef.current;
+                    if (!el) return;
+
+                    const scrollHeight = el.scrollHeight;
+
+                    // Find the input bar element to get its actual height
+                    const inputBar = document.querySelector('.fixed.bottom-0.bg-gray-900');
+                    const inputBarHeight = inputBar ? inputBar.getBoundingClientRect().height : 80;
+
+                    // Force scroll to absolute bottom - try multiple methods
+                    // Method 1: Direct assignment
+                    el.scrollTop = scrollHeight;
+
+                    // Method 2: scrollTo method
+                    el.scrollTo({
+                        top: scrollHeight,
+                        behavior: 'instant'
+                    });
+
+                    // Method 3: scrollTop assignment after a frame
+                    requestAnimationFrame(() => {
+                        el.scrollTop = scrollHeight;
+                    });
+
+                    // Also try scrollIntoView on last message - this is often more reliable
+                    const lastMsgEl = lastMessageRef.current;
+                    if (lastMsgEl) {
+                        // Use scrollIntoView with block: 'end' to scroll the message into view
+                        requestAnimationFrame(() => {
+                            lastMsgEl.scrollIntoView({
+                                behavior: 'instant',
+                                block: 'end',
+                                inline: 'nearest'
+                            });
+
+                            // Calculate exact scroll position to place message above input bar
+                            // Use requestAnimationFrame to ensure DOM is ready
+                            requestAnimationFrame(() => {
+                                setTimeout(() => {
+                                    const lastMsgRect = lastMsgEl.getBoundingClientRect();
+                                    const containerRect = el.getBoundingClientRect();
+                                    const viewportHeight = window.innerHeight;
+
+                                    // Get the actual input bar height dynamically
+                                    const inputBar = document.querySelector('.fixed.bottom-0.bg-gray-900');
+                                    const actualInputBarHeight = inputBar ? inputBar.getBoundingClientRect().height : inputBarHeight;
+                                    const inputBarTop = viewportHeight - actualInputBarHeight;
+
+                                    // Calculate message position relative to container
+                                    const messageTopRelative = lastMsgRect.top - containerRect.top + el.scrollTop;
+                                    const messageBottomRelative = messageTopRelative + lastMsgRect.height;
+
+                                    // Calculate visible container height (above input bar)
+                                    const visibleContainerHeight = inputBarTop - containerRect.top;
+
+                                    // We want the entire message (including its height) to be above the footer with padding
+                                    // Target: message bottom should be at visibleContainerHeight - padding
+                                    // But we need to account for the message's full height
+                                    const padding = 150; // Extra padding above input bar to ensure full visibility (increased significantly)
+                                    const targetMessageBottom = visibleContainerHeight - padding;
+
+                                    // Calculate the exact scroll position needed
+                                    // We want: messageBottomRelative - scrollTop = targetMessageBottom
+                                    // So: scrollTop = messageBottomRelative - targetMessageBottom
+                                    const targetScrollTop = messageBottomRelative - targetMessageBottom;
+
+                                    // Always scroll to ensure message is visible above footer
+                                    // Force scroll using multiple methods
+                                    el.scrollTop = targetScrollTop;
+                                    el.scrollTo({ top: targetScrollTop, behavior: 'instant' });
+
+                                    // Also try after a frame to ensure it sticks
+                                    requestAnimationFrame(() => {
+                                        el.scrollTop = targetScrollTop;
+                                        el.scrollTo({ top: targetScrollTop, behavior: 'instant' });
+                                    });
+
+                                    if (targetScrollTop > el.scrollTop) {
+
+
+                                        // Double-check after a delay and make a final adjustment if needed
+                                        setTimeout(() => {
+                                            const finalMsgRect = lastMsgEl.getBoundingClientRect();
+                                            const finalContainerRect = el.getBoundingClientRect();
+                                            const finalInputBar = document.querySelector('.fixed.bottom-0.bg-gray-900');
+                                            const finalInputBarHeight = finalInputBar ? finalInputBar.getBoundingClientRect().height : actualInputBarHeight;
+                                            const finalInputBarTop = window.innerHeight - finalInputBarHeight;
+                                            const finalVisibleContainerHeight = finalInputBarTop - finalContainerRect.top;
+                                            const finalPadding = 180; // Extra padding for final adjustment to ensure full visibility (increased significantly)
+                                            const finalTargetMessageBottom = finalVisibleContainerHeight - finalPadding;
+
+                                            const finalMessageTopRelative = finalMsgRect.top - finalContainerRect.top + el.scrollTop;
+                                            const finalMessageBottomRelative = finalMessageTopRelative + finalMsgRect.height;
+
+                                            if (finalMessageBottomRelative > el.scrollTop + finalTargetMessageBottom) {
+                                                const finalTargetScrollTop = finalMessageBottomRelative - finalTargetMessageBottom;
+
+                                                // Force scroll using multiple methods
+                                                el.scrollTop = finalTargetScrollTop;
+                                                el.scrollTo({ top: finalTargetScrollTop, behavior: 'instant' });
+
+                                                // Verify and retry multiple times if needed
+                                                requestAnimationFrame(() => {
+                                                    if (Math.abs(el.scrollTop - finalTargetScrollTop) > 1) {
+
+                                                        // Try multiple scroll methods
+                                                        el.scrollTop = finalTargetScrollTop;
+                                                        el.scrollTo({ top: finalTargetScrollTop, behavior: 'instant' });
+
+                                                        // Try again after a delay
+                                                        setTimeout(() => {
+                                                            el.scrollTop = finalTargetScrollTop;
+                                                            el.scrollTo({ top: finalTargetScrollTop, behavior: 'instant' });
+
+                                                        }, 50);
+                                                    }
+
+                                                });
+                                            }
+                                        }, 150);
+                                    }
+                                }, 50);
+                            });
+                        });
+                    }
+                };
+
+                // Try immediately with requestAnimationFrame
+                requestAnimationFrame(() => {
+                    forceScroll();
+                    // Try again after a short delay
+                    setTimeout(forceScroll, 50);
+                    setTimeout(forceScroll, 150);
+                    setTimeout(forceScroll, 300);
+                });
+            }
+        }
+    }, [messages, loading]);
+
+    // Also use MutationObserver to detect DOM changes and scroll
+    React.useEffect(() => {
+        const el = listRef.current;
+        if (!el) return;
+
+        const observer = new MutationObserver(() => {
+            // When DOM changes, check if we need to scroll
+            const scrollHeight = el.scrollHeight;
+            const scrollTop = el.scrollTop;
+            const clientHeight = el.clientHeight;
+            const maxScroll = scrollHeight - clientHeight;
+
+            // Only auto-scroll if user is already near the bottom (within 100px)
+            // This prevents interrupting user scrolling but catches new messages
+            const isNearBottom = Math.abs(scrollTop - maxScroll) < 100;
+
+            if (isNearBottom && maxScroll > 0) {
+                requestAnimationFrame(() => {
+                    el.scrollTop = scrollHeight;
+                    // Also try scrollIntoView on last message
+                    const lastMsgEl = lastMessageRef.current;
+                    if (lastMsgEl) {
+                        const inputBar = document.querySelector('.fixed.bottom-0.bg-gray-900');
+                        const inputBarHeight = inputBar ? inputBar.getBoundingClientRect().height : 80;
+                        requestAnimationFrame(() => {
+                            const lastMsgRect = lastMsgEl.getBoundingClientRect();
+                            const viewportHeight = window.innerHeight;
+                            const inputBarTop = viewportHeight - inputBarHeight;
+
+                            // Calculate exact scroll position to place message above input bar
+                            const containerRect = el.getBoundingClientRect();
+
+                            // Calculate message position relative to container
+                            const messageTopRelative = lastMsgRect.top - containerRect.top + el.scrollTop;
+                            const messageBottomRelative = messageTopRelative + lastMsgRect.height;
+
+                            // Calculate visible container height (above input bar)
+                            const visibleContainerHeight = inputBarTop - containerRect.top;
+                            const padding = 150; // Extra padding above input bar to ensure full visibility (increased significantly)
+                            const targetMessageBottom = visibleContainerHeight - padding;
+
+                            // Calculate the exact scroll position needed
+                            const targetScrollTop = messageBottomRelative - targetMessageBottom;
+
+                            // Always scroll to ensure message is visible above footer
+                            // Force scroll using multiple methods
+                            el.scrollTop = targetScrollTop;
+                            el.scrollTo({ top: targetScrollTop, behavior: 'instant' });
+
+                            // Also try after a frame to ensure it sticks
+                            requestAnimationFrame(() => {
+                                el.scrollTop = targetScrollTop;
+                                el.scrollTo({ top: targetScrollTop, behavior: 'instant' });
+                            });
+
+                            if (targetScrollTop > el.scrollTop) {
+
+                                // Double-check after a delay and make a final adjustment if needed
+                                setTimeout(() => {
+                                    const finalMsgRect = lastMsgEl.getBoundingClientRect();
+                                    const finalContainerRect = el.getBoundingClientRect();
+                                    const finalInputBar = document.querySelector('.fixed.bottom-0.bg-gray-900');
+                                    const finalInputBarHeight = finalInputBar ? finalInputBar.getBoundingClientRect().height : inputBarHeight;
+                                    const finalInputBarTop = window.innerHeight - finalInputBarHeight;
+                                    const finalVisibleContainerHeight = finalInputBarTop - finalContainerRect.top;
+                                    const finalPadding = 180; // Extra padding for final adjustment to ensure full visibility (increased significantly)
+                                    const finalTargetMessageBottom = finalVisibleContainerHeight - finalPadding;
+
+                                    const finalMessageTopRelative = finalMsgRect.top - finalContainerRect.top + el.scrollTop;
+                                    const finalMessageBottomRelative = finalMessageTopRelative + finalMsgRect.height;
+
+                                    if (finalMessageBottomRelative > el.scrollTop + finalTargetMessageBottom) {
+                                        const finalTargetScrollTop = finalMessageBottomRelative - finalTargetMessageBottom;
+
+                                        // Force scroll using multiple methods
+                                        el.scrollTop = finalTargetScrollTop;
+                                        el.scrollTo({ top: finalTargetScrollTop, behavior: 'instant' });
+
+                                        // Verify and retry if needed
+                                        requestAnimationFrame(() => {
+                                            if (Math.abs(el.scrollTop - finalTargetScrollTop) > 1) {
+                                                el.scrollTop = finalTargetScrollTop;
+                                                el.scrollTo({ top: finalTargetScrollTop, behavior: 'instant' });
+                                            }
+                                        });
+                                    }
+                                }, 150);
+                            }
+                        });
+                    }
+                });
+            }
+        });
+
+        observer.observe(el, {
+            childList: true,
+            subtree: true,
+            attributes: false,
+            characterData: false
+        });
+
+        return () => observer.disconnect();
+    }, []);
 
     React.useEffect(() => {
         async function loadAvatar() {
             if (!handle) return;
 
-            // Fetch posts to find the user's avatar
-            const allTabs = ['finglas', 'dublin', 'ireland', 'following'];
-            for (const tab of allTabs) {
-                try {
-                    const page = await fetchPostsPage(tab, null, 100, user?.id || 'me', user?.local || '', user?.regional || '', user?.national || '');
-                    const userPost = page.items.find(post => post.userHandle === handle);
-                    if (userPost && userPost.userAvatarUrl) {
-                        setOtherUserAvatar(userPost.userAvatarUrl);
-                        return;
-                    }
-                } catch (error) {
-                    console.error('Error fetching avatar:', error);
-                }
-            }
+            // Avatar is retrieved via getAvatarForHandle function
+            // No need to fetch from posts
 
             // Mock avatar for Sarah@Artane
             if (handle === 'Sarah@Artane') {
@@ -56,13 +347,20 @@ export default function MessagesPage() {
         // Load conversation from API
         if (!handle || !user?.handle) return;
         fetchConversation(user.handle, handle).then(items => {
-            const mapped: MessageUI[] = items.map(m => ({
+            // Ensure ascending order by timestamp so latest is at the bottom
+            const sorted = [...items].sort((a, b) => a.timestamp - b.timestamp);
+            const mapped: MessageUI[] = sorted.map(m => ({
                 ...m,
                 isFromMe: m.senderHandle === user.handle,
                 senderAvatar: m.senderHandle === user.handle ? (user.avatarUrl || getAvatarForHandle(user.handle)) : getAvatarForHandle(handle)
             }));
             setMessages(mapped);
             setLoading(false);
+            // Initialize refs
+            lastMessageCountRef.current = mapped.length;
+            lastMessageIdRef.current = mapped.length > 0 ? mapped[mapped.length - 1].id : null;
+            // Scroll to bottom after initial load
+            setTimeout(scrollToBottom, 0);
             // Mark as read on open
             markConversationRead(user.handle, handle).catch(() => { });
             const urls = Array.from(new Set(mapped.map(m => m.imageUrl).filter(Boolean) as string[]));
@@ -74,13 +372,52 @@ export default function MessagesPage() {
         const onUpdate = (e: any) => {
             const participants: string[] = e.detail?.participants || [];
             if (!participants.includes(user?.handle || '') || !participants.includes(handle || '')) return;
+
             fetchConversation(user!.handle!, handle!).then(items => {
-                const mapped = items.map(m => ({
+                const sorted = [...items].sort((a, b) => a.timestamp - b.timestamp);
+                const mapped = sorted.map(m => ({
                     ...m,
                     isFromMe: m.senderHandle === user!.handle,
                     senderAvatar: m.senderHandle === user!.handle ? (user!.avatarUrl || getAvatarForHandle(user!.handle)) : getAvatarForHandle(handle!)
                 }));
+
+                // Reset the refs so the useEffect will detect the change
+                lastMessageCountRef.current = 0;
+                lastMessageIdRef.current = null;
                 setMessages(mapped);
+
+                // Force scroll after messages are set - try multiple times for reliability
+                const forceScrollRealTime = () => {
+                    const el = listRef.current;
+                    if (!el) return;
+
+                    const scrollHeight = el.scrollHeight;
+                    el.scrollTop = scrollHeight;
+
+                    // Also try scrollIntoView on last message
+                    const lastMsgEl = lastMessageRef.current;
+                    if (lastMsgEl) {
+                        const inputBar = document.querySelector('.fixed.bottom-0.bg-gray-900');
+                        const inputBarHeight = inputBar ? inputBar.getBoundingClientRect().height : 80;
+
+                        setTimeout(() => {
+                            const lastMsgRect = lastMsgEl.getBoundingClientRect();
+                            const viewportHeight = window.innerHeight;
+                            const inputBarTop = viewportHeight - inputBarHeight;
+
+                            if (lastMsgRect.bottom > inputBarTop) {
+                                const adjustment = lastMsgRect.bottom - inputBarTop + 20;
+                                el.scrollTop = el.scrollTop + adjustment;
+                            }
+                        }, 10);
+                    }
+                };
+
+                // Try multiple times with delays to ensure it works
+                setTimeout(forceScrollRealTime, 50);
+                setTimeout(forceScrollRealTime, 150);
+                setTimeout(forceScrollRealTime, 300);
+
                 const urls = Array.from(new Set(mapped.map(m => m.imageUrl).filter(Boolean) as string[]));
                 Promise.all(urls.map(async (u) => [u, await isStoryMediaActive(u)] as const))
                     .then(entries => setStoryActiveByUrl(Object.fromEntries(entries)));
@@ -88,13 +425,65 @@ export default function MessagesPage() {
         };
         window.addEventListener('conversationUpdated', onUpdate as any);
         return () => window.removeEventListener('conversationUpdated', onUpdate as any);
-    }, [handle, user?.handle]);
+    }, [handle, user?.handle, scrollToBottom]);
 
     const handleSend = async () => {
         if (!messageText.trim()) return;
         if (!user?.handle || !handle) return;
-        await appendMessage(user.handle, handle, { text: messageText });
+
+        // Optimistically add message to state immediately for instant UI update
+        const tempMessage: MessageUI = {
+            id: `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            senderHandle: user.handle,
+            text: messageText,
+            timestamp: Date.now(),
+            isFromMe: true,
+            senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle),
+            isSystemMessage: false
+        };
+
+        // Add message immediately to state
+        setMessages(prev => {
+            const sorted = [...prev, tempMessage].sort((a, b) => a.timestamp - b.timestamp);
+            return sorted;
+        });
         setMessageText('');
+
+        // Scroll to bottom immediately
+        setTimeout(() => scrollToBottom(), 100);
+
+        // Then send to API (will update state again via event)
+        // Notifications are created automatically in appendMessage
+        await appendMessage(user.handle, handle, { text: messageText });
+    };
+
+    const handleSendSticker = async (sticker: string) => {
+        if (!user?.handle || !handle) return;
+
+        // Create temporary message for optimistic update
+        const tempMessage: MessageUI = {
+            id: `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            senderHandle: user.handle,
+            text: sticker,
+            timestamp: Date.now(),
+            isFromMe: true,
+            senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle),
+            isSystemMessage: false
+        };
+
+        // Add message immediately to state
+        setMessages(prev => {
+            const sorted = [...prev, tempMessage].sort((a, b) => a.timestamp - b.timestamp);
+            return sorted;
+        });
+        setShowStickerPicker(false);
+
+        // Scroll to bottom immediately
+        setTimeout(() => scrollToBottom(), 100);
+
+        // Then send to API (will update state again via event)
+        // Notifications are created automatically in appendMessage
+        await appendMessage(user.handle, handle, { text: sticker });
     };
 
     const handleImageClick = () => {
@@ -110,6 +499,28 @@ export default function MessagesPage() {
         reader.onloadend = () => {
             const imageUrl = reader.result as string;
             if (!user?.handle || !handle) return;
+
+            // Optimistically add message to state immediately for instant UI update
+            const tempMessage: MessageUI = {
+                id: `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                senderHandle: user.handle,
+                imageUrl: imageUrl,
+                timestamp: Date.now(),
+                isFromMe: true,
+                senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle),
+                isSystemMessage: false
+            };
+
+            // Add message immediately to state
+            setMessages(prev => {
+                const sorted = [...prev, tempMessage].sort((a, b) => a.timestamp - b.timestamp);
+                return sorted;
+            });
+
+            // Scroll to bottom immediately
+            setTimeout(() => scrollToBottom(), 100);
+
+            // Then send to API (will update state again via event)
             appendMessage(user.handle, handle, { imageUrl });
         };
         reader.readAsDataURL(file);
@@ -131,22 +542,110 @@ export default function MessagesPage() {
         }
     };
 
-    // (unused helper retained for future grouping but updated to numbers)
-    const getUniqueTimestamps = () => {
-        const uniqueTimes: string[] = [];
-        let lastTime = '';
-        messages.forEach((msg, idx) => {
-            const time = formatTimestamp(msg.timestamp);
-            if (time !== lastTime && idx > 0) {
-                lastTime = new Date(messages[idx - 1].timestamp).toDateString();
-            }
-            const dateKey = new Date(msg.timestamp).toDateString();
-            if (!uniqueTimes.includes(dateKey)) {
-                uniqueTimes.push(dateKey);
-            }
+    // Handle long-press (mobile) and right-click (desktop)
+    const handleMessageLongPress = (msg: MessageUI, e: React.MouseEvent | React.TouchEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        setContextMenu({
+            message: msg,
+            x: e.type === 'touchstart' ? (e as React.TouchEvent).touches[0].clientX : (e as React.MouseEvent).clientX,
+            y: e.type === 'touchstart' ? (e as React.TouchEvent).touches[0].clientY : (e as React.MouseEvent).clientY
         });
-        return uniqueTimes;
     };
+
+    const handleMessageContextMenu = (msg: MessageUI, e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        setContextMenu({
+            message: msg,
+            x: e.clientX,
+            y: e.clientY
+        });
+    };
+
+    // Handle long-press start
+    const handleTouchStart = (msg: MessageUI, e: React.TouchEvent) => {
+        if (longPressTimerRef.current) {
+            clearTimeout(longPressTimerRef.current);
+        }
+        longPressTimerRef.current = setTimeout(() => {
+            handleMessageLongPress(msg, e);
+        }, 500); // 500ms for long press
+    };
+
+    // Handle long-press end
+    const handleTouchEnd = () => {
+        if (longPressTimerRef.current) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+        }
+    };
+
+    // Close context menu
+    const closeContextMenu = () => {
+        setContextMenu(null);
+    };
+
+    // Handle context menu actions
+    const handleReply = () => {
+        if (!contextMenu?.message) return;
+        // Set reply text and focus input
+        setMessageText(`Replying to: ${contextMenu.message.text || 'message'} - `);
+        closeContextMenu();
+    };
+
+    const handleCopy = () => {
+        if (!contextMenu?.message) return;
+        const textToCopy = contextMenu.message.text || '';
+        if (textToCopy) {
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                // Could show a toast notification here
+            });
+        }
+        closeContextMenu();
+    };
+
+    const handleForward = () => {
+        if (!contextMenu?.message) return;
+        // TODO: Implement forward functionality
+        closeContextMenu();
+    };
+
+    const handleTranslate = () => {
+        if (!contextMenu?.message) return;
+        // TODO: Implement translate functionality
+        closeContextMenu();
+    };
+
+    const handleReport = () => {
+        if (!contextMenu?.message) return;
+        // TODO: Implement report functionality
+        if (confirm('Report this message?')) {
+            // Report logic here
+        }
+        closeContextMenu();
+    };
+
+    // Close menu when clicking outside
+    React.useEffect(() => {
+        const handleClickOutside = () => {
+            if (contextMenu) {
+                closeContextMenu();
+            }
+        };
+
+        if (contextMenu) {
+            document.addEventListener('click', handleClickOutside);
+            document.addEventListener('contextmenu', handleClickOutside);
+            return () => {
+                document.removeEventListener('click', handleClickOutside);
+                document.removeEventListener('contextmenu', handleClickOutside);
+            };
+        }
+    }, [contextMenu]);
+
 
     if (loading) {
         return (
@@ -185,11 +684,12 @@ export default function MessagesPage() {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-4 py-4 pb-24">
+            <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-4 pb-40" style={{ minHeight: 0, maxHeight: 'calc(100vh - 120px)' }}>
                 <div className="space-y-3">
                     {messages.map((msg, idx) => {
                         const showTimestamp = idx === 0 ||
-                            (messages[idx - 1].timestamp - msg.timestamp) > 60000; // Show timestamp if more than 1 minute gap
+                            (msg.timestamp - messages[idx - 1].timestamp) > 60000; // gap > 1 minute
+                        const isLastMessage = idx === messages.length - 1;
 
                         return (
                             <React.Fragment key={msg.id}>
@@ -204,13 +704,22 @@ export default function MessagesPage() {
                                     </div>
                                 )}
                                 {!msg.isSystemMessage && (
-                                    <div className={`flex ${msg.isFromMe ? 'justify-end' : 'justify-start'} ${showTimestamp ? 'mt-4' : ''}`}>
+                                    <div
+                                        ref={isLastMessage ? lastMessageRef : null}
+                                        className={`flex ${msg.isFromMe ? 'justify-end' : 'justify-start'} ${showTimestamp ? 'mt-4' : ''}`}
+                                    >
                                         {msg.isFromMe ? (
-                                            <div className="bg-purple-600 rounded-2xl px-4 py-2 max-w-[70%] break-words">
+                                            <div
+                                                className="bg-purple-600 rounded-2xl px-4 py-2 max-w-[70%] break-words cursor-pointer select-none"
+                                                onContextMenu={(e) => handleMessageContextMenu(msg, e)}
+                                                onTouchStart={(e) => handleTouchStart(msg, e)}
+                                                onTouchEnd={handleTouchEnd}
+                                                onTouchCancel={handleTouchEnd}
+                                            >
                                                 {msg.imageUrl && (
                                                     <div className="relative mb-2">
                                                         <img src={msg.imageUrl} alt="Sent image" className="max-w-full rounded-lg" />
-                                                        {msg.imageUrl && storyActiveByUrl[msg.imageUrl] === false && (
+                                                        {msg.imageUrl && wasEverAStory(msg.imageUrl) && storyActiveByUrl[msg.imageUrl] === false && (
                                                             <div className="absolute inset-0 bg-black/50 rounded-lg flex items-center justify-center">
                                                                 <span className="text-[10px] text-white/90 px-2 py-1 rounded">Story unavailable</span>
                                                             </div>
@@ -225,14 +734,20 @@ export default function MessagesPage() {
                                                     <Avatar
                                                         src={msg.senderAvatar}
                                                         name={msg.senderHandle}
-                                                        size="xs"
+                                                        size="sm"
                                                     />
                                                 )}
-                                                <div className="bg-gray-800 rounded-2xl px-4 py-2 break-words">
+                                                <div
+                                                    className="bg-gray-800 rounded-2xl px-4 py-2 break-words cursor-pointer select-none"
+                                                    onContextMenu={(e) => handleMessageContextMenu(msg, e)}
+                                                    onTouchStart={(e) => handleTouchStart(msg, e)}
+                                                    onTouchEnd={handleTouchEnd}
+                                                    onTouchCancel={handleTouchEnd}
+                                                >
                                                     {msg.imageUrl && (
                                                         <div className="relative mb-2">
                                                             <img src={msg.imageUrl} alt="Received image" className="max-w-full rounded-lg" />
-                                                            {msg.imageUrl && storyActiveByUrl[msg.imageUrl] === false && (
+                                                            {msg.imageUrl && wasEverAStory(msg.imageUrl) && storyActiveByUrl[msg.imageUrl] === false && (
                                                                 <div className="absolute inset-0 bg-black/50 rounded-lg flex items-center justify-center">
                                                                     <span className="text-[10px] text-white/90 px-2 py-1 rounded">Story unavailable</span>
                                                                 </div>
@@ -300,6 +815,155 @@ export default function MessagesPage() {
                     </div>
                 </div>
             </div>
+
+            {/* Context Menu */}
+            {contextMenu && (
+                <div
+                    className="fixed bg-gray-900 border border-gray-700 rounded-lg shadow-2xl z-50 min-w-[200px]"
+                    style={{
+                        left: `${contextMenu.x}px`,
+                        top: `${contextMenu.y}px`,
+                        transform: 'translate(-50%, -10px)'
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <div className="py-2">
+                        {/* Timestamp */}
+                        {contextMenu.message && (
+                            <div className="px-4 py-2 text-xs text-gray-400 border-b border-gray-700">
+                                {formatTimestamp(contextMenu.message.timestamp)}
+                            </div>
+                        )}
+
+                        {/* Menu Items */}
+                        <button
+                            onClick={handleReply}
+                            className="w-full text-left px-4 py-3 hover:bg-gray-800 flex items-center gap-3 text-white"
+                        >
+                            <FiCornerUpLeft className="w-5 h-5" />
+                            <span>Reply</span>
+                        </button>
+
+                        <button
+                            onClick={() => {
+                                setShowStickerPicker(true);
+                                closeContextMenu();
+                            }}
+                            className="w-full text-left px-4 py-3 hover:bg-gray-800 flex items-center gap-3 text-white"
+                        >
+                            <MdStickyNote2 className="w-5 h-5" />
+                            <span>Add sticker</span>
+                        </button>
+
+                        <button
+                            onClick={handleForward}
+                            className="w-full text-left px-4 py-3 hover:bg-gray-800 flex items-center gap-3 text-white"
+                        >
+                            <FaPaperPlane className="w-5 h-5" />
+                            <span>Forward</span>
+                        </button>
+
+                        <button
+                            onClick={handleCopy}
+                            className="w-full text-left px-4 py-3 hover:bg-gray-800 flex items-center gap-3 text-white"
+                        >
+                            <FiCopy className="w-5 h-5" />
+                            <span>Copy</span>
+                        </button>
+
+                        <button
+                            onClick={handleTranslate}
+                            className="w-full text-left px-4 py-3 hover:bg-gray-800 flex items-center gap-3 text-white"
+                        >
+                            <MdTranslate className="w-5 h-5" />
+                            <span>Translate</span>
+                        </button>
+
+                        <button
+                            onClick={handleReport}
+                            className="w-full text-left px-4 py-3 hover:bg-gray-800 flex items-center gap-3 text-red-500 border-t border-gray-700"
+                        >
+                            <FaExclamationCircle className="w-5 h-5" />
+                            <span>Report</span>
+                        </button>
+
+                        <button
+                            onClick={() => { /* TODO: More options */ closeContextMenu(); }}
+                            className="w-full text-left px-4 py-3 hover:bg-gray-800 flex items-center gap-3 text-white"
+                        >
+                            <FiMoreHorizontal className="w-5 h-5" />
+                            <span>More</span>
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Sticker Picker Modal */}
+            {showStickerPicker && (
+                <div
+                    className="fixed inset-0 bg-black/80 z-50 flex items-end justify-center"
+                    onClick={() => setShowStickerPicker(false)}
+                >
+                    <div
+                        className="bg-gray-900 rounded-t-3xl w-full max-w-md max-h-[60vh] overflow-y-auto"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="sticky top-0 bg-gray-900 border-b border-gray-700 px-4 py-3 flex items-center justify-between">
+                            <h3 className="text-white font-semibold">Add Sticker</h3>
+                            <button
+                                onClick={() => setShowStickerPicker(false)}
+                                className="text-gray-400 hover:text-white"
+                            >
+                                <FiChevronLeft className="w-6 h-6 rotate-180" />
+                            </button>
+                        </div>
+
+                        <div className="p-4 grid grid-cols-4 gap-4">
+                            {/* Common Emoji Stickers */}
+                            {['😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '🙃', '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😚', '😙', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '🤥', '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮', '🤧', '🥵', '🥶', '😵', '🤯', '🤠', '🥳', '🥸', '😎', '🤓', '🧐', '😕', '😟', '🙁', '☹️', '😮', '😯', '😲', '😳', '🥺', '😦', '😧', '😨', '😰', '😥', '😢', '😭', '😱', '😖', '😣', '😞', '😓', '😩', '😫', '🥱', '😤', '😡', '😠', '🤬', '😈', '👿', '💀', '☠️', '💩', '🤡', '👹', '👺', '👻', '👽', '👾', '🤖', '😺', '😸', '😹', '😻', '😼', '😽', '🙀', '😿', '😾'].map((emoji) => (
+                                <button
+                                    key={emoji}
+                                    onClick={() => handleSendSticker(emoji)}
+                                    className="text-4xl hover:bg-gray-800 rounded-2xl p-4 transition-colors flex items-center justify-center aspect-square"
+                                >
+                                    {emoji}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Additional sticker categories */}
+                        <div className="p-4 border-t border-gray-700">
+                            <h4 className="text-white font-semibold mb-3">Hearts</h4>
+                            <div className="grid grid-cols-6 gap-3">
+                                {['❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔', '❣️', '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💟'].map((emoji) => (
+                                    <button
+                                        key={emoji}
+                                        onClick={() => handleSendSticker(emoji)}
+                                        className="text-3xl hover:bg-gray-800 rounded-xl p-3 transition-colors flex items-center justify-center aspect-square"
+                                    >
+                                        {emoji}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="p-4 border-t border-gray-700">
+                            <h4 className="text-white font-semibold mb-3">Gestures</h4>
+                            <div className="grid grid-cols-6 gap-3">
+                                {['👍', '👎', '👊', '✊', '🤛', '🤜', '🤞', '✌️', '🤟', '🤘', '🤙', '👌', '🤌', '🤏', '👇', '☝️', '👆', '👈', '👉', '👋', '🤚', '🖐', '✋', '🖖', '👏', '🙌', '🤲', '🤝', '🙏'].map((emoji) => (
+                                    <button
+                                        key={emoji}
+                                        onClick={() => handleSendSticker(emoji)}
+                                        className="text-3xl hover:bg-gray-800 rounded-xl p-3 transition-colors flex items-center justify-center aspect-square"
+                                    >
+                                        {emoji}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

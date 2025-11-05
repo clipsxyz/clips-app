@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAuth } from '../context/Auth';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { createPost } from '../api/posts';
 import { FiCamera, FiImage, FiMapPin, FiX } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
@@ -8,12 +8,123 @@ import Avatar from '../components/Avatar';
 export default function CreatePage() {
     const { user } = useAuth();
     const navigate = useNavigate();
+    const locationState = useLocation().state as {
+        videoUrl?: string;
+        filtered?: boolean;
+        filterInfo?: {
+            active: string;
+            brightness: number;
+            contrast: number;
+            saturation: number;
+            hue: number;
+            exportFailed: boolean;
+        };
+    } | null;
     const [text, setText] = React.useState(''); // Main text - used for text-only posts OR captions for image posts
     const [location, setLocation] = React.useState('');
     const [selectedMedia, setSelectedMedia] = React.useState<string | null>(null);
     const [mediaType, setMediaType] = React.useState<'image' | 'video' | null>(null);
     const [imageText, setImageText] = React.useState(''); // Text overlay for images
     const [isUploading, setIsUploading] = React.useState(false);
+    const [filteredFromFlow, setFilteredFromFlow] = React.useState(false);
+    const captionRef = React.useRef<HTMLTextAreaElement | null>(null);
+    const videoRef = React.useRef<HTMLVideoElement | null>(null);
+
+    // Helper to build CSS filter string from filterInfo
+    function buildCssFilterFromFilterInfo() {
+        const info = locationState?.filterInfo;
+        if (!info) return '';
+        const parts: string[] = [];
+        if (info.active === 'bw') parts.push('grayscale(1)');
+        else if (info.active === 'sepia') parts.push('sepia(0.8)');
+        else if (info.active === 'vivid') parts.push(`saturate(${1.6 * (info.saturation || 1)}) contrast(${1.1 * (info.contrast || 1)})`);
+        else if (info.active === 'cool') parts.push(`hue-rotate(200deg) saturate(${1.2 * (info.saturation || 1)})`);
+        if (info.brightness && info.brightness !== 1) parts.push(`brightness(${info.brightness})`);
+        if (info.contrast && info.contrast !== 1) parts.push(`contrast(${info.contrast})`);
+        if (info.saturation && info.saturation !== 1) parts.push(`saturate(${info.saturation})`);
+        if (info.hue && info.hue !== 0) parts.push(`hue-rotate(${info.hue * 360}deg)`);
+        return parts.join(' ');
+    }
+
+    // Fallback: if export failed earlier, re-export with Canvas 2D here
+    async function ensureFilteredVideoIfNeeded(originalUrl: string): Promise<string> {
+        const info = locationState?.filterInfo;
+        if (!info || !info.exportFailed) return originalUrl;
+        try {
+            const v = document.createElement('video');
+            v.src = originalUrl;
+            v.crossOrigin = 'anonymous';
+            v.muted = true;
+            v.playsInline = true;
+            await new Promise<void>((resolve) => {
+                if (v.readyState >= 1) return resolve();
+                const on = () => { v.removeEventListener('loadedmetadata', on); resolve(); };
+                v.addEventListener('loadedmetadata', on);
+                setTimeout(() => { v.removeEventListener('loadedmetadata', on); resolve(); }, 1500);
+            });
+            const srcW = v.videoWidth || 720;
+            const srcH = v.videoHeight || 1280;
+            const longSide = Math.max(srcW, srcH);
+            const scale = longSide > 720 ? 720 / longSide : 1;
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.round(srcW * scale);
+            canvas.height = Math.round(srcH * scale);
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return originalUrl;
+            const filterStr = buildCssFilterFromFilterInfo();
+            const stream = canvas.captureStream(24);
+            let mimeType = 'video/webm;codecs=vp9';
+            if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm;codecs=vp8';
+            if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm';
+            const mr = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 1200000 });
+            const chunks: BlobPart[] = [];
+            mr.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+            const done = new Promise<void>((resolve) => { mr.onstop = () => resolve(); });
+
+            let last = -1;
+            const draw = () => {
+                if (v.ended) { if (mr.state !== 'inactive') mr.stop(); return; }
+                if (v.currentTime !== last) {
+                    ctx.filter = filterStr || 'none';
+                    ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+                    last = v.currentTime;
+                }
+                requestAnimationFrame(draw);
+            };
+
+            v.currentTime = 0;
+            v.loop = false;
+            mr.start(500);
+            await v.play();
+            requestAnimationFrame(draw);
+            const safety = setTimeout(() => { if (mr.state === 'recording') mr.stop(); }, 8000);
+            await done;
+            clearTimeout(safety);
+            if (chunks.length === 0) return originalUrl;
+            const blob = new Blob(chunks, { type: mimeType });
+            if (blob.size < 1000) return originalUrl;
+            return URL.createObjectURL(blob);
+        } catch {
+            return originalUrl;
+        }
+    }
+
+    // Prefill from Instant Filters flow
+    React.useEffect(() => {
+        (async () => {
+            if (locationState?.videoUrl) {
+                let url = locationState.videoUrl;
+                // If export failed upstream, try to produce a filtered video here
+                url = await ensureFilteredVideoIfNeeded(url);
+                setSelectedMedia(url);
+                setMediaType('video');
+                setFilteredFromFlow(!!locationState.filtered || !!locationState.filterInfo);
+                // Focus caption for quick posting
+                setTimeout(() => captionRef.current?.focus(), 0);
+            }
+        })();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [locationState?.videoUrl]);
 
     // Debug: Log user data on component mount
     React.useEffect(() => {
@@ -48,6 +159,14 @@ export default function CreatePage() {
                 id: user.id,
                 handle: user.handle,
                 regional: user.regional
+            });
+
+            console.log('Posting video:', {
+                selectedMedia: selectedMedia ? selectedMedia.substring(0, 50) + '...' : null,
+                mediaType,
+                filteredFromFlow,
+                isBlobUrl: selectedMedia?.startsWith('blob:'),
+                isDataUrl: selectedMedia?.startsWith('data:')
             });
 
             await createPost(
@@ -136,6 +255,7 @@ export default function CreatePage() {
                         : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700'
                         }`}>
                         <textarea
+                            ref={captionRef}
                             value={text}
                             onChange={(e) => setText(e.target.value)}
                             placeholder={selectedMedia ? "Write a caption for your post..." : "Tap to type"}
@@ -183,6 +303,9 @@ export default function CreatePage() {
                 {/* Media Preview */}
                 {selectedMedia && (
                     <div className="relative mb-6">
+                        {filteredFromFlow && (
+                            <span className="absolute top-2 left-2 z-10 px-2 py-1 rounded-full text-[11px] font-semibold bg-purple-600 text-white shadow">Filtered</span>
+                        )}
                         {mediaType === 'image' ? (
                             <div className="relative">
                                 <img
@@ -201,10 +324,40 @@ export default function CreatePage() {
                             </div>
                         ) : mediaType === 'video' ? (
                             <video
+                                ref={videoRef}
                                 src={selectedMedia}
                                 controls
                                 className="w-full h-64 object-cover rounded-2xl"
                                 preload="metadata"
+                                style={locationState?.filterInfo?.exportFailed ? (() => {
+                                    const filterInfo = locationState.filterInfo;
+                                    if (!filterInfo) return {};
+
+                                    // Apply CSS filters as fallback when export failed
+                                    let filter = '';
+                                    if (filterInfo.active === 'bw') {
+                                        filter = 'grayscale(1)';
+                                    } else if (filterInfo.active === 'sepia') {
+                                        filter = 'sepia(0.8)';
+                                    } else if (filterInfo.active === 'vivid') {
+                                        filter = `saturate(${1.6 * filterInfo.saturation}) contrast(${1.1 * filterInfo.contrast})`;
+                                    } else if (filterInfo.active === 'cool') {
+                                        filter = `hue-rotate(200deg) saturate(${1.2 * filterInfo.saturation})`;
+                                    }
+
+                                    // Apply adjustments
+                                    if (filterInfo.brightness !== 1) {
+                                        filter += ` brightness(${filterInfo.brightness})`;
+                                    }
+                                    if (filterInfo.contrast !== 1) {
+                                        filter += ` contrast(${filterInfo.contrast})`;
+                                    }
+                                    if (filterInfo.saturation !== 1) {
+                                        filter += ` saturate(${filterInfo.saturation})`;
+                                    }
+
+                                    return filter ? { filter } : {};
+                                })() : undefined}
                             />
                         ) : null}
                         <button

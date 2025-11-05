@@ -24,7 +24,7 @@ export async function fetchConversation(a: string, b: string): Promise<ChatMessa
     return conversations.get(id)?.slice().sort((m1, m2) => m2.timestamp - m1.timestamp) || [];
 }
 
-export async function appendMessage(from: string, to: string, message: Omit<ChatMessage, 'id' | 'timestamp'> & { timestamp?: number }): Promise<ChatMessage> {
+export async function appendMessage(from: string, to: string, message: Omit<ChatMessage, 'id' | 'timestamp' | 'senderHandle'> & { timestamp?: number }): Promise<ChatMessage> {
     const id = getConversationId(from, to);
     const list = conversations.get(id) || [];
     const msg: ChatMessage = {
@@ -39,6 +39,28 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
     conversations.set(id, list);
     // Recompute unread for receiver across all threads
     unreadByHandle.set(to, await computeUnreadTotal(to));
+
+    // Create notifications for stickers and replies (only if not a system message)
+    if (!message.isSystemMessage && message.text) {
+        // Dynamically import to avoid circular dependency
+        const { createNotification, isStickerMessage, isReplyToPost } = await import('./notifications');
+        if (isStickerMessage(message.text)) {
+            await createNotification({
+                type: 'sticker',
+                fromHandle: from,
+                toHandle: to,
+                message: message.text
+            });
+        } else if (isReplyToPost(message.text)) {
+            await createNotification({
+                type: 'reply',
+                fromHandle: from,
+                toHandle: to,
+                message: message.text
+            });
+        }
+    }
+
     // Dispatch events so UI can update/notify
     window.dispatchEvent(new CustomEvent('conversationUpdated', { detail: { participants: [from, to], message: msg } }));
     window.dispatchEvent(new CustomEvent('inboxUnreadChanged', { detail: { handle: to, unread: unreadByHandle.get(to) || 0 } }));
