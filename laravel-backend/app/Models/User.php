@@ -133,4 +133,64 @@ class User extends Authenticatable
     {
         return $this->reclips()->where('post_id', $post->id)->exists();
     }
+
+    // Notifications relationships
+    public function notifications()
+    {
+        return $this->hasMany(Notification::class);
+    }
+
+    public function unreadNotifications()
+    {
+        return $this->hasMany(Notification::class)->where('read', false);
+    }
+
+    // Messages relationships
+    public function sentMessages()
+    {
+        return $this->hasMany(Message::class, 'sender_handle', 'handle');
+    }
+
+    public function receivedMessages()
+    {
+        return $this->hasMany(Message::class, 'recipient_handle', 'handle');
+    }
+
+    public function conversations()
+    {
+        // Get all unique conversation IDs involving this user
+        $conversationIds = Message::where('sender_handle', $this->handle)
+            ->orWhere('recipient_handle', $this->handle)
+            ->distinct()
+            ->pluck('conversation_id');
+
+        return Message::whereIn('conversation_id', $conversationIds)
+            ->orderBy('created_at', 'desc');
+    }
+
+    // Stories relationships
+    public function stories()
+    {
+        return $this->hasMany(Story::class);
+    }
+
+    public function activeStories()
+    {
+        return $this->hasMany(Story::class)->where('expires_at', '>', now());
+    }
+
+    public function storyViews()
+    {
+        return $this->hasMany(StoryView::class);
+    }
+
+    public function storyReactions()
+    {
+        return $this->hasMany(StoryReaction::class);
+    }
+
+    public function storyReplies()
+    {
+        return $this->hasMany(StoryReply::class);
+    }
 }
