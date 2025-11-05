@@ -20,11 +20,19 @@ export default function ClipPage() {
   const [showTextEditor, setShowTextEditor] = React.useState(false);
   const [showControls, setShowControls] = React.useState(false);
   const [sharedPostInfo, setSharedPostInfo] = React.useState<{ postId?: string; userId?: string } | null>(null);
+  const [filteredFromFlow, setFilteredFromFlow] = React.useState(false);
+  const [videoSegments, setVideoSegments] = React.useState<string[]>([]);
+  const [currentSegmentIndex, setCurrentSegmentIndex] = React.useState(0);
+  const [isPostingSegments, setIsPostingSegments] = React.useState(false);
+  const textAreaRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const videoRef = React.useRef<HTMLVideoElement | null>(null);
+  const [videoSize, setVideoSize] = React.useState<{ w: number; h: number } | null>(null);
 
   // Check for shared post data on mount
   React.useEffect(() => {
     console.log('ClipPage mounted, checking location state...');
     const sharedStory = location.state?.sharedStory;
+    const passedVideo = location.state?.videoUrl as string | undefined;
     console.log('Shared story from location state:', sharedStory);
 
     if (sharedStory) {
@@ -49,6 +57,26 @@ export default function ClipPage() {
       } catch (error) {
         console.error('Error processing shared story data:', error);
       }
+    }
+
+    // Accept direct video from filters flow
+    if (passedVideo) {
+      setSelectedMedia(passedVideo);
+      setMediaType('video');
+      if (location.state?.filtered) setFilteredFromFlow(true);
+
+      // Handle multiple segments from instant create flow
+      const segments = location.state?.videoSegments as string[] | undefined;
+      const segmentIndex = location.state?.segmentIndex as number | undefined;
+      if (segments && segments.length > 1) {
+        setVideoSegments(segments);
+        setCurrentSegmentIndex(segmentIndex || 0);
+      }
+
+      setShowControls(true);
+      // Keep text editor collapsed by default to match regular Clips UX
+      setShowTextEditor(false);
+      setTimeout(() => textAreaRef.current?.focus(), 0);
     }
   }, [location.state]);
 
@@ -94,6 +122,13 @@ export default function ClipPage() {
   const handleSubmit = async () => {
     if (!selectedMedia || !user) return;
 
+    // If we have multiple segments, post them sequentially
+    if (videoSegments.length > 1) {
+      await postAllSegmentsSequentially();
+      return;
+    }
+
+    // Single segment or regular clip
     setIsUploading(true);
     try {
       const mediaUrl = selectedMedia;
@@ -122,6 +157,51 @@ export default function ClipPage() {
       alert('Failed to create story. Please try again.');
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const postAllSegmentsSequentially = async () => {
+    if (!user || videoSegments.length === 0) return;
+
+    setIsPostingSegments(true);
+    try {
+      // Post each segment sequentially
+      for (let i = 0; i < videoSegments.length; i++) {
+        setCurrentSegmentIndex(i); // Update UI to show current segment being posted
+        const segmentUrl = videoSegments[i];
+
+        await createStory(
+          user.id,
+          user.handle,
+          segmentUrl,
+          'video',
+          i === 0 ? text.trim() || undefined : undefined, // Only add text to first segment
+          i === 0 ? storyLocation.trim() || undefined : undefined, // Only add location to first segment
+          textColor,
+          textSize,
+          i === 0 ? sharedPostInfo?.postId : undefined,
+          i === 0 ? sharedPostInfo?.userId : undefined
+        );
+
+        // Dispatch event to refresh story indicators after each post
+        window.dispatchEvent(new CustomEvent('storyCreated', {
+          detail: { userHandle: user.handle }
+        }));
+
+        // Small delay between posts to avoid overwhelming the server
+        if (i < videoSegments.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+
+      // All segments posted, navigate to feed
+      navigate('/feed');
+    } catch (error) {
+      console.error('Error creating story segments:', error);
+      alert(`Failed to create story segment ${currentSegmentIndex + 1}. Please try again.`);
+    } finally {
+      setIsPostingSegments(false);
+      setCurrentSegmentIndex(0);
     }
   };
 
@@ -235,15 +315,18 @@ export default function ClipPage() {
         </div>
       </div>
 
-      {/* Media Preview - Full Screen */}
-      <div className="w-full h-full flex items-center justify-center bg-black">
+      {/* Media Preview - Full Screen (reserve space for controls when open) */}
+      <div className={`w-full h-full flex items-center justify-center bg-black ${showControls ? 'pb-[40vh]' : ''}`}>
         {mediaType === 'image' ? (
-          <div className="relative w-full h-full">
+          <div className="relative w-full h-full flex items-center justify-center">
             <img
               src={selectedMedia}
               alt="Story preview"
-              className="w-full h-full object-contain"
+              className="max-w-full max-h-full w-auto h-auto"
             />
+            {filteredFromFlow && (
+              <span className="absolute top-4 left-4 z-10 px-2 py-1 rounded-full text-[11px] font-semibold bg-purple-600 text-white shadow">Filtered</span>
+            )}
             {/* Text Overlay Preview */}
             {text && (
               <div className="absolute bottom-20 left-0 right-0 px-6 pointer-events-none">
@@ -263,11 +346,33 @@ export default function ClipPage() {
             )}
           </div>
         ) : (
-          <video
-            src={selectedMedia}
-            controls
-            className="w-full h-full object-contain"
-          />
+          <div className="relative w-full h-full flex items-center justify-center">
+            <div
+              className="flex items-center justify-center"
+              style={{
+                maxWidth: '100%',
+                maxHeight: '100%',
+                aspectRatio: videoSize ? `${videoSize.w} / ${videoSize.h}` : undefined,
+              }}
+            >
+              <video
+                ref={videoRef}
+                src={selectedMedia}
+                controls
+                className="w-full h-full"
+                style={{ objectFit: 'contain', display: 'block' }}
+                onLoadedMetadata={() => {
+                  const v = videoRef.current;
+                  if (v && v.videoWidth && v.videoHeight) {
+                    setVideoSize({ w: v.videoWidth, h: v.videoHeight });
+                  }
+                }}
+              />
+            </div>
+            {filteredFromFlow && (
+              <span className="absolute top-4 left-4 z-10 px-2 py-1 rounded-full text-[11px] font-semibold bg-purple-600 text-white shadow">Filtered</span>
+            )}
+          </div>
         )}
       </div>
 
@@ -289,6 +394,7 @@ export default function ClipPage() {
             {showTextEditor && (
               <div className="space-y-4">
                 <textarea
+                  ref={textAreaRef}
                   value={text}
                   onChange={(e) => setText(e.target.value)}
                   placeholder="Type your story text..."
@@ -364,12 +470,30 @@ export default function ClipPage() {
             </div>
 
             {/* Share Button */}
+            {videoSegments.length > 1 && (
+              <div className="mb-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
+                <p className="text-sm text-blue-700 dark:text-blue-400 font-medium">
+                  📹 Your video will be split into {videoSegments.length} clips (15 seconds each)
+                </p>
+                {isPostingSegments && (
+                  <p className="text-xs text-blue-600 dark:text-blue-500 mt-1">
+                    Posting clips... ({currentSegmentIndex + 1} of {videoSegments.length})
+                  </p>
+                )}
+              </div>
+            )}
             <button
               onClick={handleSubmit}
-              disabled={isUploading}
+              disabled={isUploading || isPostingSegments}
               className="w-full py-4 rounded-2xl bg-gradient-to-r from-green-500 via-blue-500 to-blue-600 text-white font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-all shadow-lg hover:scale-[1.02] active:scale-[0.98]"
             >
-              {isUploading ? 'Sharing Your Story...' : 'Share to Story'}
+              {isPostingSegments
+                ? `Posting ${videoSegments.length} Clips... (${currentSegmentIndex + 1}/${videoSegments.length})`
+                : isUploading
+                  ? 'Sharing Your Story...'
+                  : videoSegments.length > 1
+                    ? `Share ${videoSegments.length} Clips to Story`
+                    : 'Share to Story'}
             </button>
           </div>
         </div>

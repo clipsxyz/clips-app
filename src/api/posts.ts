@@ -399,9 +399,51 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       userNational: p.userNational
     })));
 
+    // Sort by newest first - extract timestamp from ID and sort descending
+    // IDs format: "post-{id}-{index}-{timestamp}-{random}" or "artane-post-{n}-{timestamp}-{random}"
+    // New posts: "{uuid}-{timestamp}"
+    // New posts are added with unshift, so they're at the beginning of the posts array
+    const sorted = filtered.slice().sort((a, b) => {
+      // Extract timestamp from ID - find any 13-digit number (timestamp)
+      const extractTimestamp = (id: string): number => {
+        const match = id.match(/\d{13}/);
+        if (match) {
+          const ts = parseInt(match[0], 10);
+          return ts;
+        }
+        return 0;
+      };
+
+      const tsA = extractTimestamp(a.id);
+      const tsB = extractTimestamp(b.id);
+
+      // If both have timestamps, sort by timestamp descending (newest first)
+      if (tsA > 0 && tsB > 0) {
+        const result = tsB - tsA; // Descending: newest first (larger timestamp = newer)
+        return result;
+      }
+
+      // If only one has timestamp, prioritize it
+      if (tsA > 0) return -1; // A is newer, put it first
+      if (tsB > 0) return 1;  // B is newer, put it first
+
+      // Fallback: since new posts are added with unshift, they're at the beginning of posts array
+      // But we want to ensure newest first, so compare IDs (newer IDs have later timestamps)
+      // For UUIDs with timestamps at the end, newer = larger lexicographically
+      return b.id.localeCompare(a.id); // Descending order (newer IDs first)
+    });
+
+    // Debug: log the sorted order
+    console.log('Sorted posts (first 3):', sorted.slice(0, 3).map((p, i) => ({
+      index: i,
+      id: p.id.substring(0, 60),
+      timestamp: p.id.match(/\d{13}/)?.[0] || 'no timestamp',
+      userHandle: p.userHandle
+    })));
+
     const start = cursor ?? 0;
-    const slice = filtered.slice(start, start + limit).map(p => decorateForUser(userId, p));
-    const next = start + slice.length < filtered.length ? start + slice.length : null;
+    const slice = sorted.slice(start, start + limit).map(p => decorateForUser(userId, p));
+    const next = start + slice.length < sorted.length ? start + slice.length : null;
 
     console.log('Returning page with:', { itemsCount: slice.length, nextCursor: next });
     return { items: slice, nextCursor: next };

@@ -416,3 +416,8 @@ export async function isStoryMediaActive(mediaUrl: string): Promise<boolean> {
     const now = Date.now();
     return stories.some(s => s.mediaUrl === mediaUrl && s.expiresAt > now);
 }
+
+// Utility: check if a media URL was ever a story (regardless of expiration)
+export function wasEverAStory(mediaUrl: string): boolean {
+    return stories.some(s => s.mediaUrl === mediaUrl);
+}

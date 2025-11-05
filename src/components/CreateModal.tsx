@@ -44,6 +44,23 @@ export default function CreateModal({ isOpen, onClose, onNavigate }: CreateModal
 
                 {/* Options */}
                 <div className="px-4 pb-6 space-y-3">
+                    {/* Instant Create Option */}
+                    <button
+                        onClick={() => handleNavigate('/create/instant')}
+                        className="w-full flex items-center gap-4 p-4 rounded-xl bg-gray-50 dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                    >
+                        <div className="w-14 h-14 rounded-full bg-gradient-to-tr from-red-500 via-pink-500 to-purple-600 p-0.5">
+                            <div className="w-full h-full rounded-full bg-gray-950 flex items-center justify-center">
+                                <FiCamera className="w-6 h-6 text-white" />
+                            </div>
+                        </div>
+                        <div className="flex-1 text-left">
+                            <div className="font-semibold text-gray-900 dark:text-gray-100">Instant Create</div>
+                            <div className="text-sm text-gray-600 dark:text-gray-400">
+                                Open camera immediately and record a clip, then add filters
+                            </div>
+                        </div>
+                    </button>
                     {/* Create Story Option */}
                     <button
                         onClick={() => handleNavigate('/clip')}

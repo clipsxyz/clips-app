@@ -15,6 +15,9 @@ import StoriesPage from '../pages/StoriesPage';
 import ViewProfilePage from '../pages/ViewProfilePage';
 import MessagesPage from '../pages/MessagesPage';
 import InboxPage from '../pages/InboxPage';
+import InstantCreatePage from '../pages/InstantCreatePage';
+import InstantFiltersPage from '../pages/InstantFiltersPage';
+import SplashPage from '../pages/SplashPage';
 
 const Placeholder = ({ name }: { name: string }) => <div className="p-6">{name}</div>;
 
@@ -25,10 +28,13 @@ export default function Root() {
                 <ThemeProvider>
                     <BrowserRouter>
                         <Routes>
+                            <Route path="/splash" element={<SplashPage />} />
                             <Route path="/" element={<App />}>
-                                <Route index element={<Navigate to="/feed" replace />} />
+                                <Route index element={<Navigate to="/splash" replace />} />
                                 <Route path="feed" element={<FeedPage />} />
                                 <Route path="create" element={<CreatePage />} />
+                                <Route path="create/instant" element={<InstantCreatePage />} />
+                                <Route path="create/filters" element={<InstantFiltersPage />} />
                                 <Route path="login" element={<LoginPage />} />
                                 <Route path="boost" element={<Placeholder name="Boost" />} />
                                 <Route path="clip" element={<ClipPage />} />
