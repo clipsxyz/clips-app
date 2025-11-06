@@ -712,7 +712,7 @@ export async function createPost(
     id: `${crypto.randomUUID()}-${Date.now()}`,
     userHandle,
     locationLabel: location || 'Unknown Location',
-    tags: [], // Could extract hashtags from text later
+    tags: [],
     mediaUrl: imageUrl || '', // Empty string for text-only posts
     mediaType: mediaType || undefined, // No media type for text-only posts
     text: text || undefined, // Store the text content
