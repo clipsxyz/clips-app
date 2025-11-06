@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiEye, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize } from 'react-icons/fi';
+import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import TopBar from './components/TopBar';
 import CommentsModal from './components/CommentsModal';
@@ -168,10 +168,10 @@ function FollowButton({ initial, onToggle }: { initial: boolean; onToggle: () =>
       aria-pressed={following}
       aria-label={following ? 'Unfollow user' : 'Follow user'}
       title={following ? 'Unfollow' : 'Follow'}
-      className={`px-3 py-2 rounded-lg border text-sm font-medium disabled:opacity-60 transition-transform active:scale-[.98]
+      className={`px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-60 transition-all duration-200 active:scale-[.98]
         ${following
-          ? 'bg-gray-100 border-gray-300 text-gray-700 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200'
-          : 'bg-white border-gray-300 text-gray-800 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-200'}`}
+          ? 'bg-gray-100 border border-gray-300 text-gray-700 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200'
+          : 'bg-gray-900 text-white hover:bg-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600'}`}
     >
       {following ? 'Following' : 'Follow +'}
     </button>
@@ -250,15 +250,18 @@ function PostHeader({ post, onFollow }: { post: Post; onFollow: () => Promise<vo
   const isReclippedPost = post.isReclipped && post.originalUserHandle;
 
   return (
-    <div className="flex items-start justify-between px-4 mt-4">
+    <div className="flex items-start justify-between px-4 pt-4 pb-3">
       <div className="flex items-center gap-3 flex-1">
-        <Avatar
-          src={avatarSrc}
-          name={post.userHandle.split('@')[0]} // Extract name from handle like "John@Dublin"
-          size="sm"
-          hasStory={hasStory}
-          onClick={hasStory ? handleAvatarClick : undefined}
-        />
+        <div className="relative">
+          <div className="absolute -inset-1 bg-gradient-to-r from-purple-500 via-pink-500 to-blue-500 rounded-full opacity-75 blur-sm"></div>
+          <Avatar
+            src={avatarSrc}
+            name={post.userHandle.split('@')[0]} // Extract name from handle like "John@Dublin"
+            size="sm"
+            hasStory={hasStory}
+            onClick={hasStory ? handleAvatarClick : undefined}
+          />
+        </div>
         <div className="flex-1" onClick={(e) => e.stopPropagation()}>
           {/* Show reclip indicator if this is a reclipped post */}
           {isReclippedPost && (
@@ -275,14 +278,14 @@ function PostHeader({ post, onFollow }: { post: Post; onFollow: () => Promise<vo
             }}
             className="text-left hover:opacity-70 transition-opacity w-full"
           >
-            <h3 id={titleId} className="font-semibold flex items-center gap-1">
+            <h3 id={titleId} className="font-semibold flex items-center gap-1.5 text-gray-900 dark:text-gray-100">
               <span>{isReclippedPost ? post.originalUserHandle : post.userHandle}</span>
               <Flag
                 value={isCurrentUser ? (user?.countryFlag || '') : (getFlagForHandle(isReclippedPost ? post.originalUserHandle! : post.userHandle) || '')}
                 size={16}
               />
             </h3>
-            <div className="text-xs text-gray-600 dark:text-gray-300 flex items-center gap-1">
+            <div className="text-xs text-gray-600 dark:text-gray-300 flex items-center gap-1 mt-0.5">
               <FiMapPin className="w-3 h-3" />
               {post.locationLabel || 'No location set'}
             </div>
@@ -295,9 +298,18 @@ function PostHeader({ post, onFollow }: { post: Post; onFollow: () => Promise<vo
 }
 
 function TagRow({ tags }: { tags: string[] }) {
+  if (tags.length === 0) return null;
+
   return (
-    <div className="flex justify-between px-4 text-sm text-gray-600 dark:text-gray-300 mt-3">
-      {tags.slice(0, 5).map((t, i) => <span key={i}>{t}</span>)}
+    <div className="flex flex-wrap gap-2 px-4 pb-3">
+      {tags.slice(0, 5).map((t, i) => (
+        <span
+          key={i}
+          className="px-2.5 py-1 rounded-full text-xs font-medium bg-gradient-to-r from-purple-100 to-pink-100 dark:from-purple-900/30 dark:to-pink-900/30 text-purple-700 dark:text-purple-300 border border-purple-200/50 dark:border-purple-700/50"
+        >
+          #{t}
+        </span>
+      ))}
     </div>
   );
 }
@@ -473,7 +485,7 @@ function CaptionText({ caption }: { caption: string }) {
   );
 }
 
-function Media({ url, mediaType, text, imageText, onDoubleLike }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; onDoubleLike: () => Promise<void> }) {
+function Media({ url, mediaType, text, imageText, onDoubleLike, onOpenScenes }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void }) {
   const [burst, setBurst] = React.useState(false);
   const [isPlaying, setIsPlaying] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -647,7 +659,7 @@ function Media({ url, mediaType, text, imageText, onDoubleLike }: { url?: string
   }
 
   return (
-    <div className="mx-4 mt-4 select-none">
+    <div className="mx-4 my-4 select-none">
       <div
         role="button"
         tabIndex={0}
@@ -660,7 +672,7 @@ function Media({ url, mediaType, text, imageText, onDoubleLike }: { url?: string
         }}
         onClick={handleClick}
         onTouchEnd={handleTouchEnd}
-        className="relative w-full aspect-square rounded-2xl ring-1 ring-gray-200/60 dark:ring-gray-700/60 overflow-hidden bg-gray-50 dark:bg-gray-900"
+        className="relative w-full aspect-video rounded-xl overflow-hidden bg-gray-50 dark:bg-gray-900 shadow-inner"
       >
         {mediaType === 'video' ? (
           <>
@@ -755,6 +767,20 @@ function Media({ url, mediaType, text, imageText, onDoubleLike }: { url?: string
               </div>
             )}
 
+            {/* Fullscreen Button - Bottom Right */}
+            {onOpenScenes && !isLoading && !hasError && (
+              <div className="absolute bottom-4 right-4 flex items-center gap-2">
+                <button
+                  onClick={onOpenScenes}
+                  aria-label="Open in Scenes fullscreen"
+                  title="Fullscreen"
+                  className="w-10 h-10 bg-black bg-opacity-50 rounded-full flex items-center justify-center hover:bg-opacity-70 transition-all duration-200"
+                >
+                  <FiMaximize className="w-5 h-5 text-white" />
+                </button>
+              </div>
+            )}
+
             {/* Gradient progress bar */}
             {!isLoading && !hasError && (
               <div className="absolute left-0 right-0 bottom-0 h-1.5 bg-black/30">
@@ -770,14 +796,29 @@ function Media({ url, mediaType, text, imageText, onDoubleLike }: { url?: string
             )}
           </>
         ) : (
-          <img
-            src={url}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            className="absolute inset-0 w-full h-full object-cover"
-            draggable={false}
-          />
+          <>
+            <img
+              src={url}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              className="absolute inset-0 w-full h-full object-cover"
+              draggable={false}
+            />
+            {/* Fullscreen Button - Bottom Right for Images */}
+            {onOpenScenes && (
+              <div className="absolute bottom-4 right-4">
+                <button
+                  onClick={onOpenScenes}
+                  aria-label="Open in Scenes fullscreen"
+                  title="Fullscreen"
+                  className="w-10 h-10 bg-black bg-opacity-50 rounded-full flex items-center justify-center hover:bg-opacity-70 transition-all duration-200"
+                >
+                  <FiMaximize className="w-5 h-5 text-white" />
+                </button>
+              </div>
+            )}
+          </>
         )}
         {/* Image Text Overlay */}
         {imageText && mediaType === 'image' && (
@@ -856,7 +897,6 @@ function EngagementBar({
 }) {
   const [liked, setLiked] = React.useState(post.userLiked);
   const [likes, setLikes] = React.useState(post.stats.likes);
-  const [views, setViews] = React.useState(post.stats.views);
   const [comments, setComments] = React.useState(post.stats.comments);
   const [shares, setShares] = React.useState(post.stats.shares);
   const [reclips, setReclips] = React.useState(post.stats.reclips);
@@ -867,21 +907,16 @@ function EngagementBar({
   React.useEffect(() => {
     setLiked(post.userLiked);
     setLikes(post.stats.likes);
-    setViews(post.stats.views);
     setComments(post.stats.comments);
     setShares(post.stats.shares);
     setReclips(post.stats.reclips);
     setUserReclipped(post.userReclipped || false);
-  }, [post.userLiked, post.stats.likes, post.stats.views, post.stats.comments, post.stats.shares, post.stats.reclips, post.userReclipped]);
+  }, [post.userLiked, post.stats.likes, post.stats.comments, post.stats.shares, post.stats.reclips, post.userReclipped]);
 
   // Listen for engagement updates
   React.useEffect(() => {
     const handleCommentAdded = () => {
       setComments(prev => prev + 1);
-    };
-
-    const handleViewAdded = () => {
-      setViews(prev => prev + 1);
     };
 
     const handleShareAdded = () => {
@@ -899,14 +934,12 @@ function EngagementBar({
 
     // Listen for all engagement events
     window.addEventListener(`commentAdded-${post.id}`, handleCommentAdded);
-    window.addEventListener(`viewAdded-${post.id}`, handleViewAdded);
     window.addEventListener(`shareAdded-${post.id}`, handleShareAdded);
     window.addEventListener(`reclipAdded-${post.id}`, handleReclipAdded);
     window.addEventListener(`likeToggled-${post.id}`, handleLikeToggled as EventListener);
 
     return () => {
       window.removeEventListener(`commentAdded-${post.id}`, handleCommentAdded);
-      window.removeEventListener(`viewAdded-${post.id}`, handleViewAdded);
       window.removeEventListener(`shareAdded-${post.id}`, handleShareAdded);
       window.removeEventListener(`reclipAdded-${post.id}`, handleReclipAdded);
       window.removeEventListener(`likeToggled-${post.id}`, handleLikeToggled as EventListener);
@@ -943,77 +976,73 @@ function EngagementBar({
     }
   }
 
+  const [bookmarked, setBookmarked] = React.useState(false);
+
   return (
-    <div className="px-4 mt-4">
+    <div className="px-4 pb-4 pt-3 border-t border-gray-200 dark:border-gray-700">
       <div className="flex items-center justify-between">
-        {/* Like */}
-        <div className="flex flex-col items-center gap-1">
+        <div className="flex items-center gap-6">
+          {/* Like */}
           <button
-            className={`flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200 hover:scale-110 active:scale-95 ${liked
-              ? 'hover:opacity-90'
-              : ''
-              }`}
+            className="flex items-center gap-2 transition-opacity hover:opacity-70 active:opacity-50"
             onClick={likeClick}
             aria-pressed={liked}
             aria-label={liked ? 'Unlike' : 'Like'}
             title={liked ? 'Unlike' : 'Like'}
           >
             {liked ? (
-              <AiFillHeart className="text-red-500 w-4 h-4" />
+              <AiFillHeart className="text-red-500 w-5 h-5" />
             ) : (
-              <FiHeart className="w-4 h-4 text-gray-700 dark:text-gray-200" />
+              <FiHeart className="w-5 h-5 text-gray-600 dark:text-gray-400" />
             )}
+            <span className="text-sm text-gray-700 dark:text-gray-300">{likes}</span>
           </button>
-          <span className="text-xs font-medium text-gray-700 dark:text-gray-200">{likes}</span>
-        </div>
 
-        {/* Views */}
-        <div className="flex flex-col items-center gap-1">
-          <div className="flex items-center justify-center w-8 h-8 rounded-full">
-            <FiEye className="w-4 h-4 text-gray-700 dark:text-gray-200" />
-          </div>
-          <span className="text-xs font-medium text-gray-700 dark:text-gray-200">{views}</span>
-        </div>
-
-        {/* Comments */}
-        <div className="flex flex-col items-center gap-1">
+          {/* Comments */}
           <button
-            className="flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200 hover:scale-110 active:scale-95"
+            className="flex items-center gap-2 transition-opacity hover:opacity-70 active:opacity-50"
             onClick={onOpenComments}
             aria-label="Comments"
             title="Comments"
           >
-            <FiMessageSquare className="w-4 h-4 text-gray-700 dark:text-gray-200" />
+            <FiMessageSquare className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+            <span className="text-sm text-gray-700 dark:text-gray-300">{comments}</span>
           </button>
-          <span className="text-xs font-medium text-gray-700 dark:text-gray-200">{comments}</span>
-        </div>
 
-        {/* Share */}
-        <div className="flex flex-col items-center gap-1">
+          {/* Share */}
           <button
-            className="flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200 hover:scale-110 active:scale-95"
+            className="flex items-center gap-2 transition-opacity hover:opacity-70 active:opacity-50"
             onClick={shareClick}
             aria-label="Share post"
             title="Share post"
           >
-            <FiShare2 className="w-4 h-4 text-gray-700 dark:text-gray-200" />
+            <FiShare2 className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+            <span className="text-sm text-gray-700 dark:text-gray-300">{shares}</span>
           </button>
-          <span className="text-xs font-medium text-gray-700 dark:text-gray-200">{shares}</span>
-        </div>
 
-        {/* Reclip */}
-        <div className="flex flex-col items-center gap-1">
+          {/* Reclip */}
           <button
-            className={`flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200 ${post.userHandle === currentUserHandle ? 'opacity-30 cursor-not-allowed' : 'hover:scale-110 active:scale-95'}`}
+            className={`flex items-center gap-2 transition-opacity hover:opacity-70 active:opacity-50 ${post.userHandle === currentUserHandle ? 'opacity-30 cursor-not-allowed' : ''}`}
             onClick={reclipClick}
             disabled={post.userHandle === currentUserHandle}
             aria-label={post.userHandle === currentUserHandle ? "Cannot reclip your own post" : "Reclip post"}
             title={post.userHandle === currentUserHandle ? "Cannot reclip your own post" : "Reclip post"}
           >
-            <FiRepeat className={`w-4 h-4 ${userReclipped ? 'text-green-500' : 'text-gray-700 dark:text-gray-200'}`} />
+            <FiRepeat className={`w-5 h-5 ${userReclipped ? 'text-green-500' : 'text-gray-600 dark:text-gray-400'}`} />
+            <span className="text-sm text-gray-700 dark:text-gray-300">{reclips}</span>
           </button>
-          <span className="text-xs font-medium text-gray-700 dark:text-gray-200">{reclips}</span>
         </div>
+
+        {/* Bookmark */}
+        <button
+          className="transition-opacity hover:opacity-70 active:opacity-50"
+          onClick={() => setBookmarked(!bookmarked)}
+          aria-pressed={bookmarked}
+          aria-label={bookmarked ? 'Remove bookmark' : 'Bookmark'}
+          title={bookmarked ? 'Remove bookmark' : 'Bookmark'}
+        >
+          <FiBookmark className={`w-5 h-5 ${bookmarked ? 'text-yellow-400 fill-yellow-400' : 'text-gray-600 dark:text-gray-400'}`} />
+        </button>
       </div>
     </div>
   );
@@ -1059,19 +1088,11 @@ const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare,
   }, [hasBeenViewed]);
 
   return (
-    <article ref={articleRef} aria-labelledby={titleId} className="pb-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 hover-lift">
+    <article ref={articleRef} aria-labelledby={titleId} className="mx-4 mb-6 rounded-lg overflow-hidden bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out]">
       <PostHeader post={post} onFollow={onFollow} />
       <TagRow tags={post.tags} />
       <div className="relative">
-        <Media url={post.mediaUrl} mediaType={post.mediaType} text={post.text} imageText={post.imageText} onDoubleLike={onLike} />
-        <button
-          onClick={onOpenScenes}
-          aria-label="Open in Scenes fullscreen"
-          title="Fullscreen"
-          className="absolute bottom-3 right-3 p-2 rounded-full bg-black/60 text-white hover:bg-black/70 focus:outline-none focus:ring-2 focus:ring-white/80"
-        >
-          <FiMaximize size={18} />
-        </button>
+        <Media url={post.mediaUrl} mediaType={post.mediaType} text={post.text} imageText={post.imageText} onDoubleLike={onLike} onOpenScenes={onOpenScenes} />
       </div>
       {/* Caption for image/video posts */}
       {post.caption && post.mediaUrl && (
@@ -1431,7 +1452,7 @@ function FeedPageWrapper() {
 
   return (
     <div key={`${currentFilter}-${customLocation || 'default'}`} id={`panel-${active}`} role="tabpanel" aria-labelledby={`tab-${active}`} className="pb-2">
-      <div className="h-2" />
+      <div className="h-4" />
 
       {/* Offline banner */}
       {!online && (
@@ -1454,6 +1475,8 @@ function FeedPageWrapper() {
           </div>
         </div>
       )}
+
+      <div className="h-4" />
 
       {error && (
         <div className="mx-4 my-3 p-3 rounded-md border border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
