@@ -490,7 +490,9 @@ function Media({ url, mediaType, text, imageText, onDoubleLike }: { url?: string
   const togglePlayPause = () => {
     if (videoRef.current) {
       if (videoRef.current.paused) {
-        videoRef.current.play();
+        videoRef.current.play().catch((error) => {
+          console.error('Error playing video:', error);
+        });
         setIsPlaying(true);
         setShowControls(false);
       } else {
@@ -554,7 +556,10 @@ function Media({ url, mediaType, text, imageText, onDoubleLike }: { url?: string
             if (entry.isIntersecting) {
               // Video is in view - play it
               if (videoRef.current) {
-                videoRef.current.play();
+                // Regular videos play muted
+                videoRef.current.play().catch((error) => {
+                  console.error('Error playing video:', error);
+                });
                 setIsPlaying(true);
               }
             } else {

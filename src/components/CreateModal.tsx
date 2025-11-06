@@ -79,6 +79,7 @@ export default function CreateModal({ isOpen, onClose, onNavigate }: CreateModal
                         </div>
                     </button>
 
+
                     {/* Create Post Option */}
                     <button
                         onClick={() => handleNavigate('/create')}
