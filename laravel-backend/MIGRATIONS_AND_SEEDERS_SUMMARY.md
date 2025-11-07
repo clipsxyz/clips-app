@@ -154,3 +154,4 @@ php artisan migrate:fresh --seed
 3. Test your API endpoints with the seeded data
 4. Ready for production!
 
+

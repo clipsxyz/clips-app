@@ -2,8 +2,9 @@ import React from 'react';
 import { useAuth } from '../context/Auth';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { createPost } from '../api/posts';
-import { FiCamera, FiImage, FiMapPin, FiX } from 'react-icons/fi';
+import { FiCamera, FiImage, FiMapPin, FiX, FiZap } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
+import type { Post } from '../types';
 
 export default function CreatePage() {
     const { user } = useAuth();
@@ -27,6 +28,8 @@ export default function CreatePage() {
     const [imageText, setImageText] = React.useState(''); // Text overlay for images
     const [isUploading, setIsUploading] = React.useState(false);
     const [filteredFromFlow, setFilteredFromFlow] = React.useState(false);
+    const [wantsToBoost, setWantsToBoost] = React.useState(false);
+    const [createdPost, setCreatedPost] = React.useState<Post | null>(null);
     const captionRef = React.useRef<HTMLTextAreaElement | null>(null);
     const videoRef = React.useRef<HTMLVideoElement | null>(null);
 
@@ -169,7 +172,7 @@ export default function CreatePage() {
                 isDataUrl: selectedMedia?.startsWith('data:')
             });
 
-            await createPost(
+            const newPost = await createPost(
                 user.id,
                 user.handle,
                 text.trim(),
@@ -183,21 +186,31 @@ export default function CreatePage() {
                 user.national
             );
 
-            // Reset form
-            setText('');
-            setLocation('');
-            setSelectedMedia(null);
-            setMediaType(null);
-            setImageText('');
-
-            // Navigate back to feed
-            navigate('/feed');
-
             // Dispatch event to refresh feed
             console.log('Post created successfully, dispatching postCreated event');
-            console.log('Event target:', window);
             window.dispatchEvent(new CustomEvent('postCreated'));
-            console.log('postCreated event dispatched');
+
+            // If user wants to boost, navigate to boost selection
+            if (wantsToBoost) {
+                setCreatedPost(newPost);
+                // Navigate to boost page with the new post
+                navigate('/boost', {
+                    state: {
+                        newPost: newPost,
+                        showBoostModal: true
+                    }
+                });
+            } else {
+                // Reset form
+                setText('');
+                setLocation('');
+                setSelectedMedia(null);
+                setMediaType(null);
+                setImageText('');
+
+                // Navigate back to feed
+                navigate('/feed');
+            }
         } catch (error) {
             console.error('Error creating post:', error);
             alert('Failed to create post. Please try again.');
@@ -410,6 +423,30 @@ export default function CreatePage() {
                     />
                 </div>
 
+                {/* Boost Option */}
+                <div className="mb-6">
+                    <label className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-gray-800 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={wantsToBoost}
+                            onChange={(e) => setWantsToBoost(e.target.checked)}
+                            className="w-5 h-5 rounded border-gray-300 dark:border-gray-600 text-brand-600 focus:ring-brand-500 focus:ring-2"
+                        />
+                        <div className="flex items-center gap-3 flex-1">
+                            <div className="w-10 h-10 rounded-full bg-brand-100 dark:bg-brand-900 flex items-center justify-center">
+                                <FiZap className="w-5 h-5 text-brand-600 dark:text-brand-400" />
+                            </div>
+                            <div className="flex-1">
+                                <div className="font-semibold text-gray-900 dark:text-gray-100">
+                                    Boost this post
+                                </div>
+                                <div className="text-sm text-gray-600 dark:text-gray-400">
+                                    Reach more people by boosting your post
+                                </div>
+                            </div>
+                        </div>
+                    </label>
+                </div>
 
                 {/* Tips */}
                 <div className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4">

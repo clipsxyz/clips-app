@@ -37,6 +37,8 @@ export type Post = {
   text_content?: string; // Backend field
   imageText?: string; // Text overlay on images
   caption?: string; // Caption/description for image/video posts
+  createdAt: number; // Epoch timestamp in milliseconds (like Date.now())
+  created_at?: string; // Backend field (ISO string)
   stats: { likes: number; views: number; comments: number; shares: number; reclips: number };
   isBookmarked: boolean;
   isFollowing: boolean;
@@ -60,6 +62,10 @@ export type Post = {
   userLocal?: string;
   userRegional?: string;
   userNational?: string;
+  // Boost data
+  isBoosted?: boolean;
+  boostExpiresAt?: number; // Epoch timestamp when boost expires
+  boostFeedType?: 'local' | 'regional' | 'national';
 };
 
 export type Comment = {
@@ -125,4 +131,62 @@ export type StoryGroup = {
   avatarUrl?: string;
   name: string;
   stories: Story[];
+};
+
+export type AdAccount = {
+  id: string;
+  name: string;
+  timezone: string; // e.g., "America/New_York", "Europe/London", "Asia/Tokyo"
+  dailyBudget: number; // Daily budget in currency units
+  currency: string; // e.g., "USD", "EUR", "GBP"
+  lastBudgetReset: number; // Epoch timestamp of last budget reset
+  createdAt: number; // Epoch timestamp when account was created
+};
+
+export type Ad = {
+  id: string;
+  adAccountId: string;
+  advertiserHandle: string; // e.g., "Brand@Dublin"
+  title: string;
+  description?: string;
+  mediaUrl: string;
+  mediaType: 'image' | 'video';
+  callToAction?: string; // e.g., "Learn More", "Shop Now"
+  linkUrl?: string; // URL to redirect on click
+  // Scheduling (epoch timestamps)
+  scheduledStart?: number; // Epoch timestamp - when ad should start showing
+  scheduledEnd?: number; // Epoch timestamp - when ad should stop showing
+  createdAt: number; // Epoch timestamp when ad was created
+  // Budget tracking (epoch timestamps)
+  dailyBudget: number;
+  spentToday: number; // Amount spent today (resets at midnight in ad account timezone)
+  lastBudgetReset: number; // Epoch timestamp of last budget reset
+  // Stats (all tracked with epoch timestamps)
+  stats: {
+    impressions: number; // Total impressions
+    clicks: number; // Total clicks
+    conversions: number; // Total conversions
+    spend: number; // Total spend
+  };
+  // Event timestamps (for attribution)
+  events: {
+    impressions: number[]; // Array of epoch timestamps when ad was shown
+    clicks: number[]; // Array of epoch timestamps when ad was clicked
+    conversions: number[]; // Array of epoch timestamps when conversions happened
+  };
+  // Targeting
+  targetLocations?: string[]; // e.g., ["Dublin", "Ireland"]
+  targetTags?: string[]; // e.g., ["food", "travel"]
+  isActive: boolean;
+};
+
+export type Collection = {
+  id: string;
+  userId: string;
+  name: string;
+  isPrivate: boolean;
+  thumbnailUrl?: string; // URL of first post's media as thumbnail
+  postIds: string[]; // Array of post IDs in this collection
+  createdAt: number; // Epoch timestamp when collection was created
+  updatedAt: number; // Epoch timestamp when collection was last updated
 };

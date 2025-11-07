@@ -120,6 +120,31 @@ export default function LoginPage() {
 
   return (
     <div className="mx-auto max-w-md min-h-screen flex items-center justify-center p-6">
+      {/* Quick Test Login Button */}
+      <div className="absolute top-4 right-4">
+        <button
+          type="button"
+          onClick={() => {
+            const testUser = {
+              name: 'Test User',
+              email: 'test@example.com',
+              password: '',
+              age: 25,
+              interests: ['Technology', 'Travel'],
+              local: 'Finglas',
+              regional: 'Dublin',
+              national: 'Ireland',
+              handle: 'TestUser@Dublin',
+              countryFlag: '🇮🇪',
+            };
+            login(testUser);
+            nav('/feed', { replace: true });
+          }}
+          className="px-3 py-1.5 text-xs bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors"
+        >
+          Quick Login (Test)
+        </button>
+      </div>
       <form onSubmit={step === 1 ? handleLocationSubmit : step === 2 ? handleAccountSubmit : handleProfilePictureSubmit} className="w-full bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-xl p-6 space-y-4">
         <div className="text-center mb-6">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">Join Clips</h1>

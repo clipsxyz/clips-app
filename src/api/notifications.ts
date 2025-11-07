@@ -80,3 +80,4 @@ export async function deleteNotification(notificationId: string, forHandle: stri
     window.dispatchEvent(new CustomEvent('notificationsUpdated', { detail: { handle: forHandle } }));
 }
 
+
