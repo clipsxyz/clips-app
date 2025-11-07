@@ -146,4 +146,18 @@ class Post extends Model
     {
         return $this->hasMany(Story::class, 'shared_from_post_id');
     }
+
+    // Collections relationships
+    public function collections()
+    {
+        return $this->belongsToMany(Collection::class, 'collection_posts')
+                    ->withTimestamps()
+                    ->orderBy('collection_posts.created_at', 'desc');
+    }
+
+    // Helper method to check if post is in a collection
+    public function isInCollection(Collection $collection)
+    {
+        return $this->collections()->where('collection_id', $collection->id)->exists();
+    }
 }

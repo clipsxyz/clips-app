@@ -3,7 +3,7 @@ import * as Sentry from '@sentry/react';
 import App from '../App';
 import { ThemeProvider } from '../theme/ThemeProvider';
 import { AuthProvider } from '../context/Auth';
-import { FeedPageWrapper as FeedPage } from '../App';
+import { FeedPageWrapper as FeedPage, BoostPageWrapper as BoostPage } from '../App';
 import ClipPage from '../pages/ClipPage';
 import CreatePage from '../pages/CreatePage';
 import LoginPage from '../pages/LoginPage';
@@ -17,8 +17,9 @@ import InboxPage from '../pages/InboxPage';
 import InstantCreatePage from '../pages/InstantCreatePage';
 import InstantFiltersPage from '../pages/InstantFiltersPage';
 import SplashPage from '../pages/SplashPage';
+import PaymentPage from '../pages/PaymentPage';
+import CollectionFeedPage from '../pages/CollectionFeedPage';
 
-const Placeholder = ({ name }: { name: string }) => <div className="p-6">{name}</div>;
 
 export default function Root() {
     return (
@@ -35,13 +36,15 @@ export default function Root() {
                                 <Route path="create/instant" element={<InstantCreatePage />} />
                                 <Route path="create/filters" element={<InstantFiltersPage />} />
                                 <Route path="login" element={<LoginPage />} />
-                                <Route path="boost" element={<Placeholder name="Boost" />} />
+                                <Route path="boost" element={<BoostPage />} />
+                                <Route path="payment" element={<PaymentPage />} />
                                 <Route path="clip" element={<ClipPage />} />
                                 <Route path="stories" element={<StoriesPage />} />
                                 <Route path="discover" element={<DiscoverPage />} />
                                 <Route path="search" element={<SearchPage />} />
                                 <Route path="profile" element={<ProfilePage />} />
                                 <Route path="user/:handle" element={<ViewProfilePage />} />
+                                <Route path="collection/:collectionId" element={<CollectionFeedPage />} />
                             </Route>
                             <Route path="messages/:handle" element={<MessagesPage />} />
                             <Route path="inbox" element={<InboxPage />} />

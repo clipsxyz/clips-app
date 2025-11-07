@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\SearchController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\StoryController;
+use App\Http\Controllers\Api\CollectionController;
 
 /*
 |--------------------------------------------------------------------------
@@ -107,5 +108,18 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/{id}/view', [StoryController::class, 'view']);
         Route::post('/{id}/reaction', [StoryController::class, 'addReaction']);
         Route::post('/{id}/reply', [StoryController::class, 'addReply']);
+    });
+
+    // Collections routes
+    Route::prefix('collections')->group(function () {
+        Route::get('/', [CollectionController::class, 'index']);
+        Route::post('/', [CollectionController::class, 'store']);
+        Route::get('/{id}', [CollectionController::class, 'show']);
+        Route::put('/{id}', [CollectionController::class, 'update']);
+        Route::delete('/{id}', [CollectionController::class, 'destroy']);
+        Route::post('/{id}/posts', [CollectionController::class, 'addPost']);
+        Route::delete('/{id}/posts', [CollectionController::class, 'removePost']);
+        Route::get('/post/{postId}', [CollectionController::class, 'getCollectionsForPost']);
+        Route::get('/{id}/posts', [CollectionController::class, 'getCollectionPosts']);
     });
 });

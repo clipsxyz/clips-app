@@ -61,17 +61,26 @@ function getUserLocationFromHandle(userHandle: string): { local: string; regiona
 }
 
 // Create a persistent posts array that won't be reset
-let posts: Post[] = [];
+export let posts: Post[] = [];
 let postsInitialized = false;
 
 // Initialize posts only once
 if (!postsInitialized) {
   console.log('Initializing posts array...');
+  const now = Date.now();
+  // Generate timestamps spread over the last 7 days for variety
   posts = (raw as Post[]).map((p, index) => {
     const location = getUserLocationFromHandle(p.userHandle);
+    // Extract timestamp from ID if it exists, otherwise generate one
+    const timestampMatch = p.id?.match(/\d{13}/);
+    const createdAt = timestampMatch
+      ? parseInt(timestampMatch[0], 10)
+      : now - (index * 3600000); // Spread posts over hours (1 hour apart)
+
     return {
       ...p,
-      id: `post-${p.id}-${index}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, // Make IDs truly unique
+      id: `post-${p.id}-${index}-${createdAt}-${Math.random().toString(36).substr(2, 9)}`,
+      createdAt,
       ...location
     };
   });
@@ -92,13 +101,15 @@ if (!postsInitialized) {
   }
 
   // Add mock posts for test user from Artane
+  const artaneNow = Date.now();
   const artanePosts: Post[] = [
     {
-      id: `artane-post-1-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: `artane-post-1-${artaneNow}-${Math.random().toString(36).substr(2, 9)}`,
       userHandle: 'Sarah@Artane',
       locationLabel: 'Artane, Dublin',
       tags: ['Dublin', 'local', 'community'],
       text: 'Beautiful sunny day in Artane! The community here is amazing. Love living in this part of Dublin. The parks, the people, everything about this area makes it special. 📍',
+      createdAt: artaneNow - 1800000, // 30 minutes ago
       stats: { likes: 23, views: 156, comments: 5, shares: 2, reclips: 1 },
       isBookmarked: false,
       isFollowing: false,
@@ -108,11 +119,12 @@ if (!postsInitialized) {
       userNational: 'Ireland'
     } as Post,
     {
-      id: `artane-post-2-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: `artane-post-2-${artaneNow - 3600000}-${Math.random().toString(36).substr(2, 9)}`,
       userHandle: 'Sarah@Artane',
       locationLabel: 'Artane, Dublin',
       tags: ['food', 'dublin', 'ireland'],
       text: 'Just had the most amazing brunch at the local cafe! The Irish breakfast is unbeatable. Highly recommend this spot if you ever find yourself in the area. Full of flavour and the service is top-notch! 🍳🥓',
+      createdAt: artaneNow - 3600000, // 1 hour ago
       stats: { likes: 45, views: 312, comments: 12, shares: 8, reclips: 3 },
       isBookmarked: false,
       isFollowing: false,
@@ -122,13 +134,14 @@ if (!postsInitialized) {
       userNational: 'Ireland'
     } as Post,
     {
-      id: `artane-post-3-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: `artane-post-3-${artaneNow - 7200000}-${Math.random().toString(36).substr(2, 9)}`,
       userHandle: 'Sarah@Artane',
       locationLabel: 'Artane, Dublin',
       tags: ['travel', 'views', 'ireland'],
       mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
       mediaType: 'video',
       caption: 'Stunning views from Howth Hill looking back towards Dublin',
+      createdAt: artaneNow - 7200000, // 2 hours ago
       stats: { likes: 67, views: 445, comments: 8, shares: 4, reclips: 2 },
       isBookmarked: false,
       isFollowing: false,
@@ -138,13 +151,14 @@ if (!postsInitialized) {
       userNational: 'Ireland'
     },
     {
-      id: `artane-post-4-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: `artane-post-4-${artaneNow - 86400000}-${Math.random().toString(36).substr(2, 9)}`,
       userHandle: 'Sarah@Artane',
       locationLabel: 'Dublin City Centre',
       tags: ['city', 'dublin', 'architecture'],
       mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
       mediaType: 'video',
       caption: 'Walking through the vibrant streets of Dublin',
+      createdAt: artaneNow - 86400000, // 1 day ago
       stats: { likes: 89, views: 678, comments: 15, shares: 7, reclips: 5 },
       isBookmarked: false,
       isFollowing: false,
@@ -154,11 +168,12 @@ if (!postsInitialized) {
       userNational: 'Ireland'
     },
     {
-      id: `artane-post-5-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: `artane-post-5-${artaneNow - 172800000}-${Math.random().toString(36).substr(2, 9)}`,
       userHandle: 'Sarah@Artane',
       locationLabel: 'Artane, Dublin',
       tags: ['thoughts', 'life', 'inspiration'],
       text: 'Life in Dublin is never boring. There\'s always something happening, someone to meet, a new place to discover. Grateful to call this city home. The energy here is infectious! 🌟',
+      createdAt: artaneNow - 172800000, // 2 days ago
       stats: { likes: 34, views: 189, comments: 6, shares: 3, reclips: 1 },
       isBookmarked: false,
       isFollowing: false,
@@ -168,13 +183,14 @@ if (!postsInitialized) {
       userNational: 'Ireland'
     } as Post,
     {
-      id: `artane-post-6-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: `artane-post-6-${artaneNow - 259200000}-${Math.random().toString(36).substr(2, 9)}`,
       userHandle: 'Sarah@Artane',
       locationLabel: 'Phoenix Park, Dublin',
       tags: ['nature', 'dublin', 'outdoors'],
       mediaUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800',
       mediaType: 'image',
       caption: 'Perfect morning walk in Phoenix Park! The deer are out and about 🦌',
+      createdAt: artaneNow - 259200000, // 3 days ago
       stats: { likes: 42, views: 287, comments: 7, shares: 4, reclips: 2 },
       isBookmarked: false,
       isFollowing: false,
@@ -264,13 +280,14 @@ type UserState = {
   bookmarks: Record<string, boolean>;
   follows: Record<string, boolean>;
   reclips: Record<string, boolean>;
+  lastViewed: Record<string, number>; // Post ID -> Epoch timestamp of last view
 };
 
 const userState: Record<string, UserState> = {};
 
 function getState(userId: string): UserState {
   if (!userState[userId]) {
-    userState[userId] = { likes: {}, bookmarks: {}, follows: {}, reclips: {} };
+    userState[userId] = { likes: {}, bookmarks: {}, follows: {}, reclips: {}, lastViewed: {} };
   }
   return userState[userId];
 }
@@ -287,7 +304,7 @@ export async function getFollowedUsers(userId: string): Promise<string[]> {
 }
 
 // compute view for a user
-function decorateForUser(userId: string, p: Post): Post {
+export function decorateForUser(userId: string, p: Post): Post {
   const s = getState(userId);
   return {
     ...p,
@@ -399,45 +416,22 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       userNational: p.userNational
     })));
 
-    // Sort by newest first - extract timestamp from ID and sort descending
-    // IDs format: "post-{id}-{index}-{timestamp}-{random}" or "artane-post-{n}-{timestamp}-{random}"
-    // New posts: "{uuid}-{timestamp}"
-    // New posts are added with unshift, so they're at the beginning of the posts array
+    // Sort by newest first using explicit createdAt epoch timestamps
     const sorted = filtered.slice().sort((a, b) => {
-      // Extract timestamp from ID - find any 13-digit number (timestamp)
-      const extractTimestamp = (id: string): number => {
-        const match = id.match(/\d{13}/);
-        if (match) {
-          const ts = parseInt(match[0], 10);
-          return ts;
-        }
-        return 0;
-      };
+      // Use explicit createdAt timestamp (epoch in milliseconds)
+      const tsA = a.createdAt || 0;
+      const tsB = b.createdAt || 0;
 
-      const tsA = extractTimestamp(a.id);
-      const tsB = extractTimestamp(b.id);
-
-      // If both have timestamps, sort by timestamp descending (newest first)
-      if (tsA > 0 && tsB > 0) {
-        const result = tsB - tsA; // Descending: newest first (larger timestamp = newer)
-        return result;
-      }
-
-      // If only one has timestamp, prioritize it
-      if (tsA > 0) return -1; // A is newer, put it first
-      if (tsB > 0) return 1;  // B is newer, put it first
-
-      // Fallback: since new posts are added with unshift, they're at the beginning of posts array
-      // But we want to ensure newest first, so compare IDs (newer IDs have later timestamps)
-      // For UUIDs with timestamps at the end, newer = larger lexicographically
-      return b.id.localeCompare(a.id); // Descending order (newer IDs first)
+      // Sort descending: newest first (larger timestamp = newer)
+      return tsB - tsA;
     });
 
     // Debug: log the sorted order
     console.log('Sorted posts (first 3):', sorted.slice(0, 3).map((p, i) => ({
       index: i,
       id: p.id.substring(0, 60),
-      timestamp: p.id.match(/\d{13}/)?.[0] || 'no timestamp',
+      createdAt: p.createdAt,
+      timeAgo: new Date(p.createdAt).toISOString(),
       userHandle: p.userHandle
     })));
 
@@ -492,14 +486,60 @@ export async function incrementViews(userId: string, id: string): Promise<Post> 
       locationLabel: 'Unknown Location',
       tags: [],
       mediaUrl: '',
+      createdAt: Date.now(),
       stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
       isBookmarked: false,
       isFollowing: false,
       userLiked: false
     };
   }
-  p.stats.views += 1;
+
+  // Track when user last viewed this post (epoch timestamp)
+  const s = getState(userId);
+  const now = Date.now();
+
+  // Check if post was viewed recently (within last 5 minutes)
+  // This prevents double-counting if user scrolls back up
+  const lastViewTime = s.lastViewed[id] || 0;
+  const fiveMinutesAgo = now - (5 * 60 * 1000);
+
+  // Only increment view count if not viewed recently
+  if (lastViewTime < fiveMinutesAgo || !lastViewTime) {
+    p.stats.views += 1;
+  }
+
+  // Always update the last viewed timestamp (epoch time)
+  s.lastViewed[id] = now; // Store epoch timestamp of last view
+
   return decorateForUser(userId, p);
+}
+
+/**
+ * Get the timestamp when a user last viewed a post
+ * @param userId - User ID
+ * @param postId - Post ID
+ * @returns Epoch timestamp in milliseconds, or null if never viewed
+ */
+export function getLastViewedTime(userId: string, postId: string): number | null {
+  const s = getState(userId);
+  return s.lastViewed[postId] || null;
+}
+
+/**
+ * Check if a post was viewed recently (within specified time window)
+ * Useful for preventing showing the same post again immediately
+ * @param userId - User ID
+ * @param postId - Post ID
+ * @param timeWindowMs - Time window in milliseconds (default: 5 minutes)
+ * @returns true if viewed within time window, false otherwise
+ */
+export function wasViewedRecently(userId: string, postId: string, timeWindowMs: number = 5 * 60 * 1000): boolean {
+  const lastViewTime = getLastViewedTime(userId, postId);
+  if (!lastViewTime) return false;
+
+  const now = Date.now();
+  const timeSinceView = now - lastViewTime;
+  return timeSinceView < timeWindowMs;
 }
 
 export async function incrementShares(userId: string, id: string): Promise<Post> {
@@ -708,8 +748,9 @@ export async function createPost(
     ? { userLocal, userRegional, userNational }
     : getUserLocationFromHandle(userHandle);
 
+  const postCreatedAt = Date.now(); // Epoch timestamp in milliseconds
   const newPost: Post = {
-    id: `${crypto.randomUUID()}-${Date.now()}`,
+    id: `${crypto.randomUUID()}-${postCreatedAt}`,
     userHandle,
     locationLabel: location || 'Unknown Location',
     tags: [],
@@ -718,6 +759,7 @@ export async function createPost(
     text: text || undefined, // Store the text content
     imageText: imageText || undefined, // Store the image text overlay
     caption: caption || undefined, // Store the caption for image/video posts
+    createdAt: postCreatedAt, // Epoch timestamp in milliseconds
     stats: {
       likes: 0,
       views: 0,

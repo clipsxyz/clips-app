@@ -1,13 +1,12 @@
 /**
  * Web entry point (Vite)
- * Uses React Native Web for cross-platform compatibility
+ * Using React Router for now - React Native migration in progress
  */
 import React from 'react';
-import { AppRegistry } from 'react-native';
-import '../global.css';
-import './index.css';
-import App from '../App';
+import ReactDOM from 'react-dom/client';
+import Root from './components/Root';
 import { initSentry } from './sentry';
+import './index.css';
 
 // Initialize Sentry early
 initSentry();
@@ -17,17 +16,8 @@ if (import.meta.env.PROD) {
   import('./utils/vitals').then(m => m.initVitals());
 }
 
-// Register app for web
-AppRegistry.registerComponent('ClipsApp', () => App);
-
-// Get the root component and render it
-const { getApplication } = AppRegistry.getApplication('ClipsApp', {});
-const root = document.getElementById('root');
-
-if (root) {
-  const { element } = getApplication();
-  const ReactDOM = require('react-dom/client');
-  ReactDOM.createRoot(root).render(
-    React.createElement(React.StrictMode, null, element)
-  );
-}
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <Root />
+  </React.StrictMode>
+);

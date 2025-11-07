@@ -150,3 +150,4 @@ php artisan migrate
 
 All relationships are properly defined and ready to use in your Laravel controllers and API endpoints!
 
+

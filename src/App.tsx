@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark } from 'react-icons/fi';
+import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2 } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import TopBar from './components/TopBar';
 import CommentsModal from './components/CommentsModal';
@@ -13,10 +13,16 @@ import { useAuth } from './context/Auth';
 import { getFlagForHandle } from './api/users';
 import Flag from './components/Flag';
 import { useOnline } from './hooks/useOnline';
-import { fetchPostsPage, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost } from './api/posts';
+import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser } from './api/posts';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle } from './api/stories';
 import { enqueue, drain } from './utils/mutationQueue';
-import type { Post } from './types';
+import { timeAgo } from './utils/timeAgo';
+import { getActiveAds, trackAdImpression, trackAdClick } from './api/ads';
+import { getActiveBoost, getBoostTimeRemaining } from './api/boost';
+import BoostSelectionModal from './components/BoostSelectionModal';
+import SavePostModal from './components/SavePostModal';
+import { getCollectionsForPost } from './api/collections';
+import type { Post, Ad } from './types';
 
 type Tab = 'Finglas' | 'Dublin' | 'Ireland' | 'Following';
 
@@ -67,7 +73,7 @@ export default function App() {
       <main id="main" className="mx-auto max-w-md min-h-screen pb-[calc(64px+theme(spacing.safe))] md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800 md:bg-white md:dark:bg-gray-950">
         <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />
         <Outlet context={{ activeTab, setActiveTab, customLocation, setCustomLocation }} />
-        {loc.pathname !== '/discover' && loc.pathname !== '/create/filters' && loc.pathname !== '/create/instant' && (
+        {loc.pathname !== '/discover' && loc.pathname !== '/create/filters' && loc.pathname !== '/create/instant' && loc.pathname !== '/payment' && (
           <BottomNav onCreateClick={() => setShowCreateModal(true)} />
         )}
       </main>
@@ -178,7 +184,90 @@ function FollowButton({ initial, onToggle }: { initial: boolean; onToggle: () =>
   );
 }
 
-function PostHeader({ post, onFollow }: { post: Post; onFollow: () => Promise<void> }) {
+function BoostButton({ postId, onBoost }: { postId: string; onBoost: () => Promise<void> }) {
+  const [busy, setBusy] = React.useState(false);
+  const [isBoosted, setIsBoosted] = React.useState(false);
+  const [timeRemaining, setTimeRemaining] = React.useState(0);
+
+  // Check boost status
+  React.useEffect(() => {
+    async function checkBoostStatus() {
+      const boost = await getActiveBoost(postId);
+      if (boost && boost.isActive) {
+        setIsBoosted(true);
+        const remaining = await getBoostTimeRemaining(postId);
+        setTimeRemaining(remaining);
+      } else {
+        setIsBoosted(false);
+        setTimeRemaining(0);
+      }
+    }
+
+    checkBoostStatus();
+
+    // Check every minute to update status
+    const interval = setInterval(() => {
+      checkBoostStatus();
+    }, 60000); // Check every minute
+
+    return () => clearInterval(interval);
+  }, [postId]);
+
+  // Format time remaining
+  const formatTimeRemaining = (ms: number): string => {
+    if (ms <= 0) return '';
+    const hours = Math.floor(ms / (1000 * 60 * 60));
+    const minutes = Math.floor((ms % (1000 * 60 * 60)) / (1000 * 60));
+    if (hours > 0) {
+      return `${hours}h ${minutes}m`;
+    }
+    return `${minutes}m`;
+  };
+
+  async function onClick() {
+    if (busy || isBoosted) return; // Don't allow clicking if already boosted
+    setBusy(true);
+    try {
+      await onBoost();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (isBoosted) {
+    return (
+      <button
+        disabled
+        aria-label="Post is boosted"
+        title={`Boosted - ${formatTimeRemaining(timeRemaining)} remaining`}
+        className="px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200 bg-red-600 text-white dark:bg-red-500 flex items-center gap-2 cursor-not-allowed"
+      >
+        <FiZap className="w-4 h-4" />
+        <span>Boosted</span>
+      </button>
+    );
+  }
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={busy}
+      aria-label="Boost post"
+      title="Boost this post"
+      className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-60 transition-all duration-200 active:scale-[.98] bg-brand-600 text-white hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 flex items-center gap-2"
+    >
+      <FiZap className="w-4 h-4" />
+      <span>Boost</span>
+    </button>
+  );
+}
+
+function PostHeader({ post, onFollow, showBoostIcon, onBoost }: {
+  post: Post;
+  onFollow?: () => Promise<void>;
+  showBoostIcon?: boolean;
+  onBoost?: () => Promise<void>;
+}) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [hasStory, setHasStory] = React.useState(false);
@@ -285,14 +374,26 @@ function PostHeader({ post, onFollow }: { post: Post; onFollow: () => Promise<vo
                 size={16}
               />
             </h3>
-            <div className="text-xs text-gray-600 dark:text-gray-300 flex items-center gap-1 mt-0.5">
-              <FiMapPin className="w-3 h-3" />
-              {post.locationLabel || 'No location set'}
+            <div className="text-xs text-gray-600 dark:text-gray-300 flex items-center gap-2 mt-0.5">
+              <span className="flex items-center gap-1">
+                <FiMapPin className="w-3 h-3" />
+                {post.locationLabel || 'No location set'}
+              </span>
+              {post.createdAt && (
+                <>
+                  <span className="text-gray-400">·</span>
+                  <span>{timeAgo(post.createdAt)}</span>
+                </>
+              )}
             </div>
           </button>
         </div>
       </div>
-      {!isCurrentUser && <FollowButton initial={post.isFollowing} onToggle={onFollow} />}
+      {showBoostIcon && isCurrentUser && onBoost ? (
+        <BoostButton postId={post.id} onBoost={onBoost} />
+      ) : !isCurrentUser && onFollow ? (
+        <FollowButton initial={post.isFollowing} onToggle={onFollow} />
+      ) : null}
     </div>
   );
 }
@@ -886,17 +987,62 @@ function EngagementBar({
   onShare,
   onOpenComments,
   onReclip,
-  currentUserHandle
+  onSave,
+  currentUserHandle,
+  currentUserId,
+  showMetricsIcon,
+  onToggleMetrics,
+  isMetricsOpen
 }: {
   post: Post;
   onLike: () => Promise<void>;
   onShare: () => Promise<void>;
   onOpenComments: () => void;
   onReclip: () => Promise<void>;
+  onSave?: () => void;
   currentUserHandle?: string;
+  currentUserId?: string;
+  showMetricsIcon?: boolean;
+  onToggleMetrics?: () => void;
+  isMetricsOpen?: boolean;
 }) {
+  const [isSaved, setIsSaved] = React.useState(false);
+
+  // Check if post is saved
+  React.useEffect(() => {
+    async function checkIfSaved() {
+      if (currentUserId && onSave) {
+        try {
+          const collections = await getCollectionsForPost(currentUserId, post.id);
+          setIsSaved(collections.length > 0);
+        } catch (error) {
+          console.error('Error checking if post is saved:', error);
+        }
+      }
+    }
+    checkIfSaved();
+  }, [currentUserId, post.id, onSave]);
+
+  // Listen for save events
+  React.useEffect(() => {
+    if (!onSave) return;
+
+    const handlePostSaved = () => {
+      if (currentUserId) {
+        getCollectionsForPost(currentUserId, post.id)
+          .then(collections => setIsSaved(collections.length > 0))
+          .catch(console.error);
+      }
+    };
+
+    window.addEventListener(`postSaved-${post.id}`, handlePostSaved);
+    return () => {
+      window.removeEventListener(`postSaved-${post.id}`, handlePostSaved);
+    };
+  }, [post.id, currentUserId, onSave]);
   const [liked, setLiked] = React.useState(post.userLiked);
   const [likes, setLikes] = React.useState(post.stats.likes);
+  const [views, setViews] = React.useState(post.stats.views);
   const [comments, setComments] = React.useState(post.stats.comments);
   const [shares, setShares] = React.useState(post.stats.shares);
   const [reclips, setReclips] = React.useState(post.stats.reclips);
@@ -907,11 +1053,12 @@ function EngagementBar({
   React.useEffect(() => {
     setLiked(post.userLiked);
     setLikes(post.stats.likes);
+    setViews(post.stats.views);
     setComments(post.stats.comments);
     setShares(post.stats.shares);
     setReclips(post.stats.reclips);
     setUserReclipped(post.userReclipped || false);
-  }, [post.userLiked, post.stats.likes, post.stats.comments, post.stats.shares, post.stats.reclips, post.userReclipped]);
+  }, [post.userLiked, post.stats.likes, post.stats.views, post.stats.comments, post.stats.shares, post.stats.reclips, post.userReclipped]);
 
   // Listen for engagement updates
   React.useEffect(() => {
@@ -927,6 +1074,10 @@ function EngagementBar({
       setReclips(prev => prev + 1);
     };
 
+    const handleViewAdded = () => {
+      setViews(prev => prev + 1);
+    };
+
     const handleLikeToggled = (event: CustomEvent) => {
       setLiked(event.detail.liked);
       setLikes(event.detail.likes);
@@ -936,12 +1087,14 @@ function EngagementBar({
     window.addEventListener(`commentAdded-${post.id}`, handleCommentAdded);
     window.addEventListener(`shareAdded-${post.id}`, handleShareAdded);
     window.addEventListener(`reclipAdded-${post.id}`, handleReclipAdded);
+    window.addEventListener(`viewAdded-${post.id}`, handleViewAdded);
     window.addEventListener(`likeToggled-${post.id}`, handleLikeToggled as EventListener);
 
     return () => {
       window.removeEventListener(`commentAdded-${post.id}`, handleCommentAdded);
       window.removeEventListener(`shareAdded-${post.id}`, handleShareAdded);
       window.removeEventListener(`reclipAdded-${post.id}`, handleReclipAdded);
+      window.removeEventListener(`viewAdded-${post.id}`, handleViewAdded);
       window.removeEventListener(`likeToggled-${post.id}`, handleLikeToggled as EventListener);
     };
   }, [post.id]);
@@ -976,8 +1129,6 @@ function EngagementBar({
     }
   }
 
-  const [bookmarked, setBookmarked] = React.useState(false);
-
   return (
     <div className="px-4 pb-4 pt-3 border-t border-gray-200 dark:border-gray-700">
       <div className="flex items-center justify-between">
@@ -997,6 +1148,12 @@ function EngagementBar({
             )}
             <span className="text-sm text-gray-700 dark:text-gray-300">{likes}</span>
           </button>
+
+          {/* Views */}
+          <div className="flex items-center gap-2">
+            <FiEye className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+            <span className="text-sm text-gray-700 dark:text-gray-300">{views}</span>
+          </div>
 
           {/* Comments */}
           <button
@@ -1031,37 +1188,187 @@ function EngagementBar({
             <FiRepeat className={`w-5 h-5 ${userReclipped ? 'text-green-500' : 'text-gray-600 dark:text-gray-400'}`} />
             <span className="text-sm text-gray-700 dark:text-gray-300">{reclips}</span>
           </button>
+
+          {/* Metrics (only on boost page for boosted posts) */}
+          {showMetricsIcon && onToggleMetrics && (
+            <button
+              className="flex items-center gap-2 transition-opacity hover:opacity-70 active:opacity-50"
+              onClick={onToggleMetrics}
+              aria-label="Toggle metrics"
+              title="View metrics"
+            >
+              <FiBarChart2 className={`w-5 h-5 transition-colors ${isMetricsOpen ? 'text-brand-600 dark:text-brand-400' : 'text-gray-600 dark:text-gray-400'}`} />
+            </button>
+          )}
         </div>
 
-        {/* Bookmark */}
-        <button
-          className="transition-opacity hover:opacity-70 active:opacity-50"
-          onClick={() => setBookmarked(!bookmarked)}
-          aria-pressed={bookmarked}
-          aria-label={bookmarked ? 'Remove bookmark' : 'Bookmark'}
-          title={bookmarked ? 'Remove bookmark' : 'Bookmark'}
-        >
-          <FiBookmark className={`w-5 h-5 ${bookmarked ? 'text-yellow-400 fill-yellow-400' : 'text-gray-600 dark:text-gray-400'}`} />
-        </button>
+        {/* Save */}
+        {onSave && (
+          <button
+            className="transition-opacity hover:opacity-70 active:opacity-50"
+            onClick={onSave}
+            aria-label={isSaved ? 'Unsave post' : 'Save post'}
+            title={isSaved ? 'Unsave post' : 'Save post'}
+          >
+            <FiBookmark className={`w-5 h-5 ${isSaved ? 'text-white fill-white' : 'text-gray-600 dark:text-gray-400'}`} />
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
-const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare, onOpenComments, onView, onReclip, onOpenScenes }: {
+function BoostMetrics({ post, isOpen }: { post: Post; isOpen: boolean }) {
+  const [isBoosted, setIsBoosted] = React.useState(false);
+  const [timeRemaining, setTimeRemaining] = React.useState(0);
+  const [feedType, setFeedType] = React.useState<string>('');
+
+  React.useEffect(() => {
+    async function checkBoost() {
+      const boost = await getActiveBoost(post.id);
+      if (boost && boost.isActive) {
+        setIsBoosted(true);
+        const remaining = await getBoostTimeRemaining(post.id);
+        setTimeRemaining(remaining);
+
+        // Get feed type label
+        switch (boost.feedType) {
+          case 'local':
+            setFeedType('Local Newsfeed');
+            break;
+          case 'regional':
+            setFeedType('Regional Newsfeed');
+            break;
+          case 'national':
+            setFeedType('National Newsfeed');
+            break;
+        }
+      } else {
+        setIsBoosted(false);
+      }
+    }
+
+    checkBoost();
+    const interval = setInterval(checkBoost, 60000); // Check every minute
+    return () => clearInterval(interval);
+  }, [post.id]);
+
+  const formatTimeRemaining = (ms: number): string => {
+    if (ms <= 0) return '';
+    const hours = Math.floor(ms / (1000 * 60 * 60));
+    const minutes = Math.floor((ms % (1000 * 60 * 60)) / (1000 * 60));
+    if (hours > 0) {
+      return `${hours}h ${minutes}m`;
+    }
+    return `${minutes}m`;
+  };
+
+  if (!isBoosted) return null;
+
+  return (
+    <div className={`mx-4 mb-4 p-4 bg-white dark:bg-gray-900 rounded-xl border-2 border-brand-200 dark:border-brand-800 transition-all duration-300 overflow-hidden shadow-sm ${isOpen ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0 p-0 mb-0'}`}>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <FiTrendingUp className="w-5 h-5 text-brand-600 dark:text-brand-400" />
+          <h3 className="font-semibold text-gray-900 dark:text-gray-100">Boost Metrics</h3>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+          <span className="px-2 py-1 bg-brand-100 dark:bg-brand-900 rounded-full text-brand-700 dark:text-brand-300 font-medium">
+            {feedType}
+          </span>
+          <span className="text-gray-500 dark:text-gray-500">
+            {formatTimeRemaining(timeRemaining)} left
+          </span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="flex flex-col">
+          <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 mb-1">
+            <FiEye className="w-4 h-4" />
+            <span className="text-xs font-medium">Views</span>
+          </div>
+          <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+            {post.stats.views.toLocaleString()}
+          </span>
+        </div>
+
+        <div className="flex flex-col">
+          <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 mb-1">
+            <FiHeart className="w-4 h-4" />
+            <span className="text-xs font-medium">Likes</span>
+          </div>
+          <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+            {post.stats.likes.toLocaleString()}
+          </span>
+        </div>
+
+        <div className="flex flex-col">
+          <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 mb-1">
+            <FiMessageSquare className="w-4 h-4" />
+            <span className="text-xs font-medium">Comments</span>
+          </div>
+          <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+            {post.stats.comments.toLocaleString()}
+          </span>
+        </div>
+
+        <div className="flex flex-col">
+          <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 mb-1">
+            <FiShare2 className="w-4 h-4" />
+            <span className="text-xs font-medium">Shares</span>
+          </div>
+          <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+            {post.stats.shares.toLocaleString()}
+          </span>
+        </div>
+
+        <div className="flex flex-col">
+          <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 mb-1">
+            <FiRepeat className="w-4 h-4" />
+            <span className="text-xs font-medium">Reclips</span>
+          </div>
+          <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+            {post.stats.reclips.toLocaleString()}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare, onOpenComments, onView, onReclip, onOpenScenes, showBoostIcon, onBoost }: {
   post: Post;
   onLike: () => Promise<void>;
-  onFollow: () => Promise<void>;
+  onFollow?: () => Promise<void>;
   onShare: () => Promise<void>;
   onOpenComments: () => void;
   onView: () => Promise<void>;
   onReclip: () => Promise<void>;
   onOpenScenes: () => void;
+  showBoostIcon?: boolean;
+  onBoost?: () => Promise<void>;
 }) {
   const { user } = useAuth();
   const titleId = `post-title-${post.id}`;
   const [hasBeenViewed, setHasBeenViewed] = React.useState(false);
+  const [isMetricsOpen, setIsMetricsOpen] = React.useState(false);
+  const [isBoosted, setIsBoosted] = React.useState(false);
+  const [saveModalOpen, setSaveModalOpen] = React.useState(false);
   const articleRef = React.useRef<HTMLElement>(null);
+
+  // Check if post is boosted to show metrics icon
+  React.useEffect(() => {
+    async function checkBoost() {
+      const boost = await getActiveBoost(post.id);
+      setIsBoosted(boost !== null && boost.isActive);
+    }
+    if (showBoostIcon) {
+      checkBoost();
+      const interval = setInterval(checkBoost, 60000);
+      return () => clearInterval(interval);
+    }
+  }, [post.id, showBoostIcon]);
 
   // Track views when post comes into viewport
   React.useEffect(() => {
@@ -1089,7 +1396,7 @@ const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare,
 
   return (
     <article ref={articleRef} aria-labelledby={titleId} className="mx-4 mb-6 rounded-lg overflow-hidden bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out]">
-      <PostHeader post={post} onFollow={onFollow} />
+      <PostHeader post={post} onFollow={onFollow} showBoostIcon={showBoostIcon} onBoost={onBoost} />
       <TagRow tags={post.tags} />
       <div className="relative">
         <Media url={post.mediaUrl} mediaType={post.mediaType} text={post.text} imageText={post.imageText} onDoubleLike={onLike} onOpenScenes={onOpenScenes} />
@@ -1100,7 +1407,109 @@ const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare,
           <CaptionText caption={post.caption} />
         </div>
       )}
-      <EngagementBar post={post} onLike={onLike} onShare={onShare} onOpenComments={onOpenComments} onReclip={onReclip} currentUserHandle={user?.handle} />
+      <EngagementBar
+        post={post}
+        onLike={onLike}
+        onShare={onShare}
+        onOpenComments={onOpenComments}
+        onReclip={onReclip}
+        onSave={user ? () => setSaveModalOpen(true) : undefined}
+        currentUserHandle={user?.handle}
+        currentUserId={user?.id}
+        showMetricsIcon={showBoostIcon && isBoosted}
+        onToggleMetrics={() => setIsMetricsOpen(!isMetricsOpen)}
+        isMetricsOpen={isMetricsOpen}
+      />
+      {showBoostIcon && <BoostMetrics post={post} isOpen={isMetricsOpen} />}
+      {user && (
+        <SavePostModal
+          post={post}
+          userId={user.id}
+          isOpen={saveModalOpen}
+          onClose={() => setSaveModalOpen(false)}
+        />
+      )}
+    </article>
+  );
+});
+
+const AdCard = React.memo(function AdCard({ ad, onImpression, onClick }: {
+  ad: Ad;
+  onImpression: () => Promise<void>;
+  onClick: () => Promise<void>;
+}) {
+  const titleId = `ad-title-${ad.id}`;
+  const [hasBeenViewed, setHasBeenViewed] = React.useState(false);
+  const articleRef = React.useRef<HTMLElement>(null);
+
+  // Track impressions when ad comes into viewport (using epoch time)
+  React.useEffect(() => {
+    if (hasBeenViewed) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && !hasBeenViewed) {
+            setHasBeenViewed(true);
+            observer.disconnect();
+            onImpression();
+          }
+        });
+      },
+      { threshold: 0.5 }
+    );
+
+    if (articleRef.current) {
+      observer.observe(articleRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, [hasBeenViewed, onImpression]);
+
+  const handleClick = async () => {
+    await onClick();
+    if (ad.linkUrl) {
+      window.open(ad.linkUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  return (
+    <article ref={articleRef} aria-labelledby={titleId} className="mx-4 mb-6 rounded-lg overflow-hidden bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out]">
+      {/* Ad Header */}
+      <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Sponsored</span>
+          <span className="text-xs text-gray-400">·</span>
+          <span className="text-xs text-gray-600 dark:text-gray-300">{ad.advertiserHandle}</span>
+        </div>
+        {ad.createdAt && (
+          <span className="text-xs text-gray-400">{timeAgo(ad.createdAt)}</span>
+        )}
+      </div>
+
+      {/* Ad Content */}
+      <div className="relative">
+        <Media
+          url={ad.mediaUrl}
+          mediaType={ad.mediaType}
+          onDoubleLike={async () => { }}
+          onOpenScenes={() => { }}
+        />
+        <button
+          onClick={handleClick}
+          className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-brand-600 hover:bg-brand-700 text-white px-6 py-2 rounded-full font-semibold shadow-lg transition-colors"
+        >
+          {ad.callToAction || 'Learn More'}
+        </button>
+      </div>
+
+      {/* Ad Description */}
+      {ad.description && (
+        <div className="px-4 py-3">
+          <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-1">{ad.title}</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-300">{ad.description}</p>
+        </div>
+      )}
     </article>
   );
 });
@@ -1114,6 +1523,7 @@ function FeedPageWrapper() {
   const [active, setActive] = React.useState<Tab>('Ireland');
   const [customLocation, setCustomLocation] = React.useState<string | null>(null);
   const [pages, setPages] = React.useState<Post[][]>([]);
+  const [ads, setAds] = React.useState<Ad[]>([]);
   const [cursor, setCursor] = React.useState<number | null>(0);
   const [loading, setLoading] = React.useState(false);
   const [end, setEnd] = React.useState(false);
@@ -1416,6 +1826,25 @@ function FeedPageWrapper() {
     });
   }
 
+  // Fetch ads when filter changes
+  React.useEffect(() => {
+    async function loadAds() {
+      try {
+        const userLocation = user?.local || user?.regional || user?.national || '';
+        const userTags: string[] = []; // Could be extracted from user interests
+        const activeAds = await getActiveAds(userLocation, userTags);
+        setAds(activeAds);
+      } catch (err) {
+        console.error('Error loading ads:', err);
+      }
+    }
+
+    if (user) {
+      loadAds();
+    }
+  }, [currentFilter, user]);
+
+  // Merge posts and ads, sort by epoch time (createdAt)
   const flat = React.useMemo(() => {
     const flattened = pages.flat();
 
@@ -1438,8 +1867,17 @@ function FeedPageWrapper() {
       console.log('Text posts after deduplication:', uniquePosts.filter(p => p.text && !p.mediaUrl).map(p => ({ id: p.id, text: p.text?.substring(0, 50) + '...' })));
     }
 
-    return uniquePosts;
-  }, [pages]);
+    // Merge posts and ads, sort by epoch time (createdAt) - newest first
+    const feedItems: Array<{ type: 'post' | 'ad'; item: Post | Ad; createdAt: number }> = [
+      ...uniquePosts.map(p => ({ type: 'post' as const, item: p, createdAt: p.createdAt || 0 })),
+      ...ads.map(a => ({ type: 'ad' as const, item: a, createdAt: a.createdAt || 0 }))
+    ];
+
+    // Sort by epoch time (createdAt) - descending (newest first)
+    feedItems.sort((a, b) => b.createdAt - a.createdAt);
+
+    return feedItems;
+  }, [pages, ads]);
 
   // Not logged in
   if (!user) {
@@ -1492,107 +1930,132 @@ function FeedPageWrapper() {
         </div>
       )}
 
-      {flat.map(p => (
-        <FeedCard
-          key={p.id}
-          post={p}
-          onLike={async () => {
-            console.log('Like button clicked for post:', p.id, 'userLiked:', p.userLiked);
-            if (!online) {
-              // Optimistically toggle icon only when offline; don't change counts
-              updateOne(p.id, post => ({ ...post, userLiked: !post.userLiked }));
-              await enqueue({ type: 'like', postId: p.id, userId });
-              return;
-            }
-            // Use server as source of truth to avoid double increments
-            const updated = await toggleLike(userId, p.id);
-            updateOne(p.id, _post => ({ ...updated }));
-            // Notify EngagementBar with authoritative values
-            window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
-              detail: { liked: updated.userLiked, likes: updated.stats.likes }
-            }));
-            console.log('Like event dispatched for post:', p.id, 'with', { liked: updated.userLiked, likes: updated.stats.likes });
-          }}
-          onFollow={async () => {
-            if (!online) {
-              await enqueue({ type: 'follow', postId: p.id, userId });
-              return;
-            }
-            updateOne(p.id, post => ({ ...post, isFollowing: !post.isFollowing }));
-            await toggleFollowForPost(userId, p.id);
-          }}
-          onShare={async () => {
-            setSelectedPostForShare(p);
-            setShareModalOpen(true);
-          }}
-          onOpenComments={() => handleOpenComments(p.id)}
-          onView={async () => {
-            if (!online) {
-              await enqueue({ type: 'view', postId: p.id, userId });
-              return;
-            }
-            updateOne(p.id, post => {
-              post.stats.views += 1;
-              return post;
-            });
-            await incrementViews(userId, p.id);
+      {flat.map((feedItem) => {
+        if (feedItem.type === 'ad') {
+          const ad = feedItem.item as Ad;
+          return (
+            <AdCard
+              key={ad.id}
+              ad={ad}
+              onImpression={async () => {
+                try {
+                  await trackAdImpression(ad.id, userId);
+                } catch (err) {
+                  console.error('Error tracking ad impression:', err);
+                }
+              }}
+              onClick={async () => {
+                try {
+                  await trackAdClick(ad.id, userId);
+                } catch (err) {
+                  console.error('Error tracking ad click:', err);
+                }
+              }}
+            />
+          );
+        }
 
-            // Notify EngagementBar to update view count
-            window.dispatchEvent(new CustomEvent(`viewAdded-${p.id}`));
-          }}
-          onReclip={async () => {
-            // Prevent users from reclipping their own posts
-            if (p.userHandle === user?.handle) {
-              console.log('Cannot reclip your own post');
-              return;
-            }
-            // Check if already reclipped - prevent multiple reclips
-            if (p.userReclipped) {
-              console.log('Post already reclipped by user, ignoring reclip request');
-              return;
-            }
-            if (!online) {
-              // Optimistically update userReclipped and reclip count
-              updateOne(p.id, post => ({
-                ...post,
-                userReclipped: true,
-                stats: { ...post.stats, reclips: post.stats.reclips + 1 }
+        const p = feedItem.item as Post;
+        return (
+          <FeedCard
+            key={p.id}
+            post={p}
+            onLike={async () => {
+              console.log('Like button clicked for post:', p.id, 'userLiked:', p.userLiked);
+              if (!online) {
+                // Optimistically toggle icon only when offline; don't change counts
+                updateOne(p.id, post => ({ ...post, userLiked: !post.userLiked }));
+                await enqueue({ type: 'like', postId: p.id, userId });
+                return;
+              }
+              // Use server as source of truth to avoid double increments
+              const updated = await toggleLike(userId, p.id);
+              updateOne(p.id, _post => ({ ...updated }));
+              // Notify EngagementBar with authoritative values
+              window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
+                detail: { liked: updated.userLiked, likes: updated.stats.likes }
               }));
-              await enqueue({ type: 'reclip', postId: p.id, userId, userHandle: user?.handle || 'Unknown@Unknown' });
-              window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`));
-              return;
-            }
-            const { originalPost: updatedOriginalPost, reclippedPost } = await reclipPost(userId, p.id, user?.handle || 'Unknown@Unknown');
+              console.log('Like event dispatched for post:', p.id, 'with', { liked: updated.userLiked, likes: updated.stats.likes });
+            }}
+            onFollow={async () => {
+              if (!online) {
+                await enqueue({ type: 'follow', postId: p.id, userId });
+                return;
+              }
+              updateOne(p.id, post => ({ ...post, isFollowing: !post.isFollowing }));
+              await toggleFollowForPost(userId, p.id);
+            }}
+            onShare={async () => {
+              setSelectedPostForShare(p);
+              setShareModalOpen(true);
+            }}
+            onOpenComments={() => handleOpenComments(p.id)}
+            onView={async () => {
+              if (!online) {
+                await enqueue({ type: 'view', postId: p.id, userId });
+                return;
+              }
+              // Use server as source of truth to avoid double increments
+              const updated = await incrementViews(userId, p.id);
+              updateOne(p.id, _post => ({ ...updated }));
 
-            // Check if user already reclipped (reclippedPost will be null)
-            if (!reclippedPost) {
-              console.log('Post already reclipped by user, ignoring reclip request');
-              // Still update the UI to reflect the current state
+              // Notify EngagementBar to update view count
+              window.dispatchEvent(new CustomEvent(`viewAdded-${p.id}`));
+            }}
+            onReclip={async () => {
+              // Prevent users from reclipping their own posts
+              if (p.userHandle === user?.handle) {
+                console.log('Cannot reclip your own post');
+                return;
+              }
+              // Check if already reclipped - prevent multiple reclips
+              if (p.userReclipped) {
+                console.log('Post already reclipped by user, ignoring reclip request');
+                return;
+              }
+              if (!online) {
+                // Optimistically update userReclipped and reclip count
+                updateOne(p.id, post => ({
+                  ...post,
+                  userReclipped: true,
+                  stats: { ...post.stats, reclips: post.stats.reclips + 1 }
+                }));
+                await enqueue({ type: 'reclip', postId: p.id, userId, userHandle: user?.handle || 'Unknown@Unknown' });
+                window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`));
+                return;
+              }
+              const { originalPost: updatedOriginalPost, reclippedPost } = await reclipPost(userId, p.id, user?.handle || 'Unknown@Unknown');
+
+              // Check if user already reclipped (reclippedPost will be null)
+              if (!reclippedPost) {
+                console.log('Post already reclipped by user, ignoring reclip request');
+                // Still update the UI to reflect the current state
+                updateOne(p.id, post => ({
+                  ...post,
+                  userReclipped: updatedOriginalPost.userReclipped,
+                  stats: updatedOriginalPost.stats
+                }));
+                return;
+              }
+
+              // New reclip was created - update the original post and add reclipped post to feed
               updateOne(p.id, post => ({
                 ...post,
                 userReclipped: updatedOriginalPost.userReclipped,
                 stats: updatedOriginalPost.stats
               }));
-              return;
-            }
-
-            // New reclip was created - update the original post and add reclipped post to feed
-            updateOne(p.id, post => ({
-              ...post,
-              userReclipped: updatedOriginalPost.userReclipped,
-              stats: updatedOriginalPost.stats
-            }));
-            // Add the reclipped post to the current feed
-            setPages(prev => [[reclippedPost], ...prev]);
-            // Notify EngagementBar to update reclip count
-            window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`));
-          }}
-          onOpenScenes={() => {
-            setSelectedPostForScenes(p);
-            setScenesOpen(true);
-          }}
-        />
-      ))}
+              // Add the reclipped post to the current feed
+              setPages(prev => [[reclippedPost], ...prev]);
+              // Notify EngagementBar to update reclip count
+              window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`));
+            }}
+            onOpenScenes={() => {
+              setSelectedPostForScenes(p);
+              setScenesOpen(true);
+            }}
+          />
+        );
+      })}
 
       {loading && (
         <div className="px-4 py-6 animate-pulse">
@@ -1771,8 +2234,272 @@ function FeedPageWrapper() {
   );
 }
 
+function BoostPageWrapper() {
+  const { user } = useAuth();
+  const userId = user?.id ?? 'anon';
+  const online = useOnline();
+  const navigate = useNavigate();
+  const [posts, setPosts] = React.useState<Post[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [commentsModalOpen, setCommentsModalOpen] = React.useState(false);
+  const [selectedPostId, setSelectedPostId] = React.useState<string | null>(null);
+  const [shareModalOpen, setShareModalOpen] = React.useState(false);
+  const [selectedPostForShare, setSelectedPostForShare] = React.useState<Post | null>(null);
+  const [scenesOpen, setScenesOpen] = React.useState(false);
+  const [selectedPostForScenes, setSelectedPostForScenes] = React.useState<Post | null>(null);
+  const [boostModalOpen, setBoostModalOpen] = React.useState(false);
+  const [selectedPostForBoost, setSelectedPostForBoost] = React.useState<Post | null>(null);
+
+  // Load user's posts
+  React.useEffect(() => {
+    async function loadUserPosts() {
+      if (!user?.handle) return;
+
+      setLoading(true);
+      setError(null);
+      try {
+        const userPosts = await fetchPostsByUser(user.handle, 50);
+        // Decorate posts for the current user
+        const decorated = userPosts.map(p => decorateForUser(userId, p));
+        setPosts(decorated);
+      } catch (err) {
+        console.error('Error loading user posts:', err);
+        setError('Failed to load your posts');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadUserPosts();
+  }, [user?.handle, userId]);
+
+  // Refresh boost status when returning from payment or creating new post
+  const location = useLocation();
+  React.useEffect(() => {
+    const handleBoostSuccess = () => {
+      // Reload posts to update boost status
+      if (user?.handle) {
+        fetchPostsByUser(user.handle, 50)
+          .then(userPosts => {
+            const decorated = userPosts.map(p => decorateForUser(userId, p));
+            setPosts(decorated);
+          })
+          .catch(console.error);
+      }
+    };
+
+    // Check if we're returning from a successful boost
+    const locationState = location.state as any;
+    if (locationState?.boostSuccess) {
+      handleBoostSuccess();
+      // Clear the state to prevent re-triggering
+      window.history.replaceState({ ...locationState, boostSuccess: false }, '');
+    }
+
+    // Check if we're coming from create page with a new post to boost
+    if (locationState?.newPost && locationState?.showBoostModal) {
+      // Set the new post for boost modal
+      setSelectedPostForBoost(locationState.newPost);
+      setBoostModalOpen(true);
+      // Clear the state to prevent re-triggering
+      window.history.replaceState({ ...locationState, showBoostModal: false }, '');
+    }
+  }, [location.state, user?.handle, userId]);
+
+  const handleOpenComments = (postId: string) => {
+    setSelectedPostId(postId);
+    setCommentsModalOpen(true);
+  };
+
+  const handleCloseComments = () => {
+    setCommentsModalOpen(false);
+    setSelectedPostId(null);
+  };
+
+  function updateOne(id: string, updater: (p: Post) => Post) {
+    setPosts(cur => cur.map(p => p.id === id ? updater({ ...p }) : p));
+  }
+
+  // Not logged in
+  if (!user) {
+    return (
+      <div className="p-6">
+        <a href="/login" className="text-brand-600 underline">Sign in</a> to view your posts.
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="p-6">
+        <div className="animate-pulse space-y-4">
+          <div className="h-4 w-40 bg-gray-200 dark:bg-gray-800 rounded" />
+          <div className="h-4 w-24 bg-gray-200 dark:bg-gray-800 rounded" />
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6">
+        <div className="text-red-600 dark:text-red-400">{error}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="pb-2">
+      <div className="h-4" />
+
+      {/* Header */}
+      <div className="px-3 py-2">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Your Posts</h2>
+        <p className="text-sm text-gray-600 dark:text-gray-400">Boost your posts to reach more people</p>
+      </div>
+
+      <div className="h-4" />
+
+      {posts.length === 0 ? (
+        <div className="p-6 text-center">
+          <p className="text-gray-600 dark:text-gray-400">You haven't created any posts yet.</p>
+        </div>
+      ) : (
+        posts.map(p => (
+          <FeedCard
+            key={p.id}
+            post={p}
+            showBoostIcon={true}
+            onBoost={async () => {
+              setSelectedPostForBoost(p);
+              setBoostModalOpen(true);
+            }}
+            onLike={async () => {
+              if (!online) {
+                updateOne(p.id, post => ({ ...post, userLiked: !post.userLiked }));
+                await enqueue({ type: 'like', postId: p.id, userId });
+                return;
+              }
+              const updated = await toggleLike(userId, p.id);
+              updateOne(p.id, _post => ({ ...updated }));
+              window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
+                detail: { liked: updated.userLiked, likes: updated.stats.likes }
+              }));
+            }}
+            onShare={async () => {
+              setSelectedPostForShare(p);
+              setShareModalOpen(true);
+            }}
+            onOpenComments={() => handleOpenComments(p.id)}
+            onView={async () => {
+              if (!online) {
+                await enqueue({ type: 'view', postId: p.id, userId });
+                return;
+              }
+              // Use server as source of truth to avoid double increments
+              const updated = await incrementViews(userId, p.id);
+              updateOne(p.id, _post => ({ ...updated }));
+
+              // Notify EngagementBar to update view count
+              window.dispatchEvent(new CustomEvent(`viewAdded-${p.id}`));
+            }}
+            onReclip={async () => {
+              // Users can't reclip their own posts
+              console.log('Cannot reclip your own post');
+            }}
+            onOpenScenes={() => {
+              setSelectedPostForScenes(p);
+              setScenesOpen(true);
+            }}
+          />
+        ))
+      )}
+
+      {/* Modals */}
+      {commentsModalOpen && selectedPostId && (
+        <CommentsModal
+          postId={selectedPostId}
+          isOpen={commentsModalOpen}
+          onClose={handleCloseComments}
+        />
+      )}
+
+      {shareModalOpen && selectedPostForShare && (
+        <ShareModal
+          post={selectedPostForShare}
+          isOpen={shareModalOpen}
+          onClose={() => {
+            setShareModalOpen(false);
+            setSelectedPostForShare(null);
+          }}
+        />
+      )}
+
+      {scenesOpen && selectedPostForScenes && (
+        <ScenesModal
+          post={selectedPostForScenes}
+          isOpen={scenesOpen}
+          onClose={() => {
+            setScenesOpen(false);
+            setSelectedPostForScenes(null);
+          }}
+          onLike={async () => {
+            if (!online) {
+              updateOne(selectedPostForScenes.id, post => ({ ...post, userLiked: !post.userLiked }));
+              await enqueue({ type: 'like', postId: selectedPostForScenes.id, userId });
+              return;
+            }
+            const updated = await toggleLike(userId, selectedPostForScenes.id);
+            updateOne(selectedPostForScenes.id, _post => ({ ...updated }));
+            window.dispatchEvent(new CustomEvent(`likeToggled-${selectedPostForScenes.id}`, {
+              detail: { liked: updated.userLiked, likes: updated.stats.likes }
+            }));
+          }}
+          onFollow={async () => {
+            // User's own posts, so no follow action needed
+          }}
+          onShare={async () => {
+            setSelectedPostForShare(selectedPostForScenes);
+            setShareModalOpen(true);
+          }}
+          onOpenComments={() => handleOpenComments(selectedPostForScenes.id)}
+          onReclip={async () => {
+            // Users can't reclip their own posts
+            console.log('Cannot reclip your own post');
+          }}
+        />
+      )}
+
+      {/* Boost Selection Modal */}
+      {boostModalOpen && selectedPostForBoost && (
+        <BoostSelectionModal
+          isOpen={boostModalOpen}
+          post={selectedPostForBoost}
+          onClose={() => {
+            setBoostModalOpen(false);
+            setSelectedPostForBoost(null);
+          }}
+          onSelect={(feedType, price) => {
+            setBoostModalOpen(false);
+            // Navigate to payment page with post and boost details
+            navigate('/payment', {
+              state: {
+                post: selectedPostForBoost,
+                feedType,
+                price
+              }
+            });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 // Expose to router
 (App as any).FeedPage = FeedPageWrapper;
+(App as any).BoostPage = BoostPageWrapper;
 
 // Export for direct import
-export { FeedPageWrapper };
+export { FeedPageWrapper, BoostPageWrapper };

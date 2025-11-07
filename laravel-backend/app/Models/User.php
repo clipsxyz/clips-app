@@ -193,4 +193,20 @@ class User extends Authenticatable
     {
         return $this->hasMany(StoryReply::class);
     }
+
+    // Collections relationships
+    public function collections()
+    {
+        return $this->hasMany(Collection::class);
+    }
+
+    public function publicCollections()
+    {
+        return $this->hasMany(Collection::class)->where('is_private', false);
+    }
+
+    public function privateCollections()
+    {
+        return $this->hasMany(Collection::class)->where('is_private', true);
+    }
 }

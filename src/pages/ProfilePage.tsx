@@ -2,8 +2,10 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import Avatar from '../components/Avatar';
-import { FiCamera, FiX } from 'react-icons/fi';
+import { FiCamera, FiX, FiBookmark } from 'react-icons/fi';
 import Flag from '../components/Flag';
+import { getUserCollections } from '../api/collections';
+import type { Collection } from '../types';
 
 export default function ProfilePage() {
   const { user, logout, login } = useAuth();
@@ -17,6 +19,8 @@ export default function ProfilePage() {
     tiktok: user?.socialLinks?.tiktok || '',
   });
   const [countryFlag, setCountryFlag] = React.useState(user?.countryFlag || '');
+  const [collections, setCollections] = React.useState<Collection[]>([]);
+  const [collectionsOpen, setCollectionsOpen] = React.useState(false);
 
   React.useEffect(() => {
     if (user?.bio) {
@@ -29,6 +33,23 @@ export default function ProfilePage() {
       setSocialLinks(user.socialLinks);
     }
   }, [user?.socialLinks]);
+
+  // Load collections
+  React.useEffect(() => {
+    if (user?.id) {
+      loadCollections();
+    }
+  }, [user?.id]);
+
+  async function loadCollections() {
+    if (!user?.id) return;
+    try {
+      const userCollections = await getUserCollections(user.id);
+      setCollections(userCollections);
+    } catch (error) {
+      console.error('Error loading collections:', error);
+    }
+  }
 
   const handleProfilePictureSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -96,7 +117,86 @@ export default function ProfilePage() {
     <div className="min-h-screen bg-gradient-to-br from-brand-50 to-brand-100 dark:from-gray-900 dark:to-gray-800">
       <div className="max-w-2xl mx-auto p-6">
         {/* Header */}
-        <div className="text-center mb-8">
+        <div className="text-center mb-8 relative">
+          {/* Collections Icon */}
+          <div className="absolute top-0 right-0">
+            <div className="relative">
+              <button
+                onClick={() => setCollectionsOpen(!collectionsOpen)}
+                className="flex items-center gap-2 px-4 py-2 rounded-full bg-white dark:bg-gray-800 shadow-lg hover:shadow-xl transition-shadow"
+                aria-label="Collections"
+                title="Collections"
+              >
+                <FiBookmark className="w-5 h-5 text-gray-700 dark:text-gray-300" />
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Collection</span>
+              </button>
+
+              {/* Collections Dropdown */}
+              {collectionsOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setCollectionsOpen(false)}
+                  />
+                  <div className="absolute top-full right-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 z-50 max-h-96 overflow-y-auto">
+                    <div className="p-2">
+                      {collections.length === 0 ? (
+                        <div className="p-4 text-center text-gray-500 dark:text-gray-400 text-sm">
+                          No collections yet
+                        </div>
+                      ) : (
+                        collections.map(collection => (
+                          <button
+                            key={collection.id}
+                            onClick={() => {
+                              setCollectionsOpen(false);
+                              nav(`/collection/${collection.id}`, { state: { collectionName: collection.name } });
+                            }}
+                            className="w-full p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left flex items-center gap-3"
+                          >
+                            <div className="w-12 h-12 rounded-lg bg-gray-200 dark:bg-gray-700 flex items-center justify-center overflow-hidden flex-shrink-0">
+                              {collection.thumbnailUrl ? (
+                                (() => {
+                                  const isVideo = collection.thumbnailUrl.toLowerCase().endsWith('.mp4') ||
+                                    collection.thumbnailUrl.toLowerCase().endsWith('.webm') ||
+                                    collection.thumbnailUrl.toLowerCase().endsWith('.mov');
+                                  return isVideo ? (
+                                    <video
+                                      src={collection.thumbnailUrl}
+                                      className="w-full h-full object-cover"
+                                      muted
+                                      playsInline
+                                      preload="metadata"
+                                    />
+                                  ) : (
+                                    <img
+                                      src={collection.thumbnailUrl}
+                                      alt={collection.name}
+                                      className="w-full h-full object-cover"
+                                    />
+                                  );
+                                })()
+                              ) : (
+                                <FiBookmark className="w-6 h-6 text-gray-400" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-semibold text-gray-900 dark:text-gray-100 truncate">
+                                {collection.name}
+                              </div>
+                              <div className="text-sm text-gray-500 dark:text-gray-400">
+                                {collection.postIds.length} {collection.postIds.length === 1 ? 'post' : 'posts'}
+                              </div>
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
           <div className="relative inline-block mb-4 mx-auto">
             <label className="cursor-pointer group">
               <Avatar
