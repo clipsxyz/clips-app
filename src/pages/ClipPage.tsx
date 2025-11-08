@@ -1,9 +1,12 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiCamera, FiMapPin, FiX, FiImage, FiType, FiPalette } from 'react-icons/fi';
+import { FiCamera, FiMapPin, FiX, FiImage, FiType, FiPalette, FiMaximize2 } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { createStory } from '../api/stories';
+import ScenesModal from '../components/ScenesModal';
+import { getPostById } from '../api/posts';
+import type { Post } from '../types';
 
 export default function ClipPage() {
   const { user } = useAuth();
@@ -24,6 +27,9 @@ export default function ClipPage() {
   const [videoSegments, setVideoSegments] = React.useState<string[]>([]);
   const [currentSegmentIndex, setCurrentSegmentIndex] = React.useState(0);
   const [isPostingSegments, setIsPostingSegments] = React.useState(false);
+  const [sharedPostTemplate, setSharedPostTemplate] = React.useState<{ templateId?: string; mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>; stickers?: any[] } | null>(null);
+  const [showScenesModal, setShowScenesModal] = React.useState(false);
+  const [fullPost, setFullPost] = React.useState<Post | null>(null);
   const textAreaRef = React.useRef<HTMLTextAreaElement | null>(null);
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
   const [videoSize, setVideoSize] = React.useState<{ w: number; h: number } | null>(null);
@@ -50,6 +56,14 @@ export default function ClipPage() {
             setSharedPostInfo({
               postId: sharedStory.sharedFromPost,
               userId: sharedStory.sharedFromUser
+            });
+          }
+          // Store template info if available
+          if (sharedStory.templateId || (sharedStory.mediaItems && sharedStory.mediaItems.length > 1)) {
+            setSharedPostTemplate({
+              templateId: sharedStory.templateId,
+              mediaItems: sharedStory.mediaItems,
+              stickers: sharedStory.stickers
             });
           }
           console.log('Media set successfully');
@@ -306,12 +320,38 @@ export default function ClipPage() {
             <FiX className="w-6 h-6" />
           </button>
           <h1 className="text-white font-semibold text-base">Your Story</h1>
-          <button
-            onClick={() => setShowControls(!showControls)}
-            className="p-2 bg-black/50 backdrop-blur-sm text-white rounded-full hover:bg-black/70 transition-colors"
-          >
-            <FiImage className="w-6 h-6" />
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Show Full Scenes Button - Show for any post shared to clips */}
+            {sharedPostInfo?.postId && (
+              <button
+                onClick={async () => {
+                  // Fetch the full post to show in Scenes
+                  if (sharedPostInfo?.postId) {
+                    try {
+                      const post = await getPostById(sharedPostInfo.postId);
+                      if (post) {
+                        setFullPost(post);
+                        setShowScenesModal(true);
+                      }
+                    } catch (error) {
+                      console.error('Error fetching post:', error);
+                    }
+                  }
+                }}
+                className="px-3 py-1.5 bg-purple-600/80 backdrop-blur-sm text-white rounded-full hover:bg-purple-600 transition-colors text-xs font-semibold flex items-center gap-1.5"
+                title="Show Full Scenes"
+              >
+                <FiMaximize2 className="w-3.5 h-3.5" />
+                <span>Full Scenes</span>
+              </button>
+            )}
+            <button
+              onClick={() => setShowControls(!showControls)}
+              className="p-2 bg-black/50 backdrop-blur-sm text-white rounded-full hover:bg-black/70 transition-colors"
+            >
+              <FiImage className="w-6 h-6" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -511,6 +551,33 @@ export default function ClipPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Scenes Modal for Template Posts */}
+      {showScenesModal && fullPost && (
+        <ScenesModal
+          post={fullPost}
+          isOpen={showScenesModal}
+          onClose={() => {
+            setShowScenesModal(false);
+            setFullPost(null);
+          }}
+          onLike={async () => {
+            // Mock like handler for scenes
+          }}
+          onFollow={async () => {
+            // Mock follow handler for scenes
+          }}
+          onShare={async () => {
+            // Mock share handler for scenes
+          }}
+          onOpenComments={() => {
+            // Mock comments handler for scenes
+          }}
+          onReclip={async () => {
+            // Mock reclip handler for scenes
+          }}
+        />
       )}
     </div>
   );

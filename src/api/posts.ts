@@ -1,5 +1,5 @@
 import raw from '../data/posts.json';
-import type { Post, Comment } from '../types';
+import type { Post, Comment, StickerOverlay } from '../types';
 
 /**
  * MOCK API - TO SWAP WITH REAL BACKEND
@@ -619,6 +619,12 @@ export async function reclipPost(userId: string, originalPostId: string, userHan
 }
 
 // Comment API functions (without replies)
+export async function getPostById(postId: string): Promise<Post | null> {
+  await delay(100);
+  const post = posts.find(p => p.id === postId);
+  return post || null;
+}
+
 export async function fetchComments(postId: string): Promise<Comment[]> {
   await delay(200);
   return comments.filter(c => c.postId === postId);
@@ -725,7 +731,11 @@ export async function createPost(
   caption?: string,
   userLocal?: string,
   userRegional?: string,
-  userNational?: string
+  userNational?: string,
+  stickers?: StickerOverlay[],
+  templateId?: string,
+  mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>, // Multiple media items for carousel
+  bannerText?: string // News ticker banner text
 ): Promise<Post> {
   await delay(500);
 
@@ -749,13 +759,22 @@ export async function createPost(
     : getUserLocationFromHandle(userHandle);
 
   const postCreatedAt = Date.now(); // Epoch timestamp in milliseconds
+
+  // If mediaItems provided, use that; otherwise fall back to single mediaUrl
+  const finalMediaItems = mediaItems && mediaItems.length > 0
+    ? mediaItems
+    : imageUrl
+      ? [{ url: imageUrl, type: mediaType || 'image' }]
+      : undefined;
+
   const newPost: Post = {
     id: `${crypto.randomUUID()}-${postCreatedAt}`,
     userHandle,
     locationLabel: location || 'Unknown Location',
     tags: [],
-    mediaUrl: imageUrl || '', // Empty string for text-only posts
-    mediaType: mediaType || undefined, // No media type for text-only posts
+    mediaUrl: imageUrl || '', // Keep for backward compatibility
+    mediaType: mediaType || undefined, // Keep for backward compatibility
+    mediaItems: finalMediaItems, // New: support multiple media items
     text: text || undefined, // Store the text content
     imageText: imageText || undefined, // Store the image text overlay
     caption: caption || undefined, // Store the caption for image/video posts
@@ -770,6 +789,9 @@ export async function createPost(
     isBookmarked: false,
     isFollowing: false,
     userLiked: false,
+    stickers: stickers || undefined, // Store stickers
+    templateId: templateId || undefined, // Store template ID
+    bannerText: bannerText || undefined, // Store news ticker banner text
     ...locationData
   };
 

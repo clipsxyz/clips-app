@@ -250,8 +250,12 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
                                             <div className="w-16 h-16 rounded-lg bg-gray-700 dark:bg-gray-600 flex items-center justify-center overflow-hidden flex-shrink-0">
                                                 {collection.thumbnailUrl ? (
                                                     (() => {
-                                                        // Check if it's a video by extension or find the post
-                                                        const isVideo = collection.thumbnailUrl.toLowerCase().endsWith('.mp4') ||
+                                                        // Find the first post to check its mediaType
+                                                        const firstPost = collection.postIds.length > 0
+                                                            ? posts.find(p => p.id === collection.postIds[0])
+                                                            : null;
+                                                        const isVideo = firstPost?.mediaType === 'video' ||
+                                                            collection.thumbnailUrl.toLowerCase().endsWith('.mp4') ||
                                                             collection.thumbnailUrl.toLowerCase().endsWith('.webm') ||
                                                             collection.thumbnailUrl.toLowerCase().endsWith('.mov');
                                                         return isVideo ? (
@@ -261,6 +265,11 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
                                                                 muted
                                                                 playsInline
                                                                 preload="metadata"
+                                                                onLoadedMetadata={(e) => {
+                                                                    // Ensure first frame is shown
+                                                                    const video = e.currentTarget;
+                                                                    video.currentTime = 0;
+                                                                }}
                                                             />
                                                         ) : (
                                                             <img

@@ -28,8 +28,11 @@ CREATE TABLE posts (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     user_handle VARCHAR(100) NOT NULL,
     text_content TEXT,
+    caption TEXT, -- Caption for image/video posts
+    image_text TEXT, -- Text overlay on images
     media_url VARCHAR(500),
     media_type VARCHAR(20) CHECK (media_type IN ('image', 'video')),
+    media_items JSONB, -- Array of media items for carousel/templates
     location_label VARCHAR(200),
     tags TEXT[], -- Array of hashtags
     likes_count INTEGER DEFAULT 0,
@@ -40,6 +43,9 @@ CREATE TABLE posts (
     is_reclipped BOOLEAN DEFAULT FALSE,
     original_post_id UUID REFERENCES posts(id) ON DELETE CASCADE,
     reclipped_by VARCHAR(100),
+    banner_text VARCHAR(500), -- News ticker banner text
+    stickers JSONB, -- Array of sticker overlays
+    template_id VARCHAR(100), -- Template used to create the post
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

@@ -15,6 +15,9 @@ interface ShareModalProps {
         mediaUrl?: string;
         locationLabel: string;
         mediaType?: 'image' | 'video';
+        templateId?: string;
+        mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>;
+        stickers?: any[];
     };
 }
 
@@ -108,7 +111,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
 
     const handleShareToStory = async () => {
         console.log('Share to story clicked', post);
-        if (!user) { alert('Please sign in to share stories.'); return; }
+        if (!user) { alert('Please sign in to share clips.'); return; }
 
         // Truncate text to 200 characters for stories
         const maxLength = 200;
@@ -126,25 +129,35 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
                 mediaType = 'image';
             }
 
+            // Create the story directly
             await createStory(
                 user.id,
-                user.handle,
+                user.handle || '',
                 mediaUrl,
                 mediaType,
-                truncatedText || undefined,
-                undefined,
-                undefined,
-                'medium',
-                post.id,
-                post.userHandle
+                truncatedText,
+                post.locationLabel,
+                undefined, // textColor
+                undefined, // textSize
+                post.id, // sharedFromPost
+                post.userHandle // sharedFromUser
             );
-            window.dispatchEvent(new CustomEvent('storyCreated', { detail: { userHandle: user.handle } }));
+
+            // Close the share modal
             onClose();
-            showToast('Shared to your stories');
-            navigate('/stories');
+
+            // Show success toast
+            showToast?.('You shared this to Clips 24!');
+
+            // Navigate to Clips 24 page (StoriesPage)
+            navigate('/stories', {
+                state: {
+                    openUserHandle: user.handle // Open current user's clips
+                }
+            });
         } catch (e) {
-            console.error('Failed to share to story:', e);
-            alert('Failed to share to stories. Please try again.');
+            console.error('Failed to share to clips:', e);
+            alert('Failed to share to Clips 24. Please try again.');
         }
     };
 

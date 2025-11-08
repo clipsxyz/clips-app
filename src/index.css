@@ -252,3 +252,45 @@
     background-position: 0% 50%;
   }
 }
+
+/* Hide scrollbar utility */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  /* IE and Edge */
+  scrollbar-width: none;
+  /* Firefox */
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+  /* Chrome, Safari and Opera */
+}
+
+/* News Ticker Banner Animation */
+.news-ticker-container {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+}
+
+.news-ticker-text {
+  display: inline-block;
+  animation: newsTickerScroll 30s linear infinite;
+  will-change: transform;
+  padding-right: 2rem;
+}
+
+@keyframes newsTickerScroll {
+  0% {
+    transform: translateX(0);
+  }
+
+  100% {
+    transform: translateX(-33.333%);
+  }
+}
+
+/* Pause animation on hover for better readability */
+.news-ticker-container:hover .news-ticker-text {
+  animation-play-state: paused;
+}

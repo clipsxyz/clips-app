@@ -158,14 +158,23 @@ class PostController extends Controller
             'text' => 'nullable|string|max:500',
             'location' => 'nullable|string|max:200',
             'mediaUrl' => 'nullable|url',
-            'mediaType' => 'nullable|in:image,video'
+            'mediaType' => 'nullable|in:image,video',
+            'caption' => 'nullable|string|max:500',
+            'imageText' => 'nullable|string|max:500',
+            'bannerText' => 'nullable|string|max:200',
+            'stickers' => 'nullable|array',
+            'templateId' => 'nullable|string|max:100',
+            'mediaItems' => 'nullable|array',
+            'mediaItems.*.url' => 'required|url',
+            'mediaItems.*.type' => 'required|in:image,video',
+            'mediaItems.*.duration' => 'nullable|numeric|min:0',
         ]);
 
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 400);
         }
 
-        if (!$request->text && !$request->mediaUrl) {
+        if (!$request->text && !$request->mediaUrl && !$request->mediaItems) {
             return response()->json(['error' => 'Post must have text or media'], 400);
         }
 
@@ -179,6 +188,12 @@ class PostController extends Controller
                 'media_url' => $request->mediaUrl,
                 'media_type' => $request->mediaType,
                 'location_label' => $request->location,
+                'caption' => $request->caption,
+                'image_text' => $request->imageText,
+                'banner_text' => $request->bannerText,
+                'stickers' => $request->stickers,
+                'template_id' => $request->templateId,
+                'media_items' => $request->mediaItems,
             ]);
 
             // Update user posts count

@@ -1,5 +1,5 @@
 import React from 'react';
-import { FiX, FiCamera, FiImage } from 'react-icons/fi';
+import { FiX, FiCamera, FiImage, FiLayers } from 'react-icons/fi';
 import Avatar from './Avatar';
 import { useAuth } from '../context/Auth';
 
@@ -79,6 +79,22 @@ export default function CreateModal({ isOpen, onClose, onNavigate }: CreateModal
                         </div>
                     </button>
 
+
+                    {/* Use Template Option */}
+                    <button
+                        onClick={() => handleNavigate('/templates')}
+                        className="w-full flex items-center gap-4 p-4 rounded-xl bg-gradient-to-r from-purple-500/10 to-pink-500/10 dark:from-purple-500/20 dark:to-pink-500/20 hover:from-purple-500/20 hover:to-pink-500/20 dark:hover:from-purple-500/30 dark:hover:to-pink-500/30 transition-colors border border-purple-500/20"
+                    >
+                        <div className="w-14 h-14 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center">
+                            <FiLayers className="w-6 h-6 text-white" />
+                        </div>
+                        <div className="flex-1 text-left">
+                            <div className="font-semibold text-gray-900 dark:text-gray-100">Use Template</div>
+                            <div className="text-sm text-gray-600 dark:text-gray-400">
+                                Create videos with trending templates and sync to audio
+                            </div>
+                        </div>
+                    </button>
 
                     {/* Create Post Option */}
                     <button

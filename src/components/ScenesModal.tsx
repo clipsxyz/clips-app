@@ -4,6 +4,7 @@ import { FiX, FiHeart, FiShare2, FiRepeat } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import Avatar from './Avatar';
 import ShareModal from './ShareModal';
+import StickerOverlayComponent from './StickerOverlay';
 import { useAuth } from '../context/Auth';
 import { useOnline } from '../hooks/useOnline';
 import { addComment } from '../api/posts';
@@ -47,8 +48,64 @@ export default function ScenesModal({
     const videoRef = React.useRef<HTMLVideoElement>(null);
     const lastTapRef = React.useRef<number>(0);
     const touchHandledRef = React.useRef<boolean>(false);
+    const mediaContainerRef = React.useRef<HTMLDivElement>(null);
+    const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
     const { user } = useAuth();
     const online = useOnline();
+
+    // Determine if we have multiple media items (carousel)
+    const items = post.mediaItems && post.mediaItems.length > 0
+        ? post.mediaItems
+        : (post.mediaUrl ? [{ url: post.mediaUrl, type: post.mediaType || 'image' }] : []);
+    const [currentIndex, setCurrentIndex] = React.useState(0);
+    const hasMultipleItems = items.length > 1;
+    const currentItem = items[currentIndex];
+
+    // Update container size for stickers
+    React.useEffect(() => {
+        if (mediaContainerRef.current && post.stickers && post.stickers.length > 0) {
+            const updateSize = () => {
+                const rect = mediaContainerRef.current?.getBoundingClientRect();
+                if (rect) {
+                    setContainerSize({ width: rect.width, height: rect.height });
+                }
+            };
+            updateSize();
+            window.addEventListener('resize', updateSize);
+            const observer = new ResizeObserver(updateSize);
+            if (mediaContainerRef.current) {
+                observer.observe(mediaContainerRef.current);
+            }
+            return () => {
+                window.removeEventListener('resize', updateSize);
+                observer.disconnect();
+            };
+        }
+    }, [post.stickers, currentIndex]);
+
+    // Reset video state when switching items
+    React.useEffect(() => {
+        if (currentItem?.type === 'video' && videoRef.current) {
+            videoRef.current.load();
+            setVideoProgress(0);
+        }
+    }, [currentIndex, currentItem?.type]);
+
+    function handleNext() {
+        if (hasMultipleItems) {
+            setCurrentIndex((prev) => (prev + 1) % items.length);
+        }
+    }
+
+    function handlePrevious() {
+        if (hasMultipleItems) {
+            setCurrentIndex((prev) => (prev - 1 + items.length) % items.length);
+        }
+    }
+
+    function handleDotClick(index: number) {
+        setCurrentIndex(index);
+    }
 
     // Sync with post data changes
     React.useEffect(() => {
@@ -166,7 +223,7 @@ export default function ScenesModal({
             }
         } else {
             // Single tap - toggle play/pause for videos
-            if (post.mediaType === 'video' && videoRef.current) {
+            if (currentItem?.type === 'video' && videoRef.current) {
                 if (videoRef.current.paused) {
                     videoRef.current.play();
                 } else {
@@ -175,7 +232,7 @@ export default function ScenesModal({
             }
         }
         lastTapRef.current = now;
-    }, [post.mediaType, onLike, busy]);
+    }, [currentItem?.type, onLike, busy, liked]);
 
     const handleMediaClick = React.useCallback((e: React.MouseEvent) => {
         if (touchHandledRef.current) {
@@ -325,6 +382,7 @@ export default function ScenesModal({
 
                     {/* Main Media Content */}
                     <div
+                        ref={mediaContainerRef}
                         className="w-full h-full flex items-center justify-center relative select-none cursor-pointer"
                         onClick={(e) => {
                             // Only handle media click if clicking directly on the media area (not on buttons)
@@ -334,13 +392,13 @@ export default function ScenesModal({
                         }}
                         onTouchEnd={handleMediaTouchEnd}
                     >
-                        {post.mediaUrl ? (
-                            post.mediaType === 'video' ? (
+                        {currentItem ? (
+                            currentItem.type === 'video' ? (
                                 <div className="relative w-full h-full">
                                     <video
                                         ref={videoRef}
                                         className="w-full h-full object-contain pointer-events-none"
-                                        src={post.mediaUrl}
+                                        src={currentItem.url}
                                         controls={false}
                                         autoPlay
                                         loop
@@ -368,15 +426,96 @@ export default function ScenesModal({
                             ) : (
                                 <img
                                     className="w-full h-full object-contain"
-                                    src={post.mediaUrl}
+                                    src={currentItem.url}
                                     alt={post.caption || post.text || 'Post media'}
                                 />
                             )
                         ) : (
                             <div className="text-white px-6 text-center max-w-md">
                                 <p className="text-xl font-semibold mb-3">{post.userHandle}</p>
-                                {post.text && <p className="whitespace-pre-line text-base opacity-90">{post.text}</p>}
+                                {/* Only show text if media is not a generated text image (data URL) */}
+                                {post.text && post.mediaUrl && !post.mediaUrl.startsWith('data:image') && (
+                                    <p className="whitespace-pre-line text-base opacity-90">{post.text}</p>
+                                )}
                             </div>
+                        )}
+
+                        {/* Sticker Overlays */}
+                        {post.stickers && post.stickers.length > 0 && containerSize.width > 0 && (
+                            <>
+                                {post.stickers.map((overlay) => (
+                                    <StickerOverlayComponent
+                                        key={overlay.id}
+                                        overlay={overlay}
+                                        onUpdate={() => { }} // Read-only in scenes
+                                        onRemove={() => { }} // Read-only in scenes
+                                        isSelected={false} // Read-only in scenes
+                                        onSelect={() => { }} // Read-only in scenes
+                                        containerWidth={containerSize.width}
+                                        containerHeight={containerSize.height}
+                                    />
+                                ))}
+                            </>
+                        )}
+
+                        {/* Carousel Navigation - Only show if multiple items */}
+                        {hasMultipleItems && (
+                            <>
+                                {/* Previous Button */}
+                                {currentIndex > 0 && (
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handlePrevious();
+                                        }}
+                                        className="absolute left-4 top-1/3 transform -translate-y-1/2 w-12 h-12 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center transition-colors z-30"
+                                        aria-label="Previous image"
+                                    >
+                                        <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                                        </svg>
+                                    </button>
+                                )}
+
+                                {/* Next Button */}
+                                {currentIndex < items.length - 1 && (
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleNext();
+                                        }}
+                                        className="absolute right-4 top-1/3 transform -translate-y-1/2 w-12 h-12 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center transition-colors z-30"
+                                        aria-label="Next image"
+                                    >
+                                        <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                        </svg>
+                                    </button>
+                                )}
+
+                                {/* Dots Indicator */}
+                                <div className="absolute bottom-24 left-1/2 transform -translate-x-1/2 flex gap-2 z-30">
+                                    {items.map((_, index) => (
+                                        <button
+                                            key={index}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDotClick(index);
+                                            }}
+                                            className={`h-2 rounded-full transition-all ${index === currentIndex
+                                                ? 'bg-white w-8'
+                                                : 'bg-white/50 hover:bg-white/75 w-2'
+                                                }`}
+                                            aria-label={`Go to image ${index + 1}`}
+                                        />
+                                    ))}
+                                </div>
+
+                                {/* Image Counter */}
+                                <div className="absolute top-20 right-4 px-3 py-1.5 bg-black/50 text-white text-sm rounded-full z-30">
+                                    {currentIndex + 1} / {items.length}
+                                </div>
+                            </>
                         )}
 
                         {/* Permanent small hearts on left side when liked */}
@@ -500,14 +639,14 @@ export default function ScenesModal({
                                     )}
                                 </div>
 
-                                {/* Caption */}
-                                {post.caption && (
+                                {/* Caption - Only show if media is not a generated text image (data URL) */}
+                                {post.caption && post.mediaUrl && !post.mediaUrl.startsWith('data:image') && (
                                     <div className="text-white text-sm mb-2 line-clamp-2">
                                         {post.caption}
                                     </div>
                                 )}
 
-                                {/* Text Content (for text-only posts) */}
+                                {/* Text Content (for text-only posts without media) */}
                                 {!post.mediaUrl && post.text && (
                                     <div className="text-white text-sm opacity-90 whitespace-pre-line mb-2">
                                         {post.text}

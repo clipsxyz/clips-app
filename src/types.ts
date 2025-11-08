@@ -31,8 +31,9 @@ export type Post = {
   userHandle: string;
   locationLabel: string;
   tags: string[];
-  mediaUrl?: string; // Optional for text-only posts
-  mediaType?: 'image' | 'video'; // New field to distinguish media types
+  mediaUrl?: string; // Optional for text-only posts (deprecated, use mediaItems for carousel)
+  mediaType?: 'image' | 'video'; // New field to distinguish media types (deprecated, use mediaItems for carousel)
+  mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>; // Multiple media items for carousel/templates
   text?: string; // Text content of the post (maps to text_content in DB)
   text_content?: string; // Backend field
   imageText?: string; // Text overlay on images
@@ -66,6 +67,11 @@ export type Post = {
   isBoosted?: boolean;
   boostExpiresAt?: number; // Epoch timestamp when boost expires
   boostFeedType?: 'local' | 'regional' | 'national';
+  // Stickers and templates
+  stickers?: StickerOverlay[]; // Stickers applied to the post
+  templateId?: string; // Template used to create the post
+  // News ticker banner
+  bannerText?: string; // Scrolling news ticker banner text
 };
 
 export type Comment = {
@@ -189,4 +195,84 @@ export type Collection = {
   postIds: string[]; // Array of post IDs in this collection
   createdAt: number; // Epoch timestamp when collection was created
   updatedAt: number; // Epoch timestamp when collection was last updated
+};
+
+export type TemplateClip = {
+  id: string;
+  duration: number; // Duration in milliseconds
+  startTime?: number; // Start time in the audio track (ms)
+  placeholderUrl?: string; // Placeholder video/image URL
+  mediaType: 'image' | 'video';
+  transition?: 'cut' | 'fade' | 'slide' | 'zoom';
+};
+
+export type VideoTemplate = {
+  id: string;
+  name: string;
+  category: string; // e.g., "For You", "Viral Song", "Meme", "AI", "Aesthetic"
+  thumbnailUrl: string; // Preview thumbnail
+  audioUrl?: string; // Audio track URL
+  audioDuration?: number; // Total audio duration in ms
+  clips: TemplateClip[]; // Array of clips with timing
+  usageCount: number; // Number of videos created with this template
+  createdAt: number; // When template was created
+  isTrending?: boolean; // Whether template is currently trending
+  description?: string; // Template description
+};
+
+export type Sticker = {
+  id: string;
+  name: string;
+  category: string; // e.g., "Emoji", "Trending", "Reactions", "Decorative", "Text"
+  url?: string; // Image URL for custom stickers
+  emoji?: string; // Emoji character for emoji stickers
+  isAnimated?: boolean; // Whether sticker is animated
+  isTrending?: boolean; // Whether sticker is currently trending
+  usageCount?: number; // Number of times sticker has been used
+};
+
+export type StickerOverlay = {
+  id: string;
+  stickerId: string;
+  sticker: Sticker;
+  x: number; // X position as percentage (0-100)
+  y: number; // Y position as percentage (0-100)
+  scale: number; // Scale factor (0.5 - 2.0)
+  rotation: number; // Rotation in degrees (0-360)
+  opacity: number; // Opacity (0-1)
+  startTime?: number; // Start time in video (ms) - for video stickers
+  endTime?: number; // End time in video (ms) - for video stickers
+  textContent?: string; // For text stickers
+  textColor?: string; // For text stickers
+  fontSize?: 'small' | 'medium' | 'large'; // For text stickers
+};
+
+// Video editing types
+export type MediaClip = {
+  id: string;
+  mediaUrl: string;
+  type: 'image' | 'video';
+  startTime: number; // Position in timeline (seconds)
+  duration: number; // Duration in timeline (seconds)
+  trimStart: number; // Trim from start (seconds)
+  trimEnd: number; // Trim from end (seconds)
+  speed: number; // 0.5x, 1x, 2x, etc.
+  reverse: boolean;
+  filter?: string; // Filter ID
+  effects?: string[]; // Effect IDs
+  originalDuration?: number; // Original media duration (for videos)
+};
+
+export type Transition = {
+  id: string;
+  fromClipId: string;
+  toClipId: string;
+  type: 'fade' | 'slide' | 'zoom' | 'none';
+  duration: number; // Transition duration in seconds
+};
+
+export type EditedMedia = {
+  clips: MediaClip[];
+  transitions: Transition[];
+  totalDuration: number; // Total timeline duration in seconds
 };
