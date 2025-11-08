@@ -22,7 +22,8 @@ import { getActiveBoost, getBoostTimeRemaining } from './api/boost';
 import BoostSelectionModal from './components/BoostSelectionModal';
 import SavePostModal from './components/SavePostModal';
 import { getCollectionsForPost } from './api/collections';
-import type { Post, Ad } from './types';
+import type { Post, Ad, StickerOverlay } from './types';
+import StickerOverlayComponent from './components/StickerOverlay';
 
 type Tab = 'Finglas' | 'Dublin' | 'Ireland' | 'Following';
 
@@ -586,7 +587,7 @@ function CaptionText({ caption }: { caption: string }) {
   );
 }
 
-function Media({ url, mediaType, text, imageText, onDoubleLike, onOpenScenes }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void }) {
+function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void }) {
   const [burst, setBurst] = React.useState(false);
   const [isPlaying, setIsPlaying] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -598,6 +599,36 @@ function Media({ url, mediaType, text, imageText, onDoubleLike, onOpenScenes }: 
   const touchHandled = React.useRef<boolean>(false);
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const observerRef = React.useRef<IntersectionObserver | null>(null);
+  const mediaContainerRef = React.useRef<HTMLDivElement>(null);
+  const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
+
+  // Determine if we have multiple media items (carousel)
+  const items = mediaItems && mediaItems.length > 0 ? mediaItems : (url ? [{ url, type: mediaType || 'image' }] : []);
+  const [currentIndex, setCurrentIndex] = React.useState(0);
+  const hasMultipleItems = items.length > 1;
+  const currentItem = items[currentIndex];
+
+  // Update container size for stickers
+  React.useEffect(() => {
+    if (mediaContainerRef.current && stickers && stickers.length > 0) {
+      const updateSize = () => {
+        const rect = mediaContainerRef.current?.getBoundingClientRect();
+        if (rect) {
+          setContainerSize({ width: rect.width, height: rect.height });
+        }
+      };
+      updateSize();
+      window.addEventListener('resize', updateSize);
+      const observer = new ResizeObserver(updateSize);
+      if (mediaContainerRef.current) {
+        observer.observe(mediaContainerRef.current);
+      }
+      return () => {
+        window.removeEventListener('resize', updateSize);
+        observer.disconnect();
+      };
+    }
+  }, [stickers, url, currentIndex]);
 
   // Video control functions
   const togglePlayPause = () => {
@@ -754,14 +785,52 @@ function Media({ url, mediaType, text, imageText, onDoubleLike, onOpenScenes }: 
     handleTap();
   }
 
+  // Reset video state when switching items
+  React.useEffect(() => {
+    if (currentItem?.type === 'video' && videoRef.current) {
+      setIsLoading(true);
+      setIsPlaying(false);
+      setShowControls(false);
+      setProgress(0);
+      videoRef.current.load();
+    } else if (currentItem?.type === 'image') {
+      setIsLoading(false);
+      setIsPlaying(false);
+      setShowControls(false);
+      setProgress(0);
+    }
+  }, [currentIndex, currentItem?.type]);
+
   // If this is a text-only post, render TextCard
-  if (text && !url) {
+  if (text && !url && (!mediaItems || mediaItems.length === 0)) {
     return <TextCard text={text} onDoubleLike={onDoubleLike} />;
+  }
+
+  // If no media at all, return null
+  if (!currentItem) {
+    return null;
+  }
+
+  function handleNext() {
+    if (hasMultipleItems) {
+      setCurrentIndex((prev) => (prev + 1) % items.length);
+    }
+  }
+
+  function handlePrevious() {
+    if (hasMultipleItems) {
+      setCurrentIndex((prev) => (prev - 1 + items.length) % items.length);
+    }
+  }
+
+  function handleDotClick(index: number) {
+    setCurrentIndex(index);
   }
 
   return (
     <div className="mx-4 my-4 select-none">
       <div
+        ref={mediaContainerRef}
         role="button"
         tabIndex={0}
         aria-label="Open media. Double tap or press to like"
@@ -769,17 +838,21 @@ function Media({ url, mediaType, text, imageText, onDoubleLike, onOpenScenes }: 
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
             onDoubleLike();
+          } else if (hasMultipleItems && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+            e.preventDefault();
+            if (e.key === 'ArrowLeft') handlePrevious();
+            else handleNext();
           }
         }}
         onClick={handleClick}
         onTouchEnd={handleTouchEnd}
         className="relative w-full aspect-video rounded-xl overflow-hidden bg-gray-50 dark:bg-gray-900 shadow-inner"
       >
-        {mediaType === 'video' ? (
+        {currentItem.type === 'video' ? (
           <>
             <video
               ref={videoRef}
-              src={url}
+              src={currentItem.url}
               className="absolute inset-0 w-full h-full object-cover"
               preload="metadata"
               playsInline
@@ -899,7 +972,7 @@ function Media({ url, mediaType, text, imageText, onDoubleLike, onOpenScenes }: 
         ) : (
           <>
             <img
-              src={url}
+              src={currentItem.url}
               alt=""
               loading="lazy"
               decoding="async"
@@ -908,7 +981,7 @@ function Media({ url, mediaType, text, imageText, onDoubleLike, onOpenScenes }: 
             />
             {/* Fullscreen Button - Bottom Right for Images */}
             {onOpenScenes && (
-              <div className="absolute bottom-4 right-4">
+              <div className="absolute bottom-4 right-4 z-10">
                 <button
                   onClick={onOpenScenes}
                   aria-label="Open in Scenes fullscreen"
@@ -921,9 +994,88 @@ function Media({ url, mediaType, text, imageText, onDoubleLike, onOpenScenes }: 
             )}
           </>
         )}
+
+        {/* Carousel Navigation - Only show if multiple items */}
+        {hasMultipleItems && (
+          <>
+            {/* Previous Button */}
+            {currentIndex > 0 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handlePrevious();
+                }}
+                className="absolute left-2 top-1/2 transform -translate-y-1/2 w-10 h-10 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center transition-colors z-20"
+                aria-label="Previous image"
+              >
+                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+            )}
+
+            {/* Next Button */}
+            {currentIndex < items.length - 1 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleNext();
+                }}
+                className="absolute right-2 top-1/2 transform -translate-y-1/2 w-10 h-10 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center transition-colors z-20"
+                aria-label="Next image"
+              >
+                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            )}
+
+            {/* Dots Indicator */}
+            <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 flex gap-1.5 z-20">
+              {items.map((_, index) => (
+                <button
+                  key={index}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDotClick(index);
+                  }}
+                  className={`w-2 h-2 rounded-full transition-all ${index === currentIndex
+                    ? 'bg-white w-6'
+                    : 'bg-white/50 hover:bg-white/75'
+                    }`}
+                  aria-label={`Go to image ${index + 1}`}
+                />
+              ))}
+            </div>
+
+            {/* Image Counter */}
+            <div className="absolute top-2 right-2 px-2 py-1 bg-black/50 text-white text-xs rounded z-20">
+              {currentIndex + 1} / {items.length}
+            </div>
+          </>
+        )}
+
+        {/* Sticker Overlays */}
+        {stickers && stickers.length > 0 && containerSize.width > 0 && (
+          <>
+            {stickers.map((overlay) => (
+              <StickerOverlayComponent
+                key={overlay.id}
+                overlay={overlay}
+                onUpdate={() => { }} // Read-only in feed
+                onRemove={() => { }} // Read-only in feed
+                isSelected={false} // Read-only in feed
+                onSelect={() => { }} // Read-only in feed
+                containerWidth={containerSize.width}
+                containerHeight={containerSize.height}
+              />
+            ))}
+          </>
+        )}
+
         {/* Image Text Overlay */}
         {imageText && mediaType === 'image' && (
-          <div className="absolute bottom-4 left-4 right-4">
+          <div className="absolute bottom-4 left-4 right-4 z-10">
             <div
               className="px-3 py-2 text-lg font-bold drop-shadow-lg"
               style={{
@@ -1399,7 +1551,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
       <PostHeader post={post} onFollow={onFollow} showBoostIcon={showBoostIcon} onBoost={onBoost} />
       <TagRow tags={post.tags} />
       <div className="relative">
-        <Media url={post.mediaUrl} mediaType={post.mediaType} text={post.text} imageText={post.imageText} onDoubleLike={onLike} onOpenScenes={onOpenScenes} />
+        <Media url={post.mediaUrl} mediaType={post.mediaType} text={post.text} imageText={post.imageText} stickers={post.stickers} mediaItems={post.mediaItems} onDoubleLike={onLike} onOpenScenes={onOpenScenes} />
       </div>
       {/* Caption for image/video posts */}
       {post.caption && post.mediaUrl && (
@@ -1420,6 +1572,16 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         onToggleMetrics={() => setIsMetricsOpen(!isMetricsOpen)}
         isMetricsOpen={isMetricsOpen}
       />
+      {/* News Ticker Banner */}
+      {post.bannerText && (
+        <div className="h-7 bg-black dark:bg-black overflow-hidden border-t border-gray-700 dark:border-gray-700">
+          <div className="news-ticker-container h-full flex items-center">
+            <div className="news-ticker-text text-white dark:text-white font-semibold text-xs whitespace-nowrap">
+              {post.bannerText} • {post.bannerText} • {post.bannerText} • {post.bannerText}
+            </div>
+          </div>
+        </div>
+      )}
       {showBoostIcon && <BoostMetrics post={post} isOpen={isMetricsOpen} />}
       {user && (
         <SavePostModal

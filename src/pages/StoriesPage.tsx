@@ -1,14 +1,15 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiHeart, FiVolume2, FiVolumeX } from 'react-icons/fi';
+import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiHeart, FiVolume2, FiVolumeX, FiMaximize2 } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle } from '../api/stories';
 import { appendMessage } from '../api/messages';
 import { showToast } from '../utils/toast';
-import { getFollowedUsers } from '../api/posts';
-import type { Story, StoryGroup } from '../types';
+import { getFollowedUsers, getPostById } from '../api/posts';
+import ScenesModal from '../components/ScenesModal';
+import type { Story, StoryGroup, Post } from '../types';
 
 export default function StoriesPage() {
     const { user } = useAuth();
@@ -27,6 +28,8 @@ export default function StoriesPage() {
     const [showReplyModal, setShowReplyModal] = React.useState(false);
     const [replyText, setReplyText] = React.useState('');
     const [showControls, setShowControls] = React.useState(true);
+    const [showScenesModal, setShowScenesModal] = React.useState(false);
+    const [fullPost, setFullPost] = React.useState<Post | null>(null);
     const videoRef = React.useRef<HTMLVideoElement>(null);
     const elapsedTimeRef = React.useRef<number>(0);
     const pausedRef = React.useRef<boolean>(false);
@@ -220,7 +223,7 @@ export default function StoriesPage() {
 
     // Track story view progress
     React.useEffect(() => {
-        if (!viewingStories || !user?.id) return;
+        if (!viewingStories || !user?.id || showScenesModal) return; // Don't run progress when ScenesModal is open
 
         const currentGroup = storyGroups[currentGroupIndex];
         if (!currentGroup || !currentGroup.stories) return;
@@ -241,7 +244,7 @@ export default function StoriesPage() {
         const interval = 50;
 
         const timer = setInterval(() => {
-            if (pausedRef.current) return; // Don't update progress when paused
+            if (pausedRef.current || showScenesModal) return; // Don't update progress when paused or ScenesModal is open
 
             elapsedTimeRef.current += interval;
             const newProgress = Math.min((elapsedTimeRef.current / duration) * 100, 100);
@@ -257,7 +260,7 @@ export default function StoriesPage() {
         }, interval);
 
         return () => clearInterval(timer);
-    }, [viewingStories, currentGroupIndex, currentStoryIndex, storyGroups, user?.id]);
+    }, [viewingStories, currentGroupIndex, currentStoryIndex, storyGroups, user?.id, showScenesModal]);
 
     // Auto-hide controls on inactivity
     React.useEffect(() => {
@@ -361,7 +364,7 @@ export default function StoriesPage() {
             <div className="flex items-center justify-center min-h-screen">
                 <div className="text-center">
                     <div className="w-12 h-12 border-4 border-green-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                    <p className="text-gray-600 dark:text-gray-400">Loading stories...</p>
+                    <p className="text-gray-600 dark:text-gray-400">Loading clips...</p>
                 </div>
             </div>
         );
@@ -392,42 +395,43 @@ export default function StoriesPage() {
     if (viewingStories && currentStory && currentGroup && currentGroup.stories) {
         return (
             <>
-                <div className="fixed inset-0 bg-black z-50">
+                <div className="fixed inset-0 bg-gradient-to-br from-gray-950 via-black to-gray-950 z-50">
                     {/* Progress bars for each story */}
-                    <div className="absolute top-0 left-0 right-0 h-2 bg-gray-900 z-50 flex gap-1 px-3 py-3">
-                        {currentGroup.stories.map((story, idx) => (
-                            <div key={story.id} className="flex-1 bg-gray-800 rounded-full overflow-hidden relative h-1">
-                                <div
-                                    className="h-full transition-all"
-                                    style={
-                                        idx < currentStoryIndex
-                                            ? {
-                                                width: '100%',
-                                                background: '#ffffff',
-                                                transitionDuration: '100ms'
-                                            }
-                                            : idx === currentStoryIndex && !paused && progress > 0
+                    <div className="absolute top-0 left-0 right-0 z-50 px-4 pt-3 pb-2">
+                        <div className="flex gap-1.5">
+                            {currentGroup.stories.map((story, idx) => (
+                                <div key={story.id} className="flex-1 h-1 bg-white/20 rounded-full overflow-hidden backdrop-blur-sm">
+                                    <div
+                                        className="h-full rounded-full transition-all ease-linear"
+                                        style={
+                                            idx < currentStoryIndex
                                                 ? {
-                                                    width: `${progress}%`,
-                                                    background: 'linear-gradient(to right, #10b981, #3b82f6, #1d4ed8)',
-                                                    transitionDuration: '50ms'
-                                                }
-                                                : {
-                                                    width: idx === currentStoryIndex ? `${progress}%` : '0%',
-                                                    background: idx === currentStoryIndex ? 'rgba(255,255,255,0.5)' : '#4b5563',
+                                                    width: '100%',
+                                                    background: 'linear-gradient(to right, #10b981, #3b82f6)',
                                                     transitionDuration: '100ms'
                                                 }
-                                    }
-                                />
-                            </div>
-                        ))}
+                                                : idx === currentStoryIndex && !paused && progress > 0
+                                                    ? {
+                                                        width: `${progress}%`,
+                                                        background: 'linear-gradient(to right, #10b981, #3b82f6)',
+                                                        transitionDuration: '50ms'
+                                                    }
+                                                    : {
+                                                        width: idx === currentStoryIndex ? `${progress}%` : '0%',
+                                                        background: idx === currentStoryIndex ? 'rgba(255,255,255,0.6)' : 'transparent',
+                                                        transitionDuration: '100ms'
+                                                    }
+                                        }
+                                    />
+                                </div>
+                            ))}
+                        </div>
                     </div>
 
-                    {/* Story Media with thick gradient frame */}
+                    {/* Story Media - Full screen with elegant container */}
                     <div className="absolute inset-0 flex items-center justify-center">
-                        <div className="relative w-[90vw] max-w-[420px] aspect-[9/16] rounded-[32px] pt-[16px] pr-[16px] pl-[16px] pb-[40px] bg-gradient-to-b from-green-500 via-blue-500 to-blue-600 shadow-[0_0_64px_rgba(59,130,246,0.55)]">
-                            <div className="absolute inset-0 -z-10 rounded-[32px] blur-2xl opacity-50 bg-gradient-to-b from-green-500 via-blue-500 to-blue-600" />
-                            <div className="w-full h-full rounded-[24px] overflow-hidden bg-black/80">
+                        <div className="relative w-full h-full max-w-[420px] max-h-[90vh] aspect-[9/16] flex items-center justify-center">
+                            <div className="relative w-full h-full rounded-2xl overflow-hidden shadow-2xl bg-black">
                                 {currentStory?.mediaType === 'video' ? (
                                     <video
                                         ref={videoRef}
@@ -450,120 +454,153 @@ export default function StoriesPage() {
                         </div>
                     </div>
 
-                    {/* Story Overlay */}
-                    <div className="absolute inset-0 pointer-events-none">
-                        {/* Gradient overlay for text readability */}
-                        <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/60" />
+                    {/* Subtle gradient overlay for text readability */}
+                    <div className="absolute inset-0 pointer-events-none z-10">
+                        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/50" />
                     </div>
 
-                    {/* Header with user info */}
-                    <div className="absolute top-16 left-0 right-0 px-6 z-50">
-                        <div className="flex items-center justify-between">
+                    {/* Header with user info - Refined with backdrop blur */}
+                    <div className="absolute top-12 left-0 right-0 px-4 z-50">
+                        <div className="flex items-center justify-between backdrop-blur-md bg-black/30 rounded-2xl px-4 py-3 border border-white/10 shadow-lg">
                             <div className="flex items-center gap-3">
-                                <Avatar
-                                    src={currentGroup?.avatarUrl}
-                                    name={currentGroup?.name || 'User'}
-                                    size="sm"
-                                />
+                                <div className="relative">
+                                    <Avatar
+                                        src={currentGroup?.avatarUrl}
+                                        name={currentGroup?.name || 'User'}
+                                        size="sm"
+                                    />
+                                    <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 border-2 border-black rounded-full"></div>
+                                </div>
                                 <div>
-                                    <p className="text-white font-semibold">{currentGroup?.userHandle}</p>
+                                    <p className="text-white font-semibold text-sm">{currentGroup?.userHandle}</p>
                                     {currentStory?.location && (
                                         <p className="text-white/70 text-xs">{currentStory.location}</p>
                                     )}
                                 </div>
                             </div>
                             <div className="flex items-center gap-2">
+                                {/* Full Scenes Button - Always visible in header */}
+                                {currentStory && (
+                                    <button
+                                        onClick={async (e) => {
+                                            e.stopPropagation();
+                                            // If story was shared from a post, fetch the full post
+                                            if (currentStory.sharedFromPost) {
+                                                try {
+                                                    const post = await getPostById(currentStory.sharedFromPost);
+                                                    if (post) {
+                                                        setFullPost(post);
+                                                        setShowScenesModal(true);
+                                                        return;
+                                                    }
+                                                } catch (error) {
+                                                    console.error('Error fetching post:', error);
+                                                }
+                                            }
+
+                                            // Otherwise, convert story to Post-like object for ScenesModal
+                                            const storyAsPost: Post = {
+                                                id: currentStory.id,
+                                                userHandle: currentStory.userHandle,
+                                                locationLabel: currentStory.location || '',
+                                                tags: [],
+                                                mediaUrl: currentStory.mediaUrl,
+                                                mediaType: currentStory.mediaType,
+                                                text: currentStory.text,
+                                                caption: currentStory.text,
+                                                createdAt: currentStory.createdAt,
+                                                stats: {
+                                                    likes: 0,
+                                                    views: currentStory.views,
+                                                    comments: currentStory.replies.length,
+                                                    shares: 0,
+                                                    reclips: 0
+                                                },
+                                                isBookmarked: false,
+                                                isFollowing: false,
+                                                userLiked: !!currentStory.userReaction
+                                            };
+                                            setFullPost(storyAsPost);
+                                            setShowScenesModal(true);
+                                        }}
+                                        className="pointer-events-auto px-3 py-1.5 rounded-full bg-gradient-to-r from-purple-600 via-purple-500 to-purple-600 text-white text-xs font-semibold flex items-center gap-1.5 hover:opacity-90 transition-opacity shadow-lg backdrop-blur-sm"
+                                        title="Show Full Scenes"
+                                    >
+                                        <FiMaximize2 className="w-3.5 h-3.5" />
+                                        <span>Scenes</span>
+                                    </button>
+                                )}
                                 {/* Mute/Unmute button - only show for videos */}
                                 {currentStory?.mediaType === 'video' && (
                                     <button
                                         onClick={() => setIsMuted(!isMuted)}
-                                        className="pointer-events-auto p-2 rounded-full hover:bg-white/20 transition-colors"
+                                        className="pointer-events-auto p-2 rounded-full bg-black/40 backdrop-blur-sm hover:bg-white/20 transition-colors border border-white/10"
                                         title={isMuted ? 'Unmute' : 'Mute'}
                                     >
                                         {isMuted ? (
-                                            <FiVolumeX className="w-6 h-6 text-white" />
+                                            <FiVolumeX className="w-5 h-5 text-white" />
                                         ) : (
-                                            <FiVolume2 className="w-6 h-6 text-white" />
+                                            <FiVolume2 className="w-5 h-5 text-white" />
                                         )}
                                     </button>
                                 )}
                                 <button
                                     onClick={closeStories}
-                                    className="pointer-events-auto p-2 rounded-full hover:bg-white/20 transition-colors"
+                                    className="pointer-events-auto p-2 rounded-full bg-black/40 backdrop-blur-sm hover:bg-white/20 transition-colors border border-white/10"
                                 >
-                                    <FiX className="w-6 h-6 text-white" />
+                                    <FiX className="w-5 h-5 text-white" />
                                 </button>
                             </div>
                         </div>
                     </div>
 
-                    {/* Story Text */}
-                    {currentStory?.text && (
-                        <div className="absolute bottom-20 left-0 right-0 px-6 z-50 pointer-events-none">
-                            <p
-                                className={`font-semibold ${currentStory?.textSize === 'small' ? 'text-sm' :
-                                    currentStory?.textSize === 'large' ? 'text-2xl' :
-                                        'text-lg'
-                                    }`}
-                                style={{
-                                    color: currentStory?.textColor || 'white',
-                                    textShadow: '2px 2px 4px rgba(0,0,0,0.8), -1px -1px 0 rgba(0,0,0,0.8), 1px -1px 0 rgba(0,0,0,0.8), -1px 1px 0 rgba(0,0,0,0.8)'
-                                }}
-                            >
-                                {currentStory.text}
-                            </p>
+                    {/* Story Text - Only show if media is not a generated text image (data URL) */}
+                    {currentStory?.text && currentStory?.mediaUrl && !currentStory.mediaUrl.startsWith('data:image') && (
+                        <div className="absolute bottom-24 left-0 right-0 px-4 z-50 pointer-events-none">
+                            <div className="backdrop-blur-md bg-black/30 rounded-2xl px-4 py-3 border border-white/10 shadow-lg max-w-md mx-auto">
+                                <p
+                                    className={`font-semibold text-center ${currentStory?.textSize === 'small' ? 'text-sm' :
+                                        currentStory?.textSize === 'large' ? 'text-2xl' :
+                                            'text-lg'
+                                        }`}
+                                    style={{
+                                        color: currentStory?.textColor || 'white',
+                                        textShadow: '1px 1px 2px rgba(0,0,0,0.5)'
+                                    }}
+                                >
+                                    {currentStory.text}
+                                </p>
+                            </div>
                         </div>
                     )}
 
                     {/* Action Buttons - vertical right side (auto-hide) */}
-                    <div className={`absolute right-4 bottom-10 z-[70] flex flex-col items-center gap-3 transition-opacity duration-200 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                    <div className={`absolute right-4 bottom-16 z-[70] flex flex-col items-center gap-3 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
                         {/* Reaction Button (single like) */}
-                        <div className="relative p-[2px] rounded-full bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 shadow-lg">
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleReaction('❤️');
-                                }}
-                                className="pointer-events-auto w-12 h-12 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center hover:bg-white/20 transition-colors active:scale-95"
-                            >
-                                {currentStory?.userReaction ? (
-                                    <span className="text-2xl">{currentStory.userReaction}</span>
-                                ) : (
-                                    <FiHeart className="w-6 h-6 text-white" />
-                                )}
-                            </button>
-                        </div>
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handleReaction('❤️');
+                            }}
+                            className="pointer-events-auto w-14 h-14 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center hover:bg-black/70 transition-all active:scale-95 border border-white/20 shadow-xl"
+                        >
+                            {currentStory?.userReaction ? (
+                                <span className="text-2xl">{currentStory.userReaction}</span>
+                            ) : (
+                                <FiHeart className="w-6 h-6 text-white" />
+                            )}
+                        </button>
 
                         {/* Reply Button */}
-                        <div className="p-[2px] rounded-full bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 shadow-lg">
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    setShowReplyModal(true);
-                                }}
-                                className="pointer-events-auto w-12 h-12 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center hover:bg-white/20 transition-colors active:scale-95"
-                            >
-                                <FiMessageCircle className="w-6 h-6 text-white" />
-                            </button>
-                        </div>
-
-                        {/* View Full Post Button - Only for shared stories */}
-                        {currentStory?.sharedFromPost && (
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    // Close stories view and navigate to feed
-                                    setViewingStories(false);
-                                    navigate('/feed');
-                                }}
-                                className="pointer-events-auto w-12 h-12 rounded-full bg-gradient-to-r from-green-500 via-blue-500 to-blue-600 flex items-center justify-center hover:opacity-90 transition-colors shadow-lg active:scale-95"
-                                title="View full post"
-                            >
-                                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                                </svg>
-                            </button>
-                        )}
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setShowReplyModal(true);
+                            }}
+                            className="pointer-events-auto w-14 h-14 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center hover:bg-black/70 transition-all active:scale-95 border border-white/20 shadow-xl"
+                        >
+                            <FiMessageCircle className="w-6 h-6 text-white" />
+                        </button>
                     </div>
 
                     {/* Tap Zones for Navigation and Pause */}
@@ -640,6 +677,35 @@ export default function StoriesPage() {
                         </div>
                     </div>
                 )}
+
+                {/* Scenes Modal for Shared Posts */}
+                {showScenesModal && fullPost && (
+                    <ScenesModal
+                        post={fullPost}
+                        isOpen={showScenesModal}
+                        onClose={() => {
+                            setShowScenesModal(false);
+                            setFullPost(null);
+                            // Resume story progress when closing ScenesModal
+                            // The progress timer will automatically resume since showScenesModal is now false
+                        }}
+                        onLike={async () => {
+                            // Mock like handler for scenes
+                        }}
+                        onFollow={async () => {
+                            // Mock follow handler for scenes
+                        }}
+                        onShare={async () => {
+                            // Mock share handler for scenes
+                        }}
+                        onOpenComments={() => {
+                            // Mock comments handler for scenes
+                        }}
+                        onReclip={async () => {
+                            // Mock reclip handler for scenes
+                        }}
+                    />
+                )}
             </>
         );
     }
@@ -649,7 +715,7 @@ export default function StoriesPage() {
         <div className="p-4">
             {/* Header */}
             <div className="flex items-center justify-between mb-6">
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Stories</h1>
+                <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Clips 24</h1>
                 <button
                     onClick={() => navigate('/feed')}
                     className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
@@ -668,16 +734,16 @@ export default function StoriesPage() {
                         </div>
                     </div>
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
-                        No stories available
+                        No clips available
                     </h3>
                     <p className="text-gray-600 dark:text-gray-400">
-                        Share your first story to get started!
+                        Share your first clip to get started!
                     </p>
                     <button
                         onClick={() => navigate('/create')}
                         className="mt-4 px-6 py-3 rounded-full bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 text-white font-medium hover:opacity-90 transition-opacity"
                     >
-                        Create Story
+                        Create Clip
                     </button>
                 </div>
             ) : (

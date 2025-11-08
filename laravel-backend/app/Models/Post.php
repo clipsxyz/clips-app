@@ -26,10 +26,18 @@ class Post extends Model
         'original_post_id',
         'original_user_handle',
         'reclipped_by',
+        'banner_text',
+        'stickers',
+        'template_id',
+        'media_items',
+        'caption',
+        'image_text',
     ];
 
     protected $casts = [
         'tags' => 'array',
+        'stickers' => 'array',
+        'media_items' => 'array',
         'likes_count' => 'integer',
         'views_count' => 'integer',
         'comments_count' => 'integer',

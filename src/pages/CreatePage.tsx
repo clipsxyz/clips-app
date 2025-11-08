@@ -2,9 +2,12 @@ import React from 'react';
 import { useAuth } from '../context/Auth';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { createPost } from '../api/posts';
-import { FiCamera, FiImage, FiMapPin, FiX, FiZap } from 'react-icons/fi';
+import { FiImage, FiMapPin, FiX, FiZap, FiLayers, FiSmile, FiEdit } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
-import type { Post } from '../types';
+import type { Post, StickerOverlay, Sticker } from '../types';
+import StickerPicker from '../components/StickerPicker';
+import StickerOverlayComponent from '../components/StickerOverlay';
+import TextStickerModal from '../components/TextStickerModal';
 
 export default function CreatePage() {
     const { user } = useAuth();
@@ -26,12 +29,33 @@ export default function CreatePage() {
     const [selectedMedia, setSelectedMedia] = React.useState<string | null>(null);
     const [mediaType, setMediaType] = React.useState<'image' | 'video' | null>(null);
     const [imageText, setImageText] = React.useState(''); // Text overlay for images
+    const [bannerText, setBannerText] = React.useState(''); // News ticker banner text
     const [isUploading, setIsUploading] = React.useState(false);
     const [filteredFromFlow, setFilteredFromFlow] = React.useState(false);
     const [wantsToBoost, setWantsToBoost] = React.useState(false);
     const [createdPost, setCreatedPost] = React.useState<Post | null>(null);
+    const [stickers, setStickers] = React.useState<StickerOverlay[]>([]);
+    const [showStickerPicker, setShowStickerPicker] = React.useState(false);
+    const [showTextStickerModal, setShowTextStickerModal] = React.useState(false);
+    const [selectedStickerOverlay, setSelectedStickerOverlay] = React.useState<string | null>(null);
+    const mediaContainerRef = React.useRef<HTMLDivElement>(null);
+    const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
     const captionRef = React.useRef<HTMLTextAreaElement | null>(null);
     const videoRef = React.useRef<HTMLVideoElement | null>(null);
+
+    React.useEffect(() => {
+        if (mediaContainerRef.current && selectedMedia) {
+            const updateSize = () => {
+                const rect = mediaContainerRef.current?.getBoundingClientRect();
+                if (rect) {
+                    setContainerSize({ width: rect.width, height: rect.height });
+                }
+            };
+            updateSize();
+            window.addEventListener('resize', updateSize);
+            return () => window.removeEventListener('resize', updateSize);
+        }
+    }, [selectedMedia]);
 
     // Helper to build CSS filter string from filterInfo
     function buildCssFilterFromFilterInfo() {
@@ -183,7 +207,11 @@ export default function CreatePage() {
                 selectedMedia ? text.trim() : undefined, // Use text as caption if media is selected
                 user.local,
                 user.regional,
-                user.national
+                user.national,
+                stickers.length > 0 ? stickers : undefined, // Pass stickers
+                undefined, // templateId
+                undefined, // mediaItems
+                bannerText.trim() || undefined // Pass banner text
             );
 
             // Dispatch event to refresh feed
@@ -223,244 +251,402 @@ export default function CreatePage() {
         setSelectedMedia(null);
         setMediaType(null);
         setImageText('');
+        setStickers([]);
+        setSelectedStickerOverlay(null);
     };
+
+    function handleSelectSticker(sticker: Sticker) {
+        const newOverlay: StickerOverlay = {
+            id: `sticker-${Date.now()}-${Math.random()}`,
+            stickerId: sticker.id,
+            sticker,
+            x: 50,
+            y: 50,
+            scale: 1,
+            rotation: 0,
+            opacity: 1
+        };
+
+        setStickers(prev => [...prev, newOverlay]);
+        setSelectedStickerOverlay(newOverlay.id);
+    }
+
+    function handleAddTextSticker(text: string, fontSize: 'small' | 'medium' | 'large', color: string) {
+        const textSticker: Sticker = {
+            id: `text-sticker-${Date.now()}`,
+            name: text,
+            category: 'Text',
+            emoji: undefined,
+            url: undefined,
+            isTrending: false
+        };
+
+        const newOverlay: StickerOverlay = {
+            id: `sticker-${Date.now()}-${Math.random()}`,
+            stickerId: textSticker.id,
+            sticker: textSticker,
+            x: 50,
+            y: 50,
+            scale: fontSize === 'small' ? 0.8 : fontSize === 'medium' ? 1 : 1.2,
+            rotation: 0,
+            opacity: 1
+        };
+
+        (newOverlay as any).textContent = text;
+        (newOverlay as any).textColor = color;
+        (newOverlay as any).fontSize = fontSize;
+
+        setStickers(prev => [...prev, newOverlay]);
+        setSelectedStickerOverlay(newOverlay.id);
+    }
+
+    function handleUpdateSticker(overlayId: string, updated: StickerOverlay) {
+        setStickers(prev => prev.map(s => s.id === overlayId ? updated : s));
+    }
+
+    function handleRemoveSticker(overlayId: string) {
+        setStickers(prev => prev.filter(s => s.id !== overlayId));
+        if (selectedStickerOverlay === overlayId) {
+            setSelectedStickerOverlay(null);
+        }
+    }
 
 
     return (
         <div className="min-h-screen bg-white dark:bg-gray-950">
-            {/* Header */}
-            <div className="sticky top-0 z-40 bg-white/80 dark:bg-gray-950/80 backdrop-blur border-b border-gray-200 dark:border-gray-800">
-                <div className="mx-auto max-w-md px-4 h-11 flex items-center justify-between">
-                    <h1 className="font-bold text-lg text-gray-900 dark:text-gray-100">Create Post</h1>
+            {/* Header - More compact like Instagram/TikTok */}
+            <div className="sticky top-0 z-40 bg-white/95 dark:bg-gray-950/95 backdrop-blur-sm border-b border-gray-100 dark:border-gray-800">
+                <div className="mx-auto max-w-md px-3 h-12 flex items-center justify-between">
+                    <button
+                        onClick={() => navigate(-1)}
+                        className="p-2 -ml-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100"
+                    >
+                        <FiX className="w-5 h-5" />
+                    </button>
+                    <h1 className="font-semibold text-base text-gray-900 dark:text-gray-100">New Post</h1>
                     <button
                         onClick={handleSubmit}
                         disabled={(!text.trim() && !selectedMedia) || isUploading}
-                        className="px-4 py-1 bg-brand-500 text-white rounded-full text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-brand-600 transition-colors"
+                        className="px-3 py-1.5 text-brand-500 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-80 transition-opacity"
                     >
-                        {isUploading ? 'Posting...' : 'Post'}
+                        {isUploading ? 'Posting...' : 'Share'}
                     </button>
                 </div>
             </div>
 
-            {/* Content */}
-            <div className="mx-auto max-w-md px-4 py-6">
-                {/* User Info */}
-                <div className="flex items-center gap-3 mb-6">
+            {/* Content - More compact spacing */}
+            <div className="mx-auto max-w-md">
+                {/* User Info - Compact */}
+                <div className="flex items-center gap-2.5 px-4 py-3 border-b border-gray-100 dark:border-gray-800">
                     <Avatar
                         src={user?.avatarUrl}
                         name={user?.name || 'User'}
-                        size="md"
+                        size="sm"
                     />
-                    <div>
-                        <div className="font-medium text-gray-900 dark:text-gray-100">
+                    <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">
                             {user?.name || 'User'}
-                        </div>
-                        <div className="text-sm text-gray-500 dark:text-gray-400">
-                            {user?.handle || 'user@location'}
                         </div>
                     </div>
                 </div>
 
-                {/* Text Input */}
-                <div className="mb-6">
-                    <div className={`rounded-xl border-2 border-dashed p-4 ${selectedMedia
-                        ? 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700'
-                        : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700'
-                        }`}>
-                        <textarea
-                            ref={captionRef}
-                            value={text}
-                            onChange={(e) => setText(e.target.value)}
-                            placeholder={selectedMedia ? "Write a caption for your post..." : "Tap to type"}
-                            className="w-full h-32 p-4 text-gray-900 dark:text-gray-100 bg-transparent border-none resize-none placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none"
-                            maxLength={500}
-                        />
-                        <div className="flex justify-between items-center text-sm text-gray-500 dark:text-gray-400">
-                            <span>{selectedMedia ? "📝 Caption" : "💬 Post without images! Try it"}</span>
-                            <span>{text.length}/500</span>
-                        </div>
+                {/* Text Input - More compact, Instagram style */}
+                <div className="px-4 py-3">
+                    <textarea
+                        ref={captionRef}
+                        value={text}
+                        onChange={(e) => setText(e.target.value)}
+                        placeholder={selectedMedia ? "Write a caption..." : "What's on your mind?"}
+                        className="w-full min-h-[100px] text-gray-900 dark:text-gray-100 bg-transparent border-none resize-none placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none text-[15px] leading-relaxed"
+                        maxLength={500}
+                    />
+                    <div className="flex justify-end mt-1">
+                        <span className="text-xs text-gray-400 dark:text-gray-500">{text.length}/500</span>
                     </div>
                 </div>
 
                 {/* Media Upload Placeholder - Only show when no media is selected */}
                 {!selectedMedia && (
-                    <div className="mb-6">
-                        <div className="flex items-center gap-2 mb-2">
-                            <FiImage className="w-4 h-4 text-gray-500" />
-                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                Add Photo or Video
-                            </label>
-                        </div>
-                        <div className="flex gap-3">
-                            <label className="flex-1 p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:border-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors">
-                                <input
-                                    type="file"
-                                    accept="image/*,video/*"
-                                    onChange={handleMediaSelect}
-                                    className="hidden"
-                                />
-                                <div className="text-center">
-                                    <FiCamera className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                                    <div className="text-sm text-gray-500 dark:text-gray-400">
-                                        Tap to add photo or video
-                                    </div>
-                                    <div className="text-xs text-gray-400 mt-1">
-                                        Images & short videos
-                                    </div>
-                                </div>
-                            </label>
-                        </div>
-                    </div>
-                )}
-
-                {/* Media Preview */}
-                {selectedMedia && (
-                    <div className="relative mb-6">
-                        {filteredFromFlow && (
-                            <span className="absolute top-2 left-2 z-10 px-2 py-1 rounded-full text-[11px] font-semibold bg-purple-600 text-white shadow">Filtered</span>
-                        )}
-                        {mediaType === 'image' ? (
-                            <div className="relative">
-                                <img
-                                    src={selectedMedia}
-                                    alt="Selected"
-                                    className="w-full h-64 object-cover rounded-2xl"
-                                />
-                                {/* Text Overlay Preview */}
-                                {imageText && (
-                                    <div className="absolute bottom-4 left-4 right-4">
-                                        <div className="bg-black/70 text-white px-3 py-2 rounded-lg text-sm font-medium backdrop-blur-sm">
-                                            {imageText}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        ) : mediaType === 'video' ? (
-                            <video
-                                ref={videoRef}
-                                src={selectedMedia}
-                                controls
-                                className="w-full h-64 object-cover rounded-2xl"
-                                preload="metadata"
-                                style={locationState?.filterInfo?.exportFailed ? (() => {
-                                    const filterInfo = locationState.filterInfo;
-                                    if (!filterInfo) return {};
-
-                                    // Apply CSS filters as fallback when export failed
-                                    let filter = '';
-                                    if (filterInfo.active === 'bw') {
-                                        filter = 'grayscale(1)';
-                                    } else if (filterInfo.active === 'sepia') {
-                                        filter = 'sepia(0.8)';
-                                    } else if (filterInfo.active === 'vivid') {
-                                        filter = `saturate(${1.6 * filterInfo.saturation}) contrast(${1.1 * filterInfo.contrast})`;
-                                    } else if (filterInfo.active === 'cool') {
-                                        filter = `hue-rotate(200deg) saturate(${1.2 * filterInfo.saturation})`;
-                                    }
-
-                                    // Apply adjustments
-                                    if (filterInfo.brightness !== 1) {
-                                        filter += ` brightness(${filterInfo.brightness})`;
-                                    }
-                                    if (filterInfo.contrast !== 1) {
-                                        filter += ` contrast(${filterInfo.contrast})`;
-                                    }
-                                    if (filterInfo.saturation !== 1) {
-                                        filter += ` saturate(${filterInfo.saturation})`;
-                                    }
-
-                                    return filter ? { filter } : {};
-                                })() : undefined}
+                    <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-800">
+                        <label className="flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group">
+                            <input
+                                type="file"
+                                accept="image/*,video/*"
+                                onChange={handleMediaSelect}
+                                className="hidden"
                             />
-                        ) : null}
+                            <div className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800 group-hover:bg-gray-200 dark:group-hover:bg-gray-700 transition-colors">
+                                <FiImage className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                            </div>
+                            <div className="flex-1">
+                                <div className="font-medium text-sm text-gray-900 dark:text-gray-100">Add Photo or Video</div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Tap to select from your device</div>
+                            </div>
+                        </label>
+
+                        {/* Use Template Button - More compact */}
                         <button
-                            onClick={removeMedia}
-                            className="absolute top-2 right-2 p-2 bg-black/50 text-white rounded-full hover:bg-black/70 transition-colors"
+                            onClick={() => navigate('/templates')}
+                            className="w-full mt-2 flex items-center gap-2.5 p-3 rounded-lg bg-gradient-to-r from-purple-500 to-pink-500 text-white font-medium hover:from-purple-600 hover:to-pink-600 transition-all text-sm"
                         >
-                            <FiX className="w-4 h-4" />
+                            <FiLayers className="w-4 h-4" />
+                            <span>Use Template</span>
                         </button>
                     </div>
                 )}
 
-                {/* Image Text Overlay Input */}
-                {selectedMedia && mediaType === 'image' && (
-                    <div className="mb-6">
-                        <div className="flex items-center gap-2 mb-2">
-                            <FiCamera className="w-4 h-4 text-gray-500" />
-                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                Add Text to Image
-                            </label>
+                {/* Media Preview - More compact */}
+                {selectedMedia && (
+                    <div className="border-t border-gray-100 dark:border-gray-800">
+                        {/* Edit Button - Compact, top right */}
+                        <div className="px-4 py-2 flex justify-end">
+                            <button
+                                onClick={() => {
+                                    navigate('/video-editor', {
+                                        state: {
+                                            mediaUrl: selectedMedia,
+                                            mediaType: mediaType || undefined
+                                        }
+                                    });
+                                }}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                            >
+                                <FiEdit className="w-4 h-4" />
+                                <span>Edit</span>
+                            </button>
                         </div>
+                        <div
+                            ref={mediaContainerRef}
+                            className="relative bg-black"
+                            onClick={(e) => {
+                                // Deselect sticker when clicking on media
+                                if (e.target === e.currentTarget || (e.target as HTMLElement).tagName === 'VIDEO' || (e.target as HTMLElement).tagName === 'IMG') {
+                                    setSelectedStickerOverlay(null);
+                                }
+                            }}
+                        >
+                            {filteredFromFlow && (
+                                <span className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded text-[10px] font-medium bg-purple-600 text-white">Filtered</span>
+                            )}
+                            {mediaType === 'image' ? (
+                                <div className="relative w-full aspect-square overflow-hidden">
+                                    <img
+                                        src={selectedMedia}
+                                        alt="Selected"
+                                        className="w-full h-full object-contain"
+                                    />
+                                    {/* Sticker Overlays */}
+                                    {stickers.map((overlay) => (
+                                        <StickerOverlayComponent
+                                            key={overlay.id}
+                                            overlay={overlay}
+                                            onUpdate={(updated) => handleUpdateSticker(overlay.id, updated)}
+                                            onRemove={() => handleRemoveSticker(overlay.id)}
+                                            isSelected={selectedStickerOverlay === overlay.id}
+                                            onSelect={() => setSelectedStickerOverlay(overlay.id)}
+                                            containerWidth={containerSize.width || 400}
+                                            containerHeight={containerSize.height || 256}
+                                        />
+                                    ))}
+                                    {/* Text Overlay Preview */}
+                                    {imageText && (
+                                        <div className="absolute bottom-4 left-4 right-4 z-10">
+                                            <div className="bg-black/70 text-white px-3 py-2 rounded-lg text-sm font-medium backdrop-blur-sm">
+                                                {imageText}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {/* Sticker Button - More subtle */}
+                                    <button
+                                        onClick={() => setShowStickerPicker(true)}
+                                        className="absolute bottom-3 right-3 p-2.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm text-gray-700 dark:text-gray-300 rounded-full hover:bg-white dark:hover:bg-gray-800 transition-colors shadow-lg z-10"
+                                        title="Add Sticker"
+                                    >
+                                        <FiSmile className="w-5 h-5" />
+                                    </button>
+                                </div>
+                            ) : mediaType === 'video' ? (
+                                <div className="relative w-full aspect-square overflow-hidden bg-black">
+                                    <video
+                                        ref={videoRef}
+                                        src={selectedMedia}
+                                        controls
+                                        className="w-full h-full object-contain"
+                                        preload="metadata"
+                                        style={locationState?.filterInfo?.exportFailed ? (() => {
+                                            const filterInfo = locationState.filterInfo;
+                                            if (!filterInfo) return {};
+
+                                            // Apply CSS filters as fallback when export failed
+                                            let filter = '';
+                                            if (filterInfo.active === 'bw') {
+                                                filter = 'grayscale(1)';
+                                            } else if (filterInfo.active === 'sepia') {
+                                                filter = 'sepia(0.8)';
+                                            } else if (filterInfo.active === 'vivid') {
+                                                filter = `saturate(${1.6 * filterInfo.saturation}) contrast(${1.1 * filterInfo.contrast})`;
+                                            } else if (filterInfo.active === 'cool') {
+                                                filter = `hue-rotate(200deg) saturate(${1.2 * filterInfo.saturation})`;
+                                            }
+
+                                            // Apply adjustments
+                                            if (filterInfo.brightness !== 1) {
+                                                filter += ` brightness(${filterInfo.brightness})`;
+                                            }
+                                            if (filterInfo.contrast !== 1) {
+                                                filter += ` contrast(${filterInfo.contrast})`;
+                                            }
+                                            if (filterInfo.saturation !== 1) {
+                                                filter += ` saturate(${filterInfo.saturation})`;
+                                            }
+
+                                            return filter ? { filter } : {};
+                                        })() : undefined}
+                                    />
+                                    {/* Sticker Overlays */}
+                                    {stickers.map((overlay) => (
+                                        <StickerOverlayComponent
+                                            key={overlay.id}
+                                            overlay={overlay}
+                                            onUpdate={(updated) => handleUpdateSticker(overlay.id, updated)}
+                                            onRemove={() => handleRemoveSticker(overlay.id)}
+                                            isSelected={selectedStickerOverlay === overlay.id}
+                                            onSelect={() => setSelectedStickerOverlay(overlay.id)}
+                                            containerWidth={containerSize.width || 400}
+                                            containerHeight={containerSize.height || 256}
+                                        />
+                                    ))}
+                                    {/* Sticker Button - More subtle */}
+                                    <button
+                                        onClick={() => setShowStickerPicker(true)}
+                                        className="absolute bottom-3 right-3 p-2.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm text-gray-700 dark:text-gray-300 rounded-full hover:bg-white dark:hover:bg-gray-800 transition-colors shadow-lg z-10"
+                                        title="Add Sticker"
+                                    >
+                                        <FiSmile className="w-5 h-5" />
+                                    </button>
+                                </div>
+                            ) : null}
+                            <button
+                                onClick={removeMedia}
+                                className="absolute top-3 right-3 p-2 bg-black/60 backdrop-blur-sm text-white rounded-full hover:bg-black/80 transition-colors z-10"
+                            >
+                                <FiX className="w-4 h-4" />
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Image Text Overlay Input - Compact */}
+                {selectedMedia && mediaType === 'image' && (
+                    <div className="px-4 py-2.5 border-t border-gray-100 dark:border-gray-800">
                         <input
                             type="text"
                             value={imageText}
                             onChange={(e) => setImageText(e.target.value)}
-                            placeholder=""
-                            className="w-full p-3 text-gray-900 dark:text-gray-100 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                            placeholder="Add text to image..."
+                            className="w-full px-3 py-2 text-sm text-gray-900 dark:text-gray-100 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-1 focus:ring-brand-500 focus:border-transparent placeholder-gray-400 dark:placeholder-gray-500"
                             maxLength={100}
                         />
-                        <div className="text-right text-xs text-gray-400 mt-1">
+                        <div className="text-right text-xs text-gray-400 dark:text-gray-500 mt-1">
                             {imageText.length}/100
                         </div>
                     </div>
                 )}
 
-
-                {/* Location Input */}
-                <div className="mb-6">
-                    <div className="flex items-center gap-2 mb-2">
-                        <FiMapPin className="w-4 h-4 text-gray-500" />
-                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Story Location
+                {/* Location Input - Compact */}
+                <div className="px-4 py-2.5 border-t border-gray-100 dark:border-gray-800">
+                    <div className="flex items-center gap-2 mb-1.5">
+                        <FiMapPin className="w-4 h-4 text-gray-400 dark:text-gray-500" />
+                        <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                            Location
                         </label>
                     </div>
                     <input
                         type="text"
                         value={location}
                         onChange={(e) => setLocation(e.target.value)}
-                        placeholder="Where did this happen?"
-                        className="w-full p-3 text-gray-900 dark:text-gray-100 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-transparent placeholder-gray-500 dark:placeholder-gray-400"
+                        placeholder="Add location"
+                        className="w-full px-0 py-1 text-[15px] text-gray-900 dark:text-gray-100 bg-transparent border-none focus:outline-none placeholder-gray-400 dark:placeholder-gray-500"
                     />
                 </div>
 
-                {/* Boost Option */}
-                <div className="mb-6">
-                    <label className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-gray-800 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors cursor-pointer">
+                {/* Boost Option - Compact */}
+                <div className="px-4 py-2.5 border-t border-gray-100 dark:border-gray-800">
+                    <label className="flex items-center gap-3 cursor-pointer group">
                         <input
                             type="checkbox"
                             checked={wantsToBoost}
                             onChange={(e) => setWantsToBoost(e.target.checked)}
-                            className="w-5 h-5 rounded border-gray-300 dark:border-gray-600 text-brand-600 focus:ring-brand-500 focus:ring-2"
+                            className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-brand-600 focus:ring-brand-500 focus:ring-1"
                         />
-                        <div className="flex items-center gap-3 flex-1">
-                            <div className="w-10 h-10 rounded-full bg-brand-100 dark:bg-brand-900 flex items-center justify-center">
-                                <FiZap className="w-5 h-5 text-brand-600 dark:text-brand-400" />
-                            </div>
-                            <div className="flex-1">
-                                <div className="font-semibold text-gray-900 dark:text-gray-100">
+                        <div className="flex items-center gap-2 flex-1">
+                            <FiZap className="w-4 h-4 text-brand-500 dark:text-brand-400" />
+                            <div>
+                                <div className="font-medium text-sm text-gray-900 dark:text-gray-100">
                                     Boost this post
                                 </div>
-                                <div className="text-sm text-gray-600 dark:text-gray-400">
-                                    Reach more people by boosting your post
+                                <div className="text-xs text-gray-500 dark:text-gray-400">
+                                    Reach more people
                                 </div>
                             </div>
                         </div>
                     </label>
                 </div>
 
-                {/* Tips */}
-                <div className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4">
-                    <h3 className="font-medium text-gray-900 dark:text-gray-100 mb-2">
-                        Tips for great posts:
-                    </h3>
-                    <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                        <li>• Share what's happening in your local area</li>
-                        <li>• Add a clear photo or short video to tell your story</li>
-                        <li>• Include the specific location</li>
-                        <li>• Keep it authentic and engaging</li>
-                    </ul>
+                {/* Add Banner Section */}
+                <div className="px-4 py-2.5 border-t border-gray-100 dark:border-gray-800">
+                    <div className="mb-2">
+                        <label className="block text-sm font-medium text-gray-900 dark:text-gray-100 mb-1.5">
+                            Add Banner
+                        </label>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                            Add a scrolling news ticker banner to your post
+                        </p>
+                        <input
+                            type="text"
+                            value={bannerText}
+                            onChange={(e) => setBannerText(e.target.value)}
+                            placeholder="Enter banner text (e.g., Breaking news headline...)"
+                            maxLength={200}
+                            className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                        />
+                        <div className="flex items-center justify-between mt-1.5">
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                                {bannerText.length}/200 characters
+                            </span>
+                            {bannerText && (
+                                <button
+                                    type="button"
+                                    onClick={() => setBannerText('')}
+                                    className="text-xs text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
+                                >
+                                    Clear
+                                </button>
+                            )}
+                        </div>
+                    </div>
                 </div>
             </div>
+
+            {/* Sticker Picker Modal - Outside content div */}
+            {selectedMedia && (
+                <div>
+                    <StickerPicker
+                        isOpen={showStickerPicker}
+                        onClose={() => setShowStickerPicker(false)}
+                        onSelectSticker={handleSelectSticker}
+                        onAddText={() => setShowTextStickerModal(true)}
+                    />
+                    <TextStickerModal
+                        isOpen={showTextStickerModal}
+                        onClose={() => setShowTextStickerModal(false)}
+                        onConfirm={(text, fontSize, color) => {
+                            handleAddTextSticker(text, fontSize, color);
+                            setShowTextStickerModal(false);
+                        }}
+                    />
+                </div>
+            )}
         </div>
     );
 }

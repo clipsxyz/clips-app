@@ -6,6 +6,7 @@ import { FiCamera, FiX, FiBookmark } from 'react-icons/fi';
 import Flag from '../components/Flag';
 import { getUserCollections } from '../api/collections';
 import type { Collection } from '../types';
+import { posts } from '../api/posts';
 
 export default function ProfilePage() {
   const { user, logout, login } = useAuth();
@@ -157,7 +158,12 @@ export default function ProfilePage() {
                             <div className="w-12 h-12 rounded-lg bg-gray-200 dark:bg-gray-700 flex items-center justify-center overflow-hidden flex-shrink-0">
                               {collection.thumbnailUrl ? (
                                 (() => {
-                                  const isVideo = collection.thumbnailUrl.toLowerCase().endsWith('.mp4') ||
+                                  // Find the first post to check its mediaType
+                                  const firstPost = collection.postIds.length > 0
+                                    ? posts.find(p => p.id === collection.postIds[0])
+                                    : null;
+                                  const isVideo = firstPost?.mediaType === 'video' ||
+                                    collection.thumbnailUrl.toLowerCase().endsWith('.mp4') ||
                                     collection.thumbnailUrl.toLowerCase().endsWith('.webm') ||
                                     collection.thumbnailUrl.toLowerCase().endsWith('.mov');
                                   return isVideo ? (
@@ -167,6 +173,11 @@ export default function ProfilePage() {
                                       muted
                                       playsInline
                                       preload="metadata"
+                                      onLoadedMetadata={(e) => {
+                                        // Ensure first frame is shown
+                                        const video = e.currentTarget;
+                                        video.currentTime = 0;
+                                      }}
                                     />
                                   ) : (
                                     <img

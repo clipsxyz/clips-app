@@ -19,6 +19,9 @@ import InstantFiltersPage from '../pages/InstantFiltersPage';
 import SplashPage from '../pages/SplashPage';
 import PaymentPage from '../pages/PaymentPage';
 import CollectionFeedPage from '../pages/CollectionFeedPage';
+import TemplatesPage from '../pages/TemplatesPage';
+import TemplateEditorPage from '../pages/TemplateEditorPage';
+import VideoEditorPage from '../pages/VideoEditorPage';
 
 
 export default function Root() {
@@ -35,6 +38,9 @@ export default function Root() {
                                 <Route path="create" element={<CreatePage />} />
                                 <Route path="create/instant" element={<InstantCreatePage />} />
                                 <Route path="create/filters" element={<InstantFiltersPage />} />
+                                <Route path="templates" element={<TemplatesPage />} />
+                                <Route path="template-editor" element={<TemplateEditorPage />} />
+                                <Route path="video-editor" element={<VideoEditorPage />} />
                                 <Route path="login" element={<LoginPage />} />
                                 <Route path="boost" element={<BoostPage />} />
                                 <Route path="payment" element={<PaymentPage />} />
