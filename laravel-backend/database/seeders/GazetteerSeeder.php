@@ -63,6 +63,16 @@ class GazetteerSeeder extends Seeder
                 'location_regional' => 'Cork',
                 'location_national' => 'Ireland',
             ],
+            [
+                'username' => 'sarah_artane',
+                'email' => 'sarah@example.com',
+                'password' => Hash::make('password123'),
+                'display_name' => 'Sarah',
+                'handle' => 'Sarah@Artane',
+                'location_local' => 'Artane',
+                'location_regional' => 'Dublin',
+                'location_national' => 'Ireland',
+            ],
         ];
 
         foreach ($users as $userData) {
@@ -73,40 +83,83 @@ class GazetteerSeeder extends Seeder
         $alice = User::where('handle', 'alice@dublin')->first();
         $bob = User::where('handle', 'bob@finglas')->first();
         $charlie = User::where('handle', 'charlie@ireland')->first();
+        $darragh = User::where('handle', 'darraghdublin')->first();
 
-        $posts = [
-            [
-                'user_id' => $alice->id,
-                'user_handle' => $alice->handle,
-                'text_content' => 'Beautiful sunset at Phoenix Park today! 🌅',
-                'location_label' => 'Phoenix Park, Dublin',
-                'likes_count' => 15,
-                'views_count' => 120,
-                'comments_count' => 3,
-            ],
-            [
-                'user_id' => $bob->id,
-                'user_handle' => $bob->handle,
-                'text_content' => 'Amazing brunch at The Fumbally! 🥞',
-                'location_label' => 'The Fumbally, Dublin',
-                'likes_count' => 8,
-                'views_count' => 85,
-                'comments_count' => 2,
-            ],
-            [
-                'user_id' => $charlie->id,
-                'user_handle' => $charlie->handle,
-                'text_content' => 'Exploring the beautiful streets of Cork today',
-                'location_label' => 'Cork City',
-                'likes_count' => 12,
-                'views_count' => 95,
-                'comments_count' => 1,
-            ],
-        ];
+        // Regular post with tagged users
+        $post1 = Post::create([
+            'user_id' => $alice->id,
+            'user_handle' => $alice->handle,
+            'text_content' => 'Beautiful sunset at Phoenix Park today! 🌅',
+            'location_label' => 'Phoenix Park, Dublin',
+            'likes_count' => 15,
+            'views_count' => 120,
+            'comments_count' => 3,
+        ]);
+        // Tag users in this post
+        $post1->taggedUsers()->attach([
+            $bob->id => ['user_handle' => $bob->handle],
+            $charlie->id => ['user_handle' => $charlie->handle],
+        ]);
 
-        foreach ($posts as $postData) {
-            Post::create($postData);
-        }
+        // Regular post
+        $post2 = Post::create([
+            'user_id' => $bob->id,
+            'user_handle' => $bob->handle,
+            'text_content' => 'Amazing brunch at The Fumbally! 🥞',
+            'location_label' => 'The Fumbally, Dublin',
+            'likes_count' => 8,
+            'views_count' => 85,
+            'comments_count' => 2,
+        ]);
+
+        // Text-only post with text style
+        $post3 = Post::create([
+            'user_id' => $charlie->id,
+            'user_handle' => $charlie->handle,
+            'text_content' => 'Exploring the beautiful streets of Cork today',
+            'location_label' => 'Cork City',
+            'text_style' => [
+                'color' => '#FFFFFF',
+                'size' => 'large',
+                'background' => 'gradient-1',
+            ],
+            'likes_count' => 12,
+            'views_count' => 95,
+            'comments_count' => 1,
+        ]);
+
+        // Text-only post with tagged user
+        $post4 = Post::create([
+            'user_id' => $darragh->id,
+            'user_handle' => $darragh->handle,
+            'text_content' => 'Just thinking about the amazing community we have here! 💭',
+            'location_label' => 'Dublin',
+            'text_style' => [
+                'color' => '#000000',
+                'size' => 'medium',
+                'background' => 'gradient-2',
+            ],
+            'stickers' => [
+                [
+                    'id' => 'sticker-1',
+                    'x' => 50,
+                    'y' => 30,
+                    'scale' => 1.0,
+                    'rotation' => 0,
+                    'sticker' => [
+                        'id' => 'emoji-1',
+                        'url' => 'https://example.com/stickers/emoji-1.png',
+                    ],
+                ],
+            ],
+            'likes_count' => 20,
+            'views_count' => 150,
+            'comments_count' => 5,
+        ]);
+        // Tag user in text-only post
+        $post4->taggedUsers()->attach([
+            $alice->id => ['user_handle' => $alice->handle],
+        ]);
 
         // Create sample comments with replies
         $phoenixPost = Post::where('text_content', 'LIKE', '%Phoenix Park%')->first();
@@ -238,6 +291,7 @@ class GazetteerSeeder extends Seeder
         ]);
 
         // Create sample stories
+        // Regular story with media
         $story1 = Story::create([
             'user_id' => $alice->id,
             'user_handle' => $alice->handle,
@@ -251,6 +305,7 @@ class GazetteerSeeder extends Seeder
             'expires_at' => now()->addHours(24),
         ]);
 
+        // Regular story with media
         $story2 = Story::create([
             'user_id' => $bob->id,
             'user_handle' => $bob->handle,
@@ -261,6 +316,54 @@ class GazetteerSeeder extends Seeder
             'text_size' => 'small',
             'location' => 'Finglas',
             'views_count' => 3,
+            'expires_at' => now()->addHours(24),
+        ]);
+
+        // Text-only story with text style, stickers, and tagged users
+        $story3 = Story::create([
+            'user_id' => $charlie->id,
+            'user_handle' => $charlie->handle,
+            'media_url' => null, // Text-only story
+            'media_type' => null, // Text-only story
+            'text' => 'Just sharing some thoughts! 💭',
+            'text_style' => [
+                'color' => '#FFFFFF',
+                'size' => 'large',
+                'background' => 'gradient-3',
+            ],
+            'stickers' => [
+                [
+                    'id' => 'gif-1',
+                    'x' => 50,
+                    'y' => 50,
+                    'scale' => 1.5,
+                    'rotation' => 0,
+                    'sticker' => [
+                        'id' => 'gif-example',
+                        'url' => 'https://example.com/gifs/example.gif',
+                    ],
+                ],
+            ],
+            'tagged_users' => [$alice->handle, $bob->handle],
+            'location' => 'Cork',
+            'views_count' => 8,
+            'expires_at' => now()->addHours(24),
+        ]);
+
+        // Text-only story with text style only
+        $story4 = Story::create([
+            'user_id' => $darragh->id,
+            'user_handle' => $darragh->handle,
+            'media_url' => null, // Text-only story
+            'media_type' => null, // Text-only story
+            'text' => 'Good morning Dublin! ☀️',
+            'text_style' => [
+                'color' => '#000000',
+                'size' => 'medium',
+                'background' => 'gradient-1',
+            ],
+            'location' => 'Dublin',
+            'views_count' => 10,
             'expires_at' => now()->addHours(24),
         ]);
 

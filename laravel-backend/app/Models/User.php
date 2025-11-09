@@ -209,4 +209,12 @@ class User extends Authenticatable
     {
         return $this->hasMany(Collection::class)->where('is_private', true);
     }
+
+    // Tagged in posts relationship (many-to-many)
+    public function taggedInPosts()
+    {
+        return $this->belongsToMany(Post::class, 'post_tagged_users')
+                    ->withPivot('user_handle')
+                    ->withTimestamps();
+    }
 }

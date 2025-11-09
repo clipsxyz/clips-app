@@ -1,12 +1,16 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiCamera, FiMapPin, FiX, FiImage, FiType, FiPalette, FiMaximize2 } from 'react-icons/fi';
+import { FiCamera, FiMapPin, FiX, FiImage, FiType, FiPalette, FiMaximize2, FiHome, FiSmile, FiSettings, FiUser } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { createStory } from '../api/stories';
 import ScenesModal from '../components/ScenesModal';
 import { getPostById } from '../api/posts';
-import type { Post } from '../types';
+import GifPicker from '../components/GifPicker';
+import StickerPicker from '../components/StickerPicker';
+import UserTaggingModal from '../components/UserTaggingModal';
+import StickerOverlayComponent from '../components/StickerOverlay';
+import type { Post, StickerOverlay, Sticker } from '../types';
 
 export default function ClipPage() {
   const { user } = useAuth();
@@ -16,12 +20,23 @@ export default function ClipPage() {
   const [selectedMedia, setSelectedMedia] = React.useState<string | null>(null);
   const [mediaType, setMediaType] = React.useState<'image' | 'video' | null>(null);
   const [text, setText] = React.useState('');
-  const [textColor, setTextColor] = React.useState('white');
+  const [textColor, setTextColor] = React.useState('#FFFFFF');
   const [textSize, setTextSize] = React.useState<'small' | 'medium' | 'large'>('medium');
+  const [background, setBackground] = React.useState<string>('linear-gradient(to bottom right, #ef4444, #f97316, #fbbf24)');
+  const [showBackgroundPicker, setShowBackgroundPicker] = React.useState(false);
+  const [showTextColorPicker, setShowTextColorPicker] = React.useState(false);
+  const [showGifPicker, setShowGifPicker] = React.useState(false);
+  const [showStickerPicker, setShowStickerPicker] = React.useState(false);
+  const [showUserTagging, setShowUserTagging] = React.useState(false);
+  const [gifOverlays, setGifOverlays] = React.useState<StickerOverlay[]>([]);
+  const [selectedGifOverlay, setSelectedGifOverlay] = React.useState<string | null>(null);
+  const [taggedUsers, setTaggedUsers] = React.useState<string[]>([]);
   const [storyLocation, setStoryLocation] = React.useState('');
   const [isUploading, setIsUploading] = React.useState(false);
   const [showTextEditor, setShowTextEditor] = React.useState(false);
   const [showControls, setShowControls] = React.useState(false);
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
   const [sharedPostInfo, setSharedPostInfo] = React.useState<{ postId?: string; userId?: string } | null>(null);
   const [filteredFromFlow, setFilteredFromFlow] = React.useState(false);
   const [videoSegments, setVideoSegments] = React.useState<string[]>([]);
@@ -134,7 +149,12 @@ export default function ClipPage() {
   };
 
   const handleSubmit = async () => {
-    if (!selectedMedia || !user) return;
+    // Allow text-only stories (no media required)
+    if (!selectedMedia && !text.trim() && gifOverlays.length === 0) {
+      alert('Please add text, media, or a GIF to your story.');
+      return;
+    }
+    if (!user) return;
 
     // If we have multiple segments, post them sequentially
     if (videoSegments.length > 1) {
@@ -142,22 +162,23 @@ export default function ClipPage() {
       return;
     }
 
-    // Single segment or regular clip
+    // Single segment, regular clip, or text-only story
     setIsUploading(true);
     try {
-      const mediaUrl = selectedMedia;
-
       await createStory(
         user.id,
         user.handle,
-        mediaUrl,
-        mediaType!,
+        selectedMedia || undefined,
+        mediaType || undefined,
         text.trim() || undefined,
         storyLocation.trim() || undefined,
         textColor,
         textSize,
         sharedPostInfo?.postId,
-        sharedPostInfo?.userId
+        sharedPostInfo?.userId,
+        text.trim() ? { color: textColor, size: textSize, background: background } : undefined, // textStyle
+        gifOverlays.length > 0 ? gifOverlays : undefined, // stickers
+        taggedUsers.length > 0 ? taggedUsers : undefined // taggedUsers
       );
 
       // Dispatch event to refresh story indicators
@@ -223,19 +244,365 @@ export default function ClipPage() {
     navigate('/feed');
   };
 
+  const [textOnlyMode, setTextOnlyMode] = React.useState(false);
+
+  // Update container size for GIF overlays
+  React.useEffect(() => {
+    if (containerRef.current) {
+      const updateSize = () => {
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (rect) {
+          setContainerSize({ width: rect.width, height: rect.height });
+        }
+      };
+      updateSize();
+      const resizeObserver = new ResizeObserver(updateSize);
+      resizeObserver.observe(containerRef.current);
+      return () => resizeObserver.disconnect();
+    }
+  }, [textOnlyMode]);
+
+  // Handle adding GIF as overlay
+  const handleAddGif = (gifUrl: string) => {
+    const gifOverlay: StickerOverlay = {
+      id: `gif-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      stickerId: `gif-${gifUrl}`,
+      sticker: {
+        id: `gif-${gifUrl}`,
+        name: 'GIF',
+        category: 'GIF',
+        url: gifUrl,
+        isAnimated: true
+      },
+      x: 50,
+      y: 50,
+      scale: 1.5,
+      rotation: 0,
+      opacity: 1.0
+    };
+    setGifOverlays([...gifOverlays, gifOverlay]);
+    setSelectedGifOverlay(gifOverlay.id);
+  };
+
+  // Handle updating GIF overlay
+  const handleUpdateGifOverlay = (overlayId: string, updated: StickerOverlay) => {
+    setGifOverlays(gifOverlays.map(overlay => overlay.id === overlayId ? updated : overlay));
+  };
+
+  // Handle removing GIF overlay
+  const handleRemoveGifOverlay = (overlayId: string) => {
+    setGifOverlays(gifOverlays.filter(overlay => overlay.id !== overlayId));
+    if (selectedGifOverlay === overlayId) {
+      setSelectedGifOverlay(null);
+    }
+  };
+
+  // Handle adding sticker as overlay
+  const handleSelectSticker = (sticker: Sticker) => {
+    const stickerOverlay: StickerOverlay = {
+      id: `sticker-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      stickerId: sticker.id,
+      sticker: sticker,
+      x: 50,
+      y: 50,
+      scale: 1.0,
+      rotation: 0,
+      opacity: 1.0
+    };
+    setGifOverlays([...gifOverlays, stickerOverlay]);
+    setSelectedGifOverlay(stickerOverlay.id);
+  };
+
+  const getTextSizeClass = () => {
+    switch (textSize) {
+      case 'small':
+        return 'text-2xl';
+      case 'medium':
+        return 'text-4xl';
+      case 'large':
+        return 'text-6xl';
+      default:
+        return 'text-4xl';
+    }
+  };
+
   if (!selectedMedia) {
     // Initial state - no media selected
+    if (textOnlyMode) {
+      // Text-only mode
+      return (
+        <div className="fixed inset-0 z-50 flex flex-col bg-gradient-to-br from-red-500 via-orange-500 to-yellow-400">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-3 bg-black/20 backdrop-blur-sm">
+            <button
+              onClick={() => {
+                setTextOnlyMode(false);
+                setText('');
+                setGifOverlays([]);
+                setTaggedUsers([]);
+              }}
+              className="p-2 -ml-2 text-white hover:bg-white/10 rounded-full transition-colors"
+              aria-label="Back"
+            >
+              <FiX className="w-6 h-6" />
+            </button>
+            <button
+              onClick={() => setShowStickerPicker(true)}
+              className="p-2 text-white hover:bg-white/10 rounded-full transition-colors"
+              aria-label="Stickers"
+            >
+              <FiSmile className="w-5 h-5" />
+            </button>
+            <button
+              onClick={() => setShowBackgroundPicker(!showBackgroundPicker)}
+              className="px-3 py-1.5 text-white hover:bg-white/10 rounded-full transition-colors text-sm font-medium"
+              aria-label="Background Settings"
+            >
+              Background
+            </button>
+          </div>
+
+          {/* Main Content Area */}
+          <div 
+            ref={containerRef}
+            className="flex-1 flex items-center justify-center relative overflow-hidden"
+            style={{
+              background: background.includes('gradient') 
+                ? undefined 
+                : background,
+              backgroundImage: background.includes('gradient') 
+                ? background 
+                : undefined
+            }}
+            onClick={(e) => {
+              // Deselect GIF overlay when clicking on background
+              if (e.target === e.currentTarget || (e.target as HTMLElement).tagName === 'DIV') {
+                setSelectedGifOverlay(null);
+              }
+            }}
+          >
+            {/* Text Display Area */}
+            <div className="w-full h-full flex flex-col items-center justify-center px-4 pointer-events-none">
+              {!text.trim() ? (
+                <div className="text-white/60 text-lg font-medium">
+                  Tap to type
+                </div>
+              ) : (
+                <div
+                  className={`text-center w-full ${getTextSizeClass()}`}
+                  style={{ color: textColor }}
+                >
+                  <div className="leading-relaxed whitespace-pre-wrap font-bold drop-shadow-lg">
+                    {text}
+                  </div>
+                </div>
+              )}
+              {/* Tagged Users Display */}
+              {taggedUsers.length > 0 && (
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                  {taggedUsers.map((handle) => (
+                    <div
+                      key={handle}
+                      className="px-3 py-1.5 bg-white/20 backdrop-blur-sm rounded-full text-white text-sm font-medium"
+                    >
+                      @{handle}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* GIF Overlays */}
+            {gifOverlays.length > 0 && containerSize.width > 0 && (
+              <>
+                {gifOverlays.map((overlay) => (
+                  <StickerOverlayComponent
+                    key={overlay.id}
+                    overlay={overlay}
+                    onUpdate={(updated) => handleUpdateGifOverlay(overlay.id, updated)}
+                    onRemove={() => handleRemoveGifOverlay(overlay.id)}
+                    isSelected={selectedGifOverlay === overlay.id}
+                    onSelect={() => setSelectedGifOverlay(overlay.id)}
+                    containerWidth={containerSize.width || 400}
+                    containerHeight={containerSize.height || 400}
+                  />
+                ))}
+              </>
+            )}
+
+            {/* Text Input - Overlay for typing */}
+            <textarea
+              ref={textAreaRef}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              className="absolute inset-0 w-full h-full bg-transparent border-none outline-none text-transparent caret-white resize-none cursor-text"
+              placeholder=""
+              style={{ fontSize: '16px' }}
+            />
+
+            {/* Left-Side Floating Elements */}
+            <div className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col gap-3 z-10">
+              {/* Text Color Picker */}
+              {showTextColorPicker && (
+                <div className="flex flex-col gap-2 bg-white/90 backdrop-blur-sm rounded-2xl p-2 shadow-lg">
+                  <div className="text-xs font-semibold text-gray-700 mb-1">Text Color</div>
+                  <div className="grid grid-cols-4 gap-1">
+                    {Object.entries(textColors).map(([name, color]) => (
+                      <button
+                        key={name}
+                        onClick={() => setTextColor(color)}
+                        className={`w-8 h-8 rounded-full ${textColor === color ? 'ring-2 ring-black' : ''}`}
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Background Picker */}
+              {showBackgroundPicker && (
+                <div className="flex flex-col gap-2 bg-white/90 backdrop-blur-sm rounded-2xl p-2 shadow-lg max-h-[400px] overflow-y-auto">
+                  <div className="text-xs font-semibold text-gray-700 mb-1">Background</div>
+                  {/* Gradient Options */}
+                  <div className="grid grid-cols-2 gap-1 mb-2">
+                    {[
+                      'linear-gradient(to bottom right, #ef4444, #f97316, #fbbf24)',
+                      'linear-gradient(to bottom right, #3b82f6, #8b5cf6, #ec4899)',
+                      'linear-gradient(to bottom right, #10b981, #3b82f6, #8b5cf6)',
+                      'linear-gradient(to bottom right, #f59e0b, #ef4444, #ec4899)',
+                    ].map((gradient) => (
+                      <button
+                        key={gradient}
+                        onClick={() => setBackground(gradient)}
+                        className={`h-12 rounded-lg ${background === gradient ? 'ring-2 ring-black' : ''}`}
+                        style={{ background: gradient }}
+                      />
+                    ))}
+                  </div>
+                  {/* Solid Color Options */}
+                  <div className="grid grid-cols-4 gap-1">
+                    {['#000000', '#FFFFFF', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF'].map((color) => (
+                      <button
+                        key={color}
+                        onClick={() => setBackground(color)}
+                        className={`w-8 h-8 rounded-full ${background === color ? 'ring-2 ring-black' : ''}`}
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Bottom Bar */}
+            <div className="absolute bottom-0 left-0 right-0 flex items-center justify-center gap-6 p-4 bg-black/20 backdrop-blur-sm z-10">
+              {/* Text Color Button */}
+              <button
+                onClick={() => {
+                  setShowTextColorPicker(!showTextColorPicker);
+                  setShowBackgroundPicker(false);
+                }}
+                className="p-3 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors"
+                aria-label="Text Color"
+              >
+                <span className="text-xl font-bold">Aa</span>
+              </button>
+
+              {/* Tag Users Button */}
+              <button
+                onClick={() => setShowUserTagging(true)}
+                className="p-3 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors relative"
+                aria-label="Tag Users"
+              >
+                <FiUser className="w-5 h-5" />
+                {taggedUsers.length > 0 && (
+                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-xs flex items-center justify-center text-white">
+                    {taggedUsers.length}
+                  </span>
+                )}
+              </button>
+
+              {/* GIF Button */}
+              <button
+                onClick={() => setShowGifPicker(true)}
+                className="p-3 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors"
+                aria-label="Add GIF"
+              >
+                <span className="text-xl font-bold">GIF</span>
+              </button>
+
+              {/* Submit Button */}
+              <button
+                onClick={handleSubmit}
+                disabled={isUploading || (!text.trim() && gifOverlays.length === 0)}
+                className="px-6 py-3 bg-white text-black rounded-full font-semibold hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isUploading ? 'Posting...' : 'Post'}
+              </button>
+            </div>
+          </div>
+
+          {/* Modals */}
+          {showGifPicker && (
+            <GifPicker
+              isOpen={showGifPicker}
+              onClose={() => setShowGifPicker(false)}
+              onSelectGif={(gifUrl) => {
+                handleAddGif(gifUrl);
+                setShowGifPicker(false);
+              }}
+            />
+          )}
+
+          {showStickerPicker && (
+            <StickerPicker
+              isOpen={showStickerPicker}
+              onClose={() => setShowStickerPicker(false)}
+              onSelectSticker={handleSelectSticker}
+            />
+          )}
+
+          {showUserTagging && (
+            <UserTaggingModal
+              isOpen={showUserTagging}
+              onClose={() => setShowUserTagging(false)}
+              onSelectUser={(handle, displayName) => {
+                if (!taggedUsers.includes(handle)) {
+                  setTaggedUsers([...taggedUsers, handle]);
+                }
+              }}
+              taggedUsers={taggedUsers}
+            />
+          )}
+        </div>
+      );
+    }
+
+    // Original upload UI
     return (
       <div className="min-h-screen bg-black relative overflow-hidden">
         {/* Header */}
         <div className="absolute top-0 left-0 right-0 z-50 bg-gradient-to-b from-black/80 to-transparent p-4">
           <div className="flex items-center justify-between">
-            <button
-              onClick={handleBack}
-              className="p-2 bg-black/50 backdrop-blur-sm text-white rounded-full hover:bg-black/70 transition-colors"
-            >
-              <FiX className="w-6 h-6" />
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => navigate('/feed')}
+                className="p-2 bg-black/50 backdrop-blur-sm text-white rounded-full hover:bg-black/70 transition-colors"
+                aria-label="Go to Home Feed"
+                title="Home"
+              >
+                <FiHome className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => navigate('/feed')}
+                className="font-bold text-lg bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 bg-clip-text text-transparent"
+                aria-label="Go to Home Feed"
+                title="Gazetteer"
+              >
+                Gazetteer
+              </button>
+            </div>
             <h1 className="text-white font-bold text-lg">Create Story</h1>
             <div className="w-10"></div>
           </div>
@@ -280,7 +647,7 @@ export default function ClipPage() {
             </p>
 
             {/* Upload Button */}
-            <label className="block">
+            <label className="block mb-4">
               <div className="relative inline-block overflow-visible">
                 {/* Gradient border wrapper */}
                 <div className="absolute -inset-[2px] rounded-full bg-gradient-to-r from-emerald-500 via-blue-500 via-purple-500 to-pink-500 blur-sm opacity-75"></div>
@@ -298,6 +665,14 @@ export default function ClipPage() {
                 className="hidden"
               />
             </label>
+
+            {/* Text Only Option */}
+            <button
+              onClick={() => setTextOnlyMode(true)}
+              className="px-6 py-3 bg-white/10 hover:bg-white/20 text-white rounded-full font-semibold transition-colors border border-white/20"
+            >
+              Create Text Story
+            </button>
           </div>
         </div>
 
@@ -313,12 +688,24 @@ export default function ClipPage() {
       {/* Top Bar */}
       <div className="absolute top-0 left-0 right-0 z-50 bg-gradient-to-b from-black/80 to-transparent p-4">
         <div className="flex items-center justify-between">
-          <button
-            onClick={removeMedia}
-            className="p-2 bg-black/50 backdrop-blur-sm text-white rounded-full hover:bg-black/70 transition-colors"
-          >
-            <FiX className="w-6 h-6" />
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => navigate('/feed')}
+              className="p-2 bg-black/50 backdrop-blur-sm text-white rounded-full hover:bg-black/70 transition-colors"
+              aria-label="Go to Home Feed"
+              title="Home"
+            >
+              <FiHome className="w-5 h-5" />
+            </button>
+            <button
+              onClick={() => navigate('/feed')}
+              className="font-bold text-base bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 bg-clip-text text-transparent"
+              aria-label="Go to Home Feed"
+              title="Gazetteer"
+            >
+              Gazetteer
+            </button>
+          </div>
           <h1 className="text-white font-semibold text-base">Your Story</h1>
           <div className="flex items-center gap-2">
             {/* Show Full Scenes Button - Show for any post shared to clips */}
@@ -539,19 +926,6 @@ export default function ClipPage() {
         </div>
       )}
 
-      {/* Bottom Bar - When controls hidden */}
-      {!showControls && (
-        <div className="absolute bottom-0 left-0 right-0 z-40 bg-gradient-to-t from-black/80 to-transparent p-6 pb-safe">
-          <div className="flex items-center justify-center gap-4">
-            <button
-              onClick={() => setShowControls(true)}
-              className="px-6 py-3 rounded-full bg-white text-black font-semibold hover:bg-gray-200 transition-all shadow-lg"
-            >
-              Add to Story
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Scenes Modal for Template Posts */}
       {showScenesModal && fullPost && (

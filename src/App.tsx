@@ -8,6 +8,7 @@ import CommentsModal from './components/CommentsModal';
 import ShareModal from './components/ShareModal';
 import ScenesModal from './components/ScenesModal';
 import CreateModal from './components/CreateModal';
+import TaggedUsersBottomSheet from './components/TaggedUsersBottomSheet';
 import Avatar from './components/Avatar';
 import { useAuth } from './context/Auth';
 import { getFlagForHandle } from './api/users';
@@ -74,7 +75,7 @@ export default function App() {
       <main id="main" className="mx-auto max-w-md min-h-screen pb-[calc(64px+theme(spacing.safe))] md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800 md:bg-white md:dark:bg-gray-950">
         <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />
         <Outlet context={{ activeTab, setActiveTab, customLocation, setCustomLocation }} />
-        {loc.pathname !== '/discover' && loc.pathname !== '/create/filters' && loc.pathname !== '/create/instant' && loc.pathname !== '/payment' && (
+        {loc.pathname !== '/discover' && loc.pathname !== '/create/filters' && loc.pathname !== '/create/instant' && loc.pathname !== '/payment' && loc.pathname !== '/clip' && loc.pathname !== '/create' && (
           <BottomNav onCreateClick={() => setShowCreateModal(true)} />
         )}
       </main>
@@ -416,11 +417,29 @@ function TagRow({ tags }: { tags: string[] }) {
   );
 }
 
-function TextCard({ text, onDoubleLike }: { text: string; onDoubleLike: () => Promise<void> }) {
+function TextCard({ text, onDoubleLike, textStyle, stickers, onOpenScenes }: { text: string; onDoubleLike: () => Promise<void>; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string }; stickers?: StickerOverlay[]; onOpenScenes?: () => void }) {
   const [burst, setBurst] = React.useState(false);
   const [isExpanded, setIsExpanded] = React.useState(false);
   const lastTap = React.useRef<number>(0);
   const touchHandled = React.useRef<boolean>(false);
+
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
+
+  React.useEffect(() => {
+    if (containerRef.current) {
+      const updateSize = () => {
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (rect) {
+          setContainerSize({ width: rect.width, height: rect.height });
+        }
+      };
+      updateSize();
+      const resizeObserver = new ResizeObserver(updateSize);
+      resizeObserver.observe(containerRef.current);
+      return () => resizeObserver.disconnect();
+    }
+  }, []);
 
   const shouldTruncate = text.length > 100;
   const displayText = shouldTruncate && !isExpanded ? text.substring(0, 100) + '...' : text;
@@ -437,9 +456,29 @@ function TextCard({ text, onDoubleLike }: { text: string; onDoubleLike: () => Pr
     '#1a202c', // Dark navy
   ];
 
-  // Select background based on text content (consistent for same text)
-  const backgroundIndex = text.length % backgrounds.length;
-  const selectedBackground = backgrounds[backgroundIndex];
+  // Use background from textStyle if provided, otherwise select based on text content
+  const selectedBackground = textStyle?.background || (() => {
+    const backgroundIndex = text.length % backgrounds.length;
+    return backgrounds[backgroundIndex];
+  })();
+
+  // Get text size class based on textStyle (matching TextOnlyPostPage sizes)
+  const getTextSizeClass = () => {
+    if (!textStyle?.size) return 'text-xl';
+    switch (textStyle.size) {
+      case 'small':
+        return 'text-2xl';
+      case 'medium':
+        return 'text-4xl';
+      case 'large':
+        return 'text-6xl';
+      default:
+        return 'text-4xl';
+    }
+  };
+
+  // Get text color from textStyle or default to white
+  const textColor = textStyle?.color || 'white';
 
   async function handleTap() {
     const now = Date.now();
@@ -484,6 +523,7 @@ function TextCard({ text, onDoubleLike }: { text: string; onDoubleLike: () => Pr
   return (
     <div className="mx-4 mt-4 select-none">
       <div
+        ref={containerRef}
         role="button"
         tabIndex={0}
         aria-label="Double tap or press to like"
@@ -497,12 +537,30 @@ function TextCard({ text, onDoubleLike }: { text: string; onDoubleLike: () => Pr
         onTouchEnd={handleTouchEnd}
         className="relative p-6 rounded-2xl min-h-[120px] flex items-center justify-center shadow-2xl hover:shadow-3xl transition-all duration-300"
         style={{
-          background: selectedBackground,
-          boxShadow: `0 0 30px ${selectedBackground}40, 0 0 60px ${selectedBackground}20`
+          ...(textStyle?.background?.includes('gradient') 
+            ? { backgroundImage: textStyle.background }
+            : { background: selectedBackground }),
+          boxShadow: textStyle?.background?.includes('gradient') 
+            ? '0 0 30px rgba(0,0,0,0.3), 0 0 60px rgba(0,0,0,0.2)' 
+            : `0 0 30px ${selectedBackground}40, 0 0 60px ${selectedBackground}20`
         }}
       >
-        <div className="text-center w-full">
-          <div className="text-xl text-white leading-relaxed whitespace-pre-wrap font-bold drop-shadow-lg">
+        {/* Fullscreen Icon */}
+        {onOpenScenes && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenScenes();
+            }}
+            className="absolute top-2 right-2 z-20 p-2 rounded-full bg-black/30 hover:bg-black/50 text-white transition-colors"
+            aria-label="View fullscreen"
+          >
+            <FiMaximize className="w-5 h-5" />
+          </button>
+        )}
+        
+        <div className="text-center w-full relative z-10">
+          <div className={`${getTextSizeClass()} leading-relaxed whitespace-pre-wrap font-bold drop-shadow-lg`} style={{ color: textColor }}>
             {displayText}
           </div>
           {shouldTruncate && (
@@ -517,6 +575,53 @@ function TextCard({ text, onDoubleLike }: { text: string; onDoubleLike: () => Pr
             </div>
           )}
         </div>
+
+        {/* GIF/Sticker Overlays - Scaled down and repositioned for feed view */}
+        {stickers && stickers.length > 0 && containerSize.width > 0 && (
+          <>
+            {stickers.map((overlay, index) => {
+              // Scale down overlays in feed view to prevent overlap (60% of original size)
+              const feedScale = 0.6;
+              
+              // Adjust position to avoid center where text typically is
+              // If overlay is near center (45-55%), move it to edges
+              let adjustedX = overlay.x;
+              let adjustedY = overlay.y;
+              
+              if (overlay.x >= 45 && overlay.x <= 55 && overlay.y >= 45 && overlay.y <= 55) {
+                // Move center-positioned overlays to corners/edges
+                // Distribute them around the edges in a circle
+                const total = stickers.length;
+                const angle = (index / total) * Math.PI * 2;
+                adjustedX = 50 + Math.cos(angle) * 30; // Spread around center
+                adjustedY = 50 + Math.sin(angle) * 30;
+                // Clamp to bounds (keep within 15-85% to avoid edges)
+                adjustedX = Math.max(15, Math.min(85, adjustedX));
+                adjustedY = Math.max(15, Math.min(85, adjustedY));
+              }
+              
+              const adjustedOverlay = {
+                ...overlay,
+                scale: overlay.scale * feedScale,
+                x: adjustedX,
+                y: adjustedY
+              };
+              
+              return (
+                <StickerOverlayComponent
+                  key={overlay.id}
+                  overlay={adjustedOverlay}
+                  onUpdate={() => { }} // Read-only in feed
+                  onRemove={() => { }} // Read-only in feed
+                  isSelected={false} // Read-only in feed
+                  onSelect={() => { }} // Read-only in feed
+                  containerWidth={containerSize.width}
+                  containerHeight={containerSize.height}
+                />
+              );
+            })}
+          </>
+        )}
 
         {/* Enhanced heart burst animation */}
         <div className={`absolute inset-0 flex items-center justify-center pointer-events-none transition-all duration-300 ${burst ? 'opacity-100 scale-100' : 'opacity-0 scale-50'}`}>
@@ -587,7 +692,7 @@ function CaptionText({ caption }: { caption: string }) {
   );
 }
 
-function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void }) {
+function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onCarouselIndexChange }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onCarouselIndexChange?: (index: number) => void }) {
   const [burst, setBurst] = React.useState(false);
   const [isPlaying, setIsPlaying] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -607,6 +712,13 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   const [currentIndex, setCurrentIndex] = React.useState(0);
   const hasMultipleItems = items.length > 1;
   const currentItem = items[currentIndex];
+
+  // Notify parent of carousel index changes
+  React.useEffect(() => {
+    if (onCarouselIndexChange && hasMultipleItems) {
+      onCarouselIndexChange(currentIndex);
+    }
+  }, [currentIndex, hasMultipleItems, onCarouselIndexChange]);
 
   // Update container size for stickers
   React.useEffect(() => {
@@ -803,7 +915,8 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
 
   // If this is a text-only post, render TextCard
   if (text && !url && (!mediaItems || mediaItems.length === 0)) {
-    return <TextCard text={text} onDoubleLike={onDoubleLike} />;
+    // textStyle will be passed from the post object
+    return null; // Will be handled by FeedCard
   }
 
   // If no media at all, return null
@@ -941,19 +1054,6 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
               </div>
             )}
 
-            {/* Fullscreen Button - Bottom Right */}
-            {onOpenScenes && !isLoading && !hasError && (
-              <div className="absolute bottom-4 right-4 flex items-center gap-2">
-                <button
-                  onClick={onOpenScenes}
-                  aria-label="Open in Scenes fullscreen"
-                  title="Fullscreen"
-                  className="w-10 h-10 bg-black bg-opacity-50 rounded-full flex items-center justify-center hover:bg-opacity-70 transition-all duration-200"
-                >
-                  <FiMaximize className="w-5 h-5 text-white" />
-                </button>
-              </div>
-            )}
 
             {/* Gradient progress bar */}
             {!isLoading && !hasError && (
@@ -979,79 +1079,46 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
               className="absolute inset-0 w-full h-full object-cover"
               draggable={false}
             />
-            {/* Fullscreen Button - Bottom Right for Images */}
-            {onOpenScenes && (
-              <div className="absolute bottom-4 right-4 z-10">
-                <button
-                  onClick={onOpenScenes}
-                  aria-label="Open in Scenes fullscreen"
-                  title="Fullscreen"
-                  className="w-10 h-10 bg-black bg-opacity-50 rounded-full flex items-center justify-center hover:bg-opacity-70 transition-all duration-200"
-                >
-                  <FiMaximize className="w-5 h-5 text-white" />
-                </button>
-              </div>
-            )}
           </>
         )}
 
         {/* Carousel Navigation - Only show if multiple items */}
         {hasMultipleItems && (
           <>
-            {/* Previous Button */}
+            {/* Previous Button - Always show when not on first image */}
             {currentIndex > 0 && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   handlePrevious();
                 }}
-                className="absolute left-2 top-1/2 transform -translate-y-1/2 w-10 h-10 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center transition-colors z-20"
+                className="absolute bottom-4 left-4 w-7 h-7 rounded-full flex items-center justify-center transition-all z-30 pointer-events-auto"
                 aria-label="Previous image"
+                style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.5))' }}
               >
-                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
                 </svg>
               </button>
             )}
 
-            {/* Next Button */}
+            {/* Next Button - Always show when not on last image */}
             {currentIndex < items.length - 1 && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   handleNext();
                 }}
-                className="absolute right-2 top-1/2 transform -translate-y-1/2 w-10 h-10 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center transition-colors z-20"
+                className="absolute bottom-4 right-12 w-7 h-7 rounded-full flex items-center justify-center transition-all z-30 pointer-events-auto"
                 aria-label="Next image"
+                style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.5))' }}
               >
-                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                 </svg>
               </button>
             )}
 
-            {/* Dots Indicator */}
-            <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 flex gap-1.5 z-20">
-              {items.map((_, index) => (
-                <button
-                  key={index}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDotClick(index);
-                  }}
-                  className={`w-2 h-2 rounded-full transition-all ${index === currentIndex
-                    ? 'bg-white w-6'
-                    : 'bg-white/50 hover:bg-white/75'
-                    }`}
-                  aria-label={`Go to image ${index + 1}`}
-                />
-              ))}
-            </div>
-
-            {/* Image Counter */}
-            <div className="absolute top-2 right-2 px-2 py-1 bg-black/50 text-white text-xs rounded z-20">
-              {currentIndex + 1} / {items.length}
-            </div>
           </>
         )}
 
@@ -1507,7 +1574,10 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   const [isMetricsOpen, setIsMetricsOpen] = React.useState(false);
   const [isBoosted, setIsBoosted] = React.useState(false);
   const [saveModalOpen, setSaveModalOpen] = React.useState(false);
+  const [carouselIndex, setCarouselIndex] = React.useState(0);
+  const [showTaggedUsersModal, setShowTaggedUsersModal] = React.useState(false);
   const articleRef = React.useRef<HTMLElement>(null);
+
 
   // Check if post is boosted to show metrics icon
   React.useEffect(() => {
@@ -1551,12 +1621,130 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
       <PostHeader post={post} onFollow={onFollow} showBoostIcon={showBoostIcon} onBoost={onBoost} />
       <TagRow tags={post.tags} />
       <div className="relative">
-        <Media url={post.mediaUrl} mediaType={post.mediaType} text={post.text} imageText={post.imageText} stickers={post.stickers} mediaItems={post.mediaItems} onDoubleLike={onLike} onOpenScenes={onOpenScenes} />
+        {post.text && !post.mediaUrl && (!post.mediaItems || post.mediaItems.length === 0) ? (
+          <TextCard text={post.text} onDoubleLike={onLike} textStyle={post.textStyle} stickers={post.stickers} onOpenScenes={onOpenScenes} />
+        ) : (
+          <Media 
+            url={post.mediaUrl} 
+            mediaType={post.mediaType} 
+            text={post.text} 
+            imageText={post.imageText} 
+            stickers={post.stickers} 
+            mediaItems={post.mediaItems} 
+            onDoubleLike={onLike} 
+            onOpenScenes={onOpenScenes}
+            onCarouselIndexChange={setCarouselIndex}
+          />
+        )}
+        {/* Carousel Indicator - Underneath the image/media */}
+        {/* Show row if: multiple media items, OR tagged users exist, OR onOpenScenes available */}
+        {(() => {
+          const hasTaggedUsers = post.taggedUsers && Array.isArray(post.taggedUsers) && post.taggedUsers.length > 0;
+          const hasMultipleItems = post.mediaItems && post.mediaItems.length > 1;
+          const hasMedia = post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0);
+          // Always show row if there are tagged users OR multiple items OR scenes available
+          return hasTaggedUsers || hasMultipleItems || (onOpenScenes && hasMedia);
+        })() ? (
+          <div className="px-4 py-2 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between">
+              {/* Left side - Tagged Users Icon */}
+              <div className="flex items-center">
+                {post.taggedUsers && Array.isArray(post.taggedUsers) && post.taggedUsers.length > 0 ? (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowTaggedUsersModal(true);
+                    }}
+                    className="w-8 h-8 rounded-full bg-gray-900 dark:bg-gray-800 flex items-center justify-center hover:bg-gray-800 dark:hover:bg-gray-700 transition-colors shadow-sm"
+                    aria-label="View tagged users"
+                    title={`View ${post.taggedUsers?.length || 0} tagged ${post.taggedUsers?.length === 1 ? 'person' : 'people'}`}
+                  >
+                    <svg
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      className="text-white"
+                      fill="currentColor"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      {/* Person silhouette - head and shoulders */}
+                      <path
+                        d="M12 12C14.21 12 16 10.21 16 8C16 5.79 14.21 4 12 4C9.79 4 8 5.79 8 8C8 10.21 9.79 12 12 12ZM12 14C9.33 14 4 15.34 4 18V20H20V18C20 15.34 14.67 14 12 14Z"
+                        fill="currentColor"
+                      />
+                    </svg>
+                  </button>
+                ) : (
+                  <div className="w-8 h-8" /> // Spacer to balance layout
+                )}
+              </div>
+              
+              {/* Center - Carousel Display (Dots and Number) */}
+              <div className="flex items-center gap-3 flex-1 justify-center">
+                {/* White Dots - Only show if multiple items */}
+                {post.mediaItems && post.mediaItems.length > 1 && (
+                  <div className="flex gap-1.5">
+                    {post.mediaItems.map((_, index) => (
+                      <div
+                        key={index}
+                        className={`w-2 h-2 rounded-full transition-all ${
+                          index === carouselIndex
+                            ? 'bg-gray-900 dark:bg-gray-100 w-6'
+                            : 'bg-gray-300 dark:bg-gray-600'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                )}
+                {/* Number Indicator - Only show if multiple items */}
+                {post.mediaItems && post.mediaItems.length > 1 && (
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {carouselIndex + 1} / {post.mediaItems.length}
+                  </span>
+                )}
+              </div>
+              
+              {/* Right side - Scenes Logo */}
+              <div className="flex items-center">
+                {onOpenScenes ? (
+                  <button
+                    onClick={onOpenScenes}
+                    className="flex items-center justify-center hover:opacity-80 transition-opacity"
+                    aria-label="Open in Scenes fullscreen"
+                    title="Open in Scenes"
+                  >
+                    <div className="p-0.5 rounded border border-gray-700 dark:border-gray-600">
+                      <div className="p-0.5 rounded border border-gray-700 dark:border-gray-600">
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          className="text-gray-700 dark:text-gray-300"
+                          fill="none"
+                          xmlns="http://www.w3.org/2000/svg"
+                        >
+                          {/* Outer square border */}
+                          <rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" strokeWidth="2" fill="none" />
+                          {/* Inner square border */}
+                          <rect x="6" y="6" width="12" height="12" rx="1" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                          {/* Play button triangle */}
+                          <path d="M9 7 L9 17 L17 12 Z" fill="currentColor" />
+                        </svg>
+                      </div>
+                    </div>
+                  </button>
+                ) : (
+                  <div className="w-6 h-6" /> // Spacer to balance layout
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
       {/* Caption for image/video posts */}
-      {post.caption && post.mediaUrl && (
+      {((post.caption || post.text) && (post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0))) && (
         <div className="px-4 py-3">
-          <CaptionText caption={post.caption} />
+          <CaptionText caption={post.caption || post.text || ''} />
         </div>
       )}
       <EngagementBar
@@ -1589,6 +1777,14 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
           userId={user.id}
           isOpen={saveModalOpen}
           onClose={() => setSaveModalOpen(false)}
+        />
+      )}
+      {/* Tagged Users Bottom Sheet */}
+      {post.taggedUsers && post.taggedUsers.length > 0 && (
+        <TaggedUsersBottomSheet
+          isOpen={showTaggedUsersModal}
+          onClose={() => setShowTaggedUsersModal(false)}
+          taggedUserHandles={post.taggedUsers}
         />
       )}
     </article>
@@ -2665,3 +2861,4 @@ function BoostPageWrapper() {
 
 // Export for direct import
 export { FeedPageWrapper, BoostPageWrapper };
+

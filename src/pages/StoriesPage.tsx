@@ -432,32 +432,95 @@ export default function StoriesPage() {
                     <div className="absolute inset-0 flex items-center justify-center">
                         <div className="relative w-full h-full max-w-[420px] max-h-[90vh] aspect-[9/16] flex items-center justify-center">
                             <div className="relative w-full h-full rounded-2xl overflow-hidden shadow-2xl bg-black">
-                                {currentStory?.mediaType === 'video' ? (
-                                    <video
-                                        ref={videoRef}
-                                        src={currentStory?.mediaUrl}
-                                        className="w-full h-full object-cover"
-                                        autoPlay
-                                        loop
-                                        muted={isMuted}
-                                        playsInline
-                                    />
+                                {currentStory?.mediaUrl ? (
+                                    currentStory.mediaType === 'video' ? (
+                                        <video
+                                            ref={videoRef}
+                                            src={currentStory.mediaUrl}
+                                            className="w-full h-full object-cover"
+                                            autoPlay
+                                            loop
+                                            muted={isMuted}
+                                            playsInline
+                                        />
+                                    ) : (
+                                        <img
+                                            src={currentStory.mediaUrl}
+                                            alt=""
+                                            className="w-full h-full object-cover select-none"
+                                            draggable={false}
+                                        />
+                                    )
                                 ) : (
-                                    <img
-                                        src={currentStory?.mediaUrl}
-                                        alt=""
-                                        className="w-full h-full object-cover select-none"
-                                        draggable={false}
-                                    />
+                                    // Text-only story display
+                                    <div 
+                                        className="w-full h-full flex items-center justify-center px-6"
+                                        style={{
+                                            background: currentStory?.textStyle?.background?.includes('gradient') 
+                                                ? undefined 
+                                                : currentStory?.textStyle?.background,
+                                            backgroundImage: currentStory?.textStyle?.background?.includes('gradient') 
+                                                ? currentStory.textStyle.background 
+                                                : undefined
+                                        }}
+                                    >
+                                        <div className="text-center w-full relative z-10">
+                                            {currentStory?.text && (
+                                                <div 
+                                                    className={`leading-relaxed whitespace-pre-wrap font-bold drop-shadow-lg ${
+                                                        currentStory.textStyle?.size === 'small' ? 'text-2xl' :
+                                                        currentStory.textStyle?.size === 'large' ? 'text-6xl' :
+                                                        'text-4xl'
+                                                    }`}
+                                                    style={{ color: currentStory.textStyle?.color || 'white' }}
+                                                >
+                                                    {currentStory.text}
+                                                </div>
+                                            )}
+                                        </div>
+                                        {/* Sticker Overlays for text-only stories */}
+                                        {currentStory?.stickers && currentStory.stickers.length > 0 && (
+                                            <>
+                                                {currentStory.stickers.map((overlay) => (
+                                                    <div
+                                                        key={overlay.id}
+                                                        className="absolute"
+                                                        style={{
+                                                            left: `${overlay.x}%`,
+                                                            top: `${overlay.y}%`,
+                                                            transform: `translate(-50%, -50%) scale(${overlay.scale}) rotate(${overlay.rotation}deg)`,
+                                                            opacity: overlay.opacity,
+                                                            zIndex: 20
+                                                        }}
+                                                    >
+                                                        {overlay.sticker.emoji ? (
+                                                            <span className="text-4xl" style={{ fontSize: `${50 * overlay.scale}px` }}>
+                                                                {overlay.sticker.emoji}
+                                                            </span>
+                                                        ) : overlay.sticker.url ? (
+                                                            <img
+                                                                src={overlay.sticker.url}
+                                                                alt=""
+                                                                className="max-w-[100px] max-h-[100px]"
+                                                                style={{ pointerEvents: 'none' }}
+                                                            />
+                                                        ) : null}
+                                                    </div>
+                                                ))}
+                                            </>
+                                        )}
+                                    </div>
                                 )}
                             </div>
                         </div>
                     </div>
 
-                    {/* Subtle gradient overlay for text readability */}
-                    <div className="absolute inset-0 pointer-events-none z-10">
-                        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/50" />
-                    </div>
+                    {/* Subtle gradient overlay for text readability - only show for media stories */}
+                    {currentStory?.mediaUrl && (
+                        <div className="absolute inset-0 pointer-events-none z-10">
+                            <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/50" />
+                        </div>
+                    )}
 
                     {/* Header with user info - Refined with backdrop blur */}
                     <div className="absolute top-12 left-0 right-0 px-4 z-50">
@@ -508,6 +571,9 @@ export default function StoriesPage() {
                                                 mediaType: currentStory.mediaType,
                                                 text: currentStory.text,
                                                 caption: currentStory.text,
+                                                textStyle: currentStory.textStyle,
+                                                stickers: currentStory.stickers,
+                                                taggedUsers: currentStory.taggedUsers,
                                                 createdAt: currentStory.createdAt,
                                                 stats: {
                                                     likes: 0,

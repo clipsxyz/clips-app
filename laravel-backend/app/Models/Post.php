@@ -32,12 +32,14 @@ class Post extends Model
         'media_items',
         'caption',
         'image_text',
+        'text_style', // JSON: { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
     ];
 
     protected $casts = [
         'tags' => 'array',
         'stickers' => 'array',
         'media_items' => 'array',
+        'text_style' => 'array', // { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
         'likes_count' => 'integer',
         'views_count' => 'integer',
         'comments_count' => 'integer',
@@ -97,6 +99,14 @@ class Post extends Model
     public function reclippedPosts()
     {
         return $this->hasMany(Post::class, 'original_post_id');
+    }
+
+    // Tagged users relationship (many-to-many)
+    public function taggedUsers()
+    {
+        return $this->belongsToMany(User::class, 'post_tagged_users')
+                    ->withPivot('user_handle')
+                    ->withTimestamps();
     }
 
     // Scopes

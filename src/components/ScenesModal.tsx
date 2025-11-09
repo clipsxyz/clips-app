@@ -431,12 +431,32 @@ export default function ScenesModal({
                                 />
                             )
                         ) : (
-                            <div className="text-white px-6 text-center max-w-md">
-                                <p className="text-xl font-semibold mb-3">{post.userHandle}</p>
-                                {/* Only show text if media is not a generated text image (data URL) */}
-                                {post.text && post.mediaUrl && !post.mediaUrl.startsWith('data:image') && (
-                                    <p className="whitespace-pre-line text-base opacity-90">{post.text}</p>
-                                )}
+                            // Text-only post display with styling
+                            <div 
+                                className="w-full h-full flex items-center justify-center px-6"
+                                style={{
+                                    background: post.textStyle?.background?.includes('gradient') 
+                                        ? undefined 
+                                        : post.textStyle?.background,
+                                    backgroundImage: post.textStyle?.background?.includes('gradient') 
+                                        ? post.textStyle.background 
+                                        : undefined
+                                }}
+                            >
+                                <div className="text-center w-full">
+                                    {post.text && (
+                                        <div 
+                                            className={`leading-relaxed whitespace-pre-wrap font-bold drop-shadow-lg ${
+                                                post.textStyle?.size === 'small' ? 'text-4xl' :
+                                                post.textStyle?.size === 'large' ? 'text-8xl' :
+                                                'text-6xl'
+                                            }`}
+                                            style={{ color: post.textStyle?.color || 'white' }}
+                                        >
+                                            {post.text}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         )}
 

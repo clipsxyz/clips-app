@@ -36,7 +36,7 @@ class PostController extends Controller
         $offset = $cursor * $limit;
 
         $query = Post::notReclipped()
-            ->with(['user:id,handle,display_name,avatar_url'])
+            ->with(['user:id,handle,display_name,avatar_url', 'taggedUsers:id,handle,display_name,avatar_url'])
             ->withCount(['likes', 'comments', 'shares', 'views', 'reclips']);
 
         // Add user-specific relationships if userId provided
@@ -71,6 +71,9 @@ class PostController extends Controller
         $userModel = $userId ? User::find($userId) : null;
         $transformedPosts = $posts->map(function ($post) use ($userModel) {
             $postData = $post->toArray();
+            
+            // Transform taggedUsers relationship to array of handles for frontend compatibility
+            $postData['taggedUsers'] = $post->taggedUsers->pluck('handle')->toArray();
             
             if ($userModel) {
                 $postData['user_liked'] = $post->isLikedBy($userModel);
@@ -111,7 +114,7 @@ class PostController extends Controller
 
         $userId = $request->get('userId');
         
-        $query = Post::with(['user:id,handle,display_name,avatar_url'])
+        $query = Post::with(['user:id,handle,display_name,avatar_url', 'taggedUsers:id,handle,display_name,avatar_url'])
             ->withCount(['likes', 'comments', 'shares', 'views', 'reclips']);
 
         if ($userId) {
@@ -133,6 +136,9 @@ class PostController extends Controller
         $userModel = $userId ? User::find($userId) : null;
 
         $postData = $post->toArray();
+        
+        // Transform taggedUsers relationship to array of handles for frontend compatibility
+        $postData['taggedUsers'] = $post->taggedUsers->pluck('handle')->toArray();
         
         if ($userModel) {
             $postData['user_liked'] = $post->isLikedBy($userModel);
@@ -168,6 +174,12 @@ class PostController extends Controller
             'mediaItems.*.url' => 'required|url',
             'mediaItems.*.type' => 'required|in:image,video',
             'mediaItems.*.duration' => 'nullable|numeric|min:0',
+            'textStyle' => 'nullable|array',
+            'textStyle.color' => 'nullable|string|max:50',
+            'textStyle.size' => 'nullable|in:small,medium,large',
+            'textStyle.background' => 'nullable|string|max:200',
+            'taggedUsers' => 'nullable|array',
+            'taggedUsers.*' => 'required|string|exists:users,handle',
         ]);
 
         if ($validator->fails()) {
@@ -194,15 +206,35 @@ class PostController extends Controller
                 'stickers' => $request->stickers,
                 'template_id' => $request->templateId,
                 'media_items' => $request->mediaItems,
+                'text_style' => $request->textStyle,
             ]);
+
+            // Attach tagged users if provided
+            if ($request->taggedUsers && is_array($request->taggedUsers) && count($request->taggedUsers) > 0) {
+                $taggedUserIds = User::whereIn('handle', $request->taggedUsers)
+                    ->get()
+                    ->mapWithKeys(function ($taggedUser) {
+                        return [$taggedUser->id => ['user_handle' => $taggedUser->handle]];
+                    })
+                    ->toArray();
+                
+                $post->taggedUsers()->attach($taggedUserIds);
+            }
 
             // Update user posts count
             $user->increment('posts_count');
 
+            // Reload relationships
+            $post->load(['user', 'taggedUsers']);
+
             return $post;
         });
 
-        return response()->json($post, 201);
+        // Transform taggedUsers to array of handles for frontend compatibility
+        $postData = $post->toArray();
+        $postData['taggedUsers'] = $post->taggedUsers->pluck('handle')->toArray();
+
+        return response()->json($postData, 201);
     }
 
     /**
