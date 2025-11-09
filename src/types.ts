@@ -72,6 +72,14 @@ export type Post = {
   templateId?: string; // Template used to create the post
   // News ticker banner
   bannerText?: string; // Scrolling news ticker banner text
+  // Text-only post styling
+  textStyle?: {
+    color?: string; // Text color
+    size?: 'small' | 'medium' | 'large'; // Text size
+    background?: string; // Background gradient or color
+  };
+  // Tagged users
+  taggedUsers?: string[]; // Array of user handles tagged in the post
 };
 
 export type Comment = {
@@ -114,11 +122,18 @@ export type Story = {
   id: string;
   userId: string;
   userHandle: string;
-  mediaUrl: string;
-  mediaType: 'image' | 'video';
+  mediaUrl?: string; // Optional for text-only stories
+  mediaType?: 'image' | 'video'; // Optional for text-only stories
   text?: string;
   textColor?: string;
   textSize?: 'small' | 'medium' | 'large';
+  textStyle?: {
+    color?: string;
+    size?: 'small' | 'medium' | 'large';
+    background?: string;
+  };
+  stickers?: StickerOverlay[]; // Stickers/GIFs applied to the story
+  taggedUsers?: string[]; // Array of user handles tagged in the story
   createdAt: number;
   expiresAt: number; // Timestamp when story expires (24 hours from creation)
   location?: string;

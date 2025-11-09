@@ -68,7 +68,7 @@ export default function StickerOverlayComponent({
                 const distance = Math.sqrt(
                     Math.pow(e.clientX - centerX, 2) + Math.pow(e.clientY - centerY, 2)
                 );
-                const baseSize = 50; // Base size in pixels
+                const baseSize = overlay.sticker.category === 'GIF' ? 80 : 50; // Base size in pixels (larger for GIFs)
                 const newScale = Math.max(0.5, Math.min(2.0, distance / baseSize));
 
                 onUpdate({
@@ -167,7 +167,9 @@ export default function StickerOverlayComponent({
         });
     }
 
-    const size = 50 * overlay.scale;
+    // Base size: 80px for GIFs, 50px for other stickers
+    const baseSize = overlay.sticker.category === 'GIF' ? 80 : 50;
+    const size = baseSize * overlay.scale;
 
     return (
         <div
@@ -196,8 +198,14 @@ export default function StickerOverlayComponent({
                 ) : overlay.sticker.url ? (
                     <img
                         src={overlay.sticker.url}
-                        alt={overlay.sticker.name}
+                        alt=""
                         className="w-full h-full object-contain"
+                        onError={(e) => {
+                            // Hide broken images
+                            (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                        loading="lazy"
+                        style={{ pointerEvents: 'none' }}
                     />
                 ) : overlay.sticker.category === 'Text' && overlay.sticker.name ? (
                     <span
@@ -210,6 +218,9 @@ export default function StickerOverlayComponent({
                     >
                         {(overlay as any).textContent || overlay.sticker.name}
                     </span>
+                ) : overlay.sticker.category === 'GIF' ? (
+                    // For GIFs, only show image, no fallback text
+                    null
                 ) : (
                     <span className="text-white text-xs">{overlay.sticker.name}</span>
                 )}
@@ -260,9 +271,9 @@ export default function StickerOverlayComponent({
                         </button>
                     </div>
 
-                    {/* Resize Handle */}
+                    {/* Resize Handle - Larger and more visible */}
                     <div
-                        className="absolute bottom-0 right-0 w-4 h-4 bg-purple-500 rounded-full cursor-nwse-resize transform translate-x-1/2 translate-y-1/2 z-20"
+                        className="absolute bottom-0 right-0 w-6 h-6 bg-purple-500 rounded-full cursor-nwse-resize transform translate-x-1/2 translate-y-1/2 z-20 shadow-lg border-2 border-white hover:bg-purple-600 transition-colors"
                         onMouseDown={(e) => {
                             e.stopPropagation();
                             setIsResizing(true);

@@ -311,7 +311,12 @@ export function decorateForUser(userId: string, p: Post): Post {
     userLiked: !!s.likes[p.id],
     isBookmarked: !!s.bookmarks[p.id],
     isFollowing: !!s.follows[p.userHandle],
-    userReclipped: !!s.reclips[p.id]
+    userReclipped: !!s.reclips[p.id],
+    // Explicitly preserve taggedUsers, textStyle, stickers, etc.
+    taggedUsers: p.taggedUsers,
+    textStyle: p.textStyle,
+    stickers: p.stickers,
+    mediaItems: p.mediaItems
   };
 }
 
@@ -735,7 +740,9 @@ export async function createPost(
   stickers?: StickerOverlay[],
   templateId?: string,
   mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>, // Multiple media items for carousel
-  bannerText?: string // News ticker banner text
+  bannerText?: string, // News ticker banner text
+  textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string }, // Text style for text-only posts
+  taggedUsers?: string[] // Array of user handles tagged in the post
 ): Promise<Post> {
   await delay(500);
 
@@ -792,6 +799,8 @@ export async function createPost(
     stickers: stickers || undefined, // Store stickers
     templateId: templateId || undefined, // Store template ID
     bannerText: bannerText || undefined, // Store news ticker banner text
+    textStyle: textStyle || undefined, // Store text style for text-only posts
+    taggedUsers: taggedUsers || undefined, // Store tagged users
     ...locationData
   };
 
@@ -800,9 +809,6 @@ export async function createPost(
 
   console.log('Post created and added to posts array. Total posts:', posts.length);
   console.log('New post:', newPost);
-  console.log('All post IDs:', posts.map(p => p.id));
-  console.log('Posts array length before createPost:', posts.length);
-  console.log('Posts array length after createPost:', posts.length);
 
   return decorateForUser(userId, newPost);
 }

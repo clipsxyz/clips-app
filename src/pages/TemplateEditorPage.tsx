@@ -296,23 +296,67 @@ export default function TemplateEditorPage() {
                             />
                         </div>
                     </div>
-                    <button
-                        onClick={handleCreateVideo}
-                        disabled={!allClipsFilled || isProcessing}
-                        className="px-4 py-1.5 bg-white text-black rounded-full text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-200 transition-colors flex items-center gap-2"
-                    >
-                        {isProcessing ? (
-                            <>
-                                <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
-                                <span>Creating...</span>
-                            </>
-                        ) : (
-                            <>
-                                <FiCheck className="w-4 h-4" />
-                                <span>Create</span>
-                            </>
-                        )}
-                    </button>
+                    <div className="flex items-center gap-2">
+                        {/* Finish Button - Returns to CreatePage */}
+                        <button
+                            onClick={() => {
+                                if (!allClipsFilled) return;
+                                
+                                // Collect all media items from all clips in order
+                                const allMediaItems = template.clips
+                                    .map(clip => {
+                                        const media = userMedia.get(clip.id);
+                                        if (!media) return null;
+                                        return {
+                                            url: media.url,
+                                            type: media.mediaType,
+                                            duration: clip.duration
+                                        };
+                                    })
+                                    .filter((item): item is { url: string; type: 'image' | 'video'; duration: number } => item !== null);
+
+                                // Combine stickers from all clips
+                                const allStickers: StickerOverlay[] = [];
+                                template.clips.forEach(clip => {
+                                    const clipStickers = stickers.get(clip.id) || [];
+                                    allStickers.push(...clipStickers);
+                                });
+
+                                // Navigate back to create page with template data
+                                navigate('/create', {
+                                    state: {
+                                        templateMediaItems: allMediaItems,
+                                        templateStickers: allStickers.length > 0 ? allStickers : undefined,
+                                        templateId: template.id,
+                                        templateText: text,
+                                        templateLocation: locationLabel
+                                    }
+                                });
+                            }}
+                            disabled={!allClipsFilled}
+                            className="px-4 py-1.5 bg-brand-500 text-white rounded-full text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-brand-600 transition-colors flex items-center gap-2"
+                            title="Finish and return to create post"
+                        >
+                            <FiCheck className="w-4 h-4" />
+                            <span>Finish</span>
+                        </button>
+                        
+                        {/* Create Button - Directly creates post */}
+                        <button
+                            onClick={handleCreateVideo}
+                            disabled={!allClipsFilled || isProcessing}
+                            className="px-4 py-1.5 bg-white text-black rounded-full text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-200 transition-colors flex items-center gap-2"
+                        >
+                            {isProcessing ? (
+                                <>
+                                    <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                                    <span>Creating...</span>
+                                </>
+                            ) : (
+                                <span>Post Now</span>
+                            )}
+                        </button>
+                    </div>
                 </div>
             </div>
 

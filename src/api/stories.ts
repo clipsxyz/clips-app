@@ -1,4 +1,4 @@
-import type { Story, StoryGroup } from '../types';
+import type { Story, StoryGroup, StickerOverlay } from '../types';
 
 // Mock stories data
 let stories: Story[] = [
@@ -248,14 +248,17 @@ export async function fetchStoryGroupByHandle(userHandle: string): Promise<Story
 export async function createStory(
     userId: string,
     userHandle: string,
-    mediaUrl: string,
-    mediaType: 'image' | 'video',
+    mediaUrl?: string, // Optional for text-only stories
+    mediaType?: 'image' | 'video', // Optional for text-only stories
     text?: string,
     location?: string,
     textColor?: string,
     textSize?: 'small' | 'medium' | 'large',
     sharedFromPost?: string,
-    sharedFromUser?: string
+    sharedFromUser?: string,
+    textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string }, // Text style for text-only stories
+    stickers?: StickerOverlay[], // Stickers/GIFs for stories
+    taggedUsers?: string[] // Tagged users
 ): Promise<Story> {
     await delay();
 
@@ -266,11 +269,14 @@ export async function createStory(
         id: `story-${Date.now()}`,
         userId,
         userHandle,
-        mediaUrl,
-        mediaType,
+        mediaUrl: mediaUrl || undefined,
+        mediaType: mediaType || undefined,
         text,
         textColor,
         textSize,
+        textStyle: textStyle || undefined,
+        stickers: stickers || undefined,
+        taggedUsers: taggedUsers || undefined,
         createdAt: now,
         expiresAt,
         location,

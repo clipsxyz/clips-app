@@ -22,11 +22,17 @@ class Story extends Model
         'expires_at',
         'shared_from_post_id',
         'shared_from_user_handle',
+        'text_style', // JSON: { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
+        'stickers', // JSON array of StickerOverlay objects
+        'tagged_users', // JSON array of user handles
     ];
 
     protected $casts = [
         'views_count' => 'integer',
         'expires_at' => 'datetime',
+        'text_style' => 'array', // { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
+        'stickers' => 'array', // Array of StickerOverlay objects
+        'tagged_users' => 'array', // Array of user handles
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];

@@ -8,6 +8,7 @@ use App\Models\StoryReaction;
 use App\Models\StoryReply;
 use App\Models\StoryView;
 use App\Models\User;
+use App\Models\Post;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -115,17 +116,29 @@ class StoryController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'media_url' => 'required|url|max:500',
-            'media_type' => 'required|in:image,video',
+            'media_url' => 'nullable|url|max:500', // Made nullable for text-only stories
+            'media_type' => 'nullable|in:image,video', // Made nullable for text-only stories
             'text' => 'nullable|string|max:200',
             'text_color' => 'nullable|string|max:50',
             'text_size' => 'nullable|in:small,medium,large',
             'location' => 'nullable|string|max:200',
             'shared_from_post_id' => 'nullable|uuid|exists:posts,id',
+            'textStyle' => 'nullable|array',
+            'textStyle.color' => 'nullable|string|max:50',
+            'textStyle.size' => 'nullable|in:small,medium,large',
+            'textStyle.background' => 'nullable|string|max:200',
+            'stickers' => 'nullable|array',
+            'taggedUsers' => 'nullable|array',
+            'taggedUsers.*' => 'required|string|exists:users,handle',
         ]);
 
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        // Validate that either media or text/stickers are provided
+        if (!$request->media_url && !$request->text && (!$request->stickers || count($request->stickers) === 0)) {
+            return response()->json(['error' => 'Story must have media, text, or stickers'], 400);
         }
 
         $user = Auth::user();
@@ -142,8 +155,11 @@ class StoryController extends Controller
                 'location' => $request->location,
                 'shared_from_post_id' => $request->shared_from_post_id,
                 'shared_from_user_handle' => $request->shared_from_post_id 
-                    ? Story::find($request->shared_from_post_id)?->user_handle 
+                    ? Post::find($request->shared_from_post_id)?->user_handle 
                     : null,
+                'text_style' => $request->textStyle,
+                'stickers' => $request->stickers,
+                'tagged_users' => $request->taggedUsers,
                 'expires_at' => now()->addHours(24), // 24 hours from now
             ]);
 

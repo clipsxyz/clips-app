@@ -22,6 +22,7 @@ import CollectionFeedPage from '../pages/CollectionFeedPage';
 import TemplatesPage from '../pages/TemplatesPage';
 import TemplateEditorPage from '../pages/TemplateEditorPage';
 import VideoEditorPage from '../pages/VideoEditorPage';
+import TextOnlyPostPage from '../pages/TextOnlyPostPage';
 
 
 export default function Root() {
@@ -38,6 +39,7 @@ export default function Root() {
                                 <Route path="create" element={<CreatePage />} />
                                 <Route path="create/instant" element={<InstantCreatePage />} />
                                 <Route path="create/filters" element={<InstantFiltersPage />} />
+                                <Route path="create/text-only" element={<TextOnlyPostPage />} />
                                 <Route path="templates" element={<TemplatesPage />} />
                                 <Route path="template-editor" element={<TemplateEditorPage />} />
                                 <Route path="video-editor" element={<VideoEditorPage />} />
