@@ -306,18 +306,25 @@ export async function getFollowedUsers(userId: string): Promise<string[]> {
 // compute view for a user
 export function decorateForUser(userId: string, p: Post): Post {
   const s = getState(userId);
-  return {
+  const decorated = {
     ...p,
     userLiked: !!s.likes[p.id],
     isBookmarked: !!s.bookmarks[p.id],
     isFollowing: !!s.follows[p.userHandle],
     userReclipped: !!s.reclips[p.id],
     // Explicitly preserve taggedUsers, textStyle, stickers, etc.
-    taggedUsers: p.taggedUsers,
+    taggedUsers: p.taggedUsers || undefined, // Preserve taggedUsers even if empty array
     textStyle: p.textStyle,
     stickers: p.stickers,
-    mediaItems: p.mediaItems
+    mediaItems: p.mediaItems,
+    templateId: p.templateId // Also preserve templateId
   };
+  if (p.taggedUsers && p.taggedUsers.length > 0) {
+    console.log('decorateForUser - preserving taggedUsers:', p.taggedUsers, 'for post:', p.id.substring(0, 30), 'templateId:', p.templateId);
+  } else if (p.templateId && !p.taggedUsers) {
+    console.log('decorateForUser - template post but NO taggedUsers:', { postId: p.id.substring(0, 30), templateId: p.templateId, originalTaggedUsers: p.taggedUsers });
+  }
+  return decorated;
 }
 
 export async function fetchPostsPage(tab: string, cursor: number | null, limit = 5, userId = 'me', userLocal = '', userRegional = '', userNational = ''): Promise<Page> {
@@ -441,7 +448,36 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
     })));
 
     const start = cursor ?? 0;
-    const slice = sorted.slice(start, start + limit).map(p => decorateForUser(userId, p));
+    const slice = sorted.slice(start, start + limit).map(p => {
+      // Debug: Log ALL properties of post before decoration, especially for template posts
+      if (p.templateId) {
+        console.log('fetchPostsPage - template post BEFORE decorateForUser:', {
+          postId: p.id.substring(0, 30),
+          templateId: p.templateId,
+          taggedUsers: p.taggedUsers,
+          hasTaggedUsers: !!p.taggedUsers,
+          taggedUsersType: typeof p.taggedUsers,
+          taggedUsersIsArray: Array.isArray(p.taggedUsers),
+          taggedUsersLength: p.taggedUsers?.length,
+          allPostKeys: Object.keys(p)
+        });
+      }
+      const decorated = decorateForUser(userId, p);
+      // Debug: Log taggedUsers after decoration
+      if (decorated.taggedUsers && decorated.taggedUsers.length > 0) {
+        console.log('fetchPostsPage - post has taggedUsers AFTER decorateForUser:', { postId: decorated.id.substring(0, 30), taggedUsers: decorated.taggedUsers, templateId: decorated.templateId });
+      } else if (p.templateId && !decorated.taggedUsers) {
+        console.warn('fetchPostsPage - taggedUsers LOST during decoration:', {
+          postId: p.id.substring(0, 30),
+          templateId: p.templateId,
+          originalTaggedUsers: p.taggedUsers,
+          decoratedTaggedUsers: decorated.taggedUsers,
+          originalHasTaggedUsers: !!p.taggedUsers,
+          decoratedHasTaggedUsers: !!decorated.taggedUsers
+        });
+      }
+      return decorated;
+    });
     const next = start + slice.length < sorted.length ? start + slice.length : null;
 
     console.log('Returning page with:', { itemsCount: slice.length, nextCursor: next });
@@ -742,9 +778,16 @@ export async function createPost(
   mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>, // Multiple media items for carousel
   bannerText?: string, // News ticker banner text
   textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string }, // Text style for text-only posts
-  taggedUsers?: string[] // Array of user handles tagged in the post
+  taggedUsers?: string[], // Array of user handles tagged in the post
+  videoCaptionsEnabled?: boolean, // Whether video captions are enabled
+  videoCaptionText?: string, // Caption text to display on video
+  subtitlesEnabled?: boolean, // Whether video subtitles are enabled
+  subtitleText?: string // Subtitle text to display on video
 ): Promise<Post> {
   await delay(500);
+
+  // Debug: Log taggedUsers parameter
+  console.log('createPost function - received taggedUsers parameter:', taggedUsers, 'type:', typeof taggedUsers, 'isArray:', Array.isArray(taggedUsers), 'length:', taggedUsers?.length);
 
   console.log('Creating post with:', {
     userId,
@@ -801,6 +844,10 @@ export async function createPost(
     bannerText: bannerText || undefined, // Store news ticker banner text
     textStyle: textStyle || undefined, // Store text style for text-only posts
     taggedUsers: taggedUsers || undefined, // Store tagged users
+    videoCaptionsEnabled: videoCaptionsEnabled || undefined, // Store video captions enabled state
+    videoCaptionText: videoCaptionText || undefined, // Store video caption text
+    subtitlesEnabled: subtitlesEnabled || undefined, // Store video subtitles enabled state
+    subtitleText: subtitleText || undefined, // Store video subtitle text
     ...locationData
   };
 
@@ -809,6 +856,13 @@ export async function createPost(
 
   console.log('Post created and added to posts array. Total posts:', posts.length);
   console.log('New post:', newPost);
+  console.log('New post taggedUsers:', newPost.taggedUsers);
+  console.log('New post templateId:', newPost.templateId);
+
+  // Verify the post in the array has taggedUsers
+  const postInArray = posts[0];
+  console.log('Post in array [0] taggedUsers:', postInArray?.taggedUsers);
+  console.log('Post in array [0] templateId:', postInArray?.templateId);
 
   return decorateForUser(userId, newPost);
 }

@@ -82,7 +82,7 @@ export default function CreateModal({ isOpen, onClose, onNavigate }: CreateModal
 
                     {/* Create Post Option */}
                     <button
-                        onClick={() => handleNavigate('/create')}
+                        onClick={() => handleNavigate('/templates')}
                         className="w-full flex items-center gap-4 p-4 rounded-xl bg-gray-50 dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                     >
                         <div className="w-14 h-14 rounded-full bg-gray-200 dark:bg-gray-800 flex items-center justify-center">

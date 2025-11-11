@@ -33,7 +33,7 @@ export type Post = {
   tags: string[];
   mediaUrl?: string; // Optional for text-only posts (deprecated, use mediaItems for carousel)
   mediaType?: 'image' | 'video'; // New field to distinguish media types (deprecated, use mediaItems for carousel)
-  mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>; // Multiple media items for carousel/templates
+  mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number; effects?: Array<{ type: string; intensity?: number; duration?: number; startTime?: number; [key: string]: any }> }>; // Multiple media items for carousel with effects/templates
   text?: string; // Text content of the post (maps to text_content in DB)
   text_content?: string; // Backend field
   imageText?: string; // Text overlay on images
@@ -80,6 +80,12 @@ export type Post = {
   };
   // Tagged users
   taggedUsers?: string[]; // Array of user handles tagged in the post
+  // Video captions
+  videoCaptionsEnabled?: boolean; // Whether video captions are enabled
+  videoCaptionText?: string; // Caption text to display on video
+  // Video subtitles
+  subtitlesEnabled?: boolean; // Whether video subtitles are enabled
+  subtitleText?: string; // Subtitle text to display on video
 };
 
 export type Comment = {
@@ -219,6 +225,13 @@ export type TemplateClip = {
   placeholderUrl?: string; // Placeholder video/image URL
   mediaType: 'image' | 'video';
   transition?: 'cut' | 'fade' | 'slide' | 'zoom';
+  effects?: Array<{
+    type: string;
+    intensity?: number;
+    duration?: number;
+    startTime?: number;
+    [key: string]: any;
+  }>;
 };
 
 export type VideoTemplate = {

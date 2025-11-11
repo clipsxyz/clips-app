@@ -9,6 +9,9 @@ class Comment extends Model
 {
     use HasFactory;
 
+    protected $keyType = 'string';
+    public $incrementing = false;
+
     protected $fillable = [
         'post_id',
         'user_id',

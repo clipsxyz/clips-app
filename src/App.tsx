@@ -3,6 +3,7 @@ import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2 } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
+import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from './constants';
 import TopBar from './components/TopBar';
 import CommentsModal from './components/CommentsModal';
 import ShareModal from './components/ShareModal';
@@ -25,6 +26,8 @@ import SavePostModal from './components/SavePostModal';
 import { getCollectionsForPost } from './api/collections';
 import type { Post, Ad, StickerOverlay } from './types';
 import StickerOverlayComponent from './components/StickerOverlay';
+import EffectWrapper from './components/EffectWrapper';
+import type { EffectConfig } from './utils/effects';
 
 type Tab = 'Finglas' | 'Dublin' | 'Ireland' | 'Following';
 
@@ -75,7 +78,7 @@ export default function App() {
       <main id="main" className="mx-auto max-w-md min-h-screen pb-[calc(64px+theme(spacing.safe))] md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800 md:bg-white md:dark:bg-gray-950">
         <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />
         <Outlet context={{ activeTab, setActiveTab, customLocation, setCustomLocation }} />
-        {loc.pathname !== '/discover' && loc.pathname !== '/create/filters' && loc.pathname !== '/create/instant' && loc.pathname !== '/payment' && loc.pathname !== '/clip' && loc.pathname !== '/create' && (
+        {loc.pathname !== '/discover' && loc.pathname !== '/create/filters' && loc.pathname !== '/create/instant' && loc.pathname !== '/payment' && loc.pathname !== '/clip' && loc.pathname !== '/create' && loc.pathname !== '/template-editor' && (
           <BottomNav onCreateClick={() => setShowCreateModal(true)} />
         )}
       </main>
@@ -692,7 +695,7 @@ function CaptionText({ caption }: { caption: string }) {
   );
 }
 
-function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onCarouselIndexChange }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onCarouselIndexChange?: (index: number) => void }) {
+function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onCarouselIndexChange, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId, videoCaptionsEnabled, videoCaptionText, subtitlesEnabled, subtitleText }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number; effects?: Array<any> }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onCarouselIndexChange?: (index: number) => void; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string }) {
   const [burst, setBurst] = React.useState(false);
   const [isPlaying, setIsPlaying] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -700,12 +703,22 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   const [showControls, setShowControls] = React.useState(false);
   const [isMuted, setIsMuted] = React.useState(true);
   const [progress, setProgress] = React.useState(0); // 0..1 for video progress
+  const [aspectRatio, setAspectRatio] = React.useState<number | null>(null); // width/height ratio
+  const [tapPosition, setTapPosition] = React.useState<{ x: number; y: number } | null>(null);
   const lastTap = React.useRef<number>(0);
   const touchHandled = React.useRef<boolean>(false);
+  const singleTapTimer = React.useRef<NodeJS.Timeout | null>(null);
+  const isProcessingDoubleTap = React.useRef<boolean>(false);
   const videoRef = React.useRef<HTMLVideoElement>(null);
+  const imageRef = React.useRef<HTMLImageElement>(null);
   const observerRef = React.useRef<IntersectionObserver | null>(null);
   const mediaContainerRef = React.useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
+
+  // Debug: Log taggedUsers when Media component receives them
+  React.useEffect(() => {
+    console.log('Media component - taggedUsers:', taggedUsers, 'onShowTaggedUsers:', !!onShowTaggedUsers, 'should show icon:', !!(taggedUsers && Array.isArray(taggedUsers) && taggedUsers.length > 0 && onShowTaggedUsers));
+  }, [taggedUsers, onShowTaggedUsers]);
 
   // Determine if we have multiple media items (carousel)
   const items = mediaItems && mediaItems.length > 0 ? mediaItems : (url ? [{ url, type: mediaType || 'image' }] : []);
@@ -759,41 +772,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     }
   };
 
-  const handleVideoClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const now = Date.now();
-    const timeSinceLastTap = now - lastTap.current;
-
-    if (timeSinceLastTap < 300) {
-      // Double tap detected - call onDoubleLike
-      setBurst(true);
-      onDoubleLike().finally(() => {
-        setTimeout(() => setBurst(false), 600);
-      });
-    } else {
-      // Single tap - toggle play/pause
-      togglePlayPause();
-    }
-    lastTap.current = now;
-  };
-
-  const handleVideoTouch = (e: React.TouchEvent) => {
-    e.stopPropagation();
-    const now = Date.now();
-    const timeSinceLastTap = now - lastTap.current;
-
-    if (timeSinceLastTap < 300) {
-      // Double tap detected - call onDoubleLike
-      setBurst(true);
-      onDoubleLike().finally(() => {
-        setTimeout(() => setBurst(false), 600);
-      });
-    } else {
-      // Single tap - toggle play/pause
-      togglePlayPause();
-    }
-    lastTap.current = now;
-  };
+  // Removed duplicate handleVideoClick and handleVideoTouch - using unified handleTap instead
 
   const toggleMute = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -805,7 +784,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
 
   // Intersection Observer for auto-play
   React.useEffect(() => {
-    if (mediaType === 'video' && videoRef.current) {
+    if (currentItem?.type === 'video' && videoRef.current) {
       observerRef.current = new IntersectionObserver(
         (entries) => {
           entries.forEach((entry) => {
@@ -839,15 +818,38 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
         observerRef.current.disconnect();
       }
     };
-  }, [mediaType]);
+  }, [currentItem?.type]);
 
   // Video event handlers
   const handleVideoLoad = () => {
     setIsLoading(false);
     setHasError(false);
+    // Get video dimensions to calculate aspect ratio
+    if (videoRef.current) {
+      const video = videoRef.current;
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        setAspectRatio(video.videoWidth / video.videoHeight);
+      }
+    }
   };
 
-  const handleVideoError = () => {
+  const handleVideoError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+    console.error('Media: Video load error', e);
+    setIsLoading(false);
+    setHasError(true);
+  };
+
+  // Image load handler to detect aspect ratio
+  const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    setIsLoading(false);
+    setHasError(false);
+    const img = e.currentTarget;
+    if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+      setAspectRatio(img.naturalWidth / img.naturalHeight);
+    }
+  };
+
+  const handleImageError = () => {
     setIsLoading(false);
     setHasError(true);
   };
@@ -862,43 +864,146 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     setShowControls(true);
   };
 
-  async function handleTap() {
+  async function handleTap(e?: React.MouseEvent | React.TouchEvent) {
+    // Prevent processing if already handling a double tap
+    if (isProcessingDoubleTap.current) {
+      return;
+    }
+
     const now = Date.now();
     const timeSinceLastTap = now - lastTap.current;
 
-    if (timeSinceLastTap < 300) {
-      // Double tap detected - only call onDoubleLike here
-      setBurst(true);
-      try {
-        await onDoubleLike();
-      } finally {
-        setTimeout(() => setBurst(false), 600);
-      }
+    // Clear any pending single tap action
+    if (singleTapTimer.current) {
+      clearTimeout(singleTapTimer.current);
+      singleTapTimer.current = null;
     }
+
+    if (timeSinceLastTap < DOUBLE_TAP_THRESHOLD) {
+      // Double tap detected
+      isProcessingDoubleTap.current = true;
+      
+      // Get tap position relative to media container
+      let tapX = 0;
+      let tapY = 0;
+      let clientX = 0;
+      let clientY = 0;
+
+      if (mediaContainerRef.current && e) {
+        const rect = mediaContainerRef.current.getBoundingClientRect();
+        
+        if ('touches' in e && e.touches.length > 0) {
+          // Touch event - use touch position
+          clientX = e.touches[0].clientX;
+          clientY = e.touches[0].clientY;
+        } else if ('changedTouches' in e && e.changedTouches.length > 0) {
+          // Touch end event - use changedTouches
+          clientX = e.changedTouches[0].clientX;
+          clientY = e.changedTouches[0].clientY;
+        } else if ('clientX' in e) {
+          // Mouse event
+          clientX = e.clientX;
+          clientY = e.clientY;
+        } else {
+          // Fallback to center
+          clientX = rect.left + rect.width / 2;
+          clientY = rect.top + rect.height / 2;
+        }
+        
+        tapX = clientX - rect.left;
+        tapY = clientY - rect.top;
+      } else {
+        // Fallback to center if no event or container
+        if (mediaContainerRef.current) {
+          const rect = mediaContainerRef.current.getBoundingClientRect();
+          tapX = rect.width / 2;
+          tapY = rect.height / 2;
+          clientX = rect.left + tapX;
+          clientY = rect.top + tapY;
+        }
+      }
+      
+      // Set tap position for heart animation
+      setTapPosition({ x: tapX, y: tapY });
+      
+      // Trigger heart animation callback
+      if (onHeartAnimation) {
+        onHeartAnimation(clientX, clientY);
+      }
+      
+      // Show burst animation
+      setBurst(true);
+      
+      try {
+        // Call the like handler
+        await onDoubleLike();
+      } catch (error) {
+        console.error('Error in double tap like:', error);
+      } finally {
+        // Smoothly fade out animations
+        setTimeout(() => {
+          setBurst(false);
+        }, ANIMATION_DURATIONS.HEART_BURST);
+        
+        setTimeout(() => {
+          setTapPosition(null);
+          isProcessingDoubleTap.current = false;
+        }, ANIMATION_DURATIONS.HEART_POPUP);
+      }
+    } else {
+      // Single tap - wait to see if it's actually a double tap
+      singleTapTimer.current = setTimeout(() => {
+        // Only open scenes if no second tap came within threshold
+        if (!isProcessingDoubleTap.current && onOpenScenes) {
+          onOpenScenes();
+        }
+        singleTapTimer.current = null;
+      }, DOUBLE_TAP_THRESHOLD);
+    }
+    
     // Always update lastTap for next potential double-tap
     lastTap.current = now;
   }
 
-  function handleTouchEnd(_e: React.TouchEvent) {
+  function handleTouchEnd(e: React.TouchEvent) {
+    e.preventDefault(); // Prevent default touch behavior
     touchHandled.current = true;
-    handleTap();
+    handleTap(e);
     // Prevent click event from firing after touch
     setTimeout(() => {
       touchHandled.current = false;
-    }, 300);
+    }, 400);
   }
 
   function handleClick(e: React.MouseEvent) {
     // Prevent click if touch was already handled
     if (touchHandled.current) {
       e.preventDefault();
+      e.stopPropagation();
       return;
     }
-    handleTap();
+    handleTap(e);
   }
+
+  // Cleanup timers and reset state on unmount or media change
+  React.useEffect(() => {
+    return () => {
+      if (singleTapTimer.current) {
+        clearTimeout(singleTapTimer.current);
+        singleTapTimer.current = null;
+      }
+      // Reset double tap processing state
+      isProcessingDoubleTap.current = false;
+      // Clear tap position
+      setTapPosition(null);
+      setBurst(false);
+    };
+  }, [currentIndex]); // Reset when switching media items
 
   // Reset video state when switching items
   React.useEffect(() => {
+    // Reset aspect ratio when switching items
+    setAspectRatio(null);
     if (currentItem?.type === 'video' && videoRef.current) {
       setIsLoading(true);
       setIsPlaying(false);
@@ -906,7 +1011,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       setProgress(0);
       videoRef.current.load();
     } else if (currentItem?.type === 'image') {
-      setIsLoading(false);
+      setIsLoading(true);
       setIsPlaying(false);
       setShowControls(false);
       setProgress(0);
@@ -940,6 +1045,25 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     setCurrentIndex(index);
   }
 
+  // Calculate container style based on aspect ratio (Instagram-style approach)
+  // Instagram uses: Square (1:1), Portrait (4:5), Landscape (1.91:1)
+  // We'll adapt to the media's aspect ratio but with reasonable limits
+  const getAspectRatio = (): string => {
+    if (!aspectRatio) return '1/1'; // Default to square
+    
+    // Clamp aspect ratio to reasonable Instagram-like ranges
+    // Portrait: max 4:5 (0.8), Landscape: max 1.91:1 (1.91)
+    const clampedRatio = Math.max(0.8, Math.min(1.91, aspectRatio));
+    return `${clampedRatio}`;
+  };
+
+  const containerStyle: React.CSSProperties = {
+    aspectRatio: getAspectRatio(),
+    maxWidth: '100%',
+    width: '100%',
+    boxSizing: 'border-box'
+  };
+
   return (
     <div className="mx-4 my-4 select-none">
       <div
@@ -959,22 +1083,26 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
         }}
         onClick={handleClick}
         onTouchEnd={handleTouchEnd}
-        className="relative w-full aspect-video rounded-xl overflow-hidden bg-gray-50 dark:bg-gray-900 shadow-inner"
+        className="relative w-full rounded-xl overflow-hidden bg-gray-50 dark:bg-gray-900 shadow-inner"
+        style={containerStyle}
       >
-        {currentItem.type === 'video' ? (
-          <>
+        {(() => {
+          // Get effects for current media item
+          const itemEffects = currentItem.effects || [];
+          
+          // Create media element
+          let mediaElement = currentItem.type === 'video' ? (
             <video
               ref={videoRef}
               src={currentItem.url}
-              className="absolute inset-0 w-full h-full object-cover"
+              className="absolute inset-0 w-full h-full object-cover pointer-events-none"
               preload="metadata"
               playsInline
               muted={isMuted}
               loop
-              onClick={handleVideoClick}
-              onTouchEnd={handleVideoTouch}
               onLoadedData={handleVideoLoad}
               onError={handleVideoError}
+              onLoadStart={() => console.log('Media: Video load started')}
               onPlay={handleVideoPlay}
               onPause={handleVideoPause}
               onTimeUpdate={() => {
@@ -983,104 +1111,115 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                   setProgress(v.currentTime / v.duration);
                 }
               }}
-            />
-
-            {/* Loading Spinner */}
-            {isLoading && (
-              <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-50">
-                <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              </div>
-            )}
-
-            {/* Error State */}
-            {hasError && (
-              <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-75">
-                <div className="text-center text-white">
-                  <div className="text-2xl mb-2">⚠️</div>
-                  <div className="text-sm">Failed to load video</div>
-                </div>
-              </div>
-            )}
-
-            {/* Play/Pause Overlay */}
-            {!isLoading && !hasError && (
-              <div
-                className={`absolute inset-0 flex items-center justify-center transition-opacity duration-300 ${showControls || !isPlaying ? 'opacity-100' : 'opacity-0'
-                  }`}
-                onClick={handleVideoClick}
-                onTouchEnd={handleVideoTouch}
-              >
-                <div className={`w-16 h-16 bg-black bg-opacity-60 rounded-full flex items-center justify-center transition-all duration-300 hover:bg-opacity-80 hover:scale-110 active:scale-95 ${!isPlaying ? 'animate-[playButtonPulse_2s_ease-in-out_infinite] hover:animate-none' : 'hover:animate-[pauseButtonGlow_1.5s_ease-out_infinite]'
-                  }`}>
-                  {isPlaying ? (
-                    <div className="relative">
-                      <svg className="w-8 h-8 text-white transition-all duration-200 hover:scale-110 hover:animate-[iconBounce_0.6s_ease-in-out]" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-                      </svg>
-                      {/* Subtle glow effect */}
-                      <div className="absolute inset-0 w-8 h-8 bg-white opacity-20 rounded-full blur-sm scale-150 animate-ping"></div>
-                    </div>
-                  ) : (
-                    <div className="relative">
-                      <svg className="w-8 h-8 text-white ml-1 transition-all duration-200 hover:scale-110 hover:animate-[iconBounce_0.6s_ease-in-out]" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M8 5v14l11-7z" />
-                      </svg>
-                      {/* Subtle glow effect */}
-                      <div className="absolute inset-0 w-8 h-8 bg-white opacity-20 rounded-full blur-sm scale-150 animate-ping"></div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Mute/Unmute Button */}
-            {!isLoading && !hasError && (
-              <div className="absolute top-4 right-4">
-                <button
-                  onClick={toggleMute}
-                  className="w-10 h-10 bg-black bg-opacity-50 rounded-full flex items-center justify-center hover:bg-opacity-70 transition-all duration-200"
-                  aria-label={isMuted ? 'Unmute video' : 'Mute video'}
-                >
-                  {isMuted ? (
-                    <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
-                    </svg>
-                  ) : (
-                    <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
-                    </svg>
-                  )}
-                </button>
-              </div>
-            )}
-
-
-            {/* Gradient progress bar */}
-            {!isLoading && !hasError && (
-              <div className="absolute left-0 right-0 bottom-0 h-1.5 bg-black/30">
-                <div
-                  className="h-full"
-                  style={{
-                    width: `${Math.max(0, Math.min(100, progress * 100))}%`,
-                    background: 'linear-gradient(90deg, #10b981, #3b82f6, #8b5cf6, #ec4899, #f59e0b)',
-                    boxShadow: '0 0 12px rgba(139,92,246,0.45)'
-                  }}
-                />
-              </div>
-            )}
-          </>
-        ) : (
-          <>
+            >
+              {/* Enable built-in captions if subtitles are enabled */}
+              {subtitlesEnabled && (
+                <track kind="captions" srcLang="en" label="English" default />
+              )}
+            </video>
+          ) : (
             <img
+              ref={imageRef}
               src={currentItem.url}
               alt=""
               loading="lazy"
               decoding="async"
               className="absolute inset-0 w-full h-full object-cover"
               draggable={false}
+              onLoad={handleImageLoad}
+              onError={handleImageError}
             />
-          </>
-        )}
+          );
+          
+          // Apply effects in reverse order (last effect wraps everything)
+          itemEffects.forEach((effect: EffectConfig) => {
+            mediaElement = (
+              <EffectWrapper key={effect.type} effect={effect} isActive={true}>
+                {mediaElement}
+              </EffectWrapper>
+            );
+          });
+          
+          return (
+            <div className="relative w-full h-full">
+              {mediaElement}
+              
+              {/* Loading Spinner */}
+              {isLoading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-50 z-50">
+                  <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                </div>
+              )}
+
+              {/* Error State */}
+              {hasError && (
+                <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-75 z-50">
+                  <div className="text-center text-white">
+                    <div className="text-2xl mb-2">⚠️</div>
+                    <div className="text-sm">Failed to load {currentItem.type}</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Mute/Unmute Button - Bottom of video */}
+              {!isLoading && !hasError && currentItem.type === 'video' && (
+                <div className="absolute bottom-4 right-4 z-40">
+                  <button
+                    onClick={toggleMute}
+                    className="w-10 h-10 bg-black bg-opacity-70 rounded-full flex items-center justify-center hover:bg-opacity-90 transition-all duration-200 shadow-lg"
+                    aria-label={isMuted ? 'Unmute video' : 'Mute video'}
+                  >
+                    {isMuted ? (
+                      <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
+                      </svg>
+                    ) : (
+                      <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              )}
+
+              {/* Gradient progress bar */}
+              {!isLoading && !hasError && currentItem.type === 'video' && (
+                <div className="absolute left-0 right-0 bottom-0 h-1.5 bg-black/30">
+                  <div
+                    className="h-full"
+                    style={{
+                      width: `${Math.max(0, Math.min(100, progress * 100))}%`,
+                      background: 'linear-gradient(90deg, #10b981, #3b82f6, #8b5cf6, #ec4899, #f59e0b)',
+                      boxShadow: '0 0 12px rgba(139,92,246,0.45)'
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* Video Captions - Display when enabled */}
+              {!isLoading && !hasError && currentItem.type === 'video' && videoCaptionsEnabled && videoCaptionText && (
+                <div className="absolute bottom-16 left-0 right-0 px-4 z-30 pointer-events-none">
+                  <div className="bg-black/80 backdrop-blur-sm rounded-lg px-4 py-3 max-w-[90%] mx-auto">
+                    <p className="text-white text-base font-medium text-center break-words leading-relaxed">
+                      {videoCaptionText}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Video Subtitles - Display when enabled */}
+              {!isLoading && !hasError && currentItem.type === 'video' && subtitlesEnabled && subtitleText && (
+                <div className="absolute bottom-24 left-0 right-0 px-4 z-30 pointer-events-none">
+                  <div className="bg-black/80 backdrop-blur-sm rounded-lg px-4 py-3 max-w-[90%] mx-auto">
+                    <p className="text-white text-base font-medium text-center break-words leading-relaxed">
+                      {subtitleText}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Carousel Navigation - Only show if multiple items */}
         {hasMultipleItems && (
@@ -1140,8 +1279,50 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
           </>
         )}
 
+        {/* Tagged Users Icon - Bottom of image/video */}
+        {(() => {
+          const hasTaggedUsers = taggedUsers && Array.isArray(taggedUsers) && taggedUsers.length > 0;
+          const hasHandler = !!onShowTaggedUsers;
+          const shouldShow = hasTaggedUsers && hasHandler;
+          
+          if (hasTaggedUsers && !hasHandler) {
+            console.warn('Media: taggedUsers exists but onShowTaggedUsers is missing', { taggedUsers, onShowTaggedUsers });
+          }
+          if (shouldShow) {
+            console.log('Media: Showing tag icon', { taggedUsers, count: taggedUsers.length });
+          }
+          
+          return shouldShow;
+        })() ? (
+          <div className="absolute bottom-4 left-4 z-40">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onShowTaggedUsers();
+              }}
+              className="w-10 h-10 rounded-full bg-black bg-opacity-70 flex items-center justify-center hover:bg-opacity-90 transition-all shadow-lg"
+              aria-label="View tagged users"
+              title={`View ${taggedUsers.length} tagged ${taggedUsers.length === 1 ? 'person' : 'people'}`}
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                className="text-white"
+                fill="currentColor"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                {/* Person silhouette - head and shoulders */}
+                <path
+                  d="M12 12C14.21 12 16 10.21 16 8C16 5.79 14.21 4 12 4C9.79 4 8 5.79 8 8C8 10.21 9.79 12 12 12ZM12 14C9.33 14 4 15.34 4 18V20H20V18C20 15.34 14.67 14 12 14Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </button>
+          </div>
+        ) : null}
         {/* Image Text Overlay */}
-        {imageText && mediaType === 'image' && (
+        {imageText && currentItem?.type === 'image' && (
           <div className="absolute bottom-4 left-4 right-4 z-10">
             <div
               className="px-3 py-2 text-lg font-bold drop-shadow-lg"
@@ -1158,44 +1339,106 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
             </div>
           </div>
         )}
-        {/* Enhanced heart burst animation */}
-        <div className={`absolute inset-0 flex items-center justify-center pointer-events-none transition-all duration-300 ${burst ? 'opacity-100 scale-100' : 'opacity-0 scale-50'}`}>
-          <div className="relative">
-            {/* Main heart */}
-            <svg className="w-20 h-20 text-red-500 drop-shadow-lg animate-pulse" viewBox="0 0 24 24" fill="currentColor">
+        {/* Heart pop-up animation at tap position */}
+        {tapPosition && (
+          <div 
+            className="absolute pointer-events-none z-50 transition-opacity duration-300"
+            style={{
+              left: `${tapPosition.x}px`,
+              top: `${tapPosition.y}px`,
+              transform: 'translate(-50%, -50%)',
+              animation: 'heartPopUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards'
+            }}
+          >
+            <svg className="w-20 h-20 text-red-500 drop-shadow-2xl" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
             </svg>
-
-            {/* Floating hearts */}
-            <div className="absolute inset-0">
-              <div className={`absolute top-2 left-2 w-4 h-4 text-red-400 transition-all duration-500 ${burst ? 'opacity-100 translate-y-[-20px]' : 'opacity-0 translate-y-0'}`}>
-                <svg viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
-                </svg>
-              </div>
-              <div className={`absolute top-4 right-2 w-3 h-3 text-red-300 transition-all duration-700 delay-100 ${burst ? 'opacity-100 translate-y-[-25px] translate-x-[10px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
-                <svg viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
-                </svg>
-              </div>
-              <div className={`absolute bottom-2 left-4 w-2 h-2 text-red-200 transition-all duration-600 delay-200 ${burst ? 'opacity-100 translate-y-[-15px] translate-x-[-8px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
-                <svg viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
-                </svg>
-              </div>
-              <div className={`absolute bottom-4 right-4 w-3 h-3 text-red-400 transition-all duration-500 delay-150 ${burst ? 'opacity-100 translate-y-[-20px] translate-x-[5px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
-                <svg viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
-                </svg>
-              </div>
-            </div>
-
-            {/* Pulse rings */}
-            <div className={`absolute inset-0 border-2 border-red-400 rounded-full transition-all duration-1000 ${burst ? 'opacity-0 scale-150' : 'opacity-100 scale-100'}`}></div>
-            <div className={`absolute inset-0 border border-red-300 rounded-full transition-all duration-1200 delay-100 ${burst ? 'opacity-0 scale-200' : 'opacity-100 scale-100'}`}></div>
           </div>
-        </div>
+        )}
       </div>
+    </div>
+  );
+}
+
+// Heart drop animation component - animates from tap position to like button
+function HeartDropAnimation({ startX, startY, targetElement, onComplete }: { startX: number; startY: number; targetElement: HTMLElement; onComplete: () => void }) {
+  const [progress, setProgress] = React.useState(0);
+  const [endPosition, setEndPosition] = React.useState<{ x: number; y: number } | null>(null);
+  const heartRef = React.useRef<HTMLDivElement>(null);
+  const animationFrameRef = React.useRef<number | null>(null);
+  const startTimeRef = React.useRef<number | null>(null);
+
+  React.useEffect(() => {
+    if (!targetElement) return;
+    
+    // Get target position (like button center)
+    try {
+      const rect = targetElement.getBoundingClientRect();
+      const targetX = rect.left + rect.width / 2;
+      const targetY = rect.top + rect.height / 2;
+      setEndPosition({ x: targetX, y: targetY });
+      startTimeRef.current = Date.now();
+
+      // Animate using requestAnimationFrame
+      const animate = () => {
+        if (!startTimeRef.current) return;
+        
+        const elapsed = Date.now() - startTimeRef.current;
+        const duration = 800; // 800ms
+        const t = Math.min(elapsed / duration, 1);
+        
+        // Ease-in function
+        const eased = t * t;
+        setProgress(eased);
+
+        if (t < 1) {
+          animationFrameRef.current = requestAnimationFrame(animate);
+        } else {
+          onComplete();
+        }
+      };
+
+      animationFrameRef.current = requestAnimationFrame(animate);
+
+      return () => {
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+        }
+      };
+    } catch (error) {
+      console.error('Error calculating heart animation target:', error);
+      onComplete();
+    }
+  }, [targetElement, onComplete]);
+
+  if (!endPosition) return null;
+
+  const deltaX = endPosition.x - startX;
+  const deltaY = endPosition.y - startY;
+  const currentX = startX + deltaX * progress;
+  const currentY = startY + deltaY * progress;
+  const scale = 1 - (progress * 0.7); // Scale from 1 to 0.3
+  const opacity = 1 - progress;
+
+  return (
+    <div
+      ref={heartRef}
+      className="fixed pointer-events-none z-[9999]"
+      style={{
+        left: `${currentX}px`,
+        top: `${currentY}px`,
+        transform: `translate(-50%, -50%) scale(${scale})`,
+        opacity: opacity,
+        transition: 'none'
+      }}
+    >
+      <svg 
+        className="w-20 h-20 text-red-500 drop-shadow-lg" 
+        viewBox="0 0 24 24" 
+        fill="currentColor"
+      >
+        <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+      </svg>
     </div>
   );
 }
@@ -1211,7 +1454,8 @@ function EngagementBar({
   currentUserId,
   showMetricsIcon,
   onToggleMetrics,
-  isMetricsOpen
+  isMetricsOpen,
+  likeButtonRef
 }: {
   post: Post;
   onLike: () => Promise<void>;
@@ -1224,6 +1468,7 @@ function EngagementBar({
   showMetricsIcon?: boolean;
   onToggleMetrics?: () => void;
   isMetricsOpen?: boolean;
+  likeButtonRef?: React.RefObject<HTMLButtonElement>;
 }) {
   const [isSaved, setIsSaved] = React.useState(false);
 
@@ -1354,6 +1599,7 @@ function EngagementBar({
         <div className="flex items-center gap-6">
           {/* Like */}
           <button
+            ref={likeButtonRef}
             className="flex items-center gap-2 transition-opacity hover:opacity-70 active:opacity-50"
             onClick={likeClick}
             aria-pressed={liked}
@@ -1576,8 +1822,18 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   const [saveModalOpen, setSaveModalOpen] = React.useState(false);
   const [carouselIndex, setCarouselIndex] = React.useState(0);
   const [showTaggedUsersModal, setShowTaggedUsersModal] = React.useState(false);
+  const [heartAnimation, setHeartAnimation] = React.useState<{ startX: number; startY: number } | null>(null);
+  const likeButtonRef = React.useRef<HTMLButtonElement>(null);
   const articleRef = React.useRef<HTMLElement>(null);
 
+  // Debug: Log taggedUsers for template posts
+  React.useEffect(() => {
+    if (post.taggedUsers && post.taggedUsers.length > 0) {
+      console.log('FeedCard - post has taggedUsers:', post.taggedUsers, 'post.id:', post.id.substring(0, 30), 'templateId:', post.templateId);
+    } else if (post.templateId) {
+      console.log('FeedCard - template post but NO taggedUsers:', { postId: post.id.substring(0, 30), templateId: post.templateId, taggedUsers: post.taggedUsers });
+    }
+  }, [post.taggedUsers, post.id, post.templateId]);
 
   // Check if post is boosted to show metrics icon
   React.useEffect(() => {
@@ -1634,108 +1890,45 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             onDoubleLike={onLike} 
             onOpenScenes={onOpenScenes}
             onCarouselIndexChange={setCarouselIndex}
+            onHeartAnimation={(clientX, clientY) => {
+              // Small delay to ensure EngagementBar ref is set
+              setTimeout(() => {
+                setHeartAnimation({ startX: clientX, startY: clientY });
+              }, 50);
+            }}
+            taggedUsers={post.taggedUsers}
+            onShowTaggedUsers={() => setShowTaggedUsersModal(true)}
+            templateId={post.templateId}
+            videoCaptionsEnabled={post.videoCaptionsEnabled}
+            videoCaptionText={post.videoCaptionText}
+            subtitlesEnabled={post.subtitlesEnabled}
+            subtitleText={post.subtitleText}
           />
         )}
         {/* Carousel Indicator - Underneath the image/media */}
-        {/* Show row if: multiple media items, OR tagged users exist, OR onOpenScenes available */}
-        {(() => {
-          const hasTaggedUsers = post.taggedUsers && Array.isArray(post.taggedUsers) && post.taggedUsers.length > 0;
-          const hasMultipleItems = post.mediaItems && post.mediaItems.length > 1;
-          const hasMedia = post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0);
-          // Always show row if there are tagged users OR multiple items OR scenes available
-          return hasTaggedUsers || hasMultipleItems || (onOpenScenes && hasMedia);
-        })() ? (
+        {/* Show row if: multiple media items exist */}
+        {post.mediaItems && post.mediaItems.length > 1 ? (
           <div className="px-4 py-2 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
-            <div className="flex items-center justify-between">
-              {/* Left side - Tagged Users Icon */}
-              <div className="flex items-center">
-                {post.taggedUsers && Array.isArray(post.taggedUsers) && post.taggedUsers.length > 0 ? (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowTaggedUsersModal(true);
-                    }}
-                    className="w-8 h-8 rounded-full bg-gray-900 dark:bg-gray-800 flex items-center justify-center hover:bg-gray-800 dark:hover:bg-gray-700 transition-colors shadow-sm"
-                    aria-label="View tagged users"
-                    title={`View ${post.taggedUsers?.length || 0} tagged ${post.taggedUsers?.length === 1 ? 'person' : 'people'}`}
-                  >
-                    <svg
-                      width="20"
-                      height="20"
-                      viewBox="0 0 24 24"
-                      className="text-white"
-                      fill="currentColor"
-                      xmlns="http://www.w3.org/2000/svg"
-                    >
-                      {/* Person silhouette - head and shoulders */}
-                      <path
-                        d="M12 12C14.21 12 16 10.21 16 8C16 5.79 14.21 4 12 4C9.79 4 8 5.79 8 8C8 10.21 9.79 12 12 12ZM12 14C9.33 14 4 15.34 4 18V20H20V18C20 15.34 14.67 14 12 14Z"
-                        fill="currentColor"
-                      />
-                    </svg>
-                  </button>
-                ) : (
-                  <div className="w-8 h-8" /> // Spacer to balance layout
-                )}
-              </div>
-              
+            <div className="flex items-center justify-center">
               {/* Center - Carousel Display (Dots and Number) */}
-              <div className="flex items-center gap-3 flex-1 justify-center">
-                {/* White Dots - Only show if multiple items */}
-                {post.mediaItems && post.mediaItems.length > 1 && (
-                  <div className="flex gap-1.5">
-                    {post.mediaItems.map((_, index) => (
-                      <div
-                        key={index}
-                        className={`w-2 h-2 rounded-full transition-all ${
-                          index === carouselIndex
-                            ? 'bg-gray-900 dark:bg-gray-100 w-6'
-                            : 'bg-gray-300 dark:bg-gray-600'
-                        }`}
-                      />
-                    ))}
-                  </div>
-                )}
-                {/* Number Indicator - Only show if multiple items */}
-                {post.mediaItems && post.mediaItems.length > 1 && (
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    {carouselIndex + 1} / {post.mediaItems.length}
-                  </span>
-                )}
-              </div>
-              
-              {/* Right side - Scenes Logo */}
-              <div className="flex items-center">
-                {onOpenScenes ? (
-                  <button
-                    onClick={onOpenScenes}
-                    className="flex items-center justify-center hover:opacity-80 transition-opacity"
-                    aria-label="Open in Scenes fullscreen"
-                    title="Open in Scenes"
-                  >
-                    <div className="p-0.5 rounded border border-gray-700 dark:border-gray-600">
-                      <div className="p-0.5 rounded border border-gray-700 dark:border-gray-600">
-                        <svg
-                          width="16"
-                          height="16"
-                          viewBox="0 0 24 24"
-                          className="text-gray-700 dark:text-gray-300"
-                          fill="none"
-                          xmlns="http://www.w3.org/2000/svg"
-                        >
-                          {/* Outer square border */}
-                          <rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" strokeWidth="2" fill="none" />
-                          {/* Inner square border */}
-                          <rect x="6" y="6" width="12" height="12" rx="1" stroke="currentColor" strokeWidth="1.5" fill="none" />
-                          {/* Play button triangle */}
-                          <path d="M9 7 L9 17 L17 12 Z" fill="currentColor" />
-                        </svg>
-                      </div>
-                    </div>
-                  </button>
-                ) : (
-                  <div className="w-6 h-6" /> // Spacer to balance layout
-                )}
+              <div className="flex items-center gap-3">
+                {/* White Dots */}
+                <div className="flex gap-1.5">
+                  {post.mediaItems.map((_, index) => (
+                    <div
+                      key={index}
+                      className={`w-2 h-2 rounded-full transition-all ${
+                        index === carouselIndex
+                          ? 'bg-gray-900 dark:bg-gray-100 w-6'
+                          : 'bg-gray-300 dark:bg-gray-600'
+                      }`}
+                    />
+                  ))}
+                </div>
+                {/* Number Indicator */}
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {carouselIndex + 1} / {post.mediaItems.length}
+                </span>
               </div>
             </div>
           </div>
@@ -1759,7 +1952,18 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         showMetricsIcon={showBoostIcon && isBoosted}
         onToggleMetrics={() => setIsMetricsOpen(!isMetricsOpen)}
         isMetricsOpen={isMetricsOpen}
+        likeButtonRef={likeButtonRef}
       />
+      {/* Heart animation from tap to like button - rendered after EngagementBar so ref is set */}
+      {heartAnimation && likeButtonRef.current && (
+        <HeartDropAnimation
+          key={`heart-${post.id}-${heartAnimation.startX}-${heartAnimation.startY}`}
+          startX={heartAnimation.startX}
+          startY={heartAnimation.startY}
+          targetElement={likeButtonRef.current}
+          onComplete={() => setHeartAnimation(null)}
+        />
+      )}
       {/* News Ticker Banner */}
       {post.bannerText && (
         <div className="h-7 bg-black dark:bg-black overflow-hidden border-t border-gray-700 dark:border-gray-700">

@@ -180,6 +180,10 @@ class PostController extends Controller
             'textStyle.background' => 'nullable|string|max:200',
             'taggedUsers' => 'nullable|array',
             'taggedUsers.*' => 'required|string|exists:users,handle',
+            'videoCaptionsEnabled' => 'nullable|boolean',
+            'videoCaptionText' => 'nullable|string|max:1000',
+            'subtitlesEnabled' => 'nullable|boolean',
+            'subtitleText' => 'nullable|string|max:2000',
         ]);
 
         if ($validator->fails()) {
@@ -207,6 +211,10 @@ class PostController extends Controller
                 'template_id' => $request->templateId,
                 'media_items' => $request->mediaItems,
                 'text_style' => $request->textStyle,
+                'video_captions_enabled' => $request->videoCaptionsEnabled ?? false,
+                'video_caption_text' => $request->videoCaptionText,
+                'subtitles_enabled' => $request->subtitlesEnabled ?? false,
+                'subtitle_text' => $request->subtitleText,
             ]);
 
             // Attach tagged users if provided

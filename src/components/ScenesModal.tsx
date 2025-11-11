@@ -5,6 +5,8 @@ import { AiFillHeart } from 'react-icons/ai';
 import Avatar from './Avatar';
 import ShareModal from './ShareModal';
 import StickerOverlayComponent from './StickerOverlay';
+import EffectWrapper from './EffectWrapper';
+import type { EffectConfig } from '../utils/effects';
 import { useAuth } from '../context/Auth';
 import { useOnline } from '../hooks/useOnline';
 import { addComment } from '../api/posts';
@@ -392,8 +394,12 @@ export default function ScenesModal({
                         }}
                         onTouchEnd={handleMediaTouchEnd}
                     >
-                        {currentItem ? (
-                            currentItem.type === 'video' ? (
+                        {currentItem ? (() => {
+                            // Get effects for current media item
+                            const itemEffects = currentItem.effects || [];
+                            
+                            // Create media element
+                            let mediaElement = currentItem.type === 'video' ? (
                                 <div className="relative w-full h-full">
                                     <video
                                         ref={videoRef}
@@ -429,8 +435,19 @@ export default function ScenesModal({
                                     src={currentItem.url}
                                     alt={post.caption || post.text || 'Post media'}
                                 />
-                            )
-                        ) : (
+                            );
+                            
+                            // Apply effects in reverse order (last effect wraps everything)
+                            itemEffects.forEach((effect: EffectConfig) => {
+                                mediaElement = (
+                                    <EffectWrapper key={effect.type} effect={effect} isActive={true}>
+                                        {mediaElement}
+                                    </EffectWrapper>
+                                );
+                            });
+                            
+                            return mediaElement;
+                        })() : (
                             // Text-only post display with styling
                             <div 
                                 className="w-full h-full flex items-center justify-center px-6"

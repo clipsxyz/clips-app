@@ -239,6 +239,45 @@
   z-index: 1;
 }
 
+/* Gazetteer-style gradient border (static) */
+.gz-animated-border {
+  position: relative;
+}
+
+.gz-animated-border::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 1rem;
+  padding: 2px;
+  /* Gazetteer brand-inspired colors: emerald → cyan → indigo */
+  background: conic-gradient(
+    from 0deg,
+    #10b981,
+    #22d3ee,
+    #6366f1,
+    #10b981
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  z-index: 0;
+}
+
+.gz-animated-border::after {
+  content: "";
+  position: absolute;
+  inset: -10px;
+  border-radius: 1.25rem;
+  background: radial-gradient(60% 60% at 50% 50%, rgba(16,185,129,0.22), rgba(34,211,238,0.16) 50%, rgba(99,102,241,0.1) 100%);
+  filter: blur(18px);
+  z-index: 0;
+}
+
+.gz-animated-border > * {
+  position: relative;
+  z-index: 1;
+}
 @keyframes borderSpin {
   0% {
     background-position: 0% 50%;
@@ -253,6 +292,106 @@
   }
 }
 
+/* Instagram-style animated gradient border for 9:16 placeholder */
+.ig-animated-border {
+  position: relative;
+}
+
+.ig-animated-border::before {
+  content: "";
+  position: absolute;
+  inset: -2px; /* border thickness */
+  border-radius: 1rem; /* matches rounded-2xl approx */
+  padding: 2px;
+  background: conic-gradient(
+    from 0deg,
+    #feda75,
+    #fa7e1e,
+    #d62976,
+    #962fbf,
+    #4f5bd5,
+    #feda75
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  z-index: 0;
+}
+
+.ig-animated-border::after {
+  content: "";
+  position: absolute;
+  inset: -10px;
+  border-radius: 1.25rem;
+  background: radial-gradient(60% 60% at 50% 50%, rgba(214,41,118,0.35), rgba(72,56,149,0.2) 50%, rgba(64,93,230,0.1) 100%);
+  filter: blur(18px);
+  /* no animation for a calm glow */
+  z-index: 0;
+}
+
+.ig-animated-border > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Rotate gradient colors while border stays static */
+@keyframes rotateGradientColors {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Respect reduced motion preference for gradient animations */
+@media (prefers-reduced-motion: reduce) {
+  .ig-animated-border::before,
+  .tt-animated-border::before,
+  .gz-animated-border::before {
+    animation: none;
+  }
+}
+
+/* TikTok-style gradient border (static) */
+.tt-animated-border {
+  position: relative;
+}
+
+.tt-animated-border::before {
+  content: "";
+  position: absolute;
+  inset: -2px; /* border thickness */
+  border-radius: 1rem;
+  padding: 2px;
+  background: conic-gradient(
+    from 0deg,
+    #69c9d0,
+    #ee1d52,
+    #000000,
+    #69c9d0
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  z-index: 0;
+}
+
+.tt-animated-border::after {
+  content: "";
+  position: absolute;
+  inset: -10px;
+  border-radius: 1.25rem;
+  background: radial-gradient(60% 60% at 50% 50%, rgba(105,201,208,0.25), rgba(238,29,82,0.18) 50%, rgba(0,0,0,0.08) 100%);
+  filter: blur(18px);
+  /* static subtle glow */
+  z-index: 0;
+}
+
+.tt-animated-border > * {
+  position: relative;
+  z-index: 1;
+}
 /* Hide scrollbar utility */
 .scrollbar-hide {
   -ms-overflow-style: none;
@@ -287,6 +426,37 @@
 
   100% {
     transform: translateX(-33.333%);
+  }
+}
+
+/* Heart pop-up animation for double-tap like */
+@keyframes heartPopUp {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0);
+  }
+  
+  20% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.2);
+  }
+  
+  40% {
+    transform: translate(-50%, -50%) scale(0.95);
+  }
+  
+  60% {
+    transform: translate(-50%, -50%) scale(1.05);
+  }
+  
+  80% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.8);
   }
 }
 

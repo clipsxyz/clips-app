@@ -9,6 +9,9 @@ class Post extends Model
 {
     use HasFactory;
 
+    protected $keyType = 'string';
+    public $incrementing = false;
+
     protected $fillable = [
         'user_id',
         'user_handle',
@@ -33,6 +36,10 @@ class Post extends Model
         'caption',
         'image_text',
         'text_style', // JSON: { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
+        'video_captions_enabled',
+        'video_caption_text',
+        'subtitles_enabled',
+        'subtitle_text',
     ];
 
     protected $casts = [
@@ -46,6 +53,8 @@ class Post extends Model
         'shares_count' => 'integer',
         'reclips_count' => 'integer',
         'is_reclipped' => 'boolean',
+        'video_captions_enabled' => 'boolean',
+        'subtitles_enabled' => 'boolean',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
@@ -88,6 +97,7 @@ class Post extends Model
     public function reclips()
     {
         return $this->belongsToMany(User::class, 'post_reclips')
+                    ->withPivot('user_handle')
                     ->withTimestamps();
     }
 
