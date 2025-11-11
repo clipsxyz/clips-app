@@ -49,6 +49,8 @@ export default function CreatePage() {
         templateId?: string; // Template ID
         templateText?: string; // Text from template editor
         templateLocation?: string; // Location from template editor
+        templateBannerText?: string; // Banner text from template editor
+        templateTaggedUsers?: string[]; // Tagged users from template editor
     } | null;
     const [text, setText] = useState(''); // Main text - used for text-only posts OR captions for image posts
     const [location, setLocation] = useState('');
@@ -202,6 +204,16 @@ export default function CreatePage() {
                     // Set stickers if provided from template
                     if (locationState.templateStickers && locationState.templateStickers.length > 0) {
                         setStickers(locationState.templateStickers);
+                    }
+                    
+                    // Set taggedUsers if provided from template
+                    if (locationState.templateTaggedUsers && locationState.templateTaggedUsers.length > 0) {
+                        setTaggedUsers(locationState.templateTaggedUsers);
+                    }
+                    
+                    // Set bannerText if provided from template
+                    if (locationState.templateBannerText) {
+                        setBannerText(locationState.templateBannerText);
                     }
                     
                     // Focus caption for quick posting
