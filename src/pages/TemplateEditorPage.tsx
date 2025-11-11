@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiX, FiCheck, FiImage, FiVideo, FiPlus, FiSmile, FiUser, FiEdit, FiChevronLeft, FiChevronRight, FiType, FiMessageSquare } from 'react-icons/fi';
-import { VideoTemplate, TemplateClip, StickerOverlay, Sticker } from '../types';
+import { FiX, FiImage, FiVideo, FiPlus, FiSmile, FiUser, FiChevronLeft, FiChevronRight, FiType, FiMessageSquare } from 'react-icons/fi';
+import { VideoTemplate, StickerOverlay, Sticker } from '../types';
 import { incrementTemplateUsage } from '../api/templates';
 import { createPost } from '../api/posts';
 import { useAuth } from '../context/Auth';
@@ -12,6 +12,7 @@ import StickerOverlayComponent from '../components/StickerOverlay';
 import TextStickerModal from '../components/TextStickerModal';
 import UserTaggingModal from '../components/UserTaggingModal';
 import EffectWrapper from '../components/EffectWrapper';
+import type { EffectConfig } from '../utils/effects';
 
 type UserMedia = {
     clipId: string;
@@ -45,13 +46,13 @@ export default function TemplateEditorPage() {
     const [showUserTagging, setShowUserTagging] = React.useState(false);
     const [currentStep, setCurrentStep] = React.useState<'media' | 'stickers' | 'details'>('media');
     const mediaContainerRef = React.useRef<HTMLDivElement>(null);
-    
+
     // For top 3 templates (Gazetteer, Instagram, TikTok), support dynamic clips (1-20)
     const isTopTemplate = template?.id === TEMPLATE_IDS.INSTAGRAM || template?.id === TEMPLATE_IDS.TIKTOK || template?.id === TEMPLATE_IDS.GAZETTEER;
     const [dynamicClips, setDynamicClips] = React.useState<Array<{ id: string; mediaType: 'image' | 'video'; duration: number }>>(
         isTopTemplate ? [{ id: 'clip-1', mediaType: 'video', duration: DEFAULT_CLIP_DURATION }] : []
     );
-    
+
     // Use dynamic clips for top templates, otherwise use template.clips
     const activeClips = isTopTemplate ? dynamicClips : (template?.clips || []);
 
@@ -67,7 +68,7 @@ export default function TemplateEditorPage() {
 
     const currentClip = activeClips[currentClipIndex] || activeClips[0];
     const allClipsFilled = activeClips.length > 0 && activeClips.every(clip => userMedia.has(clip.id));
-    
+
     // Get gradient style for button text based on template
     const buttonTextStyle = React.useMemo((): React.CSSProperties => {
         if (template?.id === TEMPLATE_IDS.INSTAGRAM) {
@@ -109,7 +110,7 @@ export default function TemplateEditorPage() {
     const showPinnedNext = currentStep === 'media' && userMedia.size > 0;
     const canGoPrevious = currentClipIndex > 0;
     const canGoNext = currentClipIndex < activeClips.length - 1;
-    
+
     // Auto-advance to details step when all clips are filled
     React.useEffect(() => {
         if (allClipsFilled && currentStep === 'media') {
@@ -142,7 +143,7 @@ export default function TemplateEditorPage() {
         reader.onload = (e) => {
             const url = e.target?.result as string;
             const mediaType = file.type.startsWith('image/') ? 'image' : 'video';
-            
+
             // For top templates, update the clip's mediaType based on what was selected
             if (isTopTemplate) {
                 const clipIndex = dynamicClips.findIndex(c => c.id === clipId);
@@ -199,7 +200,7 @@ export default function TemplateEditorPage() {
 
     function handleAddClip() {
         if (!isTopTemplate || dynamicClips.length >= MAX_CLIPS) return;
-        
+
         const newClipId = `clip-${dynamicClips.length + 1}`;
         const newClip = {
             id: newClipId,
@@ -209,34 +210,35 @@ export default function TemplateEditorPage() {
         setDynamicClips([...dynamicClips, newClip]);
         setCurrentClipIndex(dynamicClips.length); // Navigate to the new clip
     }
-    
-    function handleRemoveClip(clipId: string) {
-        if (!isTopTemplate || dynamicClips.length <= 1) return;
-        
-        const index = dynamicClips.findIndex(c => c.id === clipId);
-        if (index === -1) return;
-        
-        // Remove media and stickers for this clip
-        setUserMedia(prev => {
-            const newMap = new Map(prev);
-            newMap.delete(clipId);
-            return newMap;
-        });
-        setStickers(prev => {
-            const newMap = new Map(prev);
-            newMap.delete(clipId);
-            return newMap;
-        });
-        
-        // Remove the clip
-        const newClips = dynamicClips.filter(c => c.id !== clipId);
-        setDynamicClips(newClips);
-        
-        // Adjust current index if needed
-        if (currentClipIndex >= newClips.length) {
-            setCurrentClipIndex(newClips.length - 1);
-        }
-    }
+
+    // Removed unused function - clips are managed via dynamic state
+    // function handleRemoveClip(clipId: string) {
+    //     if (!isTopTemplate || dynamicClips.length <= 1) return;
+    //     
+    //     const index = dynamicClips.findIndex(c => c.id === clipId);
+    //     if (index === -1) return;
+    //     
+    //     // Remove media and stickers for this clip
+    //     setUserMedia(prev => {
+    //         const newMap = new Map(prev);
+    //         newMap.delete(clipId);
+    //         return newMap;
+    //     });
+    //     setStickers(prev => {
+    //         const newMap = new Map(prev);
+    //         newMap.delete(clipId);
+    //         return newMap;
+    //     });
+    //     
+    //     // Remove the clip
+    //     const newClips = dynamicClips.filter(c => c.id !== clipId);
+    //     setDynamicClips(newClips);
+    //     
+    //     // Adjust current index if needed
+    //     if (currentClipIndex >= newClips.length) {
+    //         setCurrentClipIndex(newClips.length - 1);
+    //     }
+    // }
 
     async function handleCreateVideo() {
         // Allow creating post with at least one clip filled
@@ -246,7 +248,7 @@ export default function TemplateEditorPage() {
         setIsProcessing(true);
         try {
             // Increment template usage
-            await incrementTemplateUsage(template.id);
+            await incrementTemplateUsage(template?.id || '');
 
             // For now, we'll use the first clip's media as the main post media
             // In a full implementation, you'd combine all clips into a single video
@@ -258,14 +260,16 @@ export default function TemplateEditorPage() {
                 .map(clip => {
                     const media = userMedia.get(clip.id);
                     if (!media) return null;
+                    // Get effects from template clip if it exists, otherwise empty array
+                    const clipEffects: any[] = 'effects' in clip && Array.isArray(clip.effects) ? clip.effects : [];
                     return {
                         url: media.url,
                         type: media.mediaType,
                         duration: clip.duration,
-                        effects: clip.effects || [] // Include effects from template clip
+                        effects: clipEffects
                     };
                 })
-                .filter((item): item is { url: string; type: 'image' | 'video'; duration: number; effects?: Array<any> } => item !== null);
+                .filter((item): item is { url: string; type: 'image' | 'video'; duration: number; effects: any[] } => item !== null && item !== undefined);
 
             // Combine stickers from all clips
             const allStickers: StickerOverlay[] = [];
@@ -276,7 +280,7 @@ export default function TemplateEditorPage() {
 
             // Create post with all clips' media as a carousel
             const taggedUsersToPass = taggedUsers && Array.isArray(taggedUsers) && taggedUsers.length > 0 ? taggedUsers : undefined;
-            
+
             await createPost(
                 user.id,
                 user.handle,
@@ -290,8 +294,8 @@ export default function TemplateEditorPage() {
                 user.regional,
                 user.national,
                 allStickers.length > 0 ? allStickers : undefined, // Pass all stickers
-                template.id, // templateId
-                allMediaItems, // Pass all media items for carousel
+                template?.id || undefined, // templateId
+                allMediaItems.filter(item => item !== null) as Array<{ url: string; type: 'image' | 'video'; duration?: number }>, // Pass all media items for carousel
                 bannerText.trim() || undefined, // bannerText
                 undefined, // textStyle
                 taggedUsersToPass, // taggedUsers
@@ -484,7 +488,7 @@ export default function TemplateEditorPage() {
                                         <span style={buttonTextStyle} className="text-sm">Add Another Clip ({activeClips.length}/{MAX_CLIPS})</span>
                                     </button>
                                 )}
-                                
+
                                 {/* Next Button - Right */}
                                 <button
                                     onClick={() => {
@@ -544,205 +548,207 @@ export default function TemplateEditorPage() {
                         {/* Step 1: Add Media */}
                         {/* Current Clip Preview - Clean and Simple */}
                         <div className="mb-6">
-                    {currentMedia ? (
-                        <div className="flex items-center justify-center gap-4">
-                            {activeClips.length > 1 && (
-                                <button
-                                    onClick={handlePrevious}
-                                    disabled={!canGoPrevious}
-                                    className={`p-3 rounded-full border border-white/10 bg-black/60 hover:bg-black/80 transition-colors ${!canGoPrevious ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}
-                                >
-                                    <FiChevronLeft className="w-5 h-5 text-white" />
-                                    <span className="sr-only">Previous clip</span>
-                                </button>
-                            )}
-                            <div
-                                ref={mediaContainerRef}
-                                className="relative aspect-[9/16] max-h-[55vh] rounded-2xl overflow-hidden bg-gray-900 mx-auto shadow-lg"
-                                onClick={(e) => {
-                                    // Deselect sticker when clicking on media
-                                    if (e.target === e.currentTarget || (e.target as HTMLElement).tagName === 'VIDEO' || (e.target as HTMLElement).tagName === 'IMG') {
-                                        setSelectedStickerOverlay(null);
-                                    }
-                                }}
-                            >
-                                {/* Apply effects from template clip */}
-                                {(() => {
-                                    const clipEffects = currentClip.effects || [];
-                                    
-                                    let mediaElement = currentMedia.mediaType === 'video' ? (
-                                        <video
-                                            src={currentMedia.url}
-                                            className="w-full h-full object-cover"
-                                            controls
-                                            autoPlay
-                                            loop
-                                            muted
-                                        />
-                                    ) : (
-                                        <img
-                                            src={currentMedia.url}
-                                            alt={`Clip ${currentClipIndex + 1}`}
-                                            className="w-full h-full object-cover"
-                                        />
-                                    );
+                            {currentMedia ? (
+                                <div className="flex items-center justify-center gap-4">
+                                    {activeClips.length > 1 && (
+                                        <button
+                                            onClick={handlePrevious}
+                                            disabled={!canGoPrevious}
+                                            className={`p-3 rounded-full border border-white/10 bg-black/60 hover:bg-black/80 transition-colors ${!canGoPrevious ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}
+                                        >
+                                            <FiChevronLeft className="w-5 h-5 text-white" />
+                                            <span className="sr-only">Previous clip</span>
+                                        </button>
+                                    )}
+                                    <div
+                                        ref={mediaContainerRef}
+                                        className="relative aspect-[9/16] max-h-[55vh] rounded-2xl overflow-hidden bg-gray-900 mx-auto shadow-lg"
+                                        onClick={(e) => {
+                                            // Deselect sticker when clicking on media
+                                            if (e.target === e.currentTarget || (e.target as HTMLElement).tagName === 'VIDEO' || (e.target as HTMLElement).tagName === 'IMG') {
+                                                setSelectedStickerOverlay(null);
+                                            }
+                                        }}
+                                    >
+                                        {/* Apply effects from template clip */}
+                                        {(() => {
+                                            // Get effects from template clip if it exists, otherwise empty array
+                                            const clipEffects: any[] = 'effects' in currentClip && Array.isArray(currentClip.effects) ? currentClip.effects : [];
 
-                                    // Apply effects in reverse order (last effect wraps everything)
-                                    clipEffects.forEach((effect: EffectConfig) => {
-                                        mediaElement = (
-                                            <EffectWrapper key={effect.type} effect={effect} isActive={true}>
-                                                {mediaElement}
-                                            </EffectWrapper>
-                                        );
-                                    });
-
-                                    return mediaElement;
-                                })()}
-                                
-                                {/* Show active effects indicator */}
-                                {currentClip?.effects && currentClip.effects.length > 0 && (
-                                    <div className="absolute top-3 left-3 z-20 flex flex-wrap gap-1">
-                                        {currentClip.effects.map((effect: EffectConfig, idx: number) => (
-                                            <div
-                                                key={idx}
-                                                className="px-2 py-1 bg-black/70 backdrop-blur-sm text-white text-xs rounded-full"
-                                                title={`${effect.type}${effect.colorGrading ? ` - ${effect.colorGrading}` : ''}`}
-                                            >
-                                                {effect.type === 'color-grading' && effect.colorGrading ? (
-                                                    <span className="capitalize">{effect.colorGrading.replace('-', ' ')}</span>
-                                                ) : (
-                                                    <span className="capitalize">{effect.type.replace('-', ' ')}</span>
-                                                )}
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-
-                                {/* Sticker Overlays */}
-                                {currentStickers.map((overlay) => (
-                                    <StickerOverlayComponent
-                                        key={overlay.id}
-                                        overlay={overlay}
-                                        onUpdate={(updated) => handleUpdateSticker(currentClip?.id || '', overlay.id, updated)}
-                                        onRemove={() => handleRemoveSticker(currentClip?.id || '', overlay.id)}
-                                        isSelected={selectedStickerOverlay === overlay.id}
-                                        onSelect={() => setSelectedStickerOverlay(overlay.id)}
-                                        containerWidth={containerSize.width || 400}
-                                        containerHeight={containerSize.height || 711}
-                                    />
-                                ))}
-
-                                <button
-                                    onClick={() => handleRemoveMedia(currentClip?.id || '')}
-                                    className="absolute top-3 right-3 p-2 bg-black/70 backdrop-blur-sm text-white rounded-full hover:bg-black/90 transition-colors z-10"
-                                >
-                                    <FiX className="w-4 h-4" />
-                                </button>
-                            </div>
-                            {activeClips.length > 1 && (
-                                <button
-                                    onClick={handleNext}
-                                    disabled={!canGoNext}
-                                    className={`p-3 rounded-full border border-white/10 bg-black/60 hover:bg-black/80 transition-colors ${!canGoNext ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}
-                                >
-                                    <FiChevronRight className="w-5 h-5 text-white" />
-                                    <span className="sr-only">Next clip</span>
-                                </button>
-                            )}
-                        </div>
-                    ) : (
-                        <div className="flex items-center justify-center gap-4">
-                            {activeClips.length > 1 && (
-                                <button
-                                    onClick={handlePrevious}
-                                    disabled={!canGoPrevious}
-                                    className={`p-3 rounded-full border border-white/10 bg-black/60 hover:bg-black/80 transition-colors ${!canGoPrevious ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}
-                                >
-                                    <FiChevronLeft className="w-5 h-5 text-white" />
-                                    <span className="sr-only">Previous clip</span>
-                                </button>
-                            )}
-                            <label className={`block aspect-[9/16] max-h-[55vh] rounded-2xl cursor-pointer mx-auto bg-gray-900/30 transition-colors ${
-                                template.id === TEMPLATE_IDS.INSTAGRAM
-                                    ? 'ig-animated-border'
-                                    : template.id === TEMPLATE_IDS.TIKTOK
-                                        ? 'tt-animated-border'
-                                        : template.id === TEMPLATE_IDS.GAZETTEER
-                                            ? 'gz-animated-border'
-                                            : 'border-2 border-dashed border-gray-700 hover:border-gray-600'
-                            }`}>
-                                <input
-                                    type="file"
-                                    accept={isTopTemplate ? 'image/*,video/mp4,.mp4' : (currentClip?.mediaType === 'video' ? 'video/mp4,.mp4' : 'image/*')}
-                                    onChange={(e) => handleMediaSelect(currentClip?.id || '', e)}
-                                    className="hidden"
-                                />
-                                <div className="h-full flex flex-col items-center justify-center p-8 text-center">
-                                    {isTopTemplate ? (
-                                        <>
-                                            <FiImage className="w-12 h-12 text-gray-500 mb-4" />
-                                            <div className="text-white text-lg font-semibold mb-2">
-                                                Add Photo or Video
-                                            </div>
-                                            <div className="text-gray-400 text-sm">
-                                                Tap to select image or MP4 video
-                                            </div>
-                                            <div className="text-gray-500 text-xs mt-2">
-                                                {activeClips.length === 1 ? `Add ${MIN_CLIPS}-${MAX_CLIPS} items` : `Add up to ${MAX_CLIPS - activeClips.length} more`}
-                                            </div>
-                                        </>
-                                    ) : (
-                                        <>
-                                            {currentClip?.mediaType === 'video' ? (
-                                                <FiVideo className="w-12 h-12 text-gray-500 mb-4" />
+                                            let mediaElement: React.ReactNode = currentMedia.mediaType === 'video' ? (
+                                                <video
+                                                    src={currentMedia.url}
+                                                    className="w-full h-full object-cover"
+                                                    controls
+                                                    autoPlay
+                                                    loop
+                                                    muted
+                                                />
                                             ) : (
-                                                <FiImage className="w-12 h-12 text-gray-500 mb-4" />
-                                            )}
-                                            <div className="text-white text-lg font-semibold mb-2">
-                                                Add {currentClip?.mediaType === 'video' ? 'Video (MP4 only)' : 'Photo'}
-                                            </div>
-                                            <div className="text-gray-400 text-sm">
-                                                {currentClip?.mediaType === 'video' ? 'Tap to select MP4 video' : 'Tap to select from gallery'}
-                                            </div>
-                                        </>
+                                                <img
+                                                    src={currentMedia.url}
+                                                    alt={`Clip ${currentClipIndex + 1}`}
+                                                    className="w-full h-full object-cover"
+                                                />
+                                            );
+
+                                            // Apply effects in reverse order (last effect wraps everything)
+                                            clipEffects.forEach((effect: EffectConfig) => {
+                                                mediaElement = (
+                                                    <EffectWrapper key={effect.type} effect={effect} isActive={true}>
+                                                        {mediaElement}
+                                                    </EffectWrapper>
+                                                );
+                                            });
+
+                                            return mediaElement;
+                                        })()}
+
+                                        {/* Show active effects indicator */}
+                                        {(() => {
+                                            const hasEffects = 'effects' in (currentClip || {}) && currentClip && 'effects' in currentClip && Array.isArray(currentClip.effects) && currentClip.effects.length > 0;
+                                            return hasEffects ? (
+                                                <div className="absolute top-3 left-3 z-20 flex flex-wrap gap-1">
+                                                    {Array.isArray(currentClip.effects) && currentClip.effects.map((effect: EffectConfig, idx: number) => (
+                                                        <div
+                                                            key={idx}
+                                                            className="px-2 py-1 bg-black/70 backdrop-blur-sm text-white text-xs rounded-full"
+                                                            title={`${effect.type}${effect.colorGrading ? ` - ${effect.colorGrading}` : ''}`}
+                                                        >
+                                                            {effect.type === 'color-grading' && effect.colorGrading ? (
+                                                                <span className="capitalize">{effect.colorGrading.replace('-', ' ')}</span>
+                                                            ) : (
+                                                                <span className="capitalize">{effect.type.replace('-', ' ')}</span>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : null;
+                                        })()}
+
+                                        {/* Sticker Overlays */}
+                                        {currentStickers.map((overlay) => (
+                                            <StickerOverlayComponent
+                                                key={overlay.id}
+                                                overlay={overlay}
+                                                onUpdate={(updated) => handleUpdateSticker(currentClip?.id || '', overlay.id, updated)}
+                                                onRemove={() => handleRemoveSticker(currentClip?.id || '', overlay.id)}
+                                                isSelected={selectedStickerOverlay === overlay.id}
+                                                onSelect={() => setSelectedStickerOverlay(overlay.id)}
+                                                containerWidth={containerSize.width || 400}
+                                                containerHeight={containerSize.height || 711}
+                                            />
+                                        ))}
+
+                                        <button
+                                            onClick={() => handleRemoveMedia(currentClip?.id || '')}
+                                            className="absolute top-3 right-3 p-2 bg-black/70 backdrop-blur-sm text-white rounded-full hover:bg-black/90 transition-colors z-10"
+                                        >
+                                            <FiX className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                    {activeClips.length > 1 && (
+                                        <button
+                                            onClick={handleNext}
+                                            disabled={!canGoNext}
+                                            className={`p-3 rounded-full border border-white/10 bg-black/60 hover:bg-black/80 transition-colors ${!canGoNext ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}
+                                        >
+                                            <FiChevronRight className="w-5 h-5 text-white" />
+                                            <span className="sr-only">Next clip</span>
+                                        </button>
                                     )}
                                 </div>
-                            </label>
-                            {activeClips.length > 1 && (
-                                <button
-                                    onClick={handleNext}
-                                    disabled={!canGoNext}
-                                    className={`p-3 rounded-full border border-white/10 bg-black/60 hover:bg-black/80 transition-colors ${!canGoNext ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}
-                                >
-                                    <FiChevronRight className="w-5 h-5 text-white" />
-                                    <span className="sr-only">Next clip</span>
-                                </button>
+                            ) : (
+                                <div className="flex items-center justify-center gap-4">
+                                    {activeClips.length > 1 && (
+                                        <button
+                                            onClick={handlePrevious}
+                                            disabled={!canGoPrevious}
+                                            className={`p-3 rounded-full border border-white/10 bg-black/60 hover:bg-black/80 transition-colors ${!canGoPrevious ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}
+                                        >
+                                            <FiChevronLeft className="w-5 h-5 text-white" />
+                                            <span className="sr-only">Previous clip</span>
+                                        </button>
+                                    )}
+                                    <label className={`block aspect-[9/16] max-h-[55vh] rounded-2xl cursor-pointer mx-auto bg-gray-900/30 transition-colors ${template.id === TEMPLATE_IDS.INSTAGRAM
+                                        ? 'ig-animated-border'
+                                        : template.id === TEMPLATE_IDS.TIKTOK
+                                            ? 'tt-animated-border'
+                                            : template.id === TEMPLATE_IDS.GAZETTEER
+                                                ? 'gz-animated-border'
+                                                : 'border-2 border-dashed border-gray-700 hover:border-gray-600'
+                                        }`}>
+                                        <input
+                                            type="file"
+                                            accept={isTopTemplate ? 'image/*,video/mp4,.mp4' : (currentClip?.mediaType === 'video' ? 'video/mp4,.mp4' : 'image/*')}
+                                            onChange={(e) => handleMediaSelect(currentClip?.id || '', e)}
+                                            className="hidden"
+                                        />
+                                        <div className="h-full flex flex-col items-center justify-center p-8 text-center">
+                                            {isTopTemplate ? (
+                                                <>
+                                                    <FiImage className="w-12 h-12 text-gray-500 mb-4" />
+                                                    <div className="text-white text-lg font-semibold mb-2">
+                                                        Add Photo or Video
+                                                    </div>
+                                                    <div className="text-gray-400 text-sm">
+                                                        Tap to select image or MP4 video
+                                                    </div>
+                                                    <div className="text-gray-500 text-xs mt-2">
+                                                        {activeClips.length === 1 ? `Add ${MIN_CLIPS}-${MAX_CLIPS} items` : `Add up to ${MAX_CLIPS - activeClips.length} more`}
+                                                    </div>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    {currentClip?.mediaType === 'video' ? (
+                                                        <FiVideo className="w-12 h-12 text-gray-500 mb-4" />
+                                                    ) : (
+                                                        <FiImage className="w-12 h-12 text-gray-500 mb-4" />
+                                                    )}
+                                                    <div className="text-white text-lg font-semibold mb-2">
+                                                        Add {currentClip?.mediaType === 'video' ? 'Video (MP4 only)' : 'Photo'}
+                                                    </div>
+                                                    <div className="text-gray-400 text-sm">
+                                                        {currentClip?.mediaType === 'video' ? 'Tap to select MP4 video' : 'Tap to select from gallery'}
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                    </label>
+                                    {activeClips.length > 1 && (
+                                        <button
+                                            onClick={handleNext}
+                                            disabled={!canGoNext}
+                                            className={`p-3 rounded-full border border-white/10 bg-black/60 hover:bg-black/80 transition-colors ${!canGoNext ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}
+                                        >
+                                            <FiChevronRight className="w-5 h-5 text-white" />
+                                            <span className="sr-only">Next clip</span>
+                                        </button>
+                                    )}
+                                </div>
                             )}
                         </div>
-                    )}
-                </div>
 
-                {/* Clip Navigation - Simple Dots */}
-                <div className="flex items-center justify-center gap-2 mb-6 flex-wrap">
-                    {activeClips.map((clip, index) => {
-                        const media = userMedia.get(clip.id);
-                        const isCurrent = index === currentClipIndex;
-                        return (
-                            <button
-                                key={clip.id}
-                                onClick={() => setCurrentClipIndex(index)}
-                                className={`w-2 h-2 rounded-full transition-all ${
-                                    isCurrent 
-                                        ? 'bg-white w-8' 
-                                        : media 
-                                            ? 'bg-gray-500' 
-                                            : 'bg-gray-700'
-                                }`}
-                                aria-label={`Go to clip ${index + 1}`}
-                            />
-                        );
-                    })}
-                </div>
+                        {/* Clip Navigation - Simple Dots */}
+                        <div className="flex items-center justify-center gap-2 mb-6 flex-wrap">
+                            {activeClips.map((clip, index) => {
+                                const media = userMedia.get(clip.id);
+                                const isCurrent = index === currentClipIndex;
+                                return (
+                                    <button
+                                        key={clip.id}
+                                        onClick={() => setCurrentClipIndex(index)}
+                                        className={`w-2 h-2 rounded-full transition-all ${isCurrent
+                                            ? 'bg-white w-8'
+                                            : media
+                                                ? 'bg-gray-500'
+                                                : 'bg-gray-700'
+                                            }`}
+                                        aria-label={`Go to clip ${index + 1}`}
+                                    />
+                                );
+                            })}
+                        </div>
 
                     </>
                 ) : currentStep === 'stickers' ? (
@@ -764,7 +770,7 @@ export default function TemplateEditorPage() {
                                     Step 2 of 3
                                 </div>
                             </div>
-                            
+
                             <h2 className="text-xl font-semibold text-white mb-6">Add Stickers</h2>
                         </div>
 
@@ -780,14 +786,13 @@ export default function TemplateEditorPage() {
                                         const media = userMedia.get(clip.id);
                                         const clipStickers = stickers.get(clip.id) || [];
                                         const isSelected = index === currentClipIndex;
-                                        
+
                                         return (
                                             <button
                                                 key={clip.id}
                                                 onClick={() => setCurrentClipIndex(index)}
-                                                className={`flex-shrink-0 aspect-[9/16] w-20 rounded-lg overflow-hidden relative ${
-                                                    isSelected ? 'ring-2 ring-white' : 'ring-1 ring-gray-700'
-                                                }`}
+                                                className={`flex-shrink-0 aspect-[9/16] w-20 rounded-lg overflow-hidden relative ${isSelected ? 'ring-2 ring-white' : 'ring-1 ring-gray-700'
+                                                    }`}
                                             >
                                                 {media ? (
                                                     media.mediaType === 'video' ? (
@@ -820,7 +825,7 @@ export default function TemplateEditorPage() {
                                     })}
                                 </div>
                             </div>
-                            
+
                             {/* Current Clip Preview with Stickers */}
                             {currentMedia && (
                                 <div className="mb-4">
@@ -835,8 +840,9 @@ export default function TemplateEditorPage() {
                                     >
                                         {/* Apply effects from template clip */}
                                         {(() => {
-                                            const clipEffects = currentClip.effects || [];
-                                            let mediaElement = currentMedia.mediaType === 'video' ? (
+                                            // Get effects from template clip if it exists, otherwise empty array
+                                            const clipEffects: any[] = 'effects' in currentClip && Array.isArray(currentClip.effects) ? currentClip.effects : [];
+                                            let mediaElement: React.ReactNode = currentMedia.mediaType === 'video' ? (
                                                 <video
                                                     src={currentMedia.url}
                                                     className="w-full h-full object-cover"
@@ -864,25 +870,29 @@ export default function TemplateEditorPage() {
 
                                             return mediaElement;
                                         })()}
-                                        
+
                                         {/* Show active effects indicator */}
-                                        {currentClip.effects && currentClip.effects.length > 0 && (
-                                            <div className="absolute top-3 left-3 z-20 flex flex-wrap gap-1">
-                                                {currentClip.effects.map((effect: EffectConfig, idx: number) => (
-                                                    <div
-                                                        key={idx}
-                                                        className="px-2 py-1 bg-black/70 backdrop-blur-sm text-white text-xs rounded-full"
-                                                        title={`${effect.type}${effect.colorGrading ? ` - ${effect.colorGrading}` : ''}`}
-                                                    >
-                                                        {effect.type === 'color-grading' && effect.colorGrading ? (
-                                                            <span className="capitalize">{effect.colorGrading.replace('-', ' ')}</span>
-                                                        ) : (
-                                                            <span className="capitalize">{effect.type.replace('-', ' ')}</span>
-                                                        )}
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
+                                        {(() => {
+                                            const hasEffects = 'effects' in (currentClip || {}) && currentClip && 'effects' in currentClip && Array.isArray(currentClip.effects) && currentClip.effects.length > 0;
+                                            if (!hasEffects) return null;
+                                            return (
+                                                <div className="absolute top-3 left-3 z-20 flex flex-wrap gap-1">
+                                                    {Array.isArray(currentClip.effects) && currentClip.effects.map((effect: EffectConfig, idx: number) => (
+                                                        <div
+                                                            key={idx}
+                                                            className="px-2 py-1 bg-black/70 backdrop-blur-sm text-white text-xs rounded-full"
+                                                            title={`${effect.type}${effect.colorGrading ? ` - ${effect.colorGrading}` : ''}`}
+                                                        >
+                                                            {effect.type === 'color-grading' && effect.colorGrading ? (
+                                                                <span className="capitalize">{effect.colorGrading.replace('-', ' ')}</span>
+                                                            ) : (
+                                                                <span className="capitalize">{effect.type.replace('-', ' ')}</span>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            );
+                                        })()}
 
                                         {/* Sticker Overlays */}
                                         {currentStickers.map((overlay) => (
@@ -898,7 +908,7 @@ export default function TemplateEditorPage() {
                                             />
                                         ))}
                                     </div>
-                                    
+
                                     <button
                                         onClick={() => setShowStickerPicker(true)}
                                         className="w-full mt-3 py-3 bg-gray-800 text-white rounded-xl text-sm font-medium hover:bg-gray-700 transition-colors flex items-center justify-center gap-2"
@@ -1031,14 +1041,13 @@ export default function TemplateEditorPage() {
                                 </label>
                                 <button
                                     onClick={() => setShowUserTagging(true)}
-                                    className={`w-full p-3 rounded-xl border-2 transition-colors flex items-center justify-between text-sm ${
-                                        taggedUsers.length > 0
-                                            ? 'bg-brand-500/20 border-brand-500 text-white hover:bg-brand-500/30'
-                                            : 'bg-gray-900 text-white border-gray-800 hover:bg-gray-800 hover:border-gray-700'
-                                    }`}
+                                    className={`w-full p-3 rounded-xl border-2 transition-colors flex items-center justify-between text-sm ${taggedUsers.length > 0
+                                        ? 'bg-brand-500/20 border-brand-500 text-white hover:bg-brand-500/30'
+                                        : 'bg-gray-900 text-white border-gray-800 hover:bg-gray-800 hover:border-gray-700'
+                                        }`}
                                 >
                                     <span className={taggedUsers.length > 0 ? 'font-medium' : ''}>
-                                        {taggedUsers.length > 0 
+                                        {taggedUsers.length > 0
                                             ? `${taggedUsers.length} ${taggedUsers.length === 1 ? 'person' : 'people'} tagged`
                                             : 'Tap to tag people'}
                                     </span>
@@ -1067,11 +1076,10 @@ export default function TemplateEditorPage() {
                                             <button
                                                 type="button"
                                                 onClick={() => setCaptionsEnabled(!captionsEnabled)}
-                                                className={`p-1.5 rounded-lg transition-colors ${
-                                                    captionsEnabled 
-                                                        ? 'bg-brand-500 text-white' 
-                                                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-                                                }`}
+                                                className={`p-1.5 rounded-lg transition-colors ${captionsEnabled
+                                                    ? 'bg-brand-500 text-white'
+                                                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                                                    }`}
                                                 aria-label="Toggle captions"
                                             >
                                                 <FiType className="w-4 h-4" />
@@ -1121,12 +1129,12 @@ export default function TemplateEditorPage() {
                                                 onClick={async () => {
                                                     const newEnabled = !subtitlesEnabled;
                                                     setSubtitlesEnabled(newEnabled);
-                                                    
+
                                                     // Auto-transcribe when enabling subtitles if video exists and no text yet
                                                     if (newEnabled && !subtitleText) {
                                                         const currentClip = activeClips[currentClipIndex] || activeClips[0];
                                                         const media = currentClip ? userMedia.get(currentClip.id) : null;
-                                                        
+
                                                         if (media && media.mediaType === 'video' && media.url) {
                                                             setIsTranscribing(true);
                                                             try {
@@ -1142,11 +1150,10 @@ export default function TemplateEditorPage() {
                                                         }
                                                     }
                                                 }}
-                                                className={`p-1.5 rounded-lg transition-colors ${
-                                                    subtitlesEnabled 
-                                                        ? 'bg-brand-500 text-white' 
-                                                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-                                                }`}
+                                                className={`p-1.5 rounded-lg transition-colors ${subtitlesEnabled
+                                                    ? 'bg-brand-500 text-white'
+                                                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                                                    }`}
                                                 aria-label="Toggle subtitles"
                                             >
                                                 <FiMessageSquare className="w-4 h-4" />
@@ -1192,7 +1199,7 @@ export default function TemplateEditorPage() {
             <UserTaggingModal
                 isOpen={showUserTagging}
                 onClose={() => setShowUserTagging(false)}
-                onSelectUser={(handle, displayName) => {
+                onSelectUser={(handle) => {
                     if (!taggedUsers.includes(handle)) {
                         const newTaggedUsers = [...taggedUsers, handle];
                         setTaggedUsers(newTaggedUsers);

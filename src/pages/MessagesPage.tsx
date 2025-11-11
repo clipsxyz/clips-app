@@ -34,7 +34,7 @@ export default function MessagesPage() {
         x: number;
         y: number;
     } | null>(null);
-    const longPressTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+    const longPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Sticker picker state
     const [showStickerPicker, setShowStickerPicker] = useState(false);

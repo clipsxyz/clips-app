@@ -16,7 +16,7 @@ export default function InstantCreatePage() {
     const [currentTime, setCurrentTime] = React.useState(0);
     const [isPlaying, setIsPlaying] = React.useState(false);
     const [showControls, setShowControls] = React.useState(true);
-    const controlsTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+    const controlsTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const [facingMode, setFacingMode] = React.useState<'user' | 'environment'>('user');
     const [micOn, setMicOn] = React.useState(true);
     const [countdown, setCountdown] = React.useState<number | null>(null);
