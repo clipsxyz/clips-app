@@ -540,11 +540,11 @@ function TextCard({ text, onDoubleLike, textStyle, stickers, onOpenScenes }: { t
         onTouchEnd={handleTouchEnd}
         className="relative p-6 rounded-2xl min-h-[120px] flex items-center justify-center shadow-2xl hover:shadow-3xl transition-all duration-300"
         style={{
-          ...(textStyle?.background?.includes('gradient') 
+          ...(textStyle?.background?.includes('gradient')
             ? { backgroundImage: textStyle.background }
             : { background: selectedBackground }),
-          boxShadow: textStyle?.background?.includes('gradient') 
-            ? '0 0 30px rgba(0,0,0,0.3), 0 0 60px rgba(0,0,0,0.2)' 
+          boxShadow: textStyle?.background?.includes('gradient')
+            ? '0 0 30px rgba(0,0,0,0.3), 0 0 60px rgba(0,0,0,0.2)'
             : `0 0 30px ${selectedBackground}40, 0 0 60px ${selectedBackground}20`
         }}
       >
@@ -561,7 +561,7 @@ function TextCard({ text, onDoubleLike, textStyle, stickers, onOpenScenes }: { t
             <FiMaximize className="w-5 h-5" />
           </button>
         )}
-        
+
         <div className="text-center w-full relative z-10">
           <div className={`${getTextSizeClass()} leading-relaxed whitespace-pre-wrap font-bold drop-shadow-lg`} style={{ color: textColor }}>
             {displayText}
@@ -585,12 +585,12 @@ function TextCard({ text, onDoubleLike, textStyle, stickers, onOpenScenes }: { t
             {stickers.map((overlay, index) => {
               // Scale down overlays in feed view to prevent overlap (60% of original size)
               const feedScale = 0.6;
-              
+
               // Adjust position to avoid center where text typically is
               // If overlay is near center (45-55%), move it to edges
               let adjustedX = overlay.x;
               let adjustedY = overlay.y;
-              
+
               if (overlay.x >= 45 && overlay.x <= 55 && overlay.y >= 45 && overlay.y <= 55) {
                 // Move center-positioned overlays to corners/edges
                 // Distribute them around the edges in a circle
@@ -602,14 +602,14 @@ function TextCard({ text, onDoubleLike, textStyle, stickers, onOpenScenes }: { t
                 adjustedX = Math.max(15, Math.min(85, adjustedX));
                 adjustedY = Math.max(15, Math.min(85, adjustedY));
               }
-              
+
               const adjustedOverlay = {
                 ...overlay,
                 scale: overlay.scale * feedScale,
                 x: adjustedX,
                 y: adjustedY
               };
-              
+
               return (
                 <StickerOverlayComponent
                   key={overlay.id}
@@ -695,11 +695,14 @@ function CaptionText({ caption }: { caption: string }) {
   );
 }
 
-function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onCarouselIndexChange, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId, videoCaptionsEnabled, videoCaptionText, subtitlesEnabled, subtitleText }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number; effects?: Array<any> }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onCarouselIndexChange?: (index: number) => void; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string }) {
+function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onCarouselIndexChange, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled, videoCaptionText, subtitlesEnabled, subtitleText }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number; effects?: Array<any> }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onCarouselIndexChange?: (index: number) => void; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string }) {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [burst, setBurst] = React.useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [isPlaying, setIsPlaying] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(true);
   const [hasError, setHasError] = React.useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [showControls, setShowControls] = React.useState(false);
   const [isMuted, setIsMuted] = React.useState(true);
   const [progress, setProgress] = React.useState(0); // 0..1 for video progress
@@ -707,7 +710,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   const [tapPosition, setTapPosition] = React.useState<{ x: number; y: number } | null>(null);
   const lastTap = React.useRef<number>(0);
   const touchHandled = React.useRef<boolean>(false);
-  const singleTapTimer = React.useRef<NodeJS.Timeout | null>(null);
+  const singleTapTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const isProcessingDoubleTap = React.useRef<boolean>(false);
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const imageRef = React.useRef<HTMLImageElement>(null);
@@ -756,7 +759,8 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   }, [stickers, url, currentIndex]);
 
   // Video control functions
-  const togglePlayPause = () => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _togglePlayPause = () => {
     if (videoRef.current) {
       if (videoRef.current.paused) {
         videoRef.current.play().catch((error) => {
@@ -882,7 +886,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     if (timeSinceLastTap < DOUBLE_TAP_THRESHOLD) {
       // Double tap detected
       isProcessingDoubleTap.current = true;
-      
+
       // Get tap position relative to media container
       let tapX = 0;
       let tapY = 0;
@@ -891,7 +895,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
 
       if (mediaContainerRef.current && e) {
         const rect = mediaContainerRef.current.getBoundingClientRect();
-        
+
         if ('touches' in e && e.touches.length > 0) {
           // Touch event - use touch position
           clientX = e.touches[0].clientX;
@@ -909,7 +913,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
           clientX = rect.left + rect.width / 2;
           clientY = rect.top + rect.height / 2;
         }
-        
+
         tapX = clientX - rect.left;
         tapY = clientY - rect.top;
       } else {
@@ -922,18 +926,18 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
           clientY = rect.top + tapY;
         }
       }
-      
+
       // Set tap position for heart animation
       setTapPosition({ x: tapX, y: tapY });
-      
+
       // Trigger heart animation callback
       if (onHeartAnimation) {
         onHeartAnimation(clientX, clientY);
       }
-      
+
       // Show burst animation
       setBurst(true);
-      
+
       try {
         // Call the like handler
         await onDoubleLike();
@@ -944,7 +948,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
         setTimeout(() => {
           setBurst(false);
         }, ANIMATION_DURATIONS.HEART_BURST);
-        
+
         setTimeout(() => {
           setTapPosition(null);
           isProcessingDoubleTap.current = false;
@@ -960,7 +964,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
         singleTapTimer.current = null;
       }, DOUBLE_TAP_THRESHOLD);
     }
-    
+
     // Always update lastTap for next potential double-tap
     lastTap.current = now;
   }
@@ -1041,7 +1045,8 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     }
   }
 
-  function handleDotClick(index: number) {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  function _handleDotClick(index: number) {
     setCurrentIndex(index);
   }
 
@@ -1050,7 +1055,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   // We'll adapt to the media's aspect ratio but with reasonable limits
   const getAspectRatio = (): string => {
     if (!aspectRatio) return '1/1'; // Default to square
-    
+
     // Clamp aspect ratio to reasonable Instagram-like ranges
     // Portrait: max 4:5 (0.8), Landscape: max 1.91:1 (1.91)
     const clampedRatio = Math.max(0.8, Math.min(1.91, aspectRatio));
@@ -1089,7 +1094,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
         {(() => {
           // Get effects for current media item
           const itemEffects = currentItem.effects || [];
-          
+
           // Create media element
           let mediaElement = currentItem.type === 'video' ? (
             <video
@@ -1130,7 +1135,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
               onError={handleImageError}
             />
           );
-          
+
           // Apply effects in reverse order (last effect wraps everything)
           itemEffects.forEach((effect: EffectConfig) => {
             mediaElement = (
@@ -1139,11 +1144,11 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
               </EffectWrapper>
             );
           });
-          
+
           return (
             <div className="relative w-full h-full">
               {mediaElement}
-              
+
               {/* Loading Spinner */}
               {isLoading && (
                 <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-50 z-50">
@@ -1284,25 +1289,25 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
           const hasTaggedUsers = taggedUsers && Array.isArray(taggedUsers) && taggedUsers.length > 0;
           const hasHandler = !!onShowTaggedUsers;
           const shouldShow = hasTaggedUsers && hasHandler;
-          
+
           if (hasTaggedUsers && !hasHandler) {
             console.warn('Media: taggedUsers exists but onShowTaggedUsers is missing', { taggedUsers, onShowTaggedUsers });
           }
           if (shouldShow) {
             console.log('Media: Showing tag icon', { taggedUsers, count: taggedUsers.length });
           }
-          
+
           return shouldShow;
         })() ? (
           <div className="absolute bottom-4 left-4 z-40">
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onShowTaggedUsers();
+                onShowTaggedUsers?.();
               }}
               className="w-10 h-10 rounded-full bg-black bg-opacity-70 flex items-center justify-center hover:bg-opacity-90 transition-all shadow-lg"
               aria-label="View tagged users"
-              title={`View ${taggedUsers.length} tagged ${taggedUsers.length === 1 ? 'person' : 'people'}`}
+              title={`View ${taggedUsers?.length || 0} tagged ${(taggedUsers?.length || 0) === 1 ? 'person' : 'people'}`}
             >
               <svg
                 width="20"
@@ -1341,7 +1346,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
         )}
         {/* Heart pop-up animation at tap position */}
         {tapPosition && (
-          <div 
+          <div
             className="absolute pointer-events-none z-50 transition-opacity duration-300"
             style={{
               left: `${tapPosition.x}px`,
@@ -1370,7 +1375,7 @@ function HeartDropAnimation({ startX, startY, targetElement, onComplete }: { sta
 
   React.useEffect(() => {
     if (!targetElement) return;
-    
+
     // Get target position (like button center)
     try {
       const rect = targetElement.getBoundingClientRect();
@@ -1382,11 +1387,11 @@ function HeartDropAnimation({ startX, startY, targetElement, onComplete }: { sta
       // Animate using requestAnimationFrame
       const animate = () => {
         if (!startTimeRef.current) return;
-        
+
         const elapsed = Date.now() - startTimeRef.current;
         const duration = 800; // 800ms
         const t = Math.min(elapsed / duration, 1);
-        
+
         // Ease-in function
         const eased = t * t;
         setProgress(eased);
@@ -1432,9 +1437,9 @@ function HeartDropAnimation({ startX, startY, targetElement, onComplete }: { sta
         transition: 'none'
       }}
     >
-      <svg 
-        className="w-20 h-20 text-red-500 drop-shadow-lg" 
-        viewBox="0 0 24 24" 
+      <svg
+        className="w-20 h-20 text-red-500 drop-shadow-lg"
+        viewBox="0 0 24 24"
         fill="currentColor"
       >
         <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
@@ -1880,14 +1885,14 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         {post.text && !post.mediaUrl && (!post.mediaItems || post.mediaItems.length === 0) ? (
           <TextCard text={post.text} onDoubleLike={onLike} textStyle={post.textStyle} stickers={post.stickers} onOpenScenes={onOpenScenes} />
         ) : (
-          <Media 
-            url={post.mediaUrl} 
-            mediaType={post.mediaType} 
-            text={post.text} 
-            imageText={post.imageText} 
-            stickers={post.stickers} 
-            mediaItems={post.mediaItems} 
-            onDoubleLike={onLike} 
+          <Media
+            url={post.mediaUrl}
+            mediaType={post.mediaType}
+            text={post.text}
+            imageText={post.imageText}
+            stickers={post.stickers}
+            mediaItems={post.mediaItems}
+            onDoubleLike={onLike}
             onOpenScenes={onOpenScenes}
             onCarouselIndexChange={setCarouselIndex}
             onHeartAnimation={(clientX, clientY) => {
@@ -1917,11 +1922,10 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
                   {post.mediaItems.map((_, index) => (
                     <div
                       key={index}
-                      className={`w-2 h-2 rounded-full transition-all ${
-                        index === carouselIndex
-                          ? 'bg-gray-900 dark:bg-gray-100 w-6'
-                          : 'bg-gray-300 dark:bg-gray-600'
-                      }`}
+                      className={`w-2 h-2 rounded-full transition-all ${index === carouselIndex
+                        ? 'bg-gray-900 dark:bg-gray-100 w-6'
+                        : 'bg-gray-300 dark:bg-gray-600'
+                        }`}
                     />
                   ))}
                 </div>

@@ -11,11 +11,11 @@ export type EffectConfig = {
 };
 
 // Stub functions for compatibility (not used by top 3 templates)
-export function getColorGradingFilter(preset: string, intensity: number): string {
+export function getColorGradingFilter(_preset: string, _intensity: number): string {
     return '';
 }
 
-export function getGlitchVHSStyles(intensity: number): React.CSSProperties {
+export function getGlitchVHSStyles(_intensity: number): React.CSSProperties {
     return {};
 }
 

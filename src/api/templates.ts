@@ -1,4 +1,4 @@
-import { VideoTemplate, TemplateClip } from '../types';
+import { VideoTemplate } from '../types';
 
 // Mock storage for templates
 // Only top 3 templates: Gazetteer, Instagram, TikTok
@@ -93,17 +93,17 @@ export async function getTemplates(category?: string): Promise<VideoTemplate[]> 
         const bIsNew = b.id === 'template-7' || b.id === 'template-8' || b.id === 'template-9';
         if (aIsNew && !bIsNew) return -1;
         if (!aIsNew && bIsNew) return 1;
-        
+
         // Among new templates, sort by ID (Gazetteer first, then Instagram, then TikTok)
         if (aIsNew && bIsNew) {
             const order = ['template-9', 'template-7', 'template-8'];
             return order.indexOf(a.id) - order.indexOf(b.id);
         }
-        
+
         // Then by trending
         if (a.isTrending && !b.isTrending) return -1;
         if (!a.isTrending && b.isTrending) return 1;
-        
+
         // Then by usage count
         return b.usageCount - a.usageCount;
     });
