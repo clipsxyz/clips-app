@@ -382,17 +382,17 @@ export default function ClipPage() {
             }}
           >
             {/* Text Display Area */}
-            <div className="w-full h-full flex flex-col items-center justify-center px-4 pointer-events-none">
+            <div className="w-full h-full flex flex-col items-center justify-center px-4 pointer-events-none max-w-full overflow-hidden">
               {!text.trim() ? (
                 <div className="text-white/60 text-lg font-medium">
                   Tap to type
                 </div>
               ) : (
                 <div
-                  className={`text-center w-full ${getTextSizeClass()}`}
+                  className={`text-center w-full max-w-full overflow-hidden ${getTextSizeClass()}`}
                   style={{ color: textColor }}
                 >
-                  <div className="leading-relaxed whitespace-pre-wrap font-bold drop-shadow-lg">
+                  <div className="leading-relaxed whitespace-pre-wrap font-bold drop-shadow-lg break-words" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', maxWidth: '100%' }}>
                     {text}
                   </div>
                 </div>

@@ -1,9 +1,11 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { FiCompass, FiX, FiSearch, FiMapPin, FiMenu, FiHome, FiHeart } from 'react-icons/fi';
+import { FiCompass, FiX, FiSearch, FiMapPin, FiMenu, FiHome, FiHeart, FiPlay } from 'react-icons/fi';
 import Avatar from './Avatar';
 import { getUnreadTotal } from '../api/messages';
 import { useAuth } from '../context/Auth';
+import { fetchFollowedUsersStoryGroups } from '../api/stories';
+import { getFollowedUsers } from '../api/posts';
 
 type TopBarProps = {
   activeTab?: string;
@@ -19,6 +21,47 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
   const [hasInbox, setHasInbox] = React.useState(false);
   const [unreadCount, setUnreadCount] = React.useState(0);
   const [lastSender, setLastSender] = React.useState<string | null>(null);
+  const [hasNewStories, setHasNewStories] = React.useState(false);
+
+  // Check for new stories from followed users
+  const checkNewStories = React.useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const followedUserHandles = await getFollowedUsers(user.id);
+      const storyGroups = await fetchFollowedUsersStoryGroups(user.id, followedUserHandles);
+      
+      // Check if any story group has unviewed stories
+      const hasUnviewed = storyGroups.some(group => 
+        group.stories.some(story => !story.hasViewed && story.expiresAt > Date.now())
+      );
+      setHasNewStories(hasUnviewed);
+    } catch (error) {
+      console.error('Error checking new stories:', error);
+    }
+  }, [user?.id]);
+
+  React.useEffect(() => {
+    checkNewStories();
+    // Check periodically for new stories
+    const interval = setInterval(checkNewStories, 30000); // Check every 30 seconds
+    
+    // Listen for story events to update immediately
+    const handleStoryCreated = () => {
+      checkNewStories();
+    };
+    const handleStoriesViewed = () => {
+      checkNewStories();
+    };
+    
+    window.addEventListener('storyCreated', handleStoryCreated);
+    window.addEventListener('storiesViewed', handleStoriesViewed);
+    
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('storyCreated', handleStoryCreated);
+      window.removeEventListener('storiesViewed', handleStoriesViewed);
+    };
+  }, [checkNewStories]);
 
   // Listen for new messages/replies and unread count
   React.useEffect(() => {
@@ -86,7 +129,10 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
   };
 
   const handleDiscoverClick = () => {
-    navigate('/discover');
+    // Navigate to feed with Following tab active
+    navigate('/feed');
+    // Dispatch event to set Following tab
+    window.dispatchEvent(new CustomEvent('setFollowingTab'));
   };
 
   return (
@@ -129,9 +175,47 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
               </button>
 
               <button
+                onClick={() => navigate('/stories')}
+                className="flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+                aria-label="View Stories"
+                title="Stories"
+                style={{
+                  outline: 'none',
+                  boxShadow: 'none'
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.outline = 'none';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                <div className="relative w-6 h-6">
+                  {/* Gradient border ring when there are new stories (Gazetteer-style) */}
+                  {hasNewStories ? (
+                    <div className="absolute -inset-0.5 rounded-full p-[2px]" style={{
+                      background: 'linear-gradient(45deg, #10b981 0%, #22d3ee 25%, #3b82f6 50%, #6366f1 75%, #8b5cf6 100%)',
+                    }}>
+                      <div className="w-full h-full rounded-full bg-white dark:bg-gray-950 flex items-center justify-center">
+                        <FiPlay className="w-3 h-3 text-gray-900 dark:text-gray-100" />
+                      </div>
+                    </div>
+                  ) : (
+                    /* Play button with gray border when no new stories */
+                    <div className="w-6 h-6 rounded-full overflow-hidden ring-2 ring-gray-300 dark:ring-gray-700 bg-white dark:bg-gray-950 flex items-center justify-center">
+                      <FiPlay className="w-3 h-3 text-gray-900 dark:text-gray-100" />
+                    </div>
+                  )}
+                </div>
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Clips 24
+                </span>
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
                 onClick={handleDiscoverClick}
                 className="flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                aria-label="Discover new locations"
+                aria-label="View Following feed"
               >
                 <div className="relative w-6 h-6">
                   <div className="absolute inset-0 rounded-md bg-gradient-to-r from-emerald-500 via-blue-500 to-violet-500 opacity-75 blur-sm animate-pulse"></div>
@@ -147,33 +231,7 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
                   </div>
                 </div>
                 <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Discover
-                </span>
-              </button>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => navigate('/stories')}
-                className="flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                aria-label="View Stories"
-                title="Stories"
-              >
-                <div className="relative w-6 h-6">
-                  <div className="absolute inset-0 rounded-md bg-gradient-to-r from-emerald-500 via-blue-500 to-violet-500 opacity-75 blur-sm animate-pulse"></div>
-                  <div className="absolute inset-[1px] rounded-md bg-gray-950 dark:bg-gray-950">
-                    <div className="absolute inset-0 rounded-md" style={{
-                      background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.5), transparent)',
-                      backgroundSize: '200% 100%',
-                      animation: 'shimmer 3s linear infinite',
-                    }}></div>
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-                      <FiMapPin className="w-3 h-3 text-white" />
-                    </div>
-                  </div>
-                </div>
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Clips
+                  Following
                 </span>
               </button>
 

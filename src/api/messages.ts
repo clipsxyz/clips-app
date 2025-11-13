@@ -5,6 +5,9 @@ export interface ChatMessage {
     imageUrl?: string;
     timestamp: number;
     isSystemMessage?: boolean;
+    postId?: string; // For comment notifications - the post that was commented on
+    commentId?: string; // For comment notifications - the comment ID
+    commentText?: string; // For comment notifications - the comment text
 }
 
 type ConversationId = string; // sorted `${a}|${b}`
@@ -33,7 +36,10 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
         text: message.text,
         imageUrl: message.imageUrl,
         isSystemMessage: message.isSystemMessage,
-        timestamp: message.timestamp ?? Date.now()
+        timestamp: message.timestamp ?? Date.now(),
+        postId: message.postId, // Preserve postId for comment notifications
+        commentId: message.commentId, // Preserve commentId for comment notifications
+        commentText: message.commentText // Preserve commentText for comment notifications
     };
     list.push(msg);
     conversations.set(id, list);

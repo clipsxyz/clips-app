@@ -1,16 +1,19 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { FiX, FiHeart, FiShare2, FiRepeat } from 'react-icons/fi';
+import { FiX, FiHeart, FiShare2, FiRepeat, FiMapPin } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import Avatar from './Avatar';
 import ShareModal from './ShareModal';
 import StickerOverlayComponent from './StickerOverlay';
 import EffectWrapper from './EffectWrapper';
+import Flag from './Flag';
 import type { EffectConfig } from '../utils/effects';
 import { useAuth } from '../context/Auth';
 import { useOnline } from '../hooks/useOnline';
 import { addComment } from '../api/posts';
 import { enqueue } from '../utils/mutationQueue';
+import { getAvatarForHandle, getFlagForHandle } from '../api/users';
+import { timeAgo } from '../utils/timeAgo';
 import type { Post } from '../types';
 
 type ScenesModalProps = {
@@ -156,7 +159,7 @@ export default function ScenesModal({
             window.removeEventListener(`commentAdded-${post.id}`, handleCommentAdded);
             window.removeEventListener(`likeToggled-${post.id}`, handleLikeToggled as EventListener);
             window.removeEventListener(`shareAdded-${post.id}`, handleShareAdded);
-            window.removeEventListener(`reclipAdded-${post.id}`, handleReclipAdded);
+            window.removeEventListener(`reclipAdded-${post.id}`, handleReclipAdded as EventListener);
         };
     }, [post.id]);
 
@@ -177,7 +180,7 @@ export default function ScenesModal({
     async function handleLike() {
         if (busy) return;
         setBusy(true);
-        let previousLiked: boolean;
+        let previousLiked: boolean = liked;
         try {
             // Optimistically update liked state immediately using functional updates
             setLiked(prev => {
@@ -244,7 +247,7 @@ export default function ScenesModal({
         handleMediaTap();
     }, [handleMediaTap]);
 
-    const handleMediaTouchEnd = React.useCallback((e: React.TouchEvent) => {
+    const handleMediaTouchEnd = React.useCallback(() => {
         touchHandledRef.current = true;
         handleMediaTap();
         setTimeout(() => {
@@ -389,7 +392,7 @@ export default function ScenesModal({
                         onClick={(e) => {
                             // Only handle media click if clicking directly on the media area (not on buttons)
                             if (e.target === e.currentTarget || (e.target instanceof HTMLElement && !e.target.closest('button'))) {
-                                handleMediaClick();
+                                handleMediaClick(e);
                             }
                         }}
                         onTouchEnd={handleMediaTouchEnd}
@@ -397,7 +400,7 @@ export default function ScenesModal({
                         {currentItem ? (() => {
                             // Get effects for current media item
                             const itemEffects = currentItem.effects || [];
-                            
+
                             // Create media element
                             let mediaElement = currentItem.type === 'video' ? (
                                 <div className="relative w-full h-full">
@@ -436,7 +439,7 @@ export default function ScenesModal({
                                     alt={post.caption || post.text || 'Post media'}
                                 />
                             );
-                            
+
                             // Apply effects in reverse order (last effect wraps everything)
                             itemEffects.forEach((effect: EffectConfig) => {
                                 mediaElement = (
@@ -445,36 +448,92 @@ export default function ScenesModal({
                                     </EffectWrapper>
                                 );
                             });
-                            
+
                             return mediaElement;
                         })() : (
-                            // Text-only post display with styling
-                            <div 
-                                className="w-full h-full flex items-center justify-center px-6"
-                                style={{
-                                    background: post.textStyle?.background?.includes('gradient') 
-                                        ? undefined 
-                                        : post.textStyle?.background,
-                                    backgroundImage: post.textStyle?.background?.includes('gradient') 
-                                        ? post.textStyle.background 
-                                        : undefined
-                                }}
-                            >
-                                <div className="text-center w-full">
-                                    {post.text && (
-                                        <div 
-                                            className={`leading-relaxed whitespace-pre-wrap font-bold drop-shadow-lg ${
-                                                post.textStyle?.size === 'small' ? 'text-4xl' :
-                                                post.textStyle?.size === 'large' ? 'text-8xl' :
-                                                'text-6xl'
-                                            }`}
-                                            style={{ color: post.textStyle?.color || 'white' }}
-                                        >
-                                            {post.text}
+                            // Text-only post display
+                            // Check if this is a shared text-only post (no media, has text) - show as post card screenshot
+                            !post.mediaUrl && !post.mediaItems?.length && post.text ? (
+                                // Display as screenshot of original post card (like StoriesPage)
+                                <div
+                                    className="w-full h-full flex items-center justify-center p-4"
+                                    style={{
+                                        background: '#000000' // Black background
+                                    }}
+                                >
+                                    <div className="w-full max-w-md rounded-2xl overflow-hidden bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-2xl" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
+                                        {/* Post Header */}
+                                        <div className="flex items-start justify-between px-4 pt-4 pb-3 border-b border-gray-200 dark:border-gray-700">
+                                            <div className="flex items-center gap-3 flex-1">
+                                                <Avatar
+                                                    src={getAvatarForHandle(post.userHandle)}
+                                                    name={post.userHandle.split('@')[0]}
+                                                    size="sm"
+                                                />
+                                                <div className="flex-1">
+                                                    <h3 className="font-semibold flex items-center gap-1.5 text-gray-900 dark:text-gray-100 text-sm">
+                                                        <span>{post.userHandle}</span>
+                                                        <Flag
+                                                            value={getFlagForHandle(post.userHandle) || ''}
+                                                            size={14}
+                                                        />
+                                                    </h3>
+                                                    <div className="text-xs text-gray-600 dark:text-gray-300 flex items-center gap-2 mt-0.5">
+                                                        {post.locationLabel && (
+                                                            <>
+                                                                <span className="flex items-center gap-1">
+                                                                    <FiMapPin className="w-3 h-3" />
+                                                                    {post.locationLabel}
+                                                                </span>
+                                                                {post.createdAt && <span className="text-gray-400">·</span>}
+                                                            </>
+                                                        )}
+                                                        {post.createdAt && (
+                                                            <span>{timeAgo(post.createdAt)}</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
-                                    )}
+
+                                        {/* Text Content - styled like feed */}
+                                        <div className="p-4 w-full overflow-hidden" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
+                                            <div className="p-4 rounded-lg bg-black overflow-hidden w-full" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
+                                                <div className="text-base leading-relaxed whitespace-pre-wrap font-normal text-white break-words w-full" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', maxWidth: '100%', boxSizing: 'border-box' }}>
+                                                    {post.text}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
+                            ) : (
+                                // Text-only story display (directly created, not shared) - keep original style with gradient/textStyle
+                                <div
+                                    className="w-full h-full flex items-center justify-center px-6"
+                                    style={{
+                                        background: post.textStyle?.background?.includes('gradient')
+                                            ? undefined
+                                            : post.textStyle?.background,
+                                        backgroundImage: post.textStyle?.background?.includes('gradient')
+                                            ? post.textStyle.background
+                                            : undefined
+                                    }}
+                                >
+                                    <div className="text-center w-full max-w-full overflow-hidden px-4">
+                                        {post.text && (
+                                            <div
+                                                className={`leading-relaxed whitespace-pre-wrap font-bold drop-shadow-lg break-words ${post.textStyle?.size === 'small' ? 'text-4xl' :
+                                                    post.textStyle?.size === 'large' ? 'text-8xl' :
+                                                        'text-6xl'
+                                                    }`}
+                                                style={{ color: post.textStyle?.color || 'white', wordBreak: 'break-word', overflowWrap: 'anywhere', maxWidth: '100%' }}
+                                            >
+                                                {post.text}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )
                         )}
 
                         {/* Sticker Overlays */}
@@ -683,12 +742,17 @@ export default function ScenesModal({
                                     </div>
                                 )}
 
-                                {/* Text Content (for text-only posts without media) */}
-                                {!post.mediaUrl && post.text && (
+                                {/* Text Content (for text-only posts without media) - Only show if NOT displaying as post card screenshot */}
+                                {/* Don't show text in bottom if it's a text-only post (will be shown in post card screenshot above) */}
+                                {!post.mediaUrl && !post.mediaItems?.length && post.text ? (
+                                    // Text-only post - text is shown in post card screenshot, so don't show here
+                                    null
+                                ) : !post.mediaUrl && post.text ? (
+                                    // Other text-only cases (if any) - show text
                                     <div className="text-white text-sm opacity-90 whitespace-pre-line mb-2">
                                         {post.text}
                                     </div>
-                                )}
+                                ) : null}
 
                                 {/* Comment Count - Clickable to open comments */}
                                 {comments > 0 && (

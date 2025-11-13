@@ -6,7 +6,7 @@ import { getFlagForHandle } from '../api/users';
 import Flag from '../components/Flag';
 import { useAuth } from '../context/Auth';
 import { fetchPostsPage, toggleFollowForPost } from '../api/posts';
-import { userHasStoriesByHandle } from '../api/stories';
+import { userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/stories';
 import type { Post } from '../types';
 
 export default function ViewProfilePage() {
@@ -106,12 +106,20 @@ export default function ViewProfilePage() {
         loadProfile();
     }, [handle, user?.id]);
 
-    // Check if user has stories
+    // Check if user has stories (unviewed for others, any for current user)
     React.useEffect(() => {
         async function checkStory() {
             if (!handle) return;
             try {
-                const result = await userHasStoriesByHandle(handle);
+                const isCurrentUser = handle === user?.handle;
+                let result;
+                if (isCurrentUser) {
+                    // For current user, check if they have any stories
+                    result = await userHasStoriesByHandle(handle);
+                } else {
+                    // For other users, check if current user has unviewed stories
+                    result = await userHasUnviewedStoriesByHandle(handle);
+                }
                 setHasStory(result);
             } catch (error) {
                 console.error('Error checking story:', error);

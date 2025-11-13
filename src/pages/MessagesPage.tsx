@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { FiChevronLeft, FiSend, FiCornerUpLeft, FiCopy, FiMoreHorizontal } from 'react-icons/fi';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { FiChevronLeft, FiSend, FiCornerUpLeft, FiCopy, FiMoreHorizontal, FiMapPin } from 'react-icons/fi';
 import { IoMdPhotos } from 'react-icons/io';
 import { BsEmojiSmile } from 'react-icons/bs';
 import { FaPaperPlane, FaExclamationCircle } from 'react-icons/fa';
@@ -8,23 +8,388 @@ import { MdStickyNote2, MdTranslate } from 'react-icons/md';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { fetchConversation, appendMessage, type ChatMessage, markConversationRead } from '../api/messages';
-import { getAvatarForHandle } from '../api/users';
+import { getAvatarForHandle, getFlagForHandle } from '../api/users';
 import { isStoryMediaActive, wasEverAStory } from '../api/stories';
+import { getPostById } from '../api/posts';
+import type { Post } from '../types';
+import Flag from '../components/Flag';
+import { timeAgo } from '../utils/timeAgo';
+import { showToast } from '../utils/toast';
 
 interface MessageUI extends ChatMessage {
     isFromMe: boolean;
     senderAvatar?: string;
 }
 
+// Helper function to extract post ID from message text
+function extractPostId(text: string): string | null {
+    if (!text) return null;
+    
+    // Log the full text for debugging
+    console.log('Extracting post ID from text:', text);
+    
+    // Post IDs can be in multiple formats:
+    // 1. UUID-timestamp: "550e8400-e29b-41d4-a716-446655440000-1234567890123"
+    // 2. Old format: "post-1-0-1763047647804-z58tl94lh"
+    // 3. Artane format: "artane-post-1-1763047647805-ta19qa03v"
+    // 4. Reclip format: "reclip-userId-originalPostId-timestamp"
+    
+    // Pattern 1: Full URL like http://localhost:5173/post/{postId}
+    // Matches any post ID format after /post/
+    const fullUrlPattern = /https?:\/\/[^\s\/]+\/post\/([^\s\/\?&#]+?)(?:\/|\?|#|$)/i;
+    let match = text.match(fullUrlPattern);
+    if (match && match[1]) {
+        console.log('✓ Extracted post ID (full URL):', match[1]);
+        return match[1];
+    }
+    
+    // Pattern 2: Path like /post/{postId} or post/{postId}
+    const pathPattern = /\/?post\/([^\s\/\?&#]+?)(?:\/|\?|#|$|\s)/i;
+    match = text.match(pathPattern);
+    if (match && match[1]) {
+        console.log('✓ Extracted post ID (path):', match[1]);
+        return match[1];
+    }
+    
+    // Pattern 3: Standalone UUID-timestamp format (new posts)
+    // Matches: UUID (36 chars with hyphens) + dash + timestamp (one or more digits)
+    const uuidTimestampPattern = /([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}-\d+)/i;
+    match = text.match(uuidTimestampPattern);
+    if (match && match[1]) {
+        console.log('✓ Extracted post ID (UUID-timestamp):', match[1]);
+        return match[1];
+    }
+    
+    // Pattern 4: Old format: "post-{id}-{index}-{timestamp}-{random}"
+    const oldFormatPattern = /(post-\d+-\d+-\d+-[a-z0-9]+)/i;
+    match = text.match(oldFormatPattern);
+    if (match && match[1]) {
+        console.log('✓ Extracted post ID (old format):', match[1]);
+        return match[1];
+    }
+    
+    // Pattern 5: Artane format: "artane-post-{number}-{timestamp}-{random}"
+    const artaneFormatPattern = /(artane-post-\d+-\d+-[a-z0-9]+)/i;
+    match = text.match(artaneFormatPattern);
+    if (match && match[1]) {
+        console.log('✓ Extracted post ID (artane format):', match[1]);
+        return match[1];
+    }
+    
+    // Pattern 6: Reclip format: "reclip-{userId}-{originalPostId}-{timestamp}"
+    const reclipFormatPattern = /(reclip-[^-]+-[^-]+-\d+)/i;
+    match = text.match(reclipFormatPattern);
+    if (match && match[1]) {
+        console.log('✓ Extracted post ID (reclip format):', match[1]);
+        return match[1];
+    }
+    
+    // Pattern 7: Just UUID (36 chars with hyphens) - fallback for old format
+    const uuidPattern = /([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})(?![-\d])/i;
+    match = text.match(uuidPattern);
+    if (match && match[1]) {
+        console.log('✓ Extracted post ID (UUID only, fallback):', match[1]);
+        return match[1];
+    }
+    
+    console.log('✗ No post ID found in text. Full text:', text);
+    console.log('✗ Tried patterns: full URL, path, UUID-timestamp, old format, artane format, reclip format, UUID only');
+    return null;
+}
+
+
+// Component to render comment notification with post preview (Twitter/X style)
+function CommentCard({ post, commentText, commenterHandle }: { post: Post; commentText: string; commenterHandle: string }) {
+    const hasMediaUrl = post.mediaUrl && post.mediaUrl.trim() !== '';
+    const hasMediaItems = post.mediaItems && post.mediaItems.length > 0;
+    const hasMedia = hasMediaUrl || hasMediaItems;
+    
+    return (
+        <div 
+            className="w-full max-w-md rounded-2xl overflow-hidden border shadow-xl"
+            style={{
+                backgroundColor: '#ffffff', // Force white background
+                borderColor: '#e5e7eb' // Light gray border
+            }}
+        >
+            {/* Comment Header */}
+            <div className="px-4 pt-4 pb-2" style={{ backgroundColor: '#ffffff' }}>
+                <div className="flex items-center gap-2 mb-2">
+                    <Avatar
+                        src={getAvatarForHandle(commenterHandle)}
+                        name={commenterHandle.split('@')[0]}
+                        size="sm"
+                    />
+                    <div className="flex-1">
+                        <div className="flex items-center gap-1.5">
+                            <span className="font-semibold text-sm" style={{ color: '#111827' }}>{commenterHandle}</span>
+                            <Flag
+                                value={getFlagForHandle(commenterHandle) || ''}
+                                size={12}
+                            />
+                            <span className="text-xs" style={{ color: '#6b7280' }}>commented</span>
+                        </div>
+                    </div>
+                </div>
+                {/* Comment Text */}
+                <p className="text-sm mb-3 pl-11" style={{ color: '#111827' }}>{commentText}</p>
+            </div>
+            
+            {/* Post Preview */}
+            <div 
+                className="border-t px-4 py-3"
+                style={{
+                    borderColor: '#e5e7eb',
+                    backgroundColor: '#f9fafb' // Light gray background for preview section
+                }}
+            >
+                <div className="flex items-start gap-3">
+                    <Avatar
+                        src={getAvatarForHandle(post.userHandle)}
+                        name={post.userHandle.split('@')[0]}
+                        size="sm"
+                    />
+                    <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 mb-1">
+                            <span className="font-semibold text-xs" style={{ color: '#111827' }}>{post.userHandle}</span>
+                            <Flag
+                                value={getFlagForHandle(post.userHandle) || ''}
+                                size={10}
+                            />
+                        </div>
+                        {post.text && (
+                            <p className="text-xs line-clamp-2 mb-2" style={{ color: '#4b5563' }}>{post.text}</p>
+                        )}
+                        {hasMedia && (
+                            <div className="rounded-lg overflow-hidden border" style={{ borderColor: '#e5e7eb' }}>
+                                {hasMediaUrl && (
+                                    post.mediaType === 'video' ? (
+                                        <div className="relative">
+                                            <video 
+                                                src={post.mediaUrl} 
+                                                className="w-full h-32 object-cover" 
+                                                muted
+                                                playsInline
+                                            />
+                                            <div className="absolute top-2 right-2 bg-black/50 rounded px-1.5 py-0.5">
+                                                <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
+                                                </svg>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <img src={post.mediaUrl} alt="Post media" className="w-full h-32 object-cover" />
+                                    )
+                                )}
+                                {hasMediaItems && !hasMediaUrl && post.mediaItems && post.mediaItems[0] && (
+                                    post.mediaItems[0].type === 'video' ? (
+                                        <div className="relative">
+                                            <video 
+                                                src={post.mediaItems[0].url} 
+                                                className="w-full h-32 object-cover" 
+                                                muted
+                                                playsInline
+                                            />
+                                            <div className="absolute top-2 right-2 bg-black/50 rounded px-1.5 py-0.5">
+                                                <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
+                                                </svg>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <img src={post.mediaItems[0].url} alt="Post media" className="w-full h-32 object-cover" />
+                                    )
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// Component to render shared post card (matching ScenesModal format exactly - Twitter card style)
+function SharedPostCard({ post }: { post: Post }) {
+    // More strict check: text-only means no real mediaUrl (or empty string), no mediaItems (or empty array), and has text
+    // Exclude data:image URLs (generated images) and check for real media
+    const hasRealMediaUrl = post.mediaUrl && post.mediaUrl.trim() !== '' && !post.mediaUrl.startsWith('data:image');
+    const hasMediaItems = post.mediaItems && post.mediaItems.length > 0;
+    // If post has text and no real media, show as text-only card (Twitter style)
+    // This matches ScenesModal behavior for shared text-only posts
+    const isTextOnly = !!post.text && !hasRealMediaUrl && !hasMediaItems;
+    
+    console.log('SharedPostCard rendering:', { 
+        postId: post.id, 
+        isTextOnly, 
+        hasRealMediaUrl,
+        mediaUrl: post.mediaUrl,
+        hasMediaItems,
+        mediaItemsCount: post.mediaItems?.length || 0,
+        hasText: !!post.text,
+        text: post.text?.substring(0, 50)
+    });
+    
+    // Always show text-only posts as white Twitter card (matching ScenesModal)
+    // Force white background regardless of dark mode - use !important via inline styles
+    if (isTextOnly || (post.text && !hasMediaItems)) {
+        // Match ScenesModal EXACTLY - copy the exact same structure and classes
+        // This is the Twitter card style: white card with black text box
+        return (
+            <div 
+                className="w-full max-w-md rounded-2xl overflow-hidden border shadow-2xl"
+                style={{ 
+                    maxWidth: '100%', 
+                    boxSizing: 'border-box',
+                    backgroundColor: '#ffffff', // Force white background
+                    borderColor: '#e5e7eb', // Light gray border
+                    display: 'block',
+                    visibility: 'visible',
+                    opacity: 1,
+                    color: '#000000', // Force black text for header
+                    background: '#ffffff' // Double-set to override dark mode
+                }}
+            >
+                {/* Post Header - exactly like ScenesModal */}
+                <div 
+                    className="flex items-start justify-between px-4 pt-4 pb-3 border-b" 
+                    style={{ 
+                        backgroundColor: '#ffffff',
+                        borderColor: '#e5e7eb' // Light gray border
+                    }}
+                >
+                    <div className="flex items-center gap-3 flex-1">
+                        <Avatar
+                            src={getAvatarForHandle(post.userHandle)}
+                            name={post.userHandle.split('@')[0]}
+                            size="sm"
+                        />
+                        <div className="flex-1">
+                            <h3 className="font-semibold flex items-center gap-1.5 text-sm" style={{ color: '#111827' }}>
+                                <span>{post.userHandle}</span>
+                                <Flag
+                                    value={getFlagForHandle(post.userHandle) || ''}
+                                    size={14}
+                                />
+                            </h3>
+                            <div className="text-xs flex items-center gap-2 mt-0.5" style={{ color: '#4b5563' }}>
+                                {post.locationLabel && (
+                                    <>
+                                        <span className="flex items-center gap-1">
+                                            <FiMapPin className="w-3 h-3" />
+                                            {post.locationLabel}
+                                        </span>
+                                        {post.createdAt && <span style={{ color: '#9ca3af' }}>·</span>}
+                                    </>
+                                )}
+                                {post.createdAt && (
+                                    <span>{timeAgo(post.createdAt)}</span>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Text Content - styled exactly like ScenesModal - white card with black text box */}
+                <div 
+                    className="p-4 w-full overflow-hidden" 
+                    style={{ 
+                        maxWidth: '100%', 
+                        boxSizing: 'border-box', 
+                        backgroundColor: '#ffffff' // White background
+                    }}
+                >
+                    <div 
+                        className="p-4 rounded-lg overflow-hidden w-full" 
+                        style={{ 
+                            maxWidth: '100%', 
+                            boxSizing: 'border-box', 
+                            backgroundColor: '#000000' // Black box for text
+                        }}
+                    >
+                        <div 
+                            className="text-base leading-relaxed whitespace-pre-wrap font-normal break-words w-full" 
+                            style={{ 
+                                wordBreak: 'break-word', 
+                                overflowWrap: 'anywhere', 
+                                maxWidth: '100%', 
+                                boxSizing: 'border-box', 
+                                color: '#ffffff' // White text in black box
+                            }}
+                        >
+                            {post.text}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+    
+    // For posts with media, show a simple preview with forced white background
+    return (
+        <div 
+            className="w-full max-w-sm rounded-2xl overflow-hidden border shadow-lg mt-2"
+            style={{
+                backgroundColor: '#ffffff', // Force white background
+                borderColor: '#e5e7eb' // Light gray border
+            }}
+        >
+            <div className="p-4" style={{ backgroundColor: '#ffffff' }}>
+                <div className="flex items-center gap-2 mb-2">
+                    <Avatar
+                        src={getAvatarForHandle(post.userHandle)}
+                        name={post.userHandle.split('@')[0]}
+                        size="sm"
+                    />
+                    <span className="font-semibold text-sm" style={{ color: '#111827' }}>{post.userHandle}</span>
+                </div>
+                {post.text && (
+                    <p className="text-sm line-clamp-2" style={{ color: '#374151' }}>{post.text}</p>
+                )}
+                {post.mediaUrl && (
+                    <div className="mt-2 rounded-lg overflow-hidden">
+                        {post.mediaType === 'video' ? (
+                            <video src={post.mediaUrl} className="w-full h-auto max-h-48 object-cover" controls />
+                        ) : (
+                            <img src={post.mediaUrl} alt="Post media" className="w-full h-auto max-h-48 object-cover" />
+                        )}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
 export default function MessagesPage() {
     const navigate = useNavigate();
+    const location = useLocation();
     const { handle } = useParams<{ handle: string }>();
     const { user } = useAuth();
     const [messages, setMessages] = useState<MessageUI[]>([]);
     const [storyActiveByUrl, setStoryActiveByUrl] = useState<Record<string, boolean>>({});
     const [messageText, setMessageText] = useState('');
+    
+    // Store sharePostId from location.state so we can include it when sending
+    const [pendingSharePostId, setPendingSharePostId] = React.useState<string | null>(null);
+    
+    // Check if we're coming from ShareModal with a post to share
+    React.useEffect(() => {
+        const state = location.state as any;
+        if (state?.sharePostUrl && handle) {
+            // Auto-fill the message input with the post URL
+            setMessageText(state.sharePostUrl);
+            // Store the postId so we can include it in the message
+            if (state.sharePostId) {
+                setPendingSharePostId(state.sharePostId);
+            }
+            // Clear the state to prevent re-triggering
+            window.history.replaceState({ ...state, sharePostUrl: null, sharePostId: null }, '');
+            showToast?.('Post link ready to send!');
+        }
+    }, [location.state, handle]);
     const [loading, setLoading] = useState(true);
     const [otherUserAvatar, setOtherUserAvatar] = useState<string | undefined>(undefined);
+    const [sharedPosts, setSharedPosts] = useState<Record<string, Post>>({});
     const fileInputRef = React.useRef<HTMLInputElement>(null);
     const listRef = React.useRef<HTMLDivElement>(null);
 
@@ -354,6 +719,23 @@ export default function MessagesPage() {
                 isFromMe: m.senderHandle === user.handle,
                 senderAvatar: m.senderHandle === user.handle ? (user.avatarUrl || getAvatarForHandle(user.handle)) : getAvatarForHandle(handle)
             }));
+            
+            // Debug: Log all messages to see their structure
+            console.log('=== LOADED MESSAGES ===');
+            mapped.forEach((m, idx) => {
+                console.log(`Message ${idx + 1}:`, {
+                    id: m.id,
+                    sender: m.senderHandle,
+                    text: m.text?.substring(0, 50),
+                    postId: m.postId || 'NO POST ID',
+                    commentId: m.commentId || 'NO COMMENT ID',
+                    commentText: m.commentText || 'NO COMMENT TEXT',
+                    isSystemMessage: m.isSystemMessage,
+                    hasImage: !!m.imageUrl
+                });
+            });
+            console.log('=== END LOADED MESSAGES ===');
+            
             setMessages(mapped);
             setLoading(false);
             // Initialize refs
@@ -366,6 +748,53 @@ export default function MessagesPage() {
             const urls = Array.from(new Set(mapped.map(m => m.imageUrl).filter(Boolean) as string[]));
             Promise.all(urls.map(async (u) => [u, await isStoryMediaActive(u)] as const))
                 .then(entries => setStoryActiveByUrl(Object.fromEntries(entries)));
+            
+            // Detect and fetch shared posts (from postId field, URLs in text, and comment notifications)
+            const postIds = new Set<string>();
+            mapped.forEach(msg => {
+                // Check postId field first (most reliable)
+                if (msg.postId) {
+                    console.log('Found postId in message field:', msg.postId, 'commentText:', msg.commentText);
+                    postIds.add(msg.postId);
+                }
+                // Also check for post URLs in text (fallback)
+                else if (msg.text) {
+                    const postId = extractPostId(msg.text);
+                    if (postId) {
+                        console.log('Found post ID in message text:', postId);
+                        postIds.add(postId);
+                    }
+                }
+            });
+            
+            console.log('Fetching posts for IDs:', Array.from(postIds));
+            
+            // Fetch all detected posts
+            Promise.all(Array.from(postIds).map(async (postId) => {
+                try {
+                    console.log('Fetching post:', postId);
+                    const post = await getPostById(postId);
+                    if (post) {
+                        console.log('Successfully fetched post:', {
+                            postId: post.id,
+                            userHandle: post.userHandle,
+                            hasText: !!post.text,
+                            text: post.text?.substring(0, 50),
+                            hasMediaUrl: !!post.mediaUrl,
+                            mediaUrl: post.mediaUrl,
+                            hasMediaItems: !!(post.mediaItems && post.mediaItems.length > 0),
+                            mediaItemsCount: post.mediaItems?.length || 0,
+                            hasTextStyle: !!post.textStyle,
+                            textStyle: post.textStyle
+                        });
+                        setSharedPosts(prev => ({ ...prev, [postId]: post }));
+                    } else {
+                        console.warn('Post not found:', postId);
+                    }
+                } catch (error) {
+                    console.error('Failed to fetch shared post:', postId, error);
+                }
+            }));
         });
 
         // Live updates
@@ -381,10 +810,56 @@ export default function MessagesPage() {
                     senderAvatar: m.senderHandle === user!.handle ? (user!.avatarUrl || getAvatarForHandle(user!.handle)) : getAvatarForHandle(handle!)
                 }));
 
+                // Debug: Log new messages
+                console.log('Live update - new messages:', mapped.map(m => ({
+                    id: m.id,
+                    sender: m.senderHandle,
+                    text: m.text?.substring(0, 30),
+                    postId: m.postId,
+                    commentText: m.commentText,
+                    isSystemMessage: m.isSystemMessage
+                })));
+
                 // Reset the refs so the useEffect will detect the change
                 lastMessageCountRef.current = 0;
                 lastMessageIdRef.current = null;
                 setMessages(mapped);
+                
+                // Detect and fetch shared posts in new messages (from postId field, URLs in text, and comment notifications)
+                const postIds = new Set<string>();
+                mapped.forEach(msg => {
+                    // Check postId field first (most reliable)
+                    if (msg.postId) {
+                        console.log('Live update - Found postId in message field:', msg.postId, 'commentText:', msg.commentText);
+                        postIds.add(msg.postId);
+                    }
+                    // Also check for post URLs in text (fallback)
+                    else if (msg.text) {
+                        const postId = extractPostId(msg.text);
+                        if (postId) {
+                            console.log('Live update - Found post ID in message text:', postId);
+                            postIds.add(postId);
+                        }
+                    }
+                });
+                
+                console.log('Live update - Fetching posts for IDs:', Array.from(postIds));
+                
+                // Fetch all detected posts
+                Promise.all(Array.from(postIds).map(async (postId) => {
+                    try {
+                        console.log('Live update - Fetching post:', postId);
+                        const post = await getPostById(postId);
+                        if (post) {
+                            console.log('Live update - Successfully fetched post:', postId, 'userHandle:', post.userHandle);
+                            setSharedPosts(prev => ({ ...prev, [postId]: post }));
+                        } else {
+                            console.warn('Live update - Post not found:', postId);
+                        }
+                    } catch (error) {
+                        console.error('Live update - Failed to fetch shared post:', postId, error);
+                    }
+                }));
 
                 // Force scroll after messages are set - try multiple times for reliability
                 const forceScrollRealTime = () => {
@@ -431,6 +906,20 @@ export default function MessagesPage() {
         if (!messageText.trim()) return;
         if (!user?.handle || !handle) return;
 
+        // Get postId from pendingSharePostId or extract from text
+        const postId = pendingSharePostId || extractPostId(messageText);
+        
+        if (postId && !sharedPosts[postId]) {
+            // Fetch the post immediately so it can be displayed
+            getPostById(postId).then(post => {
+                if (post) {
+                    setSharedPosts(prev => ({ ...prev, [postId]: post }));
+                }
+            }).catch(error => {
+                console.error('Failed to fetch shared post:', error);
+            });
+        }
+
         // Optimistically add message to state immediately for instant UI update
         const tempMessage: MessageUI = {
             id: `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -439,7 +928,8 @@ export default function MessagesPage() {
             timestamp: Date.now(),
             isFromMe: true,
             senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle),
-            isSystemMessage: false
+            isSystemMessage: false,
+            postId: postId || undefined // Include postId if available
         };
 
         // Add message immediately to state
@@ -448,13 +938,17 @@ export default function MessagesPage() {
             return sorted;
         });
         setMessageText('');
+        setPendingSharePostId(null); // Clear pending postId
 
         // Scroll to bottom immediately
         setTimeout(() => scrollToBottom(), 100);
 
         // Then send to API (will update state again via event)
-        // Notifications are created automatically in appendMessage
-        await appendMessage(user.handle, handle, { text: messageText });
+        // Include postId in the message so it's stored properly
+        await appendMessage(user.handle, handle, { 
+            text: messageText,
+            postId: postId || undefined
+        });
     };
 
     const handleSendSticker = async (sticker: string) => {
@@ -709,54 +1203,358 @@ export default function MessagesPage() {
                                         className={`flex ${msg.isFromMe ? 'justify-end' : 'justify-start'} ${showTimestamp ? 'mt-4' : ''}`}
                                     >
                                         {msg.isFromMe ? (
-                                            <div
-                                                className="bg-purple-600 rounded-2xl px-4 py-2 max-w-[70%] break-words cursor-pointer select-none"
-                                                onContextMenu={(e) => handleMessageContextMenu(msg, e)}
-                                                onTouchStart={(e) => handleTouchStart(msg, e)}
-                                                onTouchEnd={handleTouchEnd}
-                                                onTouchCancel={handleTouchEnd}
-                                            >
-                                                {msg.imageUrl && (
-                                                    <div className="relative mb-2">
-                                                        <img src={msg.imageUrl} alt="Sent image" className="max-w-full rounded-lg" />
-                                                        {msg.imageUrl && wasEverAStory(msg.imageUrl) && storyActiveByUrl[msg.imageUrl] === false && (
-                                                            <div className="absolute inset-0 bg-black/50 rounded-lg flex items-center justify-center">
-                                                                <span className="text-[10px] text-white/90 px-2 py-1 rounded">Story unavailable</span>
+                                            (() => {
+                                                // Check postId field first, then extract from text
+                                                const postId = msg.postId || (msg.text ? extractPostId(msg.text) : null);
+                                                const sharedPost = postId ? sharedPosts[postId] : null;
+                                                
+                                                // Debug logging
+                                                if (postId && !sharedPost) {
+                                                    console.log('Post ID detected but not yet loaded:', postId);
+                                                }
+                                                if (sharedPost) {
+                                                    console.log('Rendering SharedPostCard for post:', sharedPost.id, 'isTextOnly:', !sharedPost.mediaUrl && (!sharedPost.mediaItems || sharedPost.mediaItems.length === 0) && sharedPost.text);
+                                                }
+                                                
+                                                // If it's a shared post, render outside the bubble
+                                                if (sharedPost) {
+                                                    return (
+                                                        <div className="w-full flex justify-end mb-2" style={{ maxWidth: '100%' }}>
+                                                            <div style={{ maxWidth: '448px', width: '100%' }}>
+                                                                <SharedPostCard post={sharedPost} />
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+                                                
+                                                // If post ID is detected but post is still loading, show loading state instead of URL
+                                                if (postId && !sharedPost) {
+                                                    return (
+                                                        <div className="w-full flex justify-end mb-2" style={{ maxWidth: '100%' }}>
+                                                            <div style={{ maxWidth: '448px', width: '100%' }}>
+                                                                <div className="w-full max-w-md rounded-2xl overflow-hidden bg-gray-800 border border-gray-700 shadow-lg p-4">
+                                                                    <div className="flex items-center justify-center py-8">
+                                                                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+                                                
+                                                // Regular message - render in bubble (only if not a post URL)
+                                                // Don't show text if it's a post URL (we show SharedPostCard or loading state instead)
+                                                if (postId) {
+                                                    // Post URL detected - already handled above with SharedPostCard or loading state
+                                                    return null;
+                                                }
+                                                
+                                                // Also check if text contains a post URL pattern - if so, don't show the text
+                                                // (it might be loading or the postId wasn't set properly)
+                                                const hasPostUrlPattern = msg.text && (
+                                                    msg.text.includes('/post/') || 
+                                                    msg.text.includes('http://') || 
+                                                    msg.text.includes('https://')
+                                                );
+                                                
+                                                if (hasPostUrlPattern && !postId) {
+                                                    // URL detected but no postId - try to extract it and fetch
+                                                    const extractedPostId = extractPostId(msg.text);
+                                                    if (extractedPostId) {
+                                                        // If we already have the post, render it
+                                                        if (sharedPosts[extractedPostId]) {
+                                                            return (
+                                                                <div className="w-full flex justify-end mb-2" style={{ maxWidth: '100%' }}>
+                                                                    <div style={{ maxWidth: '448px', width: '100%' }}>
+                                                                        <SharedPostCard post={sharedPosts[extractedPostId]} />
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        }
+                                                        
+                                                        // Otherwise, fetch the post and show loading state
+                                                        if (!sharedPosts[extractedPostId]) {
+                                                            getPostById(extractedPostId).then(post => {
+                                                                if (post) {
+                                                                    setSharedPosts(prev => ({ ...prev, [extractedPostId]: post }));
+                                                                }
+                                                            }).catch(error => {
+                                                                console.error('Failed to fetch post from URL:', error);
+                                                            });
+                                                        }
+                                                    }
+                                                    
+                                                    // Show loading state while fetching
+                                                    return (
+                                                        <div className="w-full flex justify-end mb-2" style={{ maxWidth: '100%' }}>
+                                                            <div style={{ maxWidth: '448px', width: '100%' }}>
+                                                                <div className="w-full max-w-md rounded-2xl overflow-hidden bg-gray-800 border border-gray-700 shadow-lg p-4">
+                                                                    <div className="flex items-center justify-center py-8">
+                                                                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+                                                
+                                                return (
+                                                    <div
+                                                        className="bg-purple-600 rounded-2xl px-4 py-2 max-w-[70%] break-words cursor-pointer select-none"
+                                                        onContextMenu={(e) => handleMessageContextMenu(msg, e)}
+                                                        onTouchStart={(e) => handleTouchStart(msg, e)}
+                                                        onTouchEnd={handleTouchEnd}
+                                                        onTouchCancel={handleTouchEnd}
+                                                        onClick={(e) => {
+                                                            // Prevent navigation if message contains a URL
+                                                            if (msg.text && (msg.text.includes('http://') || msg.text.includes('https://'))) {
+                                                                e.preventDefault();
+                                                                e.stopPropagation();
+                                                            }
+                                                        }}
+                                                    >
+                                                        {msg.imageUrl && (
+                                                            <div className="relative mb-2">
+                                                                <img src={msg.imageUrl} alt="Sent image" className="max-w-full rounded-lg" />
+                                                                {msg.imageUrl && wasEverAStory(msg.imageUrl) && storyActiveByUrl[msg.imageUrl] === false && (
+                                                                    <div className="absolute inset-0 bg-black/50 rounded-lg flex items-center justify-center">
+                                                                        <span className="text-[10px] text-white/90 px-2 py-1 rounded">Story unavailable</span>
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         )}
+                                                        {msg.text && <p className="text-white text-sm" style={{ userSelect: 'text' }}>{msg.text}</p>}
                                                     </div>
-                                                )}
-                                                {msg.text && <p className="text-white text-sm">{msg.text}</p>}
-                                            </div>
+                                                );
+                                            })()
                                         ) : (
-                                            <div className="flex items-start gap-2 max-w-[70%]">
-                                                {msg.senderAvatar && (
-                                                    <Avatar
-                                                        src={msg.senderAvatar}
-                                                        name={msg.senderHandle}
-                                                        size="sm"
-                                                    />
-                                                )}
-                                                <div
-                                                    className="bg-gray-800 rounded-2xl px-4 py-2 break-words cursor-pointer select-none"
-                                                    onContextMenu={(e) => handleMessageContextMenu(msg, e)}
-                                                    onTouchStart={(e) => handleTouchStart(msg, e)}
-                                                    onTouchEnd={handleTouchEnd}
-                                                    onTouchCancel={handleTouchEnd}
-                                                >
-                                                    {msg.imageUrl && (
-                                                        <div className="relative mb-2">
-                                                            <img src={msg.imageUrl} alt="Received image" className="max-w-full rounded-lg" />
-                                                            {msg.imageUrl && wasEverAStory(msg.imageUrl) && storyActiveByUrl[msg.imageUrl] === false && (
-                                                                <div className="absolute inset-0 bg-black/50 rounded-lg flex items-center justify-center">
-                                                                    <span className="text-[10px] text-white/90 px-2 py-1 rounded">Story unavailable</span>
+                                            (() => {
+                                                // Check if this is a comment notification
+                                                const commentPostId = msg.postId;
+                                                const commentPost = commentPostId ? sharedPosts[commentPostId] : null;
+                                                const commentText = msg.commentText;
+                                                
+                                                // Debug logging
+                                                if (commentPostId) {
+                                                    console.log('Comment notification detected:', { 
+                                                        commentPostId, 
+                                                        commentText, 
+                                                        hasPost: !!commentPost,
+                                                        messageId: msg.id 
+                                                    });
+                                                }
+                                                
+                                                // If it's a comment notification with post and comment text, show CommentCard
+                                                if (commentPost && commentText) {
+                                                    console.log('Rendering CommentCard for:', commentPostId);
+                                                    return (
+                                                        <div className="flex items-start gap-2 w-full mb-2" style={{ maxWidth: '100%' }}>
+                                                            {msg.senderAvatar && (
+                                                                <Avatar
+                                                                    src={msg.senderAvatar}
+                                                                    name={msg.senderHandle}
+                                                                    size="sm"
+                                                                />
+                                                            )}
+                                                            <div className="flex-1 min-w-0" style={{ maxWidth: '448px' }}>
+                                                                <CommentCard 
+                                                                    post={commentPost} 
+                                                                    commentText={commentText}
+                                                                    commenterHandle={msg.senderHandle}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+                                                
+                                                // If comment post is loading
+                                                if (commentPostId && !commentPost) {
+                                                    return (
+                                                        <div className="flex items-start gap-2 w-full mb-2" style={{ maxWidth: '100%' }}>
+                                                            {msg.senderAvatar && (
+                                                                <Avatar
+                                                                    src={msg.senderAvatar}
+                                                                    name={msg.senderHandle}
+                                                                    size="sm"
+                                                                />
+                                                            )}
+                                                            <div className="flex-1 min-w-0" style={{ maxWidth: '448px' }}>
+                                                                <div className="w-full max-w-md rounded-2xl overflow-hidden bg-gray-800 border border-gray-700 shadow-lg p-4">
+                                                                    <div className="flex items-center justify-center py-8">
+                                                                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+                                                
+                                                // Check postId field first, then extract from text
+                                                const postId = msg.postId || (msg.text ? extractPostId(msg.text) : null);
+                                                const sharedPost = postId ? sharedPosts[postId] : null;
+                                                
+                                                // Debug logging
+                                                if (postId && !sharedPost) {
+                                                    console.log('Post ID detected but not yet loaded:', postId, 'from field:', !!msg.postId, 'from text:', !msg.postId);
+                                                }
+                                                if (sharedPost) {
+                                                    console.log('Rendering SharedPostCard for post:', sharedPost.id, 'isTextOnly:', !sharedPost.mediaUrl && (!sharedPost.mediaItems || sharedPost.mediaItems.length === 0) && sharedPost.text);
+                                                }
+                                                
+                                                // If it's a shared post, render outside the bubble
+                                                if (sharedPost) {
+                                                    return (
+                                                        <div className="flex items-start gap-2 w-full mb-2" style={{ maxWidth: '100%' }}>
+                                                            {msg.senderAvatar && (
+                                                                <Avatar
+                                                                    src={msg.senderAvatar}
+                                                                    name={msg.senderHandle}
+                                                                    size="sm"
+                                                                />
+                                                            )}
+                                                            <div className="flex-1 min-w-0" style={{ maxWidth: '448px' }}>
+                                                                <SharedPostCard post={sharedPost} />
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+                                                
+                                                // If post ID is detected but post is still loading, show loading state instead of URL
+                                                if (postId && !sharedPost) {
+                                                    return (
+                                                        <div className="flex items-start gap-2 w-full mb-2" style={{ maxWidth: '100%' }}>
+                                                            {msg.senderAvatar && (
+                                                                <Avatar
+                                                                    src={msg.senderAvatar}
+                                                                    name={msg.senderHandle}
+                                                                    size="sm"
+                                                                />
+                                                            )}
+                                                            <div className="flex-1 min-w-0" style={{ maxWidth: '448px' }}>
+                                                                <div className="w-full max-w-md rounded-2xl overflow-hidden bg-gray-800 border border-gray-700 shadow-lg p-4">
+                                                                    <div className="flex items-center justify-center py-8">
+                                                                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+                                                
+                                                // Regular message - render in bubble (only if not a post URL or comment notification)
+                                                // Don't show text if it's a comment notification (we show CommentCard instead)
+                                                if (commentPostId && !commentPost) {
+                                                    // Still loading, already handled above
+                                                    return null;
+                                                }
+                                                
+                                                // Don't show text if it's a post URL (we show SharedPostCard or loading state instead)
+                                                if (postId) {
+                                                    // Post URL detected - already handled above with SharedPostCard or loading state
+                                                    return null;
+                                                }
+                                                
+                                                // Also check if text contains a post URL pattern - if so, don't show the text
+                                                // (it might be loading or the postId wasn't set properly)
+                                                const hasPostUrlPattern = msg.text && (
+                                                    msg.text.includes('/post/') || 
+                                                    msg.text.includes('http://') || 
+                                                    msg.text.includes('https://')
+                                                );
+                                                
+                                                if (hasPostUrlPattern && !postId) {
+                                                    // URL detected but no postId - try to extract it and fetch
+                                                    const extractedPostId = extractPostId(msg.text);
+                                                    if (extractedPostId) {
+                                                        // If we already have the post, render it
+                                                        if (sharedPosts[extractedPostId]) {
+                                                            return (
+                                                                <div className="flex items-start gap-2 w-full mb-2" style={{ maxWidth: '100%' }}>
+                                                                    {msg.senderAvatar && (
+                                                                        <Avatar
+                                                                            src={msg.senderAvatar}
+                                                                            name={msg.senderHandle}
+                                                                            size="sm"
+                                                                        />
+                                                                    )}
+                                                                    <div className="flex-1 min-w-0" style={{ maxWidth: '448px' }}>
+                                                                        <SharedPostCard post={sharedPosts[extractedPostId]} />
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        }
+                                                        
+                                                        // Otherwise, fetch the post and show loading state
+                                                        if (!sharedPosts[extractedPostId]) {
+                                                            getPostById(extractedPostId).then(post => {
+                                                                if (post) {
+                                                                    setSharedPosts(prev => ({ ...prev, [extractedPostId]: post }));
+                                                                }
+                                                            }).catch(error => {
+                                                                console.error('Failed to fetch post from URL:', error);
+                                                            });
+                                                        }
+                                                    }
+                                                    
+                                                    // Show loading state while fetching
+                                                    return (
+                                                        <div className="flex items-start gap-2 w-full mb-2" style={{ maxWidth: '100%' }}>
+                                                            {msg.senderAvatar && (
+                                                                <Avatar
+                                                                    src={msg.senderAvatar}
+                                                                    name={msg.senderHandle}
+                                                                    size="sm"
+                                                                />
+                                                            )}
+                                                            <div className="flex-1 min-w-0" style={{ maxWidth: '448px' }}>
+                                                                <div className="w-full max-w-md rounded-2xl overflow-hidden bg-gray-800 border border-gray-700 shadow-lg p-4">
+                                                                    <div className="flex items-center justify-center py-8">
+                                                                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+                                                
+                                                return (
+                                                    <div className="flex items-start gap-2 max-w-[70%]">
+                                                        {msg.senderAvatar && (
+                                                            <Avatar
+                                                                src={msg.senderAvatar}
+                                                                name={msg.senderHandle}
+                                                                size="sm"
+                                                            />
+                                                        )}
+                                                        <div
+                                                            className="bg-gray-800 rounded-2xl px-4 py-2 break-words cursor-pointer select-none"
+                                                            onContextMenu={(e) => handleMessageContextMenu(msg, e)}
+                                                            onTouchStart={(e) => handleTouchStart(msg, e)}
+                                                            onTouchEnd={handleTouchEnd}
+                                                            onTouchCancel={handleTouchEnd}
+                                                            onClick={(e) => {
+                                                                // Prevent navigation if message contains a URL
+                                                                if (msg.text && (msg.text.includes('http://') || msg.text.includes('https://'))) {
+                                                                    e.preventDefault();
+                                                                    e.stopPropagation();
+                                                                }
+                                                            }}
+                                                        >
+                                                            {msg.imageUrl && (
+                                                                <div className="relative mb-2">
+                                                                    <img src={msg.imageUrl} alt="Received image" className="max-w-full rounded-lg" />
+                                                                    {msg.imageUrl && wasEverAStory(msg.imageUrl) && storyActiveByUrl[msg.imageUrl] === false && (
+                                                                        <div className="absolute inset-0 bg-black/50 rounded-lg flex items-center justify-center">
+                                                                            <span className="text-[10px] text-white/90 px-2 py-1 rounded">Story unavailable</span>
+                                                                        </div>
+                                                                    )}
                                                                 </div>
                                                             )}
+                                                            {msg.text && !commentPostId && <p className="text-white text-sm" style={{ userSelect: 'text' }}>{msg.text}</p>}
                                                         </div>
-                                                    )}
-                                                    {msg.text && <p className="text-white text-sm">{msg.text}</p>}
-                                                </div>
-                                            </div>
+                                                    </div>
+                                                );
+                                            })()
                                         )}
                                     </div>
                                 )}

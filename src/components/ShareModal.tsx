@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
-import { FiX, FiCopy, FiShare2, FiLink } from 'react-icons/fi';
+import React, { useState, useEffect } from 'react';
+import { FiX, FiCopy, FiShare2, FiLink, FiMessageCircle } from 'react-icons/fi';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import { createStory } from '../api/stories';
 import { showToast } from '../utils/toast';
+import { updateMetaTags, clearMetaTags } from '../utils/metaTags';
+import { getAvatarForHandle } from '../api/users';
+import { appendMessage } from '../api/messages';
 
 interface ShareModalProps {
     isOpen: boolean;
@@ -26,13 +29,34 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
     const navigate = useNavigate();
     const { user } = useAuth();
 
-    if (!isOpen) return null;
-
-    console.log('ShareModal rendered with post:', post);
-
     const postUrl = `${window.location.origin}/post/${post.id}`;
     const postTitle = post.text ? post.text.substring(0, 100) + (post.text.length > 100 ? '...' : '') : 'Check out this post';
     const shareText = `${postTitle} by ${post.userHandle}`;
+
+    // Update meta tags when modal opens for Twitter Card sharing
+    useEffect(() => {
+        if (isOpen) {
+            const avatarUrl = getAvatarForHandle(post.userHandle);
+            const imageUrl = post.mediaUrl || avatarUrl || undefined;
+            
+            updateMetaTags({
+                title: `${postTitle} by ${post.userHandle}`,
+                description: post.text ? post.text.substring(0, 200) : `Check out this post by ${post.userHandle}`,
+                image: imageUrl, // Use post media or profile picture
+                url: postUrl,
+                type: 'article'
+            });
+
+            // Cleanup: restore default meta tags when modal closes
+            return () => {
+                clearMetaTags();
+            };
+        }
+    }, [isOpen, post.id, postTitle, post.text, post.userHandle, post.mediaUrl, postUrl]);
+
+    if (!isOpen) return null;
+
+    console.log('ShareModal rendered with post:', post);
 
     const handleCopyLink = async () => {
         try {
@@ -256,6 +280,33 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
         }
     ];
 
+    const handleShareToDM = async () => {
+        if (!user?.handle) {
+            alert('Please sign in to share to DMs.');
+            return;
+        }
+        
+        // Close the share modal
+        onClose();
+        
+        // Navigate to inbox with post URL in state
+        // User can select a conversation, and the post link will be auto-filled
+        navigate('/inbox', { 
+            state: { 
+                sharePostUrl: postUrl,
+                sharePostId: post.id
+            } 
+        });
+        
+        // Also copy the link to clipboard for convenience
+        try {
+            await navigator.clipboard.writeText(postUrl);
+            showToast?.('Post link ready! Select a conversation to share.');
+        } catch (err) {
+            console.error('Failed to copy link:', err);
+        }
+    };
+
     // Always include Share to Clip option (works for media and text-only)
     const shareOptions = [
         {
@@ -268,6 +319,13 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
             ),
             color: 'bg-gradient-to-br from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white',
             action: handleShareToStory
+        },
+        {
+            id: 'dm',
+            name: 'Share to DM',
+            icon: <FiMessageCircle className="w-6 h-6" />,
+            color: 'bg-gradient-to-br from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white',
+            action: handleShareToDM
         },
         ...baseShareOptions
     ];

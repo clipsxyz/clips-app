@@ -29,7 +29,7 @@ import StickerOverlayComponent from './components/StickerOverlay';
 import EffectWrapper from './components/EffectWrapper';
 import type { EffectConfig } from './utils/effects';
 
-type Tab = 'Finglas' | 'Dublin' | 'Ireland' | 'Following';
+type Tab = 'Finglas' | 'Dublin' | 'Ireland' | 'Discover';
 
 function BottomNav({ onCreateClick }: { onCreateClick: () => void }) {
   const nav = useNavigate();
@@ -50,10 +50,16 @@ function BottomNav({ onCreateClick }: { onCreateClick: () => void }) {
     );
   };
 
+  const handleHomeClick = () => {
+    nav('/feed');
+    // Dispatch event to reset feed state
+    window.dispatchEvent(new CustomEvent('resetFeed'));
+  };
+
   return (
     <nav aria-label="Primary navigation" className="fixed bottom-0 inset-x-0 bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 z-40 pb-safe">
       <div className="mx-auto max-w-md flex">
-        {item('/feed', 'Home', <FiHome size={22} />)}
+        {item('/feed', 'Home', <FiHome size={22} />, handleHomeClick)}
         {item('/boost', 'Boost', <FiZap size={22} />)}
         {item('/create', 'Create', <FiPlusSquare size={22} />, onCreateClick)}
         {item('/search', 'Search', <FiSearch size={22} />)}
@@ -94,7 +100,8 @@ export default function App() {
 }
 
 function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCustom?: () => void }) {
-  const tabs: Tab[] = ['Finglas', 'Dublin', 'Ireland', 'Following'];
+  const navigate = useNavigate();
+  const tabs: Tab[] = ['Finglas', 'Dublin', 'Ireland', 'Discover'];
 
   return (
     <div role="tablist" aria-label="Locations" className="grid grid-cols-4 gap-2 px-3">
@@ -102,6 +109,17 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
         const active = props.active === t;
         const id = `tab-${t}`;
         const panelId = `panel-${t}`;
+
+        // Special handling for Discover tab - navigate to discover page
+        const handleClick = (e: React.MouseEvent) => {
+          e.stopPropagation();
+          if (t === 'Discover') {
+            navigate('/discover');
+          } else {
+            props.onChange(t);
+            props.onClearCustom?.();
+          }
+        };
 
         if (active) {
           return (
@@ -112,15 +130,17 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               aria-selected={active}
               aria-controls={panelId}
               tabIndex={active ? 0 : -1}
-              onClick={(e) => {
-                e.stopPropagation();
-                props.onChange(t);
-                props.onClearCustom?.();
-              }}
-              className="rounded-lg p-[2px] animate-[shimmerGradient_3s_linear_infinite] transition-transform active:scale-[.98]"
+              onClick={handleClick}
+              className="rounded-lg p-[2px] animate-[shimmerGradient_3s_linear_infinite] transition-transform active:scale-[.98] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
               style={{
                 background: 'linear-gradient(to right, #2A1FC2, #1FC2C2, #000000, #2A1FC2, #1FC2C2, #000000)',
-                backgroundSize: '400% 100%'
+                backgroundSize: '400% 100%',
+                outline: 'none',
+                boxShadow: 'none'
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.outline = 'none';
+                e.currentTarget.style.boxShadow = 'none';
               }}
             >
               <span className="block rounded-md bg-gray-900 text-white text-sm py-2 font-medium">
@@ -138,15 +158,19 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
             aria-selected={active}
             aria-controls={panelId}
             tabIndex={active ? 0 : -1}
-            onClick={(e) => {
-              e.stopPropagation();
-              props.onChange(t);
-              props.onClearCustom?.(); // Clear custom location when clicking tabs
-            }}
-            className={`rounded-md border text-sm py-2 font-medium transition-transform active:scale-[.98]
+            onClick={handleClick}
+            className={`rounded-md border text-sm py-2 font-medium transition-transform active:scale-[.98] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0
               ${active
                 ? 'bg-gray-900 text-white border-gray-900 dark:bg-white dark:text-gray-900 dark:border-white shadow-sm'
                 : 'bg-white border-gray-300 text-gray-800 hover:bg-gray-50 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800'}`}
+            style={{
+              outline: 'none',
+              boxShadow: 'none'
+            }}
+            onFocus={(e) => {
+              e.currentTarget.style.outline = 'none';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
           >
             {t}
           </button>
@@ -344,10 +368,9 @@ function PostHeader({ post, onFollow, showBoostIcon, onBoost }: {
   const isReclippedPost = post.isReclipped && post.originalUserHandle;
 
   return (
-    <div className="flex items-start justify-between px-4 pt-4 pb-3">
+      <div className="flex items-start justify-between px-4 pt-4 pb-3">
       <div className="flex items-center gap-3 flex-1">
         <div className="relative">
-          <div className="absolute -inset-1 bg-gradient-to-r from-purple-500 via-pink-500 to-blue-500 rounded-full opacity-75 blur-sm"></div>
           <Avatar
             src={avatarSrc}
             name={post.userHandle.split('@')[0]} // Extract name from handle like "John@Dublin"
@@ -420,7 +443,7 @@ function TagRow({ tags }: { tags: string[] }) {
   );
 }
 
-function TextCard({ text, onDoubleLike, textStyle, stickers, onOpenScenes }: { text: string; onDoubleLike: () => Promise<void>; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string }; stickers?: StickerOverlay[]; onOpenScenes?: () => void }) {
+function TextCard({ text, onDoubleLike, textStyle, stickers }: { text: string; onDoubleLike: () => Promise<void>; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string }; stickers?: StickerOverlay[] }) {
   const [burst, setBurst] = React.useState(false);
   const [isExpanded, setIsExpanded] = React.useState(false);
   const lastTap = React.useRef<number>(0);
@@ -465,19 +488,9 @@ function TextCard({ text, onDoubleLike, textStyle, stickers, onOpenScenes }: { t
     return backgrounds[backgroundIndex];
   })();
 
-  // Get text size class based on textStyle (matching TextOnlyPostPage sizes)
+  // Get text size class - use normal readable size for feed display
   const getTextSizeClass = () => {
-    if (!textStyle?.size) return 'text-xl';
-    switch (textStyle.size) {
-      case 'small':
-        return 'text-2xl';
-      case 'medium':
-        return 'text-4xl';
-      case 'large':
-        return 'text-6xl';
-      default:
-        return 'text-4xl';
-    }
+    return 'text-base'; // Normal readable text size like in the reference image
   };
 
   // Get text color from textStyle or default to white
@@ -524,7 +537,7 @@ function TextCard({ text, onDoubleLike, textStyle, stickers, onOpenScenes }: { t
   }
 
   return (
-    <div className="mx-4 mt-4 select-none">
+    <div className="mx-4 mt-4 select-none max-w-full">
       <div
         ref={containerRef}
         role="button"
@@ -538,39 +551,26 @@ function TextCard({ text, onDoubleLike, textStyle, stickers, onOpenScenes }: { t
         }}
         onClick={handleClick}
         onTouchEnd={handleTouchEnd}
-        className="relative p-6 rounded-2xl min-h-[120px] flex items-center justify-center shadow-2xl hover:shadow-3xl transition-all duration-300"
+        className="relative p-4 rounded-lg min-h-[80px] flex items-start shadow-sm hover:shadow-md transition-all duration-300 w-full overflow-hidden"
         style={{
-          ...(textStyle?.background?.includes('gradient')
-            ? { backgroundImage: textStyle.background }
-            : { background: selectedBackground }),
-          boxShadow: textStyle?.background?.includes('gradient')
-            ? '0 0 30px rgba(0,0,0,0.3), 0 0 60px rgba(0,0,0,0.2)'
-            : `0 0 30px ${selectedBackground}40, 0 0 60px ${selectedBackground}20`
+          background: '#000000', // Black background like in the reference image
+          boxShadow: 'none',
+          maxWidth: '100%',
+          boxSizing: 'border-box'
         }}
       >
-        {/* Fullscreen Icon */}
-        {onOpenScenes && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenScenes();
-            }}
-            className="absolute top-2 right-2 z-20 p-2 rounded-full bg-black/30 hover:bg-black/50 text-white transition-colors"
-            aria-label="View fullscreen"
-          >
-            <FiMaximize className="w-5 h-5" />
-          </button>
-        )}
+        {/* No fullscreen/scenes for text-only posts - they're read directly in feed */}
 
-        <div className="text-center w-full relative z-10">
-          <div className={`${getTextSizeClass()} leading-relaxed whitespace-pre-wrap font-bold drop-shadow-lg`} style={{ color: textColor }}>
+        <div className="w-full relative z-10 overflow-hidden" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
+          <div className={`${getTextSizeClass()} leading-relaxed whitespace-pre-wrap font-normal break-words`} style={{ color: '#ffffff', wordBreak: 'break-word', overflowWrap: 'anywhere', maxWidth: '100%', boxSizing: 'border-box' }}>
             {displayText}
           </div>
           {shouldTruncate && (
-            <div className="mt-3 flex justify-center">
+            <div className="mt-3 flex justify-start">
               <button
                 onClick={handleMoreClick}
-                className="px-4 py-2 bg-black bg-opacity-50 rounded-full text-white text-sm font-medium hover:bg-opacity-70 transition-all duration-200 hover:scale-105"
+                className="text-blue-500 hover:text-blue-600 text-sm font-medium transition-colors focus:outline-none focus:ring-0"
+                style={{ outline: 'none', border: 'none' }}
                 aria-label={isExpanded ? 'Show less' : 'Show more'}
               >
                 {isExpanded ? 'Show less' : 'Show more'}
@@ -958,8 +958,21 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       // Single tap - wait to see if it's actually a double tap
       singleTapTimer.current = setTimeout(() => {
         // Only open scenes if no second tap came within threshold
+        // Also check if the click was on an interactive element (button, link, etc.)
         if (!isProcessingDoubleTap.current && onOpenScenes) {
-          onOpenScenes();
+          // Check if the click target is an interactive element
+          const target = e?.target as HTMLElement;
+          const isInteractiveElement = target && (
+            target.tagName === 'BUTTON' ||
+            target.tagName === 'A' ||
+            target.closest('button') !== null ||
+            target.closest('a') !== null ||
+            target.closest('[role="button"]') !== null
+          );
+
+          if (!isInteractiveElement) {
+            onOpenScenes();
+          }
         }
         singleTapTimer.current = null;
       }, DOUBLE_TAP_THRESHOLD);
@@ -1303,6 +1316,22 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
             <button
               onClick={(e) => {
                 e.stopPropagation();
+                e.preventDefault();
+                // Clear any pending single tap timer to prevent onOpenScenes from firing
+                if (singleTapTimer.current) {
+                  clearTimeout(singleTapTimer.current);
+                  singleTapTimer.current = null;
+                }
+                onShowTaggedUsers?.();
+              }}
+              onTouchEnd={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                // Clear any pending single tap timer to prevent onOpenScenes from firing
+                if (singleTapTimer.current) {
+                  clearTimeout(singleTapTimer.current);
+                  singleTapTimer.current = null;
+                }
                 onShowTaggedUsers?.();
               }}
               className="w-10 h-10 rounded-full bg-black bg-opacity-70 flex items-center justify-center hover:bg-opacity-90 transition-all shadow-lg"
@@ -1881,9 +1910,9 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
     <article ref={articleRef} aria-labelledby={titleId} className="mx-4 mb-6 rounded-lg overflow-hidden bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out]">
       <PostHeader post={post} onFollow={onFollow} showBoostIcon={showBoostIcon} onBoost={onBoost} />
       <TagRow tags={post.tags} />
-      <div className="relative">
+      <div className="relative w-full overflow-hidden" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
         {post.text && !post.mediaUrl && (!post.mediaItems || post.mediaItems.length === 0) ? (
-          <TextCard text={post.text} onDoubleLike={onLike} textStyle={post.textStyle} stickers={post.stickers} onOpenScenes={onOpenScenes} />
+          <TextCard text={post.text} onDoubleLike={onLike} textStyle={post.textStyle} stickers={post.stickers} />
         ) : (
           <Media
             url={post.mediaUrl}
@@ -2101,8 +2130,40 @@ function FeedPageWrapper() {
   const [scenesOpen, setScenesOpen] = React.useState(false);
   const [selectedPostForScenes, setSelectedPostForScenes] = React.useState<Post | null>(null);
 
-  // Determine current filter - custom location overrides tabs
-  const currentFilter = customLocation || active;
+  // Internal state for Following feed (separate from tabs)
+  const [showFollowingFeed, setShowFollowingFeed] = React.useState(false);
+
+  // Listen for setFollowingTab event from TopBar
+  React.useEffect(() => {
+    const handleSetFollowingTab = () => {
+      setShowFollowingFeed(true);
+      setCustomLocation(null);
+      // Don't change active tab, just show following feed
+    };
+    window.addEventListener('setFollowingTab', handleSetFollowingTab);
+    return () => window.removeEventListener('setFollowingTab', handleSetFollowingTab);
+  }, []);
+
+  // Reset showFollowingFeed when clicking any tab (except Discover which navigates away)
+  React.useEffect(() => {
+    // When active tab changes, reset following feed
+    // (Discover tab navigates to /discover page, so it won't trigger this)
+    setShowFollowingFeed(false);
+  }, [active]);
+
+  // Listen for resetFeed event from Home button
+  React.useEffect(() => {
+    const handleResetFeed = () => {
+      setShowFollowingFeed(false);
+      setActive('Ireland');
+      setCustomLocation(null);
+    };
+    window.addEventListener('resetFeed', handleResetFeed);
+    return () => window.removeEventListener('resetFeed', handleResetFeed);
+  }, []);
+
+  // Determine current filter - showFollowingFeed overrides everything, then custom location, then active tab
+  const currentFilter = showFollowingFeed ? 'discover' : (customLocation || active);
 
   // Read location from URL query (?location=...) when arriving from Discover
   React.useEffect(() => {
@@ -2141,8 +2202,8 @@ function FeedPageWrapper() {
     // Invalidate prior in-flight requests
     requestTokenRef.current++;
 
-    // Don't load cached data for Following tab - always fetch fresh
-    if (currentFilter.toLowerCase() !== 'following') {
+    // Don't load cached data for Discover tab - always fetch fresh
+    if (currentFilter.toLowerCase() !== 'discover') {
       // Temporarily disable feed cache loading to avoid duplicates
       // loadFeed(userId, currentFilter).then(p => p.length && setPages(p));
     }
@@ -2633,7 +2694,7 @@ function FeedPageWrapper() {
 
       {end && flat.length === 0 && (
         <div className="p-8 text-center text-gray-600 dark:text-gray-300">
-          {currentFilter.toLowerCase() === 'following' ? (
+          {showFollowingFeed || currentFilter.toLowerCase() === 'discover' ? (
             <>
               <div className="text-lg font-semibold mb-1">Unlock Your Following News Feed</div>
               <div className="text-gray-600 text-sm">This feed only populates with the accounts you follow. Start tapping Follow to personalize your stream</div>

@@ -217,3 +217,6 @@ composer require predis/predis
 
 **Your Laravel backend is now configured to use Redis for session storage!**
 
+
+
+
