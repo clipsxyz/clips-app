@@ -139,10 +139,12 @@ export default function TemplateEditorPage() {
             }
         }
 
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const url = e.target?.result as string;
-            const mediaType = file.type.startsWith('image/') ? 'image' : 'video';
+        const mediaType = file.type.startsWith('image/') ? 'image' : 'video';
+
+        // Use URL.createObjectURL for videos (better Edge support) and FileReader for images
+        if (mediaType === 'video') {
+            // Use createObjectURL for videos - better performance and Edge compatibility
+            const url = URL.createObjectURL(file);
 
             // For top templates, update the clip's mediaType based on what was selected
             if (isTopTemplate) {
@@ -174,8 +176,33 @@ export default function TemplateEditorPage() {
                     setCurrentClipIndex(currentIndex + 1);
                 }, 300);
             }
-        };
-        reader.readAsDataURL(file);
+        } else {
+            // Use FileReader for images
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const url = e.target?.result as string;
+
+                setUserMedia(prev => {
+                    const newMap = new Map(prev);
+                    newMap.set(clipId, {
+                        clipId,
+                        url,
+                        mediaType,
+                        file
+                    });
+                    return newMap;
+                });
+
+                // Auto-advance to next clip if available (only if not at max)
+                const currentIndex = activeClips.findIndex(c => c.id === clipId);
+                if (currentIndex < activeClips.length - 1) {
+                    setTimeout(() => {
+                        setCurrentClipIndex(currentIndex + 1);
+                    }, 300);
+                }
+            };
+            reader.readAsDataURL(file);
+        }
     }
 
     function handleNext() {
@@ -322,6 +349,18 @@ export default function TemplateEditorPage() {
     const currentStickers = currentClip ? stickers.get(currentClip.id) || [] : [];
     const progress = ((currentClipIndex + 1) / activeClips.length) * 100;
     const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
+
+    // Cleanup object URLs when component unmounts or media changes
+    React.useEffect(() => {
+        return () => {
+            // Cleanup all object URLs to prevent memory leaks
+            userMedia.forEach(media => {
+                if (media.url && media.url.startsWith('blob:')) {
+                    URL.revokeObjectURL(media.url);
+                }
+            });
+        };
+    }, []);
 
     React.useEffect(() => {
         if (mediaContainerRef.current) {
@@ -563,6 +602,15 @@ export default function TemplateEditorPage() {
                                     <div
                                         ref={mediaContainerRef}
                                         className="relative aspect-[9/16] max-h-[55vh] rounded-2xl overflow-hidden bg-gray-900 mx-auto shadow-lg"
+                                        style={{
+                                            aspectRatio: '9/16',
+                                            maxHeight: '55vh',
+                                            width: '100%',
+                                            position: 'relative',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center'
+                                        }}
                                         onClick={(e) => {
                                             // Deselect sticker when clicking on media
                                             if (e.target === e.currentTarget || (e.target as HTMLElement).tagName === 'VIDEO' || (e.target as HTMLElement).tagName === 'IMG') {
@@ -583,12 +631,32 @@ export default function TemplateEditorPage() {
                                                     autoPlay
                                                     loop
                                                     muted
+                                                    playsInline
+                                                    preload="metadata"
+                                                    style={{
+                                                        objectFit: 'cover',
+                                                        width: '100%',
+                                                        height: '100%',
+                                                        display: 'block',
+                                                        position: 'absolute',
+                                                        top: 0,
+                                                        left: 0
+                                                    }}
                                                 />
                                             ) : (
                                                 <img
                                                     src={currentMedia.url}
                                                     alt={`Clip ${currentClipIndex + 1}`}
                                                     className="w-full h-full object-cover"
+                                                    style={{
+                                                        objectFit: 'cover',
+                                                        width: '100%',
+                                                        height: '100%',
+                                                        display: 'block',
+                                                        position: 'absolute',
+                                                        top: 0,
+                                                        left: 0
+                                                    }}
                                                 />
                                             );
 
@@ -729,6 +797,32 @@ export default function TemplateEditorPage() {
                             )}
                         </div>
 
+                        {/* Text Only Post Placeholder - Only for Gazetteer */}
+                        {template?.id === TEMPLATE_IDS.GAZETTEER && !currentMedia && (
+                            <div className="mt-6 mb-4">
+                                <button
+                                    onClick={() => navigate('/create/text-only')}
+                                    className="w-full rounded-2xl bg-gray-900/30 gz-animated-border transition-all duration-200 p-6 flex items-center gap-4 cursor-pointer group"
+                                >
+                                    {/* Icon with animated border */}
+                                    <div className="flex-shrink-0 relative">
+                                        <div className="w-14 h-14 rounded-full bg-gray-800 flex items-center justify-center gz-animated-border">
+                                            <FiType className="w-7 h-7 text-white" />
+                                        </div>
+                                    </div>
+                                    {/* Text content */}
+                                    <div className="flex-1 text-left">
+                                        <div className="text-white font-semibold text-lg mb-1">
+                                            Text Only Post
+                                        </div>
+                                        <div className="text-gray-400 text-sm">
+                                            Create a text-only post for your newsfeed. Tap here
+                                        </div>
+                                    </div>
+                                </button>
+                            </div>
+                        )}
+
                         {/* Clip Navigation - Simple Dots */}
                         <div className="flex items-center justify-center gap-2 mb-6 flex-wrap">
                             {activeClips.map((clip, index) => {
@@ -832,6 +926,15 @@ export default function TemplateEditorPage() {
                                     <div
                                         ref={mediaContainerRef}
                                         className="relative aspect-[9/16] max-h-[50vh] rounded-xl overflow-hidden bg-gray-900 mx-auto shadow-lg"
+                                        style={{
+                                            aspectRatio: '9/16',
+                                            maxHeight: '50vh',
+                                            width: '100%',
+                                            position: 'relative',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center'
+                                        }}
                                         onClick={(e) => {
                                             if (e.target === e.currentTarget || (e.target as HTMLElement).tagName === 'VIDEO' || (e.target as HTMLElement).tagName === 'IMG') {
                                                 setSelectedStickerOverlay(null);
@@ -850,12 +953,32 @@ export default function TemplateEditorPage() {
                                                     autoPlay
                                                     loop
                                                     muted
+                                                    playsInline
+                                                    preload="metadata"
+                                                    style={{
+                                                        objectFit: 'cover',
+                                                        width: '100%',
+                                                        height: '100%',
+                                                        display: 'block',
+                                                        position: 'absolute',
+                                                        top: 0,
+                                                        left: 0
+                                                    }}
                                                 />
                                             ) : (
                                                 <img
                                                     src={currentMedia.url}
                                                     alt={`Clip ${currentClipIndex + 1}`}
                                                     className="w-full h-full object-cover"
+                                                    style={{
+                                                        objectFit: 'cover',
+                                                        width: '100%',
+                                                        height: '100%',
+                                                        display: 'block',
+                                                        position: 'absolute',
+                                                        top: 0,
+                                                        left: 0
+                                                    }}
                                                 />
                                             );
 

@@ -1,3 +1,41 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Heart animation keyframes */
+@keyframes heartPopUp {
+  0% {
+    transform: translate(-50%, -50%) scale(0);
+    opacity: 0;
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.3);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes heartDrop {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: translate(calc(-50% + var(--end-x) * 0.5), calc(-50% + var(--end-y) * 0.5)) scale(0.8);
+    opacity: 0.8;
+  }
+  100% {
+    transform: translate(calc(-50% + var(--end-x)), calc(-50% + var(--end-y))) scale(0.3);
+    opacity: 0;
+  }
+}
+
+/* Fallback for browsers that don't support CSS variables in calc */
+@supports not (transform: translate(calc(var(--end-x)))) {
+  .heart-drop-animation {
+    animation: none !important;
+  }
+}

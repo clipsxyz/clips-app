@@ -40,33 +40,20 @@ export default function Avatar({ src, name, size = 'md', className = '', hasStor
                 onClick={onClick}
                 className={`${sizeClass} ${className} relative rounded-full overflow-visible ${onClick ? 'cursor-pointer hover:scale-105 transition-transform' : ''}`}
             >
-                {/* Outer shimmer + pulse ring */}
-                <div className="absolute inset-0 rounded-full" style={{ padding: '3px' }}>
-                    {/* Shimmer border */}
-                    <div
-                        className="absolute inset-0 rounded-full"
-                        style={{
-                            background: 'linear-gradient(90deg, #60a5fa, #34d399, #22d3ee, #f472b6, #60a5fa)',
-                            backgroundSize: '300% 100%',
-                            animation: 'shimmerGradient 2s linear infinite'
-                        }}
-                    />
-                    {/* Inner mask */}
-                    <div className="absolute inset-[3px] rounded-full bg-gray-900" />
-                    {/* Pulsing glow halo */}
-                    <div
-                        className="absolute -inset-1 rounded-full"
-                        style={{ animation: 'pulseGlow 2.4s ease-out infinite' }}
-                    />
+                {/* Outer gradient border ring (Gazetteer-style) */}
+                <div className="absolute -inset-0.5 rounded-full p-[2px]" style={{
+                    background: 'linear-gradient(45deg, #10b981 0%, #22d3ee 25%, #3b82f6 50%, #6366f1 75%, #8b5cf6 100%)',
+                }}>
+                    <div className="w-full h-full rounded-full bg-white dark:bg-gray-950"></div>
                 </div>
 
                 {/* Avatar content */}
-                <div className={`absolute inset-[3px] rounded-full overflow-hidden flex items-center justify-center`}>
+                <div className="absolute inset-[2px] rounded-full overflow-hidden flex items-center justify-center bg-white dark:bg-gray-950">
                     {src ? (
                         <img
                             src={src}
                             alt={`${name}'s profile picture`}
-                            className="w-full h-full object-cover"
+                            className="w-full h-full object-cover rounded-full"
                             onError={(e) => {
                                 (e.target as HTMLImageElement).style.display = 'none';
                             }}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
@@ -9,6 +9,7 @@ import { getNotifications, type Notification, markNotificationRead, markAllNotif
 
 export default function InboxPage() {
     const navigate = useNavigate();
+    const location = useLocation();
     const { user } = useAuth();
     const [items, setItems] = React.useState<ConversationSummary[]>([]);
     const [notifications, setNotifications] = React.useState<Notification[]>([]);
@@ -212,7 +213,15 @@ export default function InboxPage() {
                     {items.map(it => (
                         <button
                             key={it.otherHandle}
-                            onClick={() => navigate(`/messages/${encodeURIComponent(it.otherHandle)}`)}
+                            onClick={() => {
+                                const state = location.state as any;
+                                navigate(`/messages/${encodeURIComponent(it.otherHandle)}`, {
+                                    state: state?.sharePostUrl ? { 
+                                        sharePostUrl: state.sharePostUrl,
+                                        sharePostId: state.sharePostId 
+                                    } : undefined
+                                });
+                            }}
                             className="w-full text-left flex items-center gap-3 py-3 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg px-2"
                         >
                             <Avatar name={it.otherHandle} src={getAvatarForHandle(it.otherHandle)} size="sm" />

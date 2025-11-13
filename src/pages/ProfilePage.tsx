@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import Avatar from '../components/Avatar';
-import { FiCamera, FiX, FiBookmark } from 'react-icons/fi';
+import { FiCamera, FiBookmark, FiMessageCircle } from 'react-icons/fi';
 import Flag from '../components/Flag';
 import { getUserCollections } from '../api/collections';
 import type { Collection } from '../types';
@@ -119,7 +119,20 @@ export default function ProfilePage() {
       <div className="max-w-2xl mx-auto p-6">
         {/* Header */}
         <div className="text-center mb-8 relative">
-          {/* Collections Icon */}
+          {/* Messages Icon - Far Left */}
+          <div className="absolute top-0 left-0">
+            <button
+              onClick={() => nav('/inbox')}
+              className="flex items-center gap-2 px-4 py-2 rounded-full bg-white dark:bg-gray-800 shadow-lg hover:shadow-xl transition-shadow"
+              aria-label="Messages"
+              title="Messages"
+            >
+              <FiMessageCircle className="w-5 h-5 text-gray-700 dark:text-gray-300" />
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Messages</span>
+            </button>
+          </div>
+          
+          {/* Collections Icon - Far Right */}
           <div className="absolute top-0 right-0">
             <div className="relative">
               <button
@@ -227,16 +240,6 @@ export default function ProfilePage() {
                 disabled={isUpdatingProfile}
               />
             </label>
-            {user.avatarUrl && (
-              <button
-                onClick={removeProfilePicture}
-                disabled={isUpdatingProfile}
-                className="absolute -top-2 -right-2 w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors shadow-lg"
-                title="Remove profile picture"
-              >
-                <FiX className="w-4 h-4" />
-              </button>
-            )}
           </div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">{user.name}</h1>
           <p className="text-brand-600 dark:text-brand-400 font-medium">@{user.handle}</p>

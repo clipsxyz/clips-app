@@ -81,9 +81,34 @@ export default function CreatePage() {
     const captionRef = useRef<HTMLTextAreaElement | null>(null);
     const videoRef = useRef<HTMLVideoElement | null>(null);
     const fileInputRef = useRef<HTMLInputElement | null>(null);
-    
+
     // Debounce text inputs for better performance
     const debouncedText = useDebounce(text, 300);
+
+    // Cleanup object URLs when component unmounts or media changes
+    useEffect(() => {
+        return () => {
+            // Cleanup object URL if it's a blob URL to prevent memory leaks
+            if (selectedMedia && selectedMedia.startsWith('blob:')) {
+                URL.revokeObjectURL(selectedMedia);
+            }
+        };
+    }, [selectedMedia]);
+
+    // Force video to load in Edge when media changes
+    useEffect(() => {
+        if (mediaType === 'video' && videoRef.current && selectedMedia) {
+            const video = videoRef.current;
+            // Edge sometimes needs explicit load() call
+            if (video.readyState === 0) {
+                video.load();
+            }
+            // Also try to ensure video is visible
+            video.style.display = 'block';
+            video.style.visibility = 'visible';
+            video.style.opacity = '1';
+        }
+    }, [selectedMedia, mediaType]);
 
     // Optimize container size calculation with useMemo
     useEffect(() => {
@@ -192,7 +217,7 @@ export default function CreatePage() {
                     setSelectedMedia(firstItem.url);
                     setMediaType(firstItem.type);
                     setFilteredFromFlow(false);
-                    
+
                     // Set text and location if provided from template
                     if (locationState.templateText) {
                         setText(locationState.templateText);
@@ -200,22 +225,22 @@ export default function CreatePage() {
                     if (locationState.templateLocation) {
                         setLocation(locationState.templateLocation);
                     }
-                    
+
                     // Set stickers if provided from template
                     if (locationState.templateStickers && locationState.templateStickers.length > 0) {
                         setStickers(locationState.templateStickers);
                     }
-                    
+
                     // Set taggedUsers if provided from template
                     if (locationState.templateTaggedUsers && locationState.templateTaggedUsers.length > 0) {
                         setTaggedUsers(locationState.templateTaggedUsers);
                     }
-                    
+
                     // Set bannerText if provided from template
                     if (locationState.templateBannerText) {
                         setBannerText(locationState.templateBannerText);
                     }
-                    
+
                     // Focus caption for quick posting
                     setTimeout(() => captionRef.current?.focus(), 0);
                 } catch (error) {
@@ -266,7 +291,102 @@ export default function CreatePage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [locationState?.videoUrl, locationState?.editedMedia, locationState?.mediaItems]);
 
-    const handleMediaSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    // Helper function to transcode video for Edge compatibility
+    const transcodeVideoForEdge = useCallback(async (file: File): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const video = document.createElement('video');
+            const url = URL.createObjectURL(file);
+            video.src = url;
+            video.muted = true;
+            video.playsInline = true;
+
+            video.onloadedmetadata = async () => {
+                try {
+                    const width = video.videoWidth || 720;
+                    const height = video.videoHeight || 1280;
+                    const scale = Math.max(width, height) > 1080 ? 1080 / Math.max(width, height) : 1;
+                    const canvas = document.createElement('canvas');
+                    canvas.width = Math.round(width * scale);
+                    canvas.height = Math.round(height * scale);
+                    const ctx = canvas.getContext('2d');
+                    if (!ctx) {
+                        URL.revokeObjectURL(url);
+                        reject(new Error('Could not get canvas context'));
+                        return;
+                    }
+
+                    const stream = canvas.captureStream(30);
+                    // Use H.264 for better Edge compatibility
+                    let mimeType = 'video/webm;codecs=vp8';
+                    if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) {
+                        mimeType = 'video/webm;codecs=vp9';
+                    }
+                    const mr = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2500000 });
+                    const chunks: BlobPart[] = [];
+                    mr.ondataavailable = (e) => {
+                        if (e.data && e.data.size > 0) chunks.push(e.data);
+                    };
+                    const done = new Promise<void>((resolve) => {
+                        mr.onstop = () => resolve();
+                    });
+
+                    let lastTime = -1;
+                    const draw = () => {
+                        if (video.ended) {
+                            if (mr.state !== 'inactive') mr.stop();
+                            return;
+                        }
+                        if (video.currentTime !== lastTime) {
+                            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                            lastTime = video.currentTime;
+                        }
+                        requestAnimationFrame(draw);
+                    };
+
+                    video.currentTime = 0;
+                    mr.start(100);
+                    await video.play();
+                    requestAnimationFrame(draw);
+
+                    const duration = video.duration || 10;
+                    const safety = setTimeout(() => {
+                        if (mr.state === 'recording') mr.stop();
+                    }, Math.min(30000, duration * 2000));
+
+                    await done;
+                    clearTimeout(safety);
+                    URL.revokeObjectURL(url);
+
+                    if (chunks.length === 0) {
+                        reject(new Error('No video data recorded'));
+                        return;
+                    }
+
+                    const blob = new Blob(chunks, { type: mimeType });
+                    const transcodedUrl = URL.createObjectURL(blob);
+                    resolve(transcodedUrl);
+                } catch (error) {
+                    URL.revokeObjectURL(url);
+                    reject(error);
+                }
+            };
+
+            video.onerror = () => {
+                URL.revokeObjectURL(url);
+                reject(new Error('Failed to load video'));
+            };
+
+            // Timeout after 5 seconds
+            setTimeout(() => {
+                if (video.readyState === 0) {
+                    URL.revokeObjectURL(url);
+                    reject(new Error('Video loading timeout'));
+                }
+            }, 5000);
+        });
+    }, []);
+
+    const handleMediaSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (file) {
             // Validate file size (max 50MB)
@@ -280,24 +400,97 @@ export default function CreatePage() {
             }
 
             setIsProcessingMedia(true);
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                setSelectedMedia(e.target?.result as string);
-                // Determine if it's an image or video
-                if (file.type.startsWith('image/')) {
-                    setMediaType('image');
-                } else if (file.type.startsWith('video/')) {
+
+            // Determine if it's an image or video
+            const isVideo = file.type.startsWith('video/');
+            const isImage = file.type.startsWith('image/');
+
+            // Use URL.createObjectURL for videos (better Edge support) and FileReader for images
+            if (isVideo) {
+                try {
+                    // First, try direct blob URL
+                    const url = URL.createObjectURL(file);
+
+                    // Check if we're in Edge browser
+                    const isEdge = /Edg/.test(navigator.userAgent);
+
+                    // For Edge, check if video can actually render (not just load metadata)
+                    if (isEdge) {
+                        const testVideo = document.createElement('video');
+                        testVideo.src = url;
+                        testVideo.muted = true;
+                        testVideo.playsInline = true;
+
+                        const canRender = await new Promise<boolean>((resolve) => {
+                            const timeout = setTimeout(() => {
+                                testVideo.removeEventListener('loadeddata', onLoadedData);
+                                testVideo.removeEventListener('error', onError);
+                                URL.revokeObjectURL(url);
+                                resolve(false);
+                            }, 4000);
+
+                            const onLoadedData = () => {
+                                // Check if video actually has video dimensions (means it rendered)
+                                const hasVideo = testVideo.videoWidth > 0 && testVideo.videoHeight > 0;
+                                clearTimeout(timeout);
+                                testVideo.removeEventListener('error', onError);
+                                URL.revokeObjectURL(url);
+                                resolve(hasVideo);
+                            };
+
+                            const onError = () => {
+                                clearTimeout(timeout);
+                                testVideo.removeEventListener('loadeddata', onLoadedData);
+                                URL.revokeObjectURL(url);
+                                resolve(false);
+                            };
+
+                            testVideo.addEventListener('loadeddata', onLoadedData);
+                            testVideo.addEventListener('error', onError);
+                        });
+
+                        if (!canRender) {
+                            // Edge can't render this video, transcode it
+                            console.log('Edge cannot render video, transcoding for compatibility...');
+                            showToast('Converting video for Edge compatibility...');
+                            URL.revokeObjectURL(url);
+                            const transcodedUrl = await transcodeVideoForEdge(file);
+                            setSelectedMedia(transcodedUrl);
+                            setMediaType('video');
+                            setIsProcessingMedia(false);
+                            showToast('Video converted successfully');
+                            return;
+                        }
+                    }
+
+                    // Edge can render it, or we're not in Edge - use it directly
+                    setSelectedMedia(url);
                     setMediaType('video');
+                    setIsProcessingMedia(false);
+                } catch (error) {
+                    console.error('Error processing video:', error);
+                    showToast('Failed to process video. Please try a different format.');
+                    setIsProcessingMedia(false);
                 }
+            } else if (isImage) {
+                // Use FileReader for images
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    setSelectedMedia(e.target?.result as string);
+                    setMediaType('image');
+                    setIsProcessingMedia(false);
+                };
+                reader.onerror = () => {
+                    showToast('Failed to load file. Please try again.');
+                    setIsProcessingMedia(false);
+                };
+                reader.readAsDataURL(file);
+            } else {
+                showToast('Unsupported file type. Please select an image or video.');
                 setIsProcessingMedia(false);
-            };
-            reader.onerror = () => {
-                showToast('Failed to load file. Please try again.');
-                setIsProcessingMedia(false);
-            };
-            reader.readAsDataURL(file);
+            }
         }
-    }, []);
+    }, [transcodeVideoForEdge]);
 
     const handleSubmit = useCallback(async (e?: React.FormEvent) => {
         e?.preventDefault();
@@ -369,6 +562,10 @@ export default function CreatePage() {
     }, [text, selectedMedia, user, location, mediaType, imageText, stickers, bannerText, wantsToBoost, navigate]);
 
     const removeMedia = useCallback(() => {
+        // Cleanup object URL if it's a blob URL
+        if (selectedMedia && selectedMedia.startsWith('blob:')) {
+            URL.revokeObjectURL(selectedMedia);
+        }
         setSelectedMedia(null);
         setMediaType(null);
         setImageText('');
@@ -377,7 +574,7 @@ export default function CreatePage() {
         if (fileInputRef.current) {
             fileInputRef.current.value = '';
         }
-    }, []);
+    }, [selectedMedia]);
 
     const handleSelectSticker = useCallback((sticker: Sticker) => {
         const newOverlay: StickerOverlay = {
@@ -444,7 +641,7 @@ export default function CreatePage() {
     // Build CSS filter string from current filter settings
     const currentFilterStyle = useMemo(() => {
         let filter = '';
-        
+
         // Apply filter type
         if (activeFilter === 'bw') {
             filter = 'grayscale(1)';
@@ -511,11 +708,10 @@ export default function CreatePage() {
                     <button
                         onClick={handleSubmit}
                         disabled={!canSubmit}
-                        className={`px-4 py-2 text-sm font-semibold rounded-full transition-all duration-200 ${
-                            canSubmit
-                                ? 'bg-brand-500 text-white hover:bg-brand-600 active:scale-95 shadow-md hover:shadow-lg'
-                                : 'bg-gray-200 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed'
-                        }`}
+                        className={`px-4 py-2 text-sm font-semibold rounded-full transition-all duration-200 ${canSubmit
+                            ? 'bg-brand-500 text-white hover:bg-brand-600 active:scale-95 shadow-md hover:shadow-lg'
+                            : 'bg-gray-200 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed'
+                            }`}
                     >
                         {isUploading ? (
                             <span className="flex items-center gap-2">
@@ -562,11 +758,10 @@ export default function CreatePage() {
                         rows={2}
                     />
                     <div className="flex justify-end mt-2">
-                        <span className={`text-xs transition-colors duration-200 ${
-                            text.length > 450 
-                                ? 'text-red-500 dark:text-red-400' 
-                                : 'text-gray-400 dark:text-gray-500'
-                        }`}>
+                        <span className={`text-xs transition-colors duration-200 ${text.length > 450
+                            ? 'text-red-500 dark:text-red-400'
+                            : 'text-gray-400 dark:text-gray-500'
+                            }`}>
                             {text.length}/500
                         </span>
                     </div>
@@ -634,11 +829,10 @@ export default function CreatePage() {
                                 News ticker banner
                             </span>
                             <div className="flex items-center gap-3">
-                                <span className={`text-xs transition-colors duration-200 ${
-                                    bannerText.length > 180 
-                                        ? 'text-red-500 dark:text-red-400' 
-                                        : 'text-gray-400 dark:text-gray-500'
-                                }`}>
+                                <span className={`text-xs transition-colors duration-200 ${bannerText.length > 180
+                                    ? 'text-red-500 dark:text-red-400'
+                                    : 'text-gray-400 dark:text-gray-500'
+                                    }`}>
                                     {bannerText.length}/200
                                 </span>
                                 {bannerText && (
@@ -713,14 +907,64 @@ export default function CreatePage() {
                                     )}
                                 </div>
                             ) : mediaType === 'video' ? (
-                                <div className="relative w-full aspect-square overflow-hidden bg-black">
+                                <div className="relative w-full aspect-square overflow-hidden bg-black" style={{ position: 'relative', minHeight: '400px' }}>
                                     <video
                                         ref={videoRef}
                                         src={selectedMedia}
                                         controls
-                                        className="w-full h-full object-contain transition-opacity duration-300"
-                                        preload="metadata"
-                                        style={videoFilterStyle.filter ? videoFilterStyle : currentFilterStyle}
+                                        playsInline
+                                        className="w-full h-full transition-opacity duration-300"
+                                        preload="auto"
+                                        onLoadedMetadata={(e) => {
+                                            console.log('Video metadata loaded', {
+                                                videoWidth: e.currentTarget.videoWidth,
+                                                videoHeight: e.currentTarget.videoHeight,
+                                                duration: e.currentTarget.duration,
+                                                readyState: e.currentTarget.readyState,
+                                                clientWidth: e.currentTarget.clientWidth,
+                                                clientHeight: e.currentTarget.clientHeight
+                                            });
+                                            // Ensure video is visible in Edge - force reflow
+                                            const video = e.currentTarget;
+                                            video.style.display = 'block';
+                                            video.style.visibility = 'visible';
+                                            video.style.opacity = '1';
+                                            // Force Edge to repaint
+                                            void video.offsetHeight;
+                                            video.style.transform = 'translateZ(0)';
+                                        }}
+                                        onLoadedData={(e) => {
+                                            console.log('Video data loaded', e.currentTarget.readyState);
+                                            const video = e.currentTarget;
+                                            video.style.display = 'block';
+                                            video.style.visibility = 'visible';
+                                        }}
+                                        onCanPlay={(e) => {
+                                            console.log('Video can play', e.currentTarget.readyState);
+                                            const video = e.currentTarget;
+                                            video.style.display = 'block';
+                                            video.style.visibility = 'visible';
+                                        }}
+                                        onError={(e) => {
+                                            console.error('Video error:', e.currentTarget.error);
+                                        }}
+                                        onLoadStart={() => {
+                                            console.log('Video load started');
+                                        }}
+                                        style={{
+                                            ...(videoFilterStyle.filter ? videoFilterStyle : currentFilterStyle),
+                                            objectFit: 'contain',
+                                            width: '100%',
+                                            height: '100%',
+                                            minWidth: '100%',
+                                            minHeight: '100%',
+                                            display: 'block',
+                                            visibility: 'visible',
+                                            opacity: '1',
+                                            backgroundColor: 'transparent',
+                                            position: 'relative',
+                                            zIndex: 1
+                                        }}
                                     />
                                     {/* Sticker Overlays */}
                                     {stickers.map((overlay) => (
@@ -761,11 +1005,10 @@ export default function CreatePage() {
                         />
                         <div className="flex items-center justify-between mt-2">
                             <span className="text-xs text-gray-500 dark:text-gray-400">Text overlay</span>
-                            <span className={`text-xs transition-colors duration-200 ${
-                                imageText.length > 90 
-                                    ? 'text-red-500 dark:text-red-400' 
-                                    : 'text-gray-400 dark:text-gray-500'
-                            }`}>
+                            <span className={`text-xs transition-colors duration-200 ${imageText.length > 90
+                                ? 'text-red-500 dark:text-red-400'
+                                : 'text-gray-400 dark:text-gray-500'
+                                }`}>
                                 {imageText.length}/100
                             </span>
                         </div>
@@ -804,7 +1047,7 @@ export default function CreatePage() {
                                 Tag People
                             </div>
                             <div className="text-xs text-gray-500 dark:text-gray-400">
-                                {taggedUsers.length > 0 
+                                {taggedUsers.length > 0
                                     ? `${taggedUsers.length} ${taggedUsers.length === 1 ? 'person' : 'people'} tagged`
                                     : 'Tag someone in your post'
                                 }
@@ -837,16 +1080,14 @@ export default function CreatePage() {
                             className="w-5 h-5 rounded border-gray-300 dark:border-gray-600 text-brand-600 focus:ring-brand-500 focus:ring-2 transition-all duration-200 cursor-pointer"
                         />
                         <div className="flex items-center gap-2.5 flex-1">
-                            <div className={`p-2 rounded-lg transition-all duration-200 ${
-                                wantsToBoost 
-                                    ? 'bg-brand-100 dark:bg-brand-900/30' 
-                                    : 'bg-gray-100 dark:bg-gray-800'
-                            }`}>
-                                <FiZap className={`w-4 h-4 transition-colors duration-200 ${
-                                    wantsToBoost 
-                                        ? 'text-brand-600 dark:text-brand-400' 
-                                        : 'text-gray-400 dark:text-gray-500'
-                                }`} />
+                            <div className={`p-2 rounded-lg transition-all duration-200 ${wantsToBoost
+                                ? 'bg-brand-100 dark:bg-brand-900/30'
+                                : 'bg-gray-100 dark:bg-gray-800'
+                                }`}>
+                                <FiZap className={`w-4 h-4 transition-colors duration-200 ${wantsToBoost
+                                    ? 'text-brand-600 dark:text-brand-400'
+                                    : 'text-gray-400 dark:text-gray-500'
+                                    }`} />
                             </div>
                             <div>
                                 <div className="font-semibold text-sm text-gray-900 dark:text-gray-100">
@@ -889,7 +1130,7 @@ export default function CreatePage() {
             <UserTaggingModal
                 isOpen={showUserTagging}
                 onClose={() => setShowUserTagging(false)}
-                onSelectUser={(handle, displayName) => {
+                onSelectUser={(handle, _displayName) => {
                     if (!taggedUsers.includes(handle)) {
                         setTaggedUsers([...taggedUsers, handle]);
                     }
@@ -989,8 +1230,15 @@ export default function CreatePage() {
                                 ) : (
                                     <video
                                         src={selectedMedia}
-                                        className="w-full h-full object-contain"
-                                        style={currentFilterStyle}
+                                        className="w-full h-full"
+                                        style={{
+                                            ...currentFilterStyle,
+                                            objectFit: 'contain',
+                                            width: '100%',
+                                            height: '100%',
+                                            display: 'block'
+                                        }}
+                                        playsInline
                                         muted
                                         loop
                                         autoPlay
@@ -1014,17 +1262,15 @@ export default function CreatePage() {
                                         <button
                                             key={filter.id}
                                             onClick={() => setActiveFilter(filter.id)}
-                                            className={`flex flex-col items-center justify-center gap-1 px-2 py-1.5 transition-all flex-shrink-0 ${
-                                                activeFilter === filter.id
-                                                    ? 'scale-110'
-                                                    : ''
-                                            }`}
+                                            className={`flex flex-col items-center justify-center gap-1 px-2 py-1.5 transition-all flex-shrink-0 ${activeFilter === filter.id
+                                                ? 'scale-110'
+                                                : ''
+                                                }`}
                                         >
-                                            <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
-                                                activeFilter === filter.id
-                                                    ? 'bg-brand-500 border-2 border-white/50 shadow-lg'
-                                                    : 'bg-white/10 border border-white/20 hover:bg-white/20'
-                                            }`}>
+                                            <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${activeFilter === filter.id
+                                                ? 'bg-brand-500 border-2 border-white/50 shadow-lg'
+                                                : 'bg-white/10 border border-white/20 hover:bg-white/20'
+                                                }`}>
                                                 {filter.id === 'none' && <FiCircle className="w-4 h-4 text-white" />}
                                                 {filter.id === 'bw' && <div className="w-4 h-4 rounded-full bg-gradient-to-br from-white to-gray-400" />}
                                                 {filter.id === 'sepia' && <div className="w-4 h-4 rounded-full bg-gradient-to-br from-amber-200 to-amber-800" />}

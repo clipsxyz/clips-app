@@ -5,7 +5,7 @@ import type { Post, Comment, StickerOverlay } from '../types';
  * MOCK API - TO SWAP WITH REAL BACKEND
  * 
  * BACKEND ENDPOINTS (Laravel):
- * - GET /api/posts?filter={filter}&cursor={cursor} - Fetch posts (filter: finglas, dublin, ireland, following)
+ * - GET /api/posts?filter={filter}&cursor={cursor} - Fetch posts (filter: finglas, dublin, ireland, discover)
  * - POST /api/posts - Create new post
  * - PUT /api/posts/{id}/like - Toggle like
  * - PUT /api/posts/{id}/follow - Toggle follow author
@@ -345,7 +345,7 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
     });
 
     const filtered = posts.filter(p => {
-      if (t === 'following') {
+      if (t === 'discover') {
         const userState = getState(userId);
         const isFollowing = userState.follows[p.userHandle];
         // Only show posts from users you actually follow
@@ -353,7 +353,7 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       }
 
       // Check if this is a custom location search (not one of the predefined tabs)
-      const predefinedTabs = ['finglas', 'dublin', 'ireland', 'following'];
+      const predefinedTabs = ['finglas', 'dublin', 'ireland', 'discover'];
       if (!predefinedTabs.includes(t)) {
         // Custom location search – map query to scope: national (country), regional (city), local (town)
         const query = t.trim().toLowerCase();
@@ -682,6 +682,8 @@ export async function fetchPostsByUser(userHandle: string, limit = 30): Promise<
 
 export async function addComment(postId: string, userHandle: string, text: string): Promise<Comment> {
   await delay(300);
+  console.log('addComment called:', { postId, userHandle, text, postsCount: posts.length });
+  
   const comment: Comment = {
     id: crypto.randomUUID(),
     postId,
@@ -695,8 +697,43 @@ export async function addComment(postId: string, userHandle: string, text: strin
 
   // Update post comment count
   const post = posts.find(p => p.id === postId);
+  console.log('Post lookup result:', { 
+    postId, 
+    found: !!post, 
+    postUserHandle: post?.userHandle, 
+    commenterHandle: userHandle,
+    isOwnPost: post?.userHandle === userHandle
+  });
+  
   if (post) {
     post.stats.comments += 1;
+    
+    // Send DM to post owner with comment notification (only if not commenting on own post)
+    if (post.userHandle !== userHandle) {
+      // Dynamically import to avoid circular dependency
+      const { appendMessage } = await import('./messages');
+      console.log('Sending comment notification DM:', { 
+        from: userHandle, 
+        to: post.userHandle, 
+        postId, 
+        commentText: text 
+      });
+      try {
+        await appendMessage(userHandle, post.userHandle, {
+          postId: postId,
+          commentId: comment.id,
+          commentText: text,
+          isSystemMessage: false
+        });
+        console.log('Comment notification DM sent successfully');
+      } catch (error) {
+        console.error('Failed to send comment notification DM:', error);
+      }
+    } else {
+      console.log('Skipping DM - user is commenting on their own post');
+    }
+  } else {
+    console.warn('Post not found for comment:', postId, 'Available post IDs:', posts.map(p => p.id).slice(0, 5));
   }
 
   return comment;

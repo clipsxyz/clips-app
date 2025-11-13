@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiHeart, FiVolume2, FiVolumeX, FiMaximize2 } from 'react-icons/fi';
+import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiHeart, FiVolume2, FiVolumeX, FiMaximize2, FiMapPin } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
@@ -9,6 +9,9 @@ import { appendMessage } from '../api/messages';
 import { showToast } from '../utils/toast';
 import { getFollowedUsers, getPostById } from '../api/posts';
 import ScenesModal from '../components/ScenesModal';
+import { getFlagForHandle, getAvatarForHandle } from '../api/users';
+import Flag from '../components/Flag';
+import { timeAgo } from '../utils/timeAgo';
 import type { Story, StoryGroup, Post } from '../types';
 
 export default function StoriesPage() {
@@ -30,6 +33,7 @@ export default function StoriesPage() {
     const [showControls, setShowControls] = React.useState(true);
     const [showScenesModal, setShowScenesModal] = React.useState(false);
     const [fullPost, setFullPost] = React.useState<Post | null>(null);
+    const [originalPost, setOriginalPost] = React.useState<Post | null>(null);
     const videoRef = React.useRef<HTMLVideoElement>(null);
     const elapsedTimeRef = React.useRef<number>(0);
     const pausedRef = React.useRef<boolean>(false);
@@ -220,6 +224,42 @@ export default function StoriesPage() {
             console.error('Error adding reply:', error);
         }
     }
+
+    // Fetch original post if this is a shared text-only post
+    React.useEffect(() => {
+        const currentGroup = storyGroups[currentGroupIndex];
+        if (!currentGroup || !currentGroup.stories) return;
+        const currentStory = currentGroup.stories[currentStoryIndex];
+
+        // Check if this is a shared post - if it has sharedFromPost, fetch the original
+        if (currentStory?.sharedFromPost) {
+            console.log('Fetching original post for shared story:', currentStory.sharedFromPost);
+            // Fetch the original post to display it
+            getPostById(currentStory.sharedFromPost)
+                .then((post) => {
+                    if (post) {
+                        console.log('Original post fetched:', {
+                            id: post.id,
+                            hasText: !!post.text,
+                            hasMediaUrl: !!post.mediaUrl,
+                            mediaUrl: post.mediaUrl,
+                            hasMediaItems: !!(post.mediaItems && post.mediaItems.length > 0)
+                        });
+                        // Set the post regardless of media - we'll handle display in the render
+                        setOriginalPost(post);
+                    } else {
+                        console.warn('Original post not found:', currentStory.sharedFromPost);
+                        setOriginalPost(null);
+                    }
+                })
+                .catch((error) => {
+                    console.error('Failed to fetch original post:', error);
+                    setOriginalPost(null);
+                });
+        } else {
+            setOriginalPost(null);
+        }
+    }, [currentGroupIndex, currentStoryIndex, storyGroups]);
 
     // Track story view progress
     React.useEffect(() => {
@@ -432,84 +472,226 @@ export default function StoriesPage() {
                     <div className="absolute inset-0 flex items-center justify-center">
                         <div className="relative w-full h-full max-w-[420px] max-h-[90vh] aspect-[9/16] flex items-center justify-center">
                             <div className="relative w-full h-full rounded-2xl overflow-hidden shadow-2xl bg-black">
-                                {currentStory?.mediaUrl ? (
-                                    currentStory.mediaType === 'video' ? (
-                                        <video
-                                            ref={videoRef}
-                                            src={currentStory.mediaUrl}
-                                            className="w-full h-full object-cover"
-                                            autoPlay
-                                            loop
-                                            muted={isMuted}
-                                            playsInline
-                                        />
-                                    ) : (
-                                        <img
-                                            src={currentStory.mediaUrl}
-                                            alt=""
-                                            className="w-full h-full object-cover select-none"
-                                            draggable={false}
-                                        />
-                                    )
-                                ) : (
-                                    // Text-only story display
-                                    <div 
-                                        className="w-full h-full flex items-center justify-center px-6"
-                                        style={{
-                                            background: currentStory?.textStyle?.background?.includes('gradient') 
-                                                ? undefined 
-                                                : currentStory?.textStyle?.background,
-                                            backgroundImage: currentStory?.textStyle?.background?.includes('gradient') 
-                                                ? currentStory.textStyle.background 
-                                                : undefined
-                                        }}
-                                    >
-                                        <div className="text-center w-full relative z-10">
-                                            {currentStory?.text && (
-                                                <div 
-                                                    className={`leading-relaxed whitespace-pre-wrap font-bold drop-shadow-lg ${
-                                                        currentStory.textStyle?.size === 'small' ? 'text-2xl' :
-                                                        currentStory.textStyle?.size === 'large' ? 'text-6xl' :
-                                                        'text-4xl'
-                                                    }`}
-                                                    style={{ color: currentStory.textStyle?.color || 'white' }}
+                                {(() => {
+                                    // Debug logging
+                                    if (currentStory?.sharedFromPost) {
+                                        console.log('Rendering shared post story:', {
+                                            sharedFromPost: currentStory.sharedFromPost,
+                                            hasOriginalPost: !!originalPost,
+                                            storyHasMediaUrl: !!currentStory.mediaUrl,
+                                            storyHasText: !!currentStory.text,
+                                            originalPostText: originalPost?.text,
+                                            originalPostMediaUrl: originalPost?.mediaUrl,
+                                            originalPostHasMediaItems: !!(originalPost?.mediaItems && originalPost.mediaItems.length > 0)
+                                        });
+                                    }
+                                    
+                                    if (currentStory?.sharedFromPost && !originalPost) {
+                                        // Loading state while fetching original post
+                                        return (
+                                            <div className="w-full h-full flex items-center justify-center">
+                                                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
+                                            </div>
+                                        );
+                                    }
+                                    
+                                    if (currentStory?.sharedFromPost && originalPost) {
+                                        // This is a shared post - ALWAYS show the original post format, not the generated image
+                                        // Check if it has media or is text-only
+                                        const hasRealMedia = (originalPost.mediaUrl && originalPost.mediaUrl.trim() !== '' && !originalPost.mediaUrl.startsWith('data:image')) || (originalPost.mediaItems && originalPost.mediaItems.length > 0);
+                                        
+                                        if (hasRealMedia) {
+                                            // Shared post with media - show the media
+                                            return originalPost.mediaType === 'video' || originalPost.mediaItems?.[0]?.type === 'video' ? (
+                                                <video
+                                                    ref={videoRef}
+                                                    src={originalPost.mediaUrl || originalPost.mediaItems?.[0]?.url}
+                                                    className="w-full h-full object-cover"
+                                                    autoPlay
+                                                    loop
+                                                    muted={isMuted}
+                                                    playsInline
+                                                />
+                                            ) : (
+                                                <img
+                                                    src={originalPost.mediaUrl || originalPost.mediaItems?.[0]?.url}
+                                                    alt="Shared post"
+                                                    className="w-full h-full object-cover"
+                                                />
+                                            );
+                                        } else if (originalPost.text) {
+                                            // Display shared text-only post as screenshot of original post card (Twitter style)
+                                            // This handles text-only posts (tweets) - ignore any generated mediaUrl from ShareModal
+                                            return (
+                                                <div
+                                                    className="w-full h-full flex items-center justify-center p-4"
+                                                    style={{
+                                                        background: '#000000' // Black background
+                                                    }}
                                                 >
-                                                    {currentStory.text}
-                                                </div>
-                                            )}
-                                        </div>
-                                        {/* Sticker Overlays for text-only stories */}
-                                        {currentStory?.stickers && currentStory.stickers.length > 0 && (
-                                            <>
-                                                {currentStory.stickers.map((overlay) => (
-                                                    <div
-                                                        key={overlay.id}
-                                                        className="absolute"
-                                                        style={{
-                                                            left: `${overlay.x}%`,
-                                                            top: `${overlay.y}%`,
-                                                            transform: `translate(-50%, -50%) scale(${overlay.scale}) rotate(${overlay.rotation}deg)`,
-                                                            opacity: overlay.opacity,
-                                                            zIndex: 20
+                                                    <div 
+                                                        className="w-full max-w-md rounded-2xl overflow-hidden bg-white border border-gray-200 shadow-2xl" 
+                                                        style={{ 
+                                                            maxWidth: '100%', 
+                                                            boxSizing: 'border-box',
+                                                            backgroundColor: '#ffffff' // Force white background
                                                         }}
                                                     >
-                                                        {overlay.sticker.emoji ? (
-                                                            <span className="text-4xl" style={{ fontSize: `${50 * overlay.scale}px` }}>
-                                                                {overlay.sticker.emoji}
-                                                            </span>
-                                                        ) : overlay.sticker.url ? (
-                                                            <img
-                                                                src={overlay.sticker.url}
-                                                                alt=""
-                                                                className="max-w-[100px] max-h-[100px]"
-                                                                style={{ pointerEvents: 'none' }}
-                                                            />
-                                                        ) : null}
+                                                        {/* Post Header */}
+                                                        <div 
+                                                            className="flex items-start justify-between px-4 pt-4 pb-3 border-b border-gray-200" 
+                                                            style={{ backgroundColor: '#ffffff' }}
+                                                        >
+                                                            <div className="flex items-center gap-3 flex-1">
+                                                                <Avatar
+                                                                    src={getAvatarForHandle(originalPost.userHandle)}
+                                                                    name={originalPost.userHandle.split('@')[0]}
+                                                                    size="sm"
+                                                                />
+                                                                <div className="flex-1">
+                                                                    <h3 className="font-semibold flex items-center gap-1.5 text-gray-900 text-sm">
+                                                                        <span>{originalPost.userHandle}</span>
+                                                                        <Flag
+                                                                            value={getFlagForHandle(originalPost.userHandle) || ''}
+                                                                            size={14}
+                                                                        />
+                                                                    </h3>
+                                                                    <div className="text-xs text-gray-600 flex items-center gap-2 mt-0.5">
+                                                                        {originalPost.locationLabel && (
+                                                                            <>
+                                                                                <span className="flex items-center gap-1">
+                                                                                    <FiMapPin className="w-3 h-3" />
+                                                                                    {originalPost.locationLabel}
+                                                                                </span>
+                                                                                {originalPost.createdAt && <span className="text-gray-400">·</span>}
+                                                                            </>
+                                                                        )}
+                                                                        {originalPost.createdAt && (
+                                                                            <span>{timeAgo(originalPost.createdAt)}</span>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Text Content - styled like feed (Twitter card style) */}
+                                                        <div 
+                                                            className="p-4 w-full overflow-hidden" 
+                                                            style={{ 
+                                                                maxWidth: '100%', 
+                                                                boxSizing: 'border-box', 
+                                                                backgroundColor: '#ffffff' 
+                                                            }}
+                                                        >
+                                                            <div 
+                                                                className="p-4 rounded-lg bg-black overflow-hidden w-full" 
+                                                                style={{ 
+                                                                    maxWidth: '100%', 
+                                                                    boxSizing: 'border-box', 
+                                                                    backgroundColor: '#000000' 
+                                                                }}
+                                                            >
+                                                                <div 
+                                                                    className="text-base leading-relaxed whitespace-pre-wrap font-normal text-white break-words w-full" 
+                                                                    style={{ 
+                                                                        wordBreak: 'break-word', 
+                                                                        overflowWrap: 'anywhere', 
+                                                                        maxWidth: '100%', 
+                                                                        boxSizing: 'border-box', 
+                                                                        color: '#ffffff' 
+                                                                    }}
+                                                                >
+                                                                    {originalPost.text || 'Shared post'}
+                                                                </div>
+                                                            </div>
+                                                        </div>
                                                     </div>
-                                                ))}
-                                            </>
-                                        )}
-                                    </div>
+                                                </div>
+                                            );
+                                        } else {
+                                            // Fallback for shared post that doesn't match media or text-only
+                                            return (
+                                                <div className="w-full h-full flex items-center justify-center">
+                                                    <p className="text-white">Shared post</p>
+                                                </div>
+                                            );
+                                        }
+                                    }
+                                    
+                                    // Not a shared post - show regular story content
+                                    if (currentStory?.mediaUrl) {
+                                        return currentStory.mediaType === 'video' ? (
+                                            <video
+                                                ref={videoRef}
+                                                src={currentStory.mediaUrl}
+                                                className="w-full h-full object-cover"
+                                                autoPlay
+                                                loop
+                                                muted={isMuted}
+                                                playsInline
+                                            />
+                                        ) : (
+                                            <img
+                                                src={currentStory.mediaUrl}
+                                                alt=""
+                                                className="w-full h-full object-cover select-none"
+                                                draggable={false}
+                                            />
+                                        );
+                                    }
+                                    
+                                    // Text-only story display (directly created, not shared) - keep original style with gradient/textStyle
+                                    return (
+                                        <div
+                                            className="w-full h-full flex items-center justify-center p-4"
+                                            style={{
+                                                background: currentStory?.textStyle?.background || '#1a1a1a'
+                                            }}
+                                        >
+                                            <div className="w-full max-w-md">
+                                                <div
+                                                    className="text-base leading-relaxed whitespace-pre-wrap font-normal px-6 py-8"
+                                                    style={{
+                                                        color: currentStory?.textStyle?.color || '#ffffff'
+                                                    }}
+                                                >
+                                                    {currentStory?.text}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+
+                                {/* Sticker Overlays for all stories */}
+                                {currentStory?.stickers && currentStory.stickers.length > 0 && (
+                                    <>
+                                        {currentStory.stickers.map((overlay) => (
+                                            <div
+                                                key={overlay.id}
+                                                className="absolute"
+                                                style={{
+                                                    left: `${overlay.x}%`,
+                                                    top: `${overlay.y}%`,
+                                                    transform: `translate(-50%, -50%) scale(${overlay.scale}) rotate(${overlay.rotation}deg)`,
+                                                    opacity: overlay.opacity,
+                                                    zIndex: 20
+                                                }}
+                                            >
+                                                {overlay.sticker.emoji ? (
+                                                    <span className="text-4xl" style={{ fontSize: `${50 * overlay.scale}px` }}>
+                                                        {overlay.sticker.emoji}
+                                                    </span>
+                                                ) : overlay.sticker.url ? (
+                                                    <img
+                                                        src={overlay.sticker.url}
+                                                        alt=""
+                                                        className="max-w-[100px] max-h-[100px]"
+                                                        style={{ pointerEvents: 'none' }}
+                                                    />
+                                                ) : null}
+                                            </div>
+                                        ))}
+                                    </>
                                 )}
                             </div>
                         </div>
@@ -732,7 +914,24 @@ export default function StoriesPage() {
                                         onClick={() => {
                                             setShowReplyModal(false);
                                             setViewingStories(false);
-                                            navigate(`/messages/${encodeURIComponent(currentGroup.userHandle!)}`);
+
+                                            // Get the current story to check if it's a shared post
+                                            const group = storyGroups[currentGroupIndex];
+                                            const story = group?.stories?.[currentStoryIndex];
+
+                                            // If this is a shared post, pass the post URL
+                                            let shareState: any = undefined;
+                                            if (story?.sharedFromPost) {
+                                                const postUrl = `${window.location.origin}/post/${story.sharedFromPost}`;
+                                                shareState = {
+                                                    sharePostUrl: postUrl,
+                                                    sharePostId: story.sharedFromPost
+                                                };
+                                            }
+
+                                            navigate(`/messages/${encodeURIComponent(currentGroup.userHandle!)}`, {
+                                                state: shareState
+                                            });
                                         }}
                                         className="px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                                     >
@@ -778,15 +977,15 @@ export default function StoriesPage() {
 
     // Story list UI
     return (
-        <div className="p-4">
+        <div className="min-h-screen bg-black text-white p-4">
             {/* Header */}
             <div className="flex items-center justify-between mb-6">
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Clips 24</h1>
+                <h1 className="text-2xl font-bold text-white">Clips 24</h1>
                 <button
                     onClick={() => navigate('/feed')}
-                    className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                    className="p-2 rounded-full hover:bg-gray-800 transition-colors"
                 >
-                    <FiX className="w-6 h-6 text-gray-600 dark:text-gray-400" />
+                    <FiX className="w-6 h-6 text-gray-400" />
                 </button>
             </div>
 
@@ -799,10 +998,10 @@ export default function StoriesPage() {
                             </div>
                         </div>
                     </div>
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
+                    <h3 className="text-lg font-semibold text-white mb-2">
                         No clips available
                     </h3>
-                    <p className="text-gray-600 dark:text-gray-400">
+                    <p className="text-gray-400">
                         Share your first clip to get started!
                     </p>
                     <button
@@ -813,7 +1012,7 @@ export default function StoriesPage() {
                     </button>
                 </div>
             ) : (
-                <div className="space-y-2">
+                <div className="grid grid-cols-3 gap-3">
                     {sortedGroups.map((group, index) => {
                         if (!group.stories || group.stories.length === 0) return null;
 
@@ -821,45 +1020,240 @@ export default function StoriesPage() {
                         const latestStory = group.stories.reduce((latest, current) =>
                             current.createdAt > latest.createdAt ? current : latest
                         );
-                        const timeAgo = getTimeAgo(latestStory.createdAt);
-
+                        
+                        // Extract location from userHandle (e.g., "Sarah@Artane" -> "Artane")
+                        const locationMatch = group.userHandle.match(/@(.+)/);
+                        const location = locationMatch ? locationMatch[1] : '';
+                        const displayName = group.userHandle.split('@')[0];
+                        const usernameLocation = location ? `${displayName}@${location}` : group.userHandle;
+                        
+                        // Generate gazetteer-style color based on location
+                        const getLocationColor = (loc: string): string => {
+                            if (!loc) return '#6366f1'; // Default indigo
+                            
+                            // Create a consistent color based on location string
+                            let hash = 0;
+                            for (let i = 0; i < loc.length; i++) {
+                                hash = loc.charCodeAt(i) + ((hash << 5) - hash);
+                            }
+                            
+                            // Generate a vibrant color palette
+                            const hue = Math.abs(hash % 360);
+                            const saturation = 65 + (Math.abs(hash) % 20); // 65-85%
+                            const lightness = 50 + (Math.abs(hash) % 15); // 50-65%
+                            
+                            return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+                        };
+                        
+                        const locationColor = getLocationColor(location || group.userHandle);
+                        
+                        // Check if this is a shared post - if so, we need to fetch and show the original post format
+                        const StoryThumbnail = React.memo(({ story }: { story: Story }) => {
+                            const [originalPost, setOriginalPost] = React.useState<Post | null>(null);
+                            const [loading, setLoading] = React.useState(false);
+                            
+                            React.useEffect(() => {
+                                if (story.sharedFromPost) {
+                                    setLoading(true);
+                                    getPostById(story.sharedFromPost)
+                                        .then((post) => {
+                                            if (post) {
+                                                setOriginalPost(post);
+                                            }
+                                            setLoading(false);
+                                        })
+                                        .catch(() => {
+                                            setLoading(false);
+                                        });
+                                }
+                            }, [story.sharedFromPost]);
+                            
+                            // If it's a shared post, show the original post format
+                            if (story.sharedFromPost && originalPost) {
+                                const hasRealMedia = (originalPost.mediaUrl && originalPost.mediaUrl.trim() !== '' && !originalPost.mediaUrl.startsWith('data:image')) || (originalPost.mediaItems && originalPost.mediaItems.length > 0);
+                                
+                                if (hasRealMedia) {
+                                    // Shared post with media
+                                    return originalPost.mediaType === 'video' || originalPost.mediaItems?.[0]?.type === 'video' ? (
+                                        <video
+                                            src={originalPost.mediaUrl || originalPost.mediaItems?.[0]?.url}
+                                            className="w-full h-full object-cover"
+                                            muted
+                                            playsInline
+                                            preload="metadata"
+                                        />
+                                    ) : (
+                                        <img
+                                            src={originalPost.mediaUrl || originalPost.mediaItems?.[0]?.url}
+                                            alt="Shared post"
+                                            className="w-full h-full object-cover"
+                                            loading="lazy"
+                                        />
+                                    );
+                                } else if (originalPost.text) {
+                                    // Shared text-only post - show Twitter card style preview
+                                    return (
+                                        <div className="w-full h-full flex items-center justify-center p-2 bg-black">
+                                            <div className="w-full max-w-full rounded-lg overflow-hidden bg-white border border-gray-200 shadow-lg">
+                                                {/* Post Header */}
+                                                <div className="px-2 pt-1.5 pb-1 border-b border-gray-200 bg-white">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <Avatar
+                                                            src={getAvatarForHandle(originalPost.userHandle)}
+                                                            name={originalPost.userHandle.split('@')[0]}
+                                                            size="xs"
+                                                        />
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="flex items-center gap-1">
+                                                                <span className="font-semibold text-[9px] text-gray-900 truncate">{originalPost.userHandle}</span>
+                                                                <Flag
+                                                                    value={getFlagForHandle(originalPost.userHandle) || ''}
+                                                                    size={8}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                {/* Text Content - Twitter card style */}
+                                                <div className="p-1.5 bg-white">
+                                                    <div className="p-1.5 rounded bg-black">
+                                                        <div className="text-[8px] leading-tight text-white line-clamp-4 whitespace-pre-wrap break-words">
+                                                            {originalPost.text}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                }
+                            }
+                            
+                            if (story.sharedFromPost && loading) {
+                                return (
+                                    <div className="w-full h-full flex items-center justify-center bg-gray-900">
+                                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
+                                    </div>
+                                );
+                            }
+                            
+                            // Not a shared post - show regular story thumbnail
+                            const thumbnailUrl = story.mediaUrl;
+                            
+                            if (thumbnailUrl) {
+                                return story.mediaType === 'video' ? (
+                                    <video
+                                        src={thumbnailUrl}
+                                        className="w-full h-full object-cover"
+                                        muted
+                                        playsInline
+                                        preload="metadata"
+                                    />
+                                ) : (
+                                    <img
+                                        src={thumbnailUrl}
+                                        alt={`${group.userHandle} clip`}
+                                        className="w-full h-full object-cover"
+                                        loading="lazy"
+                                        onError={(e) => {
+                                            const target = e.target as HTMLImageElement;
+                                            if (!target.src.includes('via.placeholder')) {
+                                                target.src = 'https://via.placeholder.com/400x600/1a1a1a/ffffff?text=' + encodeURIComponent(displayName);
+                                            }
+                                        }}
+                                    />
+                                );
+                            } else if (story.text) {
+                                // Text-only story (directly created, not shared) - show with gradient background
+                                return (
+                                    <div
+                                        className="w-full h-full flex items-center justify-center p-4 rounded-lg"
+                                        style={{
+                                            background: story.textStyle?.background || '#1a1a1a'
+                                        }}
+                                    >
+                                        <div
+                                            className="text-xs leading-relaxed whitespace-pre-wrap font-normal text-center line-clamp-4"
+                                            style={{
+                                                color: story.textStyle?.color || '#ffffff'
+                                            }}
+                                        >
+                                            {story.text}
+                                        </div>
+                                    </div>
+                                );
+                            } else {
+                                // Fallback placeholder
+                                return (
+                                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-800 to-gray-900">
+                                        <Avatar
+                                            src={group.avatarUrl}
+                                            name={group.name}
+                                            size="lg"
+                                        />
+                                    </div>
+                                );
+                            }
+                        });
+                        
+                        StoryThumbnail.displayName = 'StoryThumbnail';
+                        
                         return (
                             <button
                                 key={group.userId}
                                 onClick={() => startViewingStories(group)}
-                                className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                                className={`relative aspect-[9/16] rounded-lg overflow-hidden bg-gray-900 group cursor-pointer border focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-black ${
+                                    isUnviewed 
+                                        ? 'border-transparent' 
+                                        : 'border-white'
+                                }`}
+                                style={isUnviewed ? {
+                                    background: 'linear-gradient(135deg, #10b981, #3b82f6, #2563eb)',
+                                    padding: '2px'
+                                } : {}}
                             >
-                                {/* Profile Picture with Glow Effect */}
-                                <div className="relative flex-shrink-0">
-                                    {isUnviewed ? (
-                                        <div className="w-14 h-14 rounded-full bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 p-0.5 animate-pulse">
-                                            <div className="w-full h-full rounded-full bg-gray-950 flex items-center justify-center">
-                                                <Avatar
-                                                    src={group.avatarUrl}
-                                                    name={group.name}
-                                                    size="lg"
-                                                />
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div className="w-14 h-14 rounded-full">
-                                            <Avatar
-                                                src={group.avatarUrl}
-                                                name={group.name}
-                                                size="lg"
-                                            />
-                                        </div>
-                                    )}
-                                </div>
+                                <div className={`relative w-full h-full rounded-lg overflow-hidden ${isUnviewed ? 'bg-gray-900' : ''}`}>
+                                    {/* Improved Thumbnail */}
+                                    <div className="absolute inset-0">
+                                        <StoryThumbnail story={latestStory} />
+                                    </div>
+                                    
+                                    {/* Overlay on hover */}
+                                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors rounded-lg z-10" />
 
-                                {/* User Info */}
-                                <div className="flex-1 text-left min-w-0">
-                                    <p className="font-semibold text-gray-900 dark:text-gray-100 truncate">
-                                        {group.userHandle}
-                                    </p>
-                                    <p className="text-xs text-gray-600 dark:text-gray-400">
-                                        {timeAgo}
-                                    </p>
+                                    {/* Centered Profile Picture with Gazetteer Border */}
+                                    <div className="absolute inset-0 flex items-center justify-center z-20">
+                                        <div 
+                                            className="relative w-16 h-16 rounded-full overflow-hidden border-4 shadow-lg"
+                                            style={{
+                                                borderColor: locationColor,
+                                                boxShadow: `0 0 0 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.4)`
+                                            }}
+                                        >
+                                            {group.avatarUrl ? (
+                                                <img
+                                                    src={group.avatarUrl}
+                                                    alt={group.name}
+                                                    className="w-full h-full object-cover"
+                                                />
+                                            ) : (
+                                                <div 
+                                                    className="w-full h-full flex items-center justify-center"
+                                                    style={{ backgroundColor: locationColor + '40' }}
+                                                >
+                                                    <span className="text-xl text-white font-bold">
+                                                        {group.name.charAt(0).toUpperCase()}
+                                                    </span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Username at bottom */}
+                                    <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/90 via-black/70 to-transparent rounded-b-lg z-20">
+                                        <p className="text-white text-[10px] font-medium text-center truncate leading-tight">
+                                            {usernameLocation}
+                                        </p>
+                                    </div>
                                 </div>
                             </button>
                         );
