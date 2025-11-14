@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiX, FiImage, FiVideo, FiPlus, FiSmile, FiUser, FiChevronLeft, FiChevronRight, FiType, FiMessageSquare } from 'react-icons/fi';
+import { FiX, FiImage, FiVideo, FiPlus, FiSmile, FiUser, FiChevronLeft, FiChevronRight, FiType, FiMessageSquare, FiMapPin } from 'react-icons/fi';
 import { VideoTemplate, StickerOverlay, Sticker } from '../types';
 import { incrementTemplateUsage } from '../api/templates';
 import { createPost } from '../api/posts';
@@ -25,9 +25,34 @@ export default function TemplateEditorPage() {
     const navigate = useNavigate();
     const location = useLocation();
     const { user } = useAuth();
-    const template = (location.state as { template?: VideoTemplate })?.template;
+    const locationStateTemplate = (location.state as { template?: VideoTemplate })?.template;
+    
+    // Try to get template from location state, or restore from sessionStorage
+    const [template, setTemplate] = React.useState<VideoTemplate | undefined>(locationStateTemplate);
+    
+    // Restore template from location state or sessionStorage
+    React.useEffect(() => {
+        if (locationStateTemplate) {
+            // Template in location state takes priority
+            setTemplate(locationStateTemplate);
+        } else if (!template) {
+            // Try to restore from sessionStorage
+            const savedState = sessionStorage.getItem('templateEditorState');
+            if (savedState) {
+                try {
+                    const state = JSON.parse(savedState);
+                    if (state.template) {
+                        setTemplate(state.template);
+                    }
+                } catch (e) {
+                    console.error('Error restoring template from sessionStorage:', e);
+                }
+            }
+        }
+    }, [locationStateTemplate, template]);
 
     const [userMedia, setUserMedia] = React.useState<Map<string, UserMedia>>(new Map());
+    const [textOnlyClips, setTextOnlyClips] = React.useState<Map<string, { text: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>>(new Map()); // clipId -> text content
     const [currentClipIndex, setCurrentClipIndex] = React.useState(0);
     const [isProcessing, setIsProcessing] = React.useState(false);
     const [text, setText] = React.useState('');
@@ -46,10 +71,11 @@ export default function TemplateEditorPage() {
     const [showUserTagging, setShowUserTagging] = React.useState(false);
     const [currentStep, setCurrentStep] = React.useState<'media' | 'stickers' | 'details'>('media');
     const mediaContainerRef = React.useRef<HTMLDivElement>(null);
+    const isAddingClipRef = React.useRef(false); // Prevent multiple rapid clicks
 
     // For top 3 templates (Gazetteer, Instagram, TikTok), support dynamic clips (1-20)
     const isTopTemplate = template?.id === TEMPLATE_IDS.INSTAGRAM || template?.id === TEMPLATE_IDS.TIKTOK || template?.id === TEMPLATE_IDS.GAZETTEER;
-    const [dynamicClips, setDynamicClips] = React.useState<Array<{ id: string; mediaType: 'image' | 'video'; duration: number }>>(
+    const [dynamicClips, setDynamicClips] = React.useState<Array<{ id: string; mediaType: 'image' | 'video' | 'text'; duration: number }>>(
         isTopTemplate ? [{ id: 'clip-1', mediaType: 'video', duration: DEFAULT_CLIP_DURATION }] : []
     );
 
@@ -57,9 +83,30 @@ export default function TemplateEditorPage() {
     const activeClips = isTopTemplate ? dynamicClips : (template?.clips || []);
 
     React.useEffect(() => {
-        if (!template) {
-            navigate('/templates');
-        }
+        // Only redirect if we've checked sessionStorage and still don't have a template
+        const checkTemplate = () => {
+            if (!template) {
+                const savedState = sessionStorage.getItem('templateEditorState');
+                if (savedState) {
+                    try {
+                        const state = JSON.parse(savedState);
+                        if (state.template) {
+                            // Template found in sessionStorage, set it
+                            setTemplate(state.template);
+                            return; // Don't redirect, template is being restored
+                        }
+                    } catch (e) {
+                        // Error parsing, continue to redirect
+                    }
+                }
+                // No template found, redirect to templates page
+                navigate('/templates');
+            }
+        };
+        
+        // Small delay to allow sessionStorage restoration to complete
+        const timeoutId = setTimeout(checkTemplate, 100);
+        return () => clearTimeout(timeoutId);
     }, [template, navigate]);
 
     if (!template) {
@@ -67,7 +114,109 @@ export default function TemplateEditorPage() {
     }
 
     const currentClip = activeClips[currentClipIndex] || activeClips[0];
-    const allClipsFilled = activeClips.length > 0 && activeClips.every(clip => userMedia.has(clip.id));
+    
+    // Count only filled clips (clips with media or text)
+    const filledClipsCount = activeClips.filter(clip => {
+        if (clip.mediaType === 'text') {
+            return textOnlyClips.has(clip.id);
+        }
+        return userMedia.has(clip.id);
+    }).length;
+    
+    const allClipsFilled = activeClips.length > 0 && activeClips.every(clip => {
+        if (clip.mediaType === 'text') {
+            return textOnlyClips.has(clip.id);
+        }
+        return userMedia.has(clip.id);
+    });
+    
+    // Handle returning from text-only page with clip data
+    React.useEffect(() => {
+        const locationState = location.state as any;
+        if (locationState?.textClipData && locationState?.clipId) {
+            const { text, textStyle, clipId } = locationState.textClipData;
+            
+            // Restore state from sessionStorage
+            const savedState = sessionStorage.getItem('templateEditorState');
+            if (savedState) {
+                try {
+                    const state = JSON.parse(savedState);
+                    
+                    // Restore template if not already set
+                    if (state.template && !template) {
+                        setTemplate(state.template);
+                    }
+                    
+                    // Restore all state
+                    if (state.dynamicClips) {
+                        setDynamicClips(state.dynamicClips);
+                    }
+                    if (state.userMedia) {
+                        const mediaMap = new Map<string, UserMedia>();
+                        state.userMedia.forEach((item: { id: string; url: string; mediaType: 'image' | 'video' }) => {
+                            // Reconstruct UserMedia without File object (file will be undefined)
+                            mediaMap.set(item.id, {
+                                clipId: item.id,
+                                url: item.url,
+                                mediaType: item.mediaType
+                                // file is not restored as it can't be serialized
+                            });
+                        });
+                        setUserMedia(mediaMap);
+                    }
+                    if (state.textOnlyClips) {
+                        const textMap = new Map();
+                        state.textOnlyClips.forEach(([id, textData]: [string, any]) => {
+                            textMap.set(id, textData);
+                        });
+                        setTextOnlyClips(textMap);
+                    }
+                    if (state.stickers) {
+                        const stickerMap = new Map();
+                        state.stickers.forEach(([id, stickerArray]: [string, StickerOverlay[]]) => {
+                            stickerMap.set(id, stickerArray);
+                        });
+                        setStickers(stickerMap);
+                    }
+                    if (state.currentClipIndex !== undefined) {
+                        setCurrentClipIndex(state.currentClipIndex);
+                    }
+                    if (state.text !== undefined) setText(state.text);
+                    if (state.locationLabel !== undefined) setLocationLabel(state.locationLabel);
+                    if (state.bannerText !== undefined) setBannerText(state.bannerText);
+                    if (state.taggedUsers) setTaggedUsers(state.taggedUsers);
+                    
+                    // Add the new text clip (this will overwrite if it already exists in restored state)
+                    setTextOnlyClips(prev => {
+                        const newMap = new Map(prev);
+                        newMap.set(clipId, { text, textStyle });
+                        return newMap;
+                    });
+                    
+                    // Clear sessionStorage
+                    sessionStorage.removeItem('templateEditorState');
+                } catch (e) {
+                    console.error('Error restoring template editor state:', e);
+                    // Fallback: just add the text clip
+                    setTextOnlyClips(prev => {
+                        const newMap = new Map(prev);
+                        newMap.set(clipId, { text, textStyle });
+                        return newMap;
+                    });
+                }
+            } else {
+                // Fallback: just add the text clip
+                setTextOnlyClips(prev => {
+                    const newMap = new Map(prev);
+                    newMap.set(clipId, { text, textStyle });
+                    return newMap;
+                });
+            }
+            
+            // Clear the state to prevent re-processing
+            window.history.replaceState({ ...window.history.state, state: null }, '');
+        }
+    }, [location.state, template]);
 
     // Get gradient style for button text based on template
     const buttonTextStyle = React.useMemo((): React.CSSProperties => {
@@ -226,16 +375,48 @@ export default function TemplateEditorPage() {
     }
 
     function handleAddClip() {
-        if (!isTopTemplate || dynamicClips.length >= MAX_CLIPS) return;
-
-        const newClipId = `clip-${dynamicClips.length + 1}`;
-        const newClip = {
-            id: newClipId,
-            mediaType: 'video' as const,
-            duration: DEFAULT_CLIP_DURATION
-        };
-        setDynamicClips([...dynamicClips, newClip]);
-        setCurrentClipIndex(dynamicClips.length); // Navigate to the new clip
+        if (!isTopTemplate || isAddingClipRef.current) return;
+        
+        // Check if we're at max clips
+        if (dynamicClips.length >= MAX_CLIPS) return;
+        
+        // Set flag to prevent multiple rapid clicks
+        isAddingClipRef.current = true;
+        
+        // Use functional update to prevent race conditions
+        setDynamicClips(prev => {
+            if (prev.length >= MAX_CLIPS) {
+                isAddingClipRef.current = false;
+                return prev; // Don't add if at max
+            }
+            
+            // Generate a unique clip ID that doesn't conflict with text-clip IDs
+            // Find the highest numbered clip ID to avoid conflicts
+            const existingClipNumbers = prev
+                .map(clip => {
+                    const match = clip.id.match(/^clip-(\d+)$/);
+                    return match ? parseInt(match[1], 10) : 0;
+                })
+                .filter(num => num > 0);
+            const nextClipNumber = existingClipNumbers.length > 0 
+                ? Math.max(...existingClipNumbers) + 1 
+                : prev.length + 1;
+            
+            const newClipId = `clip-${nextClipNumber}`;
+            const newClip = {
+                id: newClipId,
+                mediaType: 'video' as const,
+                duration: DEFAULT_CLIP_DURATION
+            };
+            
+            // Navigate to the new clip after state update
+            setTimeout(() => {
+                setCurrentClipIndex(prev.length); // Navigate to the new clip (index is prev.length before adding)
+                isAddingClipRef.current = false; // Reset flag after state update
+            }, 100);
+            
+            return [...prev, newClip];
+        });
     }
 
     // Removed unused function - clips are managed via dynamic state
@@ -277,26 +458,50 @@ export default function TemplateEditorPage() {
             // Increment template usage
             await incrementTemplateUsage(template?.id || '');
 
-            // For now, we'll use the first clip's media as the main post media
-            // In a full implementation, you'd combine all clips into a single video
+            // Check if we have at least one filled clip (either media or text-only)
+            const hasAnyFilledClip = activeClips.some(clip => {
+                if (clip.mediaType === 'text') {
+                    return textOnlyClips.has(clip.id);
+                }
+                return userMedia.has(clip.id);
+            });
+            if (!hasAnyFilledClip) return;
+            
+            // Get first media for backward compatibility (skip text-only clips)
             const firstMedia = Array.from(userMedia.values())[0];
-            if (!firstMedia) return;
 
-            // Collect only media items from clips that have been filled, including effects
-            const allMediaItems = activeClips
-                .map(clip => {
+            // Collect media items from clips that have been filled, including text-only clips
+            const allMediaItems: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: any[]; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }> = [];
+            
+            activeClips.forEach(clip => {
+                if (clip.mediaType === 'text') {
+                    // Handle text-only clips
+                    const textClip = textOnlyClips.get(clip.id);
+                    if (textClip) {
+                        // Use a special data URL to mark this as a text-only clip
+                        allMediaItems.push({
+                            url: `data:text/plain;base64,${btoa(textClip.text)}`, // Encode text as base64 in data URL
+                            type: 'text',
+                            duration: clip.duration,
+                            text: textClip.text,
+                            textStyle: textClip.textStyle || { color: '#ffffff', size: 'medium', background: '#000000' }
+                        });
+                    }
+                } else {
+                    // Handle regular media clips
                     const media = userMedia.get(clip.id);
-                    if (!media) return null;
-                    // Get effects from template clip if it exists, otherwise empty array
-                    const clipEffects: any[] = 'effects' in clip && Array.isArray(clip.effects) ? clip.effects : [];
-                    return {
-                        url: media.url,
-                        type: media.mediaType,
-                        duration: clip.duration,
-                        effects: clipEffects
-                    };
-                })
-                .filter((item): item is { url: string; type: 'image' | 'video'; duration: number; effects: any[] } => item !== null && item !== undefined);
+                    if (media) {
+                        // Get effects from template clip if it exists, otherwise empty array
+                        const clipEffects: any[] = 'effects' in clip && Array.isArray(clip.effects) ? clip.effects : [];
+                        allMediaItems.push({
+                            url: media.url,
+                            type: media.mediaType,
+                            duration: clip.duration,
+                            effects: clipEffects
+                        });
+                    }
+                }
+            });
 
             // Combine stickers from all clips
             const allStickers: StickerOverlay[] = [];
@@ -308,13 +513,16 @@ export default function TemplateEditorPage() {
             // Create post with all clips' media as a carousel
             const taggedUsersToPass = taggedUsers && Array.isArray(taggedUsers) && taggedUsers.length > 0 ? taggedUsers : undefined;
 
+            // Find first non-text item for backward compatibility (mediaUrl/mediaType)
+            const firstMediaItem = allMediaItems.find(item => item.type !== 'text');
+            
             await createPost(
                 user.id,
                 user.handle,
                 text.trim(),
                 locationLabel.trim(),
-                allMediaItems[0]?.url, // First media for backward compatibility
-                allMediaItems[0]?.type, // First media type for backward compatibility
+                firstMediaItem?.url, // First non-text media for backward compatibility
+                firstMediaItem?.type === 'text' ? undefined : (firstMediaItem?.type as 'image' | 'video' | undefined), // First media type for backward compatibility (skip text)
                 undefined, // imageText
                 text.trim() || undefined, // caption
                 user.local,
@@ -322,7 +530,7 @@ export default function TemplateEditorPage() {
                 user.national,
                 allStickers.length > 0 ? allStickers : undefined, // Pass all stickers
                 template?.id || undefined, // templateId
-                allMediaItems.filter(item => item !== null) as Array<{ url: string; type: 'image' | 'video'; duration?: number }>, // Pass all media items for carousel
+                allMediaItems.filter(item => item !== null) as Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>, // Pass all media items for carousel (including text-only clips)
                 bannerText.trim() || undefined, // bannerText
                 undefined, // textStyle
                 taggedUsersToPass, // taggedUsers
@@ -345,9 +553,12 @@ export default function TemplateEditorPage() {
         }
     }
 
-    const currentMedia = currentClip ? userMedia.get(currentClip.id) : null;
+    const currentMedia = currentClip ? (currentClip.mediaType === 'text' ? null : userMedia.get(currentClip.id)) : null;
+    const currentTextOnlyClip = currentClip && currentClip.mediaType === 'text' ? textOnlyClips.get(currentClip.id) : null;
     const currentStickers = currentClip ? stickers.get(currentClip.id) || [] : [];
-    const progress = ((currentClipIndex + 1) / activeClips.length) * 100;
+    
+    // Calculate progress based on filled clips, but use current position in all clips
+    const progress = filledClipsCount > 0 ? ((currentClipIndex + 1) / Math.max(activeClips.length, filledClipsCount)) * 100 : 0;
     const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
 
     // Cleanup object URLs when component unmounts or media changes
@@ -488,7 +699,7 @@ export default function TemplateEditorPage() {
                         {currentStep === 'media' ? (
                             <>
                                 <div className="text-sm text-gray-400 mb-1">
-                                    Clip {currentClipIndex + 1} of {activeClips.length} {isTopTemplate && `(Max ${MAX_CLIPS})`}
+                                    Clip {currentClipIndex + 1} of {filledClipsCount} {isTopTemplate && `(Max ${MAX_CLIPS})`}
                                 </div>
                                 <div className="w-full h-1 bg-gray-800 rounded-full overflow-hidden">
                                     <div
@@ -520,11 +731,18 @@ export default function TemplateEditorPage() {
                                 {/* Add Another Clip Button - Left */}
                                 {isTopTemplate && activeClips.length < MAX_CLIPS && (
                                     <button
-                                        onClick={handleAddClip}
-                                        className="flex-1 py-2.5 bg-black text-white border border-white/40 rounded-lg text-sm font-semibold hover:bg-black/80 transition-colors flex items-center justify-center gap-1.5"
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            if (activeClips.length < MAX_CLIPS && !isAddingClipRef.current) {
+                                                handleAddClip();
+                                            }
+                                        }}
+                                        disabled={activeClips.length >= MAX_CLIPS || isAddingClipRef.current}
+                                        className="flex-1 py-2.5 bg-black text-white border border-white/40 rounded-lg text-sm font-semibold hover:bg-black/80 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         <FiPlus className="w-1.5 h-1.5" />
-                                        <span style={buttonTextStyle} className="text-sm">Add Another Clip ({activeClips.length}/{MAX_CLIPS})</span>
+                                        <span style={buttonTextStyle} className="text-sm">Add Another Clip ({filledClipsCount}/{MAX_CLIPS})</span>
                                     </button>
                                 )}
 
@@ -587,7 +805,7 @@ export default function TemplateEditorPage() {
                         {/* Step 1: Add Media */}
                         {/* Current Clip Preview - Clean and Simple */}
                         <div className="mb-6">
-                            {currentMedia ? (
+                            {(currentMedia || currentTextOnlyClip) ? (
                                 <div className="flex items-center justify-center gap-4">
                                     {activeClips.length > 1 && (
                                         <button
@@ -618,8 +836,49 @@ export default function TemplateEditorPage() {
                                             }
                                         }}
                                     >
-                                        {/* Apply effects from template clip */}
-                                        {(() => {
+                                        {/* Display text-only clip in Twitter card format */}
+                                        {currentTextOnlyClip ? (
+                                            <div className="w-full h-full flex items-center justify-center p-4 bg-black">
+                                                <div className="w-full max-w-md rounded-2xl overflow-hidden bg-white border border-gray-200 shadow-2xl" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
+                                                    {/* Post Header */}
+                                                    <div className="flex items-start justify-between px-4 pt-4 pb-3 border-b border-gray-200">
+                                                        <div className="flex items-center gap-3 flex-1">
+                                                            <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0">
+                                                                <span className="text-gray-600 text-sm font-semibold">
+                                                                    {user?.handle?.split('@')[0]?.charAt(0).toUpperCase() || 'U'}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex-1">
+                                                                <h3 className="font-semibold flex items-center gap-1.5 text-gray-900 text-sm">
+                                                                    <span>{user?.handle || 'User'}</span>
+                                                                </h3>
+                                                                <div className="text-xs text-gray-600 flex items-center gap-2 mt-0.5">
+                                                                    {locationLabel && (
+                                                                        <>
+                                                                            <span className="flex items-center gap-1">
+                                                                                <FiMapPin className="w-3 h-3" />
+                                                                                {locationLabel}
+                                                                            </span>
+                                                                        </>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Text Content - Twitter card style (white card with black text box) */}
+                                                    <div className="p-4 w-full overflow-hidden" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
+                                                        <div className="p-4 rounded-lg bg-black overflow-hidden w-full" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
+                                                            <div className="text-base leading-relaxed whitespace-pre-wrap font-normal text-white break-words w-full" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', maxWidth: '100%', boxSizing: 'border-box' }}>
+                                                                {currentTextOnlyClip.text}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ) : currentMedia ? (
+                                        /* Apply effects from template clip */
+                                        (() => {
                                             // Get effects from template clip if it exists, otherwise empty array
                                             const clipEffects: any[] = 'effects' in currentClip && Array.isArray(currentClip.effects) ? currentClip.effects : [];
 
@@ -670,7 +929,8 @@ export default function TemplateEditorPage() {
                                             });
 
                                             return mediaElement;
-                                        })()}
+                                        })()
+                                        ) : null}
 
                                         {/* Show active effects indicator */}
                                         {(() => {
@@ -727,106 +987,165 @@ export default function TemplateEditorPage() {
                                     )}
                                 </div>
                             ) : (
-                                <div className="flex items-center justify-center gap-4">
-                                    {activeClips.length > 1 && (
-                                        <button
-                                            onClick={handlePrevious}
-                                            disabled={!canGoPrevious}
-                                            className={`p-3 rounded-full border border-white/10 bg-black/60 hover:bg-black/80 transition-colors ${!canGoPrevious ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}
-                                        >
-                                            <FiChevronLeft className="w-5 h-5 text-white" />
-                                            <span className="sr-only">Previous clip</span>
-                                        </button>
-                                    )}
-                                    <label className={`block aspect-[9/16] max-h-[55vh] rounded-2xl cursor-pointer mx-auto bg-gray-900/30 transition-colors ${template.id === TEMPLATE_IDS.INSTAGRAM
-                                        ? 'ig-animated-border'
-                                        : template.id === TEMPLATE_IDS.TIKTOK
-                                            ? 'tt-animated-border'
-                                            : template.id === TEMPLATE_IDS.GAZETTEER
-                                                ? 'gz-animated-border'
-                                                : 'border-2 border-dashed border-gray-700 hover:border-gray-600'
-                                        }`}>
-                                        <input
-                                            type="file"
-                                            accept={isTopTemplate ? 'image/*,video/mp4,.mp4' : (currentClip?.mediaType === 'video' ? 'video/mp4,.mp4' : 'image/*')}
-                                            onChange={(e) => handleMediaSelect(currentClip?.id || '', e)}
-                                            className="hidden"
-                                        />
-                                        <div className="h-full flex flex-col items-center justify-center p-8 text-center">
-                                            {isTopTemplate ? (
-                                                <>
-                                                    <FiImage className="w-12 h-12 text-gray-500 mb-4" />
-                                                    <div className="text-white text-lg font-semibold mb-2">
-                                                        Add Photo or Video
-                                                    </div>
-                                                    <div className="text-gray-400 text-sm">
-                                                        Tap to select image or MP4 video
-                                                    </div>
-                                                    <div className="text-gray-500 text-xs mt-2">
-                                                        {activeClips.length === 1 ? `Add ${MIN_CLIPS}-${MAX_CLIPS} items` : `Add up to ${MAX_CLIPS - activeClips.length} more`}
-                                                    </div>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    {currentClip?.mediaType === 'video' ? (
-                                                        <FiVideo className="w-12 h-12 text-gray-500 mb-4" />
-                                                    ) : (
+                                <div className="space-y-4">
+                                    {/* Photo/Video Option */}
+                                    <div className="flex items-center justify-center gap-4">
+                                        {activeClips.length > 1 && (
+                                            <button
+                                                onClick={handlePrevious}
+                                                disabled={!canGoPrevious}
+                                                className={`p-3 rounded-full border border-white/10 bg-black/60 hover:bg-black/80 transition-colors ${!canGoPrevious ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}
+                                            >
+                                                <FiChevronLeft className="w-5 h-5 text-white" />
+                                                <span className="sr-only">Previous clip</span>
+                                            </button>
+                                        )}
+                                        <label className={`block aspect-[9/16] max-h-[55vh] rounded-2xl cursor-pointer mx-auto bg-gray-900/30 transition-colors ${template.id === TEMPLATE_IDS.INSTAGRAM
+                                            ? 'ig-animated-border'
+                                            : template.id === TEMPLATE_IDS.TIKTOK
+                                                ? 'tt-animated-border'
+                                                : template.id === TEMPLATE_IDS.GAZETTEER
+                                                    ? 'gz-animated-border'
+                                                    : 'border-2 border-dashed border-gray-700 hover:border-gray-600'
+                                            }`}>
+                                            <input
+                                                type="file"
+                                                accept={isTopTemplate ? 'image/*,video/mp4,.mp4' : (currentClip?.mediaType === 'video' ? 'video/mp4,.mp4' : 'image/*')}
+                                                onChange={(e) => handleMediaSelect(currentClip?.id || '', e)}
+                                                className="hidden"
+                                            />
+                                            <div className="h-full flex flex-col items-center justify-center p-8 text-center">
+                                                {isTopTemplate ? (
+                                                    <>
                                                         <FiImage className="w-12 h-12 text-gray-500 mb-4" />
-                                                    )}
-                                                    <div className="text-white text-lg font-semibold mb-2">
-                                                        Add {currentClip?.mediaType === 'video' ? 'Video (MP4 only)' : 'Photo'}
-                                                    </div>
-                                                    <div className="text-gray-400 text-sm">
-                                                        {currentClip?.mediaType === 'video' ? 'Tap to select MP4 video' : 'Tap to select from gallery'}
-                                                    </div>
-                                                </>
-                                            )}
-                                        </div>
-                                    </label>
-                                    {activeClips.length > 1 && (
+                                                        <div className="text-white text-lg font-semibold mb-2">
+                                                            Add Photo or Video
+                                                        </div>
+                                                        <div className="text-gray-400 text-sm">
+                                                            Tap to select image or MP4 video
+                                                        </div>
+                                                        <div className="text-gray-500 text-xs mt-2">
+                                                            {activeClips.length === 1 ? `Add ${MIN_CLIPS}-${MAX_CLIPS} items` : `Add up to ${MAX_CLIPS - activeClips.length} more`}
+                                                        </div>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        {currentClip?.mediaType === 'video' ? (
+                                                            <FiVideo className="w-12 h-12 text-gray-500 mb-4" />
+                                                        ) : (
+                                                            <FiImage className="w-12 h-12 text-gray-500 mb-4" />
+                                                        )}
+                                                        <div className="text-white text-lg font-semibold mb-2">
+                                                            Add {currentClip?.mediaType === 'video' ? 'Video (MP4 only)' : 'Photo'}
+                                                        </div>
+                                                        <div className="text-gray-400 text-sm">
+                                                            {currentClip?.mediaType === 'video' ? 'Tap to select MP4 video' : 'Tap to select from gallery'}
+                                                        </div>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </label>
+                                        {activeClips.length > 1 && (
+                                            <button
+                                                onClick={handleNext}
+                                                disabled={!canGoNext}
+                                                className={`p-3 rounded-full border border-white/10 bg-black/60 hover:bg-black/80 transition-colors ${!canGoNext ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}
+                                            >
+                                                <FiChevronRight className="w-5 h-5 text-white" />
+                                                <span className="sr-only">Next clip</span>
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    {/* Text Only Post Placeholder - Only for Gazetteer - Compact design to fit on page */}
+                                    {template?.id === TEMPLATE_IDS.GAZETTEER && !currentMedia && !currentTextOnlyClip && (
                                         <button
-                                            onClick={handleNext}
-                                            disabled={!canGoNext}
-                                            className={`p-3 rounded-full border border-white/10 bg-black/60 hover:bg-black/80 transition-colors ${!canGoNext ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}
+                                            onClick={() => {
+                                                // Check if we already have video clips - if so, add text-only as a clip
+                                                if (userMedia.size > 0 || textOnlyClips.size > 0) {
+                                                    // Add a new text-only clip using functional update
+                                                    const newClipId = `text-clip-${Date.now()}`;
+                                                    const newClip = {
+                                                        id: newClipId,
+                                                        mediaType: 'text' as const,
+                                                        duration: DEFAULT_CLIP_DURATION
+                                                    };
+                                                    
+                                                    // Use functional update to get the latest state
+                                                    setDynamicClips(prev => {
+                                                        const updatedClips = [...prev, newClip];
+                                                        
+                                                        // Store current state in sessionStorage to restore when returning
+                                                        // Note: File objects can't be serialized, so we only store URLs
+                                                        const serializableUserMedia = Array.from(userMedia.entries()).map(([id, media]) => ({
+                                                            id,
+                                                            url: media.url,
+                                                            mediaType: media.mediaType
+                                                            // Note: file is not stored as it can't be serialized
+                                                        }));
+                                                        sessionStorage.setItem('templateEditorState', JSON.stringify({
+                                                            template: template,
+                                                            dynamicClips: updatedClips,
+                                                            userMedia: serializableUserMedia,
+                                                            textOnlyClips: Array.from(textOnlyClips.entries()),
+                                                            stickers: Array.from(stickers.entries()),
+                                                            currentClipIndex: prev.length, // Index of new clip
+                                                            text: text,
+                                                            locationLabel: locationLabel,
+                                                            bannerText: bannerText,
+                                                            taggedUsers: taggedUsers
+                                                        }));
+                                                        
+                                                        // Navigate to text-only page after state update
+                                                        setTimeout(() => {
+                                                            setCurrentClipIndex(prev.length); // Navigate to the new clip
+                                                            navigate('/create/text-only', { 
+                                                                state: { 
+                                                                    isClip: true, 
+                                                                    clipId: newClipId,
+                                                                    templateId: template.id
+                                                                } 
+                                                            });
+                                                        }, 0);
+                                                        
+                                                        return updatedClips;
+                                                    });
+                                                } else {
+                                                    // No existing clips, navigate normally for standalone text-only post
+                                                    navigate('/create/text-only');
+                                                }
+                                            }}
+                                            className="w-full rounded-xl bg-white border-2 border-gray-300 transition-all duration-200 p-3.5 flex items-center gap-3 cursor-pointer group mt-3"
                                         >
-                                            <FiChevronRight className="w-5 h-5 text-white" />
-                                            <span className="sr-only">Next clip</span>
+                                            {/* Icon with black background */}
+                                            <div className="flex-shrink-0 relative">
+                                                <div className="w-11 h-11 rounded-full bg-black flex items-center justify-center">
+                                                    <FiType className="w-5 h-5 text-white" />
+                                                </div>
+                                            </div>
+                                            {/* Text content */}
+                                            <div className="flex-1 text-left">
+                                                <div className="text-black font-semibold text-sm mb-0.5">
+                                                    {userMedia.size > 0 ? 'Add Text-Only Clip' : 'Text Only Post'}
+                                                </div>
+                                                <div className="text-gray-600 text-xs">
+                                                    {userMedia.size > 0 
+                                                        ? 'Add a text-only clip to your post' 
+                                                        : 'Create a text-only post'}
+                                                </div>
+                                            </div>
                                         </button>
                                     )}
                                 </div>
                             )}
                         </div>
 
-                        {/* Text Only Post Placeholder - Only for Gazetteer */}
-                        {template?.id === TEMPLATE_IDS.GAZETTEER && !currentMedia && (
-                            <div className="mt-6 mb-4">
-                                <button
-                                    onClick={() => navigate('/create/text-only')}
-                                    className="w-full rounded-2xl bg-gray-900/30 gz-animated-border transition-all duration-200 p-6 flex items-center gap-4 cursor-pointer group"
-                                >
-                                    {/* Icon with animated border */}
-                                    <div className="flex-shrink-0 relative">
-                                        <div className="w-14 h-14 rounded-full bg-gray-800 flex items-center justify-center gz-animated-border">
-                                            <FiType className="w-7 h-7 text-white" />
-                                        </div>
-                                    </div>
-                                    {/* Text content */}
-                                    <div className="flex-1 text-left">
-                                        <div className="text-white font-semibold text-lg mb-1">
-                                            Text Only Post
-                                        </div>
-                                        <div className="text-gray-400 text-sm">
-                                            Create a text-only post for your newsfeed. Tap here
-                                        </div>
-                                    </div>
-                                </button>
-                            </div>
-                        )}
-
                         {/* Clip Navigation - Simple Dots */}
                         <div className="flex items-center justify-center gap-2 mb-6 flex-wrap">
                             {activeClips.map((clip, index) => {
                                 const media = userMedia.get(clip.id);
+                                const textClip = clip.mediaType === 'text' ? textOnlyClips.get(clip.id) : null;
+                                const isFilled = media || textClip;
                                 const isCurrent = index === currentClipIndex;
                                 return (
                                     <button
@@ -834,7 +1153,7 @@ export default function TemplateEditorPage() {
                                         onClick={() => setCurrentClipIndex(index)}
                                         className={`w-2 h-2 rounded-full transition-all ${isCurrent
                                             ? 'bg-white w-8'
-                                            : media
+                                            : isFilled
                                                 ? 'bg-gray-500'
                                                 : 'bg-gray-700'
                                             }`}
@@ -876,19 +1195,38 @@ export default function TemplateEditorPage() {
                                 </div>
                                 {/* Clip Thumbnails for Sticker Selection */}
                                 <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-2">
-                                    {activeClips.map((clip, index) => {
+                                    {activeClips
+                                        .filter(clip => {
+                                            // Only show clips that have media or text content
+                                            const media = userMedia.get(clip.id);
+                                            const textClip = clip.mediaType === 'text' ? textOnlyClips.get(clip.id) : null;
+                                            return media || textClip;
+                                        })
+                                        .map((clip, index) => {
                                         const media = userMedia.get(clip.id);
+                                        const textClip = clip.mediaType === 'text' ? textOnlyClips.get(clip.id) : null;
                                         const clipStickers = stickers.get(clip.id) || [];
-                                        const isSelected = index === currentClipIndex;
+                                        // Find the actual index in activeClips for selection
+                                        const actualIndex = activeClips.findIndex(c => c.id === clip.id);
+                                        const isSelected = actualIndex === currentClipIndex;
 
                                         return (
                                             <button
                                                 key={clip.id}
-                                                onClick={() => setCurrentClipIndex(index)}
+                                                onClick={() => setCurrentClipIndex(actualIndex)}
                                                 className={`flex-shrink-0 aspect-[9/16] w-20 rounded-lg overflow-hidden relative ${isSelected ? 'ring-2 ring-white' : 'ring-1 ring-gray-700'
                                                     }`}
                                             >
-                                                {media ? (
+                                                {textClip ? (
+                                                    // Text-only clip preview - Twitter card style
+                                                    <div className="w-full h-full bg-white rounded-lg overflow-hidden p-0.5">
+                                                        <div className="w-full h-full bg-black rounded flex items-center justify-center p-1">
+                                                            <div className="text-white text-[5px] leading-tight text-center line-clamp-5 whitespace-pre-wrap break-words overflow-hidden w-full">
+                                                                {textClip.text}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ) : media ? (
                                                     media.mediaType === 'video' ? (
                                                         <video
                                                             src={media.url}
@@ -921,7 +1259,7 @@ export default function TemplateEditorPage() {
                             </div>
 
                             {/* Current Clip Preview with Stickers */}
-                            {currentMedia && (
+                            {(currentMedia || currentTextOnlyClip) && (
                                 <div className="mb-4">
                                     <div
                                         ref={mediaContainerRef}
@@ -941,8 +1279,49 @@ export default function TemplateEditorPage() {
                                             }
                                         }}
                                     >
-                                        {/* Apply effects from template clip */}
-                                        {(() => {
+                                        {/* Display text-only clip in Twitter card format */}
+                                        {currentTextOnlyClip ? (
+                                            <div className="w-full h-full flex items-center justify-center p-4 bg-black">
+                                                <div className="w-full max-w-md rounded-2xl overflow-hidden bg-white border border-gray-200 shadow-2xl" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
+                                                    {/* Post Header */}
+                                                    <div className="flex items-start justify-between px-4 pt-4 pb-3 border-b border-gray-200">
+                                                        <div className="flex items-center gap-3 flex-1">
+                                                            <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0">
+                                                                <span className="text-gray-600 text-sm font-semibold">
+                                                                    {user?.handle?.split('@')[0]?.charAt(0).toUpperCase() || 'U'}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex-1">
+                                                                <h3 className="font-semibold flex items-center gap-1.5 text-gray-900 text-sm">
+                                                                    <span>{user?.handle || 'User'}</span>
+                                                                </h3>
+                                                                <div className="text-xs text-gray-600 flex items-center gap-2 mt-0.5">
+                                                                    {locationLabel && (
+                                                                        <>
+                                                                            <span className="flex items-center gap-1">
+                                                                                <FiMapPin className="w-3 h-3" />
+                                                                                {locationLabel}
+                                                                            </span>
+                                                                        </>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Text Content - Twitter card style (white card with black text box) */}
+                                                    <div className="p-4 w-full overflow-hidden" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
+                                                        <div className="p-4 rounded-lg bg-black overflow-hidden w-full" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
+                                                            <div className="text-base leading-relaxed whitespace-pre-wrap font-normal text-white break-words w-full" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', maxWidth: '100%', boxSizing: 'border-box' }}>
+                                                                {currentTextOnlyClip.text}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ) : currentMedia ? (
+                                        /* Apply effects from template clip */
+                                        (() => {
                                             // Get effects from template clip if it exists, otherwise empty array
                                             const clipEffects: any[] = 'effects' in currentClip && Array.isArray(currentClip.effects) ? currentClip.effects : [];
                                             let mediaElement: React.ReactNode = currentMedia.mediaType === 'video' ? (
@@ -992,7 +1371,8 @@ export default function TemplateEditorPage() {
                                             });
 
                                             return mediaElement;
-                                        })()}
+                                        })()
+                                        ) : null}
 
                                         {/* Show active effects indicator */}
                                         {(() => {

@@ -33,7 +33,7 @@ export type Post = {
   tags: string[];
   mediaUrl?: string; // Optional for text-only posts (deprecated, use mediaItems for carousel)
   mediaType?: 'image' | 'video'; // New field to distinguish media types (deprecated, use mediaItems for carousel)
-  mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number; effects?: Array<{ type: string; intensity?: number; duration?: number; startTime?: number; [key: string]: any }> }>; // Multiple media items for carousel with effects/templates
+  mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<{ type: string; intensity?: number; duration?: number; startTime?: number; [key: string]: any }>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; // Multiple media items for carousel with effects/templates, including text-only clips
   text?: string; // Text content of the post (maps to text_content in DB)
   text_content?: string; // Backend field
   imageText?: string; // Text overlay on images

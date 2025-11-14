@@ -447,13 +447,13 @@ export default function StoriesPage() {
                                             idx < currentStoryIndex
                                                 ? {
                                                     width: '100%',
-                                                    background: 'linear-gradient(to right, #10b981, #3b82f6)',
+                                                    background: 'linear-gradient(to right, rgb(255, 140, 0) 5%, rgb(248, 0, 50) 25%, rgb(255, 0, 160) 45%, rgb(140, 40, 255) 65%, rgb(0, 35, 255) 82%, rgb(25, 160, 255) 96%)',
                                                     transitionDuration: '100ms'
                                                 }
                                                 : idx === currentStoryIndex && !paused && progress > 0
                                                     ? {
                                                         width: `${progress}%`,
-                                                        background: 'linear-gradient(to right, #10b981, #3b82f6)',
+                                                        background: 'linear-gradient(to right, rgb(255, 140, 0) 5%, rgb(248, 0, 50) 25%, rgb(255, 0, 160) 45%, rgb(140, 40, 255) 65%, rgb(0, 35, 255) 82%, rgb(25, 160, 255) 96%)',
                                                         transitionDuration: '50ms'
                                                     }
                                                     : {
@@ -1029,7 +1029,7 @@ export default function StoriesPage() {
                         
                         // Generate gazetteer-style color based on location
                         const getLocationColor = (loc: string): string => {
-                            if (!loc) return '#6366f1'; // Default indigo
+                            if (!loc) return 'rgb(140, 40, 255)'; // Default purple
                             
                             // Create a consistent color based on location string
                             let hash = 0;
@@ -1207,7 +1207,7 @@ export default function StoriesPage() {
                                         : 'border-white'
                                 }`}
                                 style={isUnviewed ? {
-                                    background: 'linear-gradient(135deg, #10b981, #3b82f6, #2563eb)',
+                                    background: 'linear-gradient(to right, rgb(255, 140, 0) 5%, rgb(248, 0, 50) 25%, rgb(255, 0, 160) 45%, rgb(140, 40, 255) 65%, rgb(0, 35, 255) 82%, rgb(25, 160, 255) 96%)',
                                     padding: '2px'
                                 } : {}}
                             >

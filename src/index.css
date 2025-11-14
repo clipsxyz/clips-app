@@ -38,7 +38,8 @@ video {
   }
 
   body {
-    @apply bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100 antialiased;
+    @apply text-gray-900 dark:text-gray-100 antialiased;
+    background-color: #000000;
   }
 
   h1,
@@ -287,12 +288,15 @@ video {
   inset: -2px;
   border-radius: 1rem;
   padding: 2px;
-  /* Gazetteer brand-inspired colors: emerald → cyan → indigo */
+  /* Gazetteer brand-inspired colors: orange → pink → purple → blue */
   background: conic-gradient(from 0deg,
-      #10b981,
-      #22d3ee,
-      #6366f1,
-      #10b981);
+      rgb(255, 140, 0),
+      rgb(248, 0, 50),
+      rgb(255, 0, 160),
+      rgb(140, 40, 255),
+      rgb(0, 35, 255),
+      rgb(25, 160, 255),
+      rgb(255, 140, 0));
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
@@ -305,7 +309,7 @@ video {
   position: absolute;
   inset: -10px;
   border-radius: 1.25rem;
-  background: radial-gradient(60% 60% at 50% 50%, rgba(16, 185, 129, 0.22), rgba(34, 211, 238, 0.16) 50%, rgba(99, 102, 241, 0.1) 100%);
+  background: radial-gradient(60% 60% at 50% 50%, rgba(255, 140, 0, 0.22), rgba(255, 0, 160, 0.16) 50%, rgba(140, 40, 255, 0.1) 100%);
   filter: blur(18px);
   z-index: 0;
 }

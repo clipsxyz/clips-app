@@ -812,7 +812,7 @@ export async function createPost(
   userNational?: string,
   stickers?: StickerOverlay[],
   templateId?: string,
-  mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>, // Multiple media items for carousel
+  mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>, // Multiple media items for carousel, including text-only clips
   bannerText?: string, // News ticker banner text
   textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string }, // Text style for text-only posts
   taggedUsers?: string[], // Array of user handles tagged in the post
