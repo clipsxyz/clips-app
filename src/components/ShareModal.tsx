@@ -7,21 +7,12 @@ import { showToast } from '../utils/toast';
 import { updateMetaTags, clearMetaTags } from '../utils/metaTags';
 import { getAvatarForHandle } from '../api/users';
 import { appendMessage } from '../api/messages';
+import type { Post } from '../types';
 
 interface ShareModalProps {
     isOpen: boolean;
     onClose: () => void;
-    post: {
-        id: string;
-        userHandle: string;
-        text?: string;
-        mediaUrl?: string;
-        locationLabel: string;
-        mediaType?: 'image' | 'video';
-        templateId?: string;
-        mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>;
-        stickers?: any[];
-    };
+    post: Post;
 }
 
 const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {

@@ -469,7 +469,7 @@ export default function ClipPage() {
                     {[
                       'linear-gradient(to bottom right, #ef4444, #f97316, #fbbf24)',
                       'linear-gradient(to bottom right, #3b82f6, #8b5cf6, #ec4899)',
-                      'linear-gradient(to bottom right, #10b981, #3b82f6, #8b5cf6)',
+                      'linear-gradient(to bottom right, rgb(255, 140, 0), rgb(255, 0, 160), rgb(140, 40, 255))',
                       'linear-gradient(to bottom right, #f59e0b, #ef4444, #ec4899)',
                     ].map((gradient) => (
                       <button
@@ -620,7 +620,7 @@ export default function ClipPage() {
               <div
                 className="w-32 h-32 rounded-full p-0.5 absolute top-0 left-0"
                 style={{
-                  background: 'conic-gradient(from 0deg, #10b981, #3b82f6, #1d4ed8, #8b5cf6, #ec4899, #f59e0b, #10b981)',
+                  background: 'conic-gradient(from 0deg, rgb(255, 140, 0), rgb(248, 0, 50), rgb(255, 0, 160), rgb(140, 40, 255), rgb(0, 35, 255), rgb(25, 160, 255), rgb(255, 140, 0))',
                 }}
               >
                 {/* Inner container */}

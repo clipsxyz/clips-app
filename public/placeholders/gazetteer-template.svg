@@ -5,9 +5,12 @@
   <!-- Gazetteer gradient colors -->
   <defs>
     <linearGradient id="gazetteerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#10b981;stop-opacity:1" />
-      <stop offset="50%" style="stop-color:#3b82f6;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:1" />
+      <stop offset="5%" style="stop-color:rgb(255, 140, 0);stop-opacity:1" />
+      <stop offset="25%" style="stop-color:rgb(248, 0, 50);stop-opacity:1" />
+      <stop offset="45%" style="stop-color:rgb(255, 0, 160);stop-opacity:1" />
+      <stop offset="65%" style="stop-color:rgb(140, 40, 255);stop-opacity:1" />
+      <stop offset="82%" style="stop-color:rgb(0, 35, 255);stop-opacity:1" />
+      <stop offset="96%" style="stop-color:rgb(25, 160, 255);stop-opacity:1" />
     </linearGradient>
   </defs>
   

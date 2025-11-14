@@ -42,7 +42,7 @@ export default function Avatar({ src, name, size = 'md', className = '', hasStor
             >
                 {/* Outer gradient border ring (Gazetteer-style) */}
                 <div className="absolute -inset-0.5 rounded-full p-[2px]" style={{
-                    background: 'linear-gradient(45deg, #10b981 0%, #22d3ee 25%, #3b82f6 50%, #6366f1 75%, #8b5cf6 100%)',
+                    background: 'linear-gradient(to right, rgb(255, 140, 0) 5%, rgb(248, 0, 50) 25%, rgb(255, 0, 160) 45%, rgb(140, 40, 255) 65%, rgb(0, 35, 255) 82%, rgb(25, 160, 255) 96%)',
                 }}>
                     <div className="w-full h-full rounded-full bg-white dark:bg-gray-950"></div>
                 </div>

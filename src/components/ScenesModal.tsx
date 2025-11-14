@@ -59,9 +59,9 @@ export default function ScenesModal({
     const online = useOnline();
 
     // Determine if we have multiple media items (carousel)
-    const items = post.mediaItems && post.mediaItems.length > 0
+    const items: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }> = post.mediaItems && post.mediaItems.length > 0
         ? post.mediaItems
-        : (post.mediaUrl ? [{ url: post.mediaUrl, type: post.mediaType || 'image' }] : []);
+        : (post.mediaUrl ? [{ url: post.mediaUrl, type: (post.mediaType || 'image') as 'image' | 'video' }] : []);
     const [currentIndex, setCurrentIndex] = React.useState(0);
     const hasMultipleItems = items.length > 1;
     const currentItem = items[currentIndex];
@@ -401,6 +401,77 @@ export default function ScenesModal({
                             // Get effects for current media item
                             const itemEffects = currentItem.effects || [];
 
+                            // Handle text-only clips - display as Twitter card preview
+                            if (currentItem.type === 'text') {
+                                // Extract text from data URL or use text property
+                                let textContent = '';
+                                let textStyle: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } | undefined;
+
+                                if ((currentItem as any).text) {
+                                    textContent = (currentItem as any).text;
+                                    textStyle = (currentItem as any).textStyle;
+                                } else if (currentItem.url && currentItem.url.startsWith('data:text/plain;base64,')) {
+                                    try {
+                                        const base64Text = currentItem.url.split(',')[1];
+                                        textContent = atob(base64Text);
+                                        textStyle = (currentItem as any).textStyle || { color: '#ffffff', size: 'medium', background: '#000000' };
+                                    } catch (e) {
+                                        console.error('Error decoding text from data URL:', e);
+                                        textContent = 'Text content';
+                                    }
+                                }
+
+                                // Display as Twitter card preview (white card with black text box)
+                                return (
+                                    <div className="w-full h-full flex items-center justify-center p-4 bg-black">
+                                        <div className="w-full max-w-md rounded-2xl overflow-hidden bg-white border border-gray-200 shadow-2xl" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
+                                            {/* Post Header */}
+                                            <div className="flex items-start justify-between px-4 pt-4 pb-3 border-b border-gray-200">
+                                                <div className="flex items-center gap-3 flex-1">
+                                                    <Avatar
+                                                        src={getAvatarForHandle(post.userHandle)}
+                                                        name={post.userHandle.split('@')[0]}
+                                                        size="sm"
+                                                    />
+                                                    <div className="flex-1">
+                                                        <h3 className="font-semibold flex items-center gap-1.5 text-gray-900 text-sm">
+                                                            <span>{post.userHandle}</span>
+                                                            <Flag
+                                                                value={getFlagForHandle(post.userHandle) || ''}
+                                                                size={14}
+                                                            />
+                                                        </h3>
+                                                        <div className="text-xs text-gray-600 flex items-center gap-2 mt-0.5">
+                                                            {post.locationLabel && (
+                                                                <>
+                                                                    <span className="flex items-center gap-1">
+                                                                        <FiMapPin className="w-3 h-3" />
+                                                                        {post.locationLabel}
+                                                                    </span>
+                                                                    {post.createdAt && <span className="text-gray-400">·</span>}
+                                                                </>
+                                                            )}
+                                                            {post.createdAt && (
+                                                                <span>{timeAgo(post.createdAt)}</span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Text Content - Twitter card style (white card with black text box) */}
+                                            <div className="p-4 w-full overflow-hidden" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
+                                                <div className="p-4 rounded-lg bg-black overflow-hidden w-full" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
+                                                    <div className="text-base leading-relaxed whitespace-pre-wrap font-normal text-white break-words w-full" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', maxWidth: '100%', boxSizing: 'border-box' }}>
+                                                        {textContent}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            }
+
                             // Create media element
                             let mediaElement = currentItem.type === 'video' ? (
                                 <div className="relative w-full h-full">
@@ -426,7 +497,7 @@ export default function ScenesModal({
                                             className="h-full transition-all duration-100"
                                             style={{
                                                 width: `${Math.max(0, Math.min(100, videoProgress * 100))}%`,
-                                                background: 'linear-gradient(90deg, #10b981, #3b82f6, #8b5cf6, #ec4899, #f59e0b)',
+                                                background: 'linear-gradient(to right, rgb(255, 140, 0) 5%, rgb(248, 0, 50) 25%, rgb(255, 0, 160) 45%, rgb(140, 40, 255) 65%, rgb(0, 35, 255) 82%, rgb(25, 160, 255) 96%)',
                                                 boxShadow: '0 0 12px rgba(139,92,246,0.45)'
                                             }}
                                         />

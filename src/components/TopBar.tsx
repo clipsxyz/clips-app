@@ -151,11 +151,24 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
 
             <button
               onClick={() => navigate('/feed')}
-              className="font-bold text-lg bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 bg-clip-text text-transparent"
+              className="font-bold text-lg"
               aria-label="Go to Home Feed"
               title="Gazetteer"
             >
-              Gazetteer
+              <span
+                style={{
+                  background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
+                  backgroundSize: '200% 100%',
+                  WebkitBackgroundClip: 'text',
+                  backgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  color: 'transparent',
+                  animation: 'shimmer 3s linear infinite',
+                  display: 'inline-block'
+                }}
+              >
+                Gazetteer
+              </span>
             </button>
 
             <div className="flex items-center">
@@ -167,46 +180,106 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
             <div className="flex items-center gap-2">
               <button
                 onClick={() => navigate('/feed')}
-                className="font-bold text-lg bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 bg-clip-text text-transparent"
+                className="font-bold text-lg"
                 aria-label="Go to Home Feed"
                 title="Gazetteer"
               >
-                Gazetteer
+                <span
+                  style={{
+                    background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
+                    backgroundSize: '200% 100%',
+                    WebkitBackgroundClip: 'text',
+                    backgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    color: 'transparent',
+                    animation: 'shimmer 3s linear infinite',
+                    display: 'inline-block'
+                  }}
+                >
+                  Gazetteer
+                </span>
               </button>
 
               <button
                 onClick={() => navigate('/stories')}
-                className="flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+                className="flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 relative overflow-hidden"
                 aria-label="View Stories"
                 title="Stories"
                 style={{
                   outline: 'none',
-                  boxShadow: 'none'
+                  boxShadow: 'none',
+                  border: '1px solid rgba(255, 255, 255, 0.2)'
                 }}
                 onFocus={(e) => {
                   e.currentTarget.style.outline = 'none';
                   e.currentTarget.style.boxShadow = 'none';
                 }}
               >
-                <div className="relative w-6 h-6">
+                {/* Shimmer border effect */}
+                <div 
+                  className="absolute inset-0 rounded-full pointer-events-none"
+                  style={{
+                    background: 'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.4) 50%, transparent 100%)',
+                    backgroundSize: '200% 100%',
+                    animation: 'shimmer 3s linear infinite',
+                    border: '1px solid rgba(255, 255, 255, 0.3)',
+                    margin: '-1px'
+                  }}
+                />
+                <div className="relative w-6 h-6 z-10">
                   {/* Gradient border ring when there are new stories (Gazetteer-style) */}
                   {hasNewStories ? (
                     <div className="absolute -inset-0.5 rounded-full p-[2px]" style={{
-                      background: 'linear-gradient(45deg, #10b981 0%, #22d3ee 25%, #3b82f6 50%, #6366f1 75%, #8b5cf6 100%)',
+                      background: 'linear-gradient(to right, rgb(255, 140, 0) 5%, rgb(248, 0, 50) 25%, rgb(255, 0, 160) 45%, rgb(140, 40, 255) 65%, rgb(0, 35, 255) 82%, rgb(25, 160, 255) 96%)',
                     }}>
-                      <div className="w-full h-full rounded-full bg-white dark:bg-gray-950 flex items-center justify-center">
-                        <FiPlay className="w-3 h-3 text-gray-900 dark:text-gray-100" />
+                      <div className="w-full h-full rounded-full bg-white dark:bg-gray-950 flex items-center justify-center relative overflow-hidden">
+                        <FiPlay className="w-3 h-3 text-gray-900 dark:text-gray-100 relative z-10" />
+                        <div 
+                          className="absolute inset-0 rounded-full"
+                          style={{
+                            background: 'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.6) 50%, transparent 100%)',
+                            backgroundSize: '200% 100%',
+                            animation: 'shimmer 3s linear infinite',
+                            mixBlendMode: 'overlay',
+                            pointerEvents: 'none',
+                            zIndex: 11
+                          }}
+                        />
                       </div>
                     </div>
                   ) : (
                     /* Play button with gray border when no new stories */
-                    <div className="w-6 h-6 rounded-full overflow-hidden ring-2 ring-gray-300 dark:ring-gray-700 bg-white dark:bg-gray-950 flex items-center justify-center">
-                      <FiPlay className="w-3 h-3 text-gray-900 dark:text-gray-100" />
+                    <div className="w-6 h-6 rounded-full overflow-hidden ring-2 ring-gray-300 dark:ring-gray-700 bg-white dark:bg-gray-950 flex items-center justify-center relative">
+                      <FiPlay className="w-3 h-3 text-gray-900 dark:text-gray-100 relative z-10" />
+                      <div 
+                        className="absolute inset-0 rounded-full"
+                        style={{
+                          background: 'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.6) 50%, transparent 100%)',
+                          backgroundSize: '200% 100%',
+                          animation: 'shimmer 3s linear infinite',
+                          mixBlendMode: 'overlay',
+                          pointerEvents: 'none',
+                          zIndex: 11
+                        }}
+                      />
                     </div>
                   )}
                 </div>
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Clips 24
+                <span className="text-sm font-medium relative z-10">
+                  <span
+                    style={{
+                      background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
+                      backgroundSize: '200% 100%',
+                      WebkitBackgroundClip: 'text',
+                      backgroundClip: 'text',
+                      WebkitTextFillColor: 'transparent',
+                      color: 'transparent',
+                      animation: 'shimmer 3s linear infinite',
+                      display: 'inline-block'
+                    }}
+                  >
+                    Clips 24
+                  </span>
                 </span>
               </button>
             </div>
@@ -214,10 +287,24 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
             <div className="flex items-center gap-2">
               <button
                 onClick={handleDiscoverClick}
-                className="flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                className="flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors relative overflow-hidden"
                 aria-label="View Following feed"
+                style={{
+                  border: '1px solid rgba(255, 255, 255, 0.2)'
+                }}
               >
-                <div className="relative w-6 h-6">
+                {/* Shimmer border effect */}
+                <div 
+                  className="absolute inset-0 rounded-full pointer-events-none"
+                  style={{
+                    background: 'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.4) 50%, transparent 100%)',
+                    backgroundSize: '200% 100%',
+                    animation: 'shimmer 3s linear infinite',
+                    border: '1px solid rgba(255, 255, 255, 0.3)',
+                    margin: '-1px'
+                  }}
+                />
+                <div className="relative w-6 h-6 z-10">
                   <div className="absolute inset-0 rounded-md bg-gradient-to-r from-emerald-500 via-blue-500 to-violet-500 opacity-75 blur-sm animate-pulse"></div>
                   <div className="absolute inset-[1px] rounded-md bg-gray-950 dark:bg-gray-950">
                     <div className="absolute inset-0 rounded-md" style={{
@@ -230,8 +317,21 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
                     </div>
                   </div>
                 </div>
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Following
+                <span className="text-sm font-medium relative z-10">
+                  <span
+                    style={{
+                      background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
+                      backgroundSize: '200% 100%',
+                      WebkitBackgroundClip: 'text',
+                      backgroundClip: 'text',
+                      WebkitTextFillColor: 'transparent',
+                      color: 'transparent',
+                      animation: 'shimmer 3s linear infinite',
+                      display: 'inline-block'
+                    }}
+                  >
+                    Following
+                  </span>
                 </span>
               </button>
 

@@ -12,7 +12,7 @@ import CreateModal from './components/CreateModal';
 import TaggedUsersBottomSheet from './components/TaggedUsersBottomSheet';
 import Avatar from './components/Avatar';
 import { useAuth } from './context/Auth';
-import { getFlagForHandle } from './api/users';
+import { getFlagForHandle, getAvatarForHandle } from './api/users';
 import Flag from './components/Flag';
 import { useOnline } from './hooks/useOnline';
 import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser } from './api/posts';
@@ -81,10 +81,10 @@ export default function App() {
 
   return (
     <>
-      <main id="main" className="mx-auto max-w-md min-h-screen pb-[calc(64px+theme(spacing.safe))] md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800 md:bg-white md:dark:bg-gray-950">
-        <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />
+      <main id="main" className="mx-auto max-w-md min-h-screen pb-[calc(64px+theme(spacing.safe))] md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800" style={{ backgroundColor: '#000000' }}>
+        {loc.pathname !== '/login' && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
         <Outlet context={{ activeTab, setActiveTab, customLocation, setCustomLocation }} />
-        {loc.pathname !== '/discover' && loc.pathname !== '/create/filters' && loc.pathname !== '/create/instant' && loc.pathname !== '/payment' && loc.pathname !== '/clip' && loc.pathname !== '/create' && loc.pathname !== '/template-editor' && (
+        {loc.pathname !== '/discover' && loc.pathname !== '/create/filters' && loc.pathname !== '/create/instant' && loc.pathname !== '/payment' && loc.pathname !== '/clip' && loc.pathname !== '/create' && loc.pathname !== '/template-editor' && loc.pathname !== '/login' && (
           <BottomNav onCreateClick={() => setShowCreateModal(true)} />
         )}
       </main>
@@ -695,7 +695,7 @@ function CaptionText({ caption }: { caption: string }) {
   );
 }
 
-function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onCarouselIndexChange, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled, videoCaptionText, subtitlesEnabled, subtitleText }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number; effects?: Array<any> }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onCarouselIndexChange?: (index: number) => void; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string }) {
+function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onCarouselIndexChange, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled, videoCaptionText, subtitlesEnabled, subtitleText, postUserHandle, postLocationLabel, postCreatedAt }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onCarouselIndexChange?: (index: number) => void; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string }) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [burst, setBurst] = React.useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -724,7 +724,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   }, [taggedUsers, onShowTaggedUsers]);
 
   // Determine if we have multiple media items (carousel)
-  const items = mediaItems && mediaItems.length > 0 ? mediaItems : (url ? [{ url, type: mediaType || 'image' }] : []);
+  const items: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }> = mediaItems && mediaItems.length > 0 ? mediaItems : (url ? [{ url, type: (mediaType || 'image') as 'image' | 'video' }] : []);
   const [currentIndex, setCurrentIndex] = React.useState(0);
   const hasMultipleItems = items.length > 1;
   const currentItem = items[currentIndex];
@@ -958,20 +958,25 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       // Single tap - wait to see if it's actually a double tap
       singleTapTimer.current = setTimeout(() => {
         // Only open scenes if no second tap came within threshold
-        // Also check if the click was on an interactive element (button, link, etc.)
         if (!isProcessingDoubleTap.current && onOpenScenes) {
-          // Check if the click target is an interactive element
+          // Check if the click was on an interactive element (button, link, etc.)
+          // We want to open scenes unless clicking on a real button/link
           const target = e?.target as HTMLElement;
-          const isInteractiveElement = target && (
-            target.tagName === 'BUTTON' ||
-            target.tagName === 'A' ||
-            target.closest('button') !== null ||
-            target.closest('a') !== null ||
-            target.closest('[role="button"]') !== null
-          );
-
-          if (!isInteractiveElement) {
-            onOpenScenes();
+          const mediaContainer = mediaContainerRef.current;
+          
+          // Check if target is within the media container
+          if (mediaContainer && (target === mediaContainer || mediaContainer.contains(target))) {
+            // Check if clicking on a real interactive element (button or link)
+            // Exclude the media container itself (which has role="button" for accessibility)
+            const clickedButton = target.closest('button');
+            const clickedLink = target.closest('a');
+            const isRealButton = clickedButton && clickedButton !== mediaContainer;
+            const isRealLink = clickedLink && clickedLink !== mediaContainer;
+            
+            // Only open scenes if NOT clicking on a real button or link
+            if (!isRealButton && !isRealLink) {
+              onOpenScenes();
+            }
           }
         }
         singleTapTimer.current = null;
@@ -1047,8 +1052,11 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   }
 
   function handleNext() {
-    if (hasMultipleItems) {
-      setCurrentIndex((prev) => (prev + 1) % items.length);
+    if (hasMultipleItems && currentIndex < items.length - 1) {
+      setCurrentIndex((prev) => {
+        const nextIndex = prev + 1;
+        return nextIndex < items.length ? nextIndex : prev;
+      });
     }
   }
 
@@ -1063,27 +1071,20 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     setCurrentIndex(index);
   }
 
-  // Calculate container style based on aspect ratio (Instagram-style approach)
-  // Instagram uses: Square (1:1), Portrait (4:5), Landscape (1.91:1)
-  // We'll adapt to the media's aspect ratio but with reasonable limits
-  const getAspectRatio = (): string => {
-    if (!aspectRatio) return '1/1'; // Default to square
-
-    // Clamp aspect ratio to reasonable Instagram-like ranges
-    // Portrait: max 4:5 (0.8), Landscape: max 1.91:1 (1.91)
-    const clampedRatio = Math.max(0.8, Math.min(1.91, aspectRatio));
-    return `${clampedRatio}`;
-  };
-
+  // Match create post page exactly - fixed aspect ratio container
   const containerStyle: React.CSSProperties = {
-    aspectRatio: getAspectRatio(),
-    maxWidth: '100%',
+    aspectRatio: '9/16',
+    maxHeight: '55vh',
     width: '100%',
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     boxSizing: 'border-box'
   };
 
   return (
-    <div className="mx-4 my-4 select-none">
+    <div className="mx-0 my-0 select-none">
       <div
         ref={mediaContainerRef}
         role="button"
@@ -1101,19 +1102,92 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
         }}
         onClick={handleClick}
         onTouchEnd={handleTouchEnd}
-        className="relative w-full rounded-xl overflow-hidden bg-gray-50 dark:bg-gray-900 shadow-inner"
+        className="relative aspect-[9/16] max-h-[55vh] rounded-2xl overflow-hidden bg-gray-900 mx-auto shadow-lg"
         style={containerStyle}
       >
         {(() => {
           // Get effects for current media item
           const itemEffects = currentItem.effects || [];
 
-          // Create media element
+          // Handle text-only clips - display as Twitter card preview
+          if (currentItem.type === 'text') {
+            // Extract text from data URL or use text property
+            let textContent = '';
+            let textStyle: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } | undefined;
+            
+            if ((currentItem as any).text) {
+              textContent = (currentItem as any).text;
+              textStyle = (currentItem as any).textStyle;
+            } else if (currentItem.url && currentItem.url.startsWith('data:text/plain;base64,')) {
+              try {
+                const base64Text = currentItem.url.split(',')[1];
+                textContent = atob(base64Text);
+                textStyle = (currentItem as any).textStyle || { color: '#ffffff', size: 'medium', background: '#000000' };
+              } catch (e) {
+                console.error('Error decoding text from data URL:', e);
+                textContent = 'Text content';
+              }
+            }
+            
+            // Display as Twitter card preview (white card with black text box)
+            return (
+              <div className="w-full h-full flex items-center justify-center p-4 bg-black">
+                <div className="w-full max-w-md rounded-2xl overflow-hidden bg-white border border-gray-200 shadow-2xl" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
+                  {/* Post Header */}
+                  <div className="flex items-start justify-between px-4 pt-4 pb-3 border-b border-gray-200">
+                    <div className="flex items-center gap-3 flex-1">
+                      <Avatar
+                        src={postUserHandle ? getAvatarForHandle(postUserHandle) : undefined}
+                        name={postUserHandle ? postUserHandle.split('@')[0] : 'User'}
+                        size="sm"
+                      />
+                      <div className="flex-1">
+                        <h3 className="font-semibold flex items-center gap-1.5 text-gray-900 text-sm">
+                          <span>{postUserHandle || 'User'}</span>
+                          {postUserHandle && (
+                            <Flag
+                              value={getFlagForHandle(postUserHandle) || ''}
+                              size={14}
+                            />
+                          )}
+                        </h3>
+                        <div className="text-xs text-gray-600 flex items-center gap-2 mt-0.5">
+                          {postLocationLabel && (
+                            <>
+                              <span className="flex items-center gap-1">
+                                <FiMapPin className="w-3 h-3" />
+                                {postLocationLabel}
+                              </span>
+                              {postCreatedAt && <span className="text-gray-400">·</span>}
+                            </>
+                          )}
+                          {postCreatedAt && (
+                            <span>{timeAgo(postCreatedAt)}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Text Content - Twitter card style (white card with black text box) */}
+                  <div className="p-4 w-full overflow-hidden" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
+                    <div className="p-4 rounded-lg bg-black overflow-hidden w-full" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
+                      <div className="text-base leading-relaxed whitespace-pre-wrap font-normal text-white break-words w-full" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', maxWidth: '100%', boxSizing: 'border-box' }}>
+                        {textContent}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          // Match create post page exactly - use object-cover in fixed aspect container
           let mediaElement = currentItem.type === 'video' ? (
             <video
               ref={videoRef}
               src={currentItem.url}
-              className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+              className="w-full h-full object-cover pointer-events-none"
               preload="metadata"
               playsInline
               muted={isMuted}
@@ -1142,7 +1216,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
               alt=""
               loading="lazy"
               decoding="async"
-              className="absolute inset-0 w-full h-full object-cover"
+              className="w-full h-full object-cover"
               draggable={false}
               onLoad={handleImageLoad}
               onError={handleImageError}
@@ -1207,7 +1281,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                     className="h-full"
                     style={{
                       width: `${Math.max(0, Math.min(100, progress * 100))}%`,
-                      background: 'linear-gradient(90deg, #10b981, #3b82f6, #8b5cf6, #ec4899, #f59e0b)',
+                      background: 'linear-gradient(to right, rgb(255, 140, 0) 5%, rgb(248, 0, 50) 25%, rgb(255, 0, 160) 45%, rgb(140, 40, 255) 65%, rgb(0, 35, 255) 82%, rgb(25, 160, 255) 96%)',
                       boxShadow: '0 0 12px rgba(139,92,246,0.45)'
                     }}
                   />
@@ -1242,35 +1316,73 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
         {/* Carousel Navigation - Only show if multiple items */}
         {hasMultipleItems && (
           <>
-            {/* Previous Button - Always show when not on first image */}
+            {/* Previous Button - Always show when not on first image - Positioned in middle left */}
             {currentIndex > 0 && (
               <button
+                type="button"
                 onClick={(e) => {
+                  e.preventDefault();
                   e.stopPropagation();
                   handlePrevious();
                 }}
-                className="absolute bottom-4 left-4 w-7 h-7 rounded-full flex items-center justify-center transition-all z-30 pointer-events-auto"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onTouchStart={(e) => {
+                  e.stopPropagation();
+                }}
+                onTouchEnd={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handlePrevious();
+                }}
+                className="absolute top-1/2 left-4 w-10 h-10 rounded-full flex items-center justify-center transition-all z-50 pointer-events-auto bg-black/50 hover:bg-black/70 backdrop-blur-sm cursor-pointer"
                 aria-label="Previous image"
-                style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.5))' }}
+                style={{ 
+                  filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.5))',
+                  transform: 'translateY(-50%)',
+                  pointerEvents: 'auto',
+                  touchAction: 'manipulation'
+                }}
               >
-                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                <svg className="w-5 h-5 text-white pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
                 </svg>
               </button>
             )}
 
-            {/* Next Button - Always show when not on last image */}
+            {/* Next Button - Always show when not on last image - Positioned in middle right */}
             {currentIndex < items.length - 1 && (
               <button
+                type="button"
                 onClick={(e) => {
+                  e.preventDefault();
                   e.stopPropagation();
                   handleNext();
                 }}
-                className="absolute bottom-4 right-12 w-7 h-7 rounded-full flex items-center justify-center transition-all z-30 pointer-events-auto"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onTouchStart={(e) => {
+                  e.stopPropagation();
+                }}
+                onTouchEnd={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleNext();
+                }}
+                className="absolute top-1/2 right-4 w-10 h-10 rounded-full flex items-center justify-center transition-all z-50 pointer-events-auto bg-black/50 hover:bg-black/70 backdrop-blur-sm cursor-pointer"
                 aria-label="Next image"
-                style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.5))' }}
+                style={{ 
+                  filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.5))',
+                  transform: 'translateY(-50%)',
+                  pointerEvents: 'auto',
+                  touchAction: 'manipulation'
+                }}
               >
-                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                <svg className="w-5 h-5 text-white pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                 </svg>
               </button>
@@ -1907,7 +2019,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   }, [hasBeenViewed]);
 
   return (
-    <article ref={articleRef} aria-labelledby={titleId} className="mx-4 mb-6 rounded-lg overflow-hidden bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out]">
+    <article ref={articleRef} aria-labelledby={titleId} className="mx-0 mb-6 overflow-hidden border-0 border-b border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out]" style={{ backgroundColor: '#000000' }}>
       <PostHeader post={post} onFollow={onFollow} showBoostIcon={showBoostIcon} onBoost={onBoost} />
       <TagRow tags={post.tags} />
       <div className="relative w-full overflow-hidden" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
@@ -1937,6 +2049,9 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             videoCaptionText={post.videoCaptionText}
             subtitlesEnabled={post.subtitlesEnabled}
             subtitleText={post.subtitleText}
+            postUserHandle={post.userHandle}
+            postLocationLabel={post.locationLabel}
+            postCreatedAt={post.createdAt}
           />
         )}
         {/* Carousel Indicator - Underneath the image/media */}
@@ -1946,15 +2061,16 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             <div className="flex items-center justify-center">
               {/* Center - Carousel Display (Dots and Number) */}
               <div className="flex items-center gap-3">
-                {/* White Dots */}
+                {/* Baby Blue Dots */}
                 <div className="flex gap-1.5">
                   {post.mediaItems.map((_, index) => (
                     <div
                       key={index}
                       className={`w-2 h-2 rounded-full transition-all ${index === carouselIndex
-                        ? 'bg-gray-900 dark:bg-gray-100 w-6'
+                        ? 'w-6'
                         : 'bg-gray-300 dark:bg-gray-600'
                         }`}
+                      style={index === carouselIndex ? { backgroundColor: '#2563eb' } : {}}
                     />
                   ))}
                 </div>
@@ -2069,7 +2185,7 @@ const AdCard = React.memo(function AdCard({ ad, onImpression, onClick }: {
   };
 
   return (
-    <article ref={articleRef} aria-labelledby={titleId} className="mx-4 mb-6 rounded-lg overflow-hidden bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out]">
+    <article ref={articleRef} aria-labelledby={titleId} className="mx-4 mb-6 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out]" style={{ backgroundColor: '#000000' }}>
       {/* Ad Header */}
       <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
         <div className="flex items-center gap-2">
