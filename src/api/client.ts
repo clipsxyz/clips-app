@@ -167,6 +167,24 @@ export async function fetchFollowing(handle: string, cursor: number = 0, limit: 
     return apiRequest(`/users/${handle}/following?${params}`);
 }
 
+export async function togglePrivacy() {
+    return apiRequest('/users/privacy/toggle', {
+        method: 'POST',
+    });
+}
+
+export async function acceptFollowRequest(handle: string) {
+    return apiRequest(`/users/${handle}/follow/accept`, {
+        method: 'POST',
+    });
+}
+
+export async function denyFollowRequest(handle: string) {
+    return apiRequest(`/users/${handle}/follow/deny`, {
+        method: 'POST',
+    });
+}
+
 // Upload API
 export async function uploadFile(file: File) {
     const formData = new FormData();

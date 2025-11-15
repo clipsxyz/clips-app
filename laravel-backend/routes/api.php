@@ -75,8 +75,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('users')->group(function () {
         Route::get('/{handle}', [UserController::class, 'show']);
         Route::post('/{handle}/follow', [UserController::class, 'toggleFollow']);
+        Route::post('/{handle}/follow/accept', [UserController::class, 'acceptFollowRequest']);
+        Route::post('/{handle}/follow/deny', [UserController::class, 'denyFollowRequest']);
         Route::get('/{handle}/followers', [UserController::class, 'followers']);
         Route::get('/{handle}/following', [UserController::class, 'following']);
+        Route::post('/privacy/toggle', [UserController::class, 'togglePrivacy']);
     });
 
     // Upload routes

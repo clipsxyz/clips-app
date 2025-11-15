@@ -596,11 +596,27 @@ export default function ClipPage() {
               </button>
               <button
                 onClick={() => navigate('/feed')}
-                className="font-bold text-lg bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 bg-clip-text text-transparent"
+                className="font-light text-lg tracking-tight"
                 aria-label="Go to Home Feed"
                 title="Gazetteer"
+                style={{ 
+                  fontFamily: 'system-ui, -apple-system, sans-serif'
+                }}
               >
-                Gazetteer
+                <span
+                  style={{
+                    background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
+                    backgroundSize: '200% 100%',
+                    WebkitBackgroundClip: 'text',
+                    backgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    color: 'transparent',
+                    animation: 'shimmer 3s linear infinite',
+                    display: 'inline-block'
+                  }}
+                >
+                  Gazetteer
+                </span>
               </button>
             </div>
             <h1 className="text-white font-bold text-lg">Create Story</h1>
@@ -699,11 +715,27 @@ export default function ClipPage() {
             </button>
             <button
               onClick={() => navigate('/feed')}
-              className="font-bold text-base bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 bg-clip-text text-transparent"
+              className="font-light text-base tracking-tight"
               aria-label="Go to Home Feed"
               title="Gazetteer"
+              style={{ 
+                fontFamily: 'system-ui, -apple-system, sans-serif'
+              }}
             >
-              Gazetteer
+              <span
+                style={{
+                  background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
+                  backgroundSize: '200% 100%',
+                  WebkitBackgroundClip: 'text',
+                  backgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  color: 'transparent',
+                  animation: 'shimmer 3s linear infinite',
+                  display: 'inline-block'
+                }}
+              >
+                Gazetteer
+              </span>
             </button>
           </div>
           <h1 className="text-white font-semibold text-base">Your Story</h1>

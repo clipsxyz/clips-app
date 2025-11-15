@@ -1,13 +1,22 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { FiChevronLeft, FiBell, FiShare2, FiMessageSquare, FiMoreHorizontal, FiX } from 'react-icons/fi';
+import { FiChevronLeft, FiBell, FiShare2, FiMessageSquare, FiMoreHorizontal, FiX, FiLock } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { getFlagForHandle } from '../api/users';
 import Flag from '../components/Flag';
 import { useAuth } from '../context/Auth';
-import { fetchPostsPage, toggleFollowForPost } from '../api/posts';
+import { fetchPostsPage, toggleFollowForPost, getFollowedUsers } from '../api/posts';
 import { userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/stories';
 import type { Post } from '../types';
+import { 
+  isProfilePrivate, 
+  canViewProfile, 
+  canSendMessage, 
+  hasPendingFollowRequest,
+  createFollowRequest,
+  removeFollowRequest
+} from '../api/privacy';
+import Swal from 'sweetalert2';
 
 export default function ViewProfilePage() {
     const navigate = useNavigate();
@@ -20,6 +29,70 @@ export default function ViewProfilePage() {
     const [stats, setStats] = React.useState({ following: 0, followers: 0, likes: 0, views: 0 });
     const [selectedPost, setSelectedPost] = React.useState<Post | null>(null);
     const [hasStory, setHasStory] = React.useState(false);
+    const [canViewProfile, setCanViewProfile] = React.useState(true);
+    const [hasPendingRequest, setHasPendingRequest] = React.useState(false);
+    const [profileIsPrivate, setProfileIsPrivate] = React.useState(false);
+
+    const handleFollow = async () => {
+        if (!user?.id || !handle || !user?.handle) return;
+        
+        try {
+            const followedUsers = await getFollowedUsers(user.id);
+            const isCurrentlyFollowing = followedUsers.includes(handle);
+            const profilePrivate = isProfilePrivate(handle);
+            
+            if (isCurrentlyFollowing) {
+                // Unfollow
+                await toggleFollowForPost(user.id, posts[0]?.id || '');
+                setIsFollowing(false);
+                setHasPendingRequest(false);
+                removeFollowRequest(user.handle, handle);
+                
+                // If profile was private, user can no longer view
+                if (profilePrivate) {
+                    setCanViewProfile(false);
+                }
+            } else {
+                // Follow
+                if (profilePrivate) {
+                    // Create follow request for private profile
+                    createFollowRequest(user.handle, handle);
+                    setHasPendingRequest(true);
+                    setIsFollowing(false);
+                    
+                    // Create notification (using the notifications system)
+                    const { createNotification } = await import('../api/notifications');
+                    await createNotification({
+                        type: 'follow_request',
+                        fromHandle: user.handle,
+                        toHandle: handle,
+                        message: `${user.handle} wants to follow you`
+                    });
+                    
+                    Swal.fire({
+                        title: 'Follow Request Sent',
+                        text: 'Your follow request has been sent. You will be notified when they accept.',
+                        icon: 'success',
+                        timer: 2000,
+                        showConfirmButton: false
+                    });
+                } else {
+                    // Public profile - follow immediately
+                    await toggleFollowForPost(user.id, posts[0]?.id || '');
+                    setIsFollowing(true);
+                    setHasPendingRequest(false);
+                    setCanViewProfile(true);
+                }
+            }
+
+            // Dispatch event to update newsfeed
+            window.dispatchEvent(new CustomEvent('followToggled', {
+                detail: { handle, isFollowing: !isCurrentlyFollowing }
+            }));
+        } catch (error) {
+            console.error('Error toggling follow:', error);
+        }
+    };
 
     React.useEffect(() => {
         const loadProfile = async () => {
@@ -27,6 +100,46 @@ export default function ViewProfilePage() {
 
             setLoading(true);
             try {
+                // Check privacy using localStorage
+                const profilePrivate = isProfilePrivate(handle);
+                setProfileIsPrivate(profilePrivate);
+                
+                if (user?.id && user?.handle) {
+                    const followedUsers = await getFollowedUsers(user.id);
+                    const canView = canViewProfile(user.handle, handle, followedUsers);
+                    const isFollowingUser = followedUsers.includes(handle);
+                    const hasPending = hasPendingFollowRequest(user.handle, handle);
+                    
+                    setCanViewProfile(canView);
+                    setIsFollowing(isFollowingUser);
+                    setHasPendingRequest(hasPending);
+                    
+                    // Show SweetAlert if profile is private and user can't view
+                    if (!canView && profilePrivate && handle !== user.handle) {
+                        Swal.fire({
+                            title: 'Private Profile',
+                            text: 'To view this user\'s profile you must be following them.',
+                            icon: 'info',
+                            showCancelButton: true,
+                            confirmButtonText: 'Follow',
+                            cancelButtonText: 'Cancel',
+                            confirmButtonColor: '#3085d6',
+                            cancelButtonColor: '#d33'
+                        }).then(async (result) => {
+                            if (result.isConfirmed && user?.id) {
+                                try {
+                                    await handleFollow();
+                                } catch (error) {
+                                    console.error('Error following user:', error);
+                                }
+                            }
+                        });
+                        
+                        setLoading(false);
+                        return;
+                    }
+                }
+
                 // Fetch all posts from all tabs to find this user's posts
                 // We fetch from all tabs because posts might be in different location feeds
                 const allTabs = ['finglas', 'dublin', 'ireland', 'following'];
@@ -156,7 +269,7 @@ export default function ViewProfilePage() {
         );
     }
 
-    if (!profileUser) {
+    if (!profileUser && !loading) {
         return (
             <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
                 <div className="text-center">
@@ -167,6 +280,42 @@ export default function ViewProfilePage() {
                     >
                         Go Back
                     </button>
+                </div>
+            </div>
+        );
+    }
+
+    // Show private profile message if can't view
+    if (!canViewProfile && profileIsPrivate && !loading) {
+        return (
+            <div className="min-h-screen bg-gray-950 text-white">
+                <div className="sticky top-0 bg-gray-950 z-10 border-b border-gray-800">
+                    <div className="flex items-center justify-between px-4 py-3">
+                        <button
+                            onClick={() => navigate(-1)}
+                            className="p-2 hover:bg-gray-900 rounded-full transition-colors"
+                        >
+                            <FiChevronLeft className="w-6 h-6" />
+                        </button>
+                    </div>
+                </div>
+                <div className="flex items-center justify-center min-h-[80vh]">
+                    <div className="text-center px-4">
+                        <FiLock className="w-16 h-16 mx-auto mb-4 text-gray-400" />
+                        <h2 className="text-2xl font-bold mb-2">This Account is Private</h2>
+                        <p className="text-gray-400 mb-6">To view this user's profile you must be following them.</p>
+                        {!hasPendingRequest && (
+                            <button
+                                onClick={handleFollow}
+                                className="px-6 py-3 bg-brand-600 hover:bg-brand-700 rounded-lg font-semibold transition-colors"
+                            >
+                                Follow
+                            </button>
+                        )}
+                        {hasPendingRequest && (
+                            <p className="text-gray-500">Follow request sent</p>
+                        )}
+                    </div>
                 </div>
             </div>
         );
@@ -243,33 +392,26 @@ export default function ViewProfilePage() {
                 {/* Action Buttons */}
                 <div className="flex gap-2 mb-4 relative z-10">
                     <button
-                        onClick={async () => {
-                            if (!user?.id || !handle) return;
-                            try {
-                                // Find a post by this user to toggle follow
-                                const userPost = posts[0];
-                                if (userPost) {
-                                    await toggleFollowForPost(user.id, userPost.id);
-                                }
-                                setIsFollowing(!isFollowing);
-
-                                // Dispatch event to update newsfeed
-                                window.dispatchEvent(new CustomEvent('followToggled', {
-                                    detail: { handle, isFollowing: !isFollowing }
-                                }));
-                            } catch (error) {
-                                console.error('Error toggling follow:', error);
-                            }
-                        }}
+                        onClick={handleFollow}
                         className="flex-1 py-2 rounded-lg font-semibold transition-colors bg-brand-600 hover:bg-brand-700 text-white"
                     >
-                        {isFollowing ? 'Following' : 'Follow'}
+                        {hasPendingRequest ? 'Requested' : isFollowing ? 'Following' : 'Follow'}
                     </button>
                     <button
-                        onClick={(e) => {
+                        onClick={async (e) => {
                             e.stopPropagation();
                             e.preventDefault();
-                            if (handle) {
+                            if (handle && user?.handle && user?.id) {
+                                // Check if user can message (privacy check)
+                                const followedUsers = await getFollowedUsers(user.id);
+                                if (!canSendMessage(user.handle, handle, followedUsers)) {
+                                    Swal.fire({
+                                        title: 'Cannot Send Message',
+                                        text: 'You must follow this user to send them a message.',
+                                        icon: 'warning'
+                                    });
+                                    return;
+                                }
                                 navigate(`/messages/${handle}`);
                             }
                         }}

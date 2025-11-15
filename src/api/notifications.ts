@@ -1,4 +1,4 @@
-export type NotificationType = 'sticker' | 'reply' | 'dm' | 'like' | 'comment' | 'follow';
+export type NotificationType = 'sticker' | 'reply' | 'dm' | 'like' | 'comment' | 'follow' | 'follow_request';
 
 export interface Notification {
     id: string;

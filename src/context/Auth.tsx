@@ -1,6 +1,7 @@
 import React from 'react';
 import * as Sentry from '@sentry/react';
 import { User } from '../types';
+import { setProfilePrivacy } from '../api/privacy';
 type AuthCtx = { user: User | null; login: (userData: any) => void; logout: () => void };
 const Ctx = React.createContext<AuthCtx | null>(null);
 
@@ -24,10 +25,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           national: 'Ireland',
           handle: 'TestUser@Dublin',
           countryFlag: '🇮🇪',
-          avatarUrl: undefined
+          avatarUrl: undefined,
+          is_private: false
         };
         setUser(testUser);
         localStorage.setItem('user', JSON.stringify(testUser));
+        // Sync privacy setting
+        setProfilePrivacy(testUser.handle, false);
         return;
       }
 
@@ -47,11 +51,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           national: '',
           handle: `${parsed.name || 'User'}@Unknown`,
           countryFlag: parsed.countryFlag || undefined,
-          avatarUrl: parsed.avatarUrl || undefined
+          avatarUrl: parsed.avatarUrl || undefined,
+          is_private: parsed.is_private || false
         };
         setUser(convertedUser);
+        // Sync privacy setting
+        if (convertedUser.handle) {
+          setProfilePrivacy(convertedUser.handle, convertedUser.is_private || false);
+        }
       } else {
         setUser(parsed);
+        // Sync privacy setting
+        if (parsed.handle) {
+          setProfilePrivacy(parsed.handle, parsed.is_private || false);
+        }
       }
     } catch (error) {
       console.error('Error loading user from localStorage:', error);
@@ -73,10 +86,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       countryFlag: userData.countryFlag || undefined,
       avatarUrl: userData.avatarUrl || undefined,
       bio: userData.bio || undefined,
-      socialLinks: userData.socialLinks || undefined
+      socialLinks: userData.socialLinks || undefined,
+      is_private: userData.is_private || false
     };
     setUser(u);
     localStorage.setItem('user', JSON.stringify(u));
+    // Sync privacy setting
+    if (u.handle) {
+      setProfilePrivacy(u.handle, u.is_private || false);
+    }
     Sentry.setUser({ id: u.id, username: u.name });
   };
 

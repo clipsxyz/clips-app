@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\Notification;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -66,9 +67,25 @@ class UserController extends Controller
             return $postData;
         });
 
+        $viewer = $userId ? User::find($userId) : null;
+        
+        // Check if viewer can access this profile
+        $canView = $viewer ? $user->canViewProfile($viewer) : true;
+        
+        if (!$canView) {
+            return response()->json([
+                'error' => 'Profile is private',
+                'is_private' => true,
+                'can_view' => false,
+                'requires_follow' => true
+            ], 403);
+        }
+
         $userData = $user->toArray();
         $userData['is_following'] = $userId ? $user->followers()->where('follower_id', $userId)->exists() : false;
+        $userData['has_pending_request'] = $userId ? $viewer->hasPendingFollowRequest($user) : false;
         $userData['posts'] = $transformedPosts;
+        $userData['can_view'] = true;
 
         return response()->json($userData);
     }
@@ -94,20 +111,64 @@ class UserController extends Controller
         }
 
         $result = DB::transaction(function () use ($follower, $following) {
-            $existingFollow = $follower->following()->where('following_id', $following->id)->first();
+            // Check if there's an existing follow relationship (accepted or pending)
+            $existingFollow = DB::table('user_follows')
+                ->where('follower_id', $follower->id)
+                ->where('following_id', $following->id)
+                ->first();
 
             if ($existingFollow) {
-                // Unfollow
-                $follower->following()->detach($following->id);
-                $follower->decrement('following_count');
-                $following->decrement('followers_count');
-                return ['following' => false];
+                // Unfollow (remove regardless of status)
+                DB::table('user_follows')
+                    ->where('follower_id', $follower->id)
+                    ->where('following_id', $following->id)
+                    ->delete();
+                
+                // Only decrement counts if it was accepted
+                if ($existingFollow->status === 'accepted') {
+                    $follower->decrement('following_count');
+                    $following->decrement('followers_count');
+                }
+                
+                return ['following' => false, 'status' => 'unfollowed'];
             } else {
-                // Follow
-                $follower->following()->attach($following->id);
-                $follower->increment('following_count');
-                $following->increment('followers_count');
-                return ['following' => true];
+                // Check if profile is private
+                if ($following->is_private) {
+                    // Create pending follow request
+                    DB::table('user_follows')->insert([
+                        'follower_id' => $follower->id,
+                        'following_id' => $following->id,
+                        'status' => 'pending',
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+
+                    // Create notification for the user being followed
+                    Notification::create([
+                        'user_id' => $following->id,
+                        'type' => 'follow_request',
+                        'from_handle' => $follower->handle,
+                        'to_handle' => $following->handle,
+                        'message' => "{$follower->handle} wants to follow you",
+                        'read' => false,
+                    ]);
+
+                    return ['following' => false, 'status' => 'pending', 'message' => 'Follow request sent'];
+                } else {
+                    // Public profile - follow immediately
+                    DB::table('user_follows')->insert([
+                        'follower_id' => $follower->id,
+                        'following_id' => $following->id,
+                        'status' => 'accepted',
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                    
+                    $follower->increment('following_count');
+                    $following->increment('followers_count');
+                    
+                    return ['following' => true, 'status' => 'accepted'];
+                }
             }
         });
 
@@ -146,6 +207,123 @@ class UserController extends Controller
             'nextCursor' => $nextCursor,
             'hasMore' => $nextCursor !== null
         ]);
+    }
+
+    /**
+     * Toggle profile privacy
+     */
+    public function togglePrivacy(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+        $user->is_private = !$user->is_private;
+        $user->save();
+
+        return response()->json([
+            'is_private' => $user->is_private,
+            'message' => $user->is_private ? 'Profile set to private' : 'Profile set to public'
+        ]);
+    }
+
+    /**
+     * Accept follow request
+     */
+    public function acceptFollowRequest(Request $request, string $handle): JsonResponse
+    {
+        $validator = Validator::make(['handle' => $handle], [
+            'handle' => 'required|string|exists:users,handle'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $user = Auth::user();
+        $requester = User::where('handle', $handle)->firstOrFail();
+
+        $result = DB::transaction(function () use ($user, $requester) {
+            $followRequest = DB::table('user_follows')
+                ->where('follower_id', $requester->id)
+                ->where('following_id', $user->id)
+                ->where('status', 'pending')
+                ->first();
+
+            if (!$followRequest) {
+                return ['error' => 'Follow request not found'];
+            }
+
+            // Update status to accepted
+            DB::table('user_follows')
+                ->where('follower_id', $requester->id)
+                ->where('following_id', $user->id)
+                ->update(['status' => 'accepted', 'updated_at' => now()]);
+
+            // Update counts
+            $requester->increment('following_count');
+            $user->increment('followers_count');
+
+            // Delete the notification
+            Notification::where('user_id', $user->id)
+                ->where('type', 'follow_request')
+                ->where('from_handle', $requester->handle)
+                ->delete();
+
+            return ['status' => 'accepted', 'message' => 'Follow request accepted'];
+        });
+
+        if (isset($result['error'])) {
+            return response()->json($result, 404);
+        }
+
+        return response()->json($result);
+    }
+
+    /**
+     * Deny follow request
+     */
+    public function denyFollowRequest(Request $request, string $handle): JsonResponse
+    {
+        $validator = Validator::make(['handle' => $handle], [
+            'handle' => 'required|string|exists:users,handle'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $user = Auth::user();
+        $requester = User::where('handle', $handle)->firstOrFail();
+
+        $result = DB::transaction(function () use ($user, $requester) {
+            $followRequest = DB::table('user_follows')
+                ->where('follower_id', $requester->id)
+                ->where('following_id', $user->id)
+                ->where('status', 'pending')
+                ->first();
+
+            if (!$followRequest) {
+                return ['error' => 'Follow request not found'];
+            }
+
+            // Delete the follow request
+            DB::table('user_follows')
+                ->where('follower_id', $requester->id)
+                ->where('following_id', $user->id)
+                ->delete();
+
+            // Delete the notification
+            Notification::where('user_id', $user->id)
+                ->where('type', 'follow_request')
+                ->where('from_handle', $requester->handle)
+                ->delete();
+
+            return ['status' => 'denied', 'message' => 'Follow request denied'];
+        });
+
+        if (isset($result['error'])) {
+            return response()->json($result, 404);
+        }
+
+        return response()->json($result);
     }
 
     /**

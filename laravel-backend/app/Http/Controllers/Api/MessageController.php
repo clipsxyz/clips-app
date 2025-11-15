@@ -122,9 +122,18 @@ class MessageController extends Controller
 
         $user = Auth::user();
         $recipientHandle = $request->recipient_handle;
+        $recipient = User::where('handle', $recipientHandle)->firstOrFail();
 
         if ($user->handle === $recipientHandle) {
             return response()->json(['error' => 'Cannot send message to yourself'], 400);
+        }
+
+        // Check if user can send message (privacy check)
+        if (!$recipient->canSendMessage($user)) {
+            return response()->json([
+                'error' => 'Cannot send message',
+                'message' => 'You must follow this user to send them a message'
+            ], 403);
         }
 
         $message = DB::transaction(function () use ($request, $user, $recipientHandle) {

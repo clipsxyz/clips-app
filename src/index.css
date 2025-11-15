@@ -509,3 +509,88 @@ video {
 .news-ticker-container:hover .news-ticker-text {
   animation-play-state: paused;
 }
+
+/* Instagram-style modal for SweetAlert */
+.instagram-style-modal {
+  border-radius: 12px !important;
+  background: #262626 !important;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 4px 12px rgba(0, 0, 0, 0.5) !important;
+  max-width: 400px !important;
+  width: 90% !important;
+  padding: 0 !important;
+}
+
+.instagram-modal-title {
+  font-size: 20px !important;
+  font-weight: 600 !important;
+  color: #ffffff !important;
+  margin: 24px 24px 16px 24px !important;
+  text-align: center !important;
+  line-height: 24px !important;
+  padding: 0 !important;
+}
+
+.instagram-modal-content {
+  color: #ffffff !important;
+  font-size: 14px !important;
+  line-height: 20px !important;
+  margin: 0 24px 24px 24px !important;
+  padding: 0 !important;
+}
+
+.instagram-modal-actions {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+.instagram-confirm-btn,
+.instagram-cancel-btn {
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 16px !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  border-radius: 0 !important;
+  border: none !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+  cursor: pointer !important;
+  transition: background-color 0.2s ease !important;
+}
+
+.instagram-confirm-btn {
+  background: #262626 !important;
+  color: #0095f6 !important;
+}
+
+.instagram-confirm-btn:hover {
+  background: #363636 !important;
+}
+
+.instagram-cancel-btn {
+  background: #262626 !important;
+  color: #ffffff !important;
+  border-bottom: none !important;
+}
+
+.instagram-cancel-btn:hover {
+  background: #363636 !important;
+}
+
+.instagram-confirm-btn:last-child {
+  border-bottom: none !important;
+}
+
+/* Override SweetAlert2 default styles for Instagram modal */
+.instagram-style-modal .swal2-html-container {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.instagram-style-modal .swal2-actions {
+  margin: 0 !important;
+  padding: 0 !important;
+}
