@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
@@ -24,6 +25,7 @@ class User extends Authenticatable
         'location_regional',
         'location_national',
         'is_verified',
+        'is_private',
         'followers_count',
         'following_count',
         'posts_count',
@@ -38,6 +40,7 @@ class User extends Authenticatable
         'email_verified_at' => 'datetime',
         'password' => 'hashed',
         'is_verified' => 'boolean',
+        'is_private' => 'boolean',
         'followers_count' => 'integer',
         'following_count' => 'integer',
         'posts_count' => 'integer',
@@ -58,12 +61,28 @@ class User extends Authenticatable
     public function followers()
     {
         return $this->belongsToMany(User::class, 'user_follows', 'following_id', 'follower_id')
+                    ->wherePivot('status', 'accepted')
                     ->withTimestamps();
     }
 
     public function following()
     {
         return $this->belongsToMany(User::class, 'user_follows', 'follower_id', 'following_id')
+                    ->wherePivot('status', 'accepted')
+                    ->withTimestamps();
+    }
+
+    public function followRequests()
+    {
+        return $this->belongsToMany(User::class, 'user_follows', 'following_id', 'follower_id')
+                    ->wherePivot('status', 'pending')
+                    ->withTimestamps();
+    }
+
+    public function pendingFollowRequests()
+    {
+        return $this->belongsToMany(User::class, 'user_follows', 'follower_id', 'following_id')
+                    ->wherePivot('status', 'pending')
                     ->withTimestamps();
     }
 
@@ -107,6 +126,47 @@ class User extends Authenticatable
     public function isFollowing(User $user)
     {
         return $this->following()->where('following_id', $user->id)->exists();
+    }
+
+    public function hasPendingFollowRequest(User $user)
+    {
+        return DB::table('user_follows')
+            ->where('follower_id', $this->id)
+            ->where('following_id', $user->id)
+            ->where('status', 'pending')
+            ->exists();
+    }
+
+    public function canViewProfile(User $viewer)
+    {
+        // Users can always view their own profile
+        if ($this->id === $viewer->id) {
+            return true;
+        }
+
+        // If profile is not private, anyone can view
+        if (!$this->is_private) {
+            return true;
+        }
+
+        // If profile is private, only followers can view
+        return $this->followers()->where('follower_id', $viewer->id)->exists();
+    }
+
+    public function canSendMessage(User $sender)
+    {
+        // Users can always message themselves (though this shouldn't happen)
+        if ($this->id === $sender->id) {
+            return true;
+        }
+
+        // If profile is not private, anyone can message
+        if (!$this->is_private) {
+            return true;
+        }
+
+        // If profile is private, only followers can message
+        return $this->followers()->where('follower_id', $sender->id)->exists();
     }
 
     public function hasLikedPost(Post $post)

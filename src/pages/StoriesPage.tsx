@@ -6,8 +6,10 @@ import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle } from '../api/stories';
 import { appendMessage } from '../api/messages';
-import { showToast } from '../utils/toast';
+import Swal from 'sweetalert2';
+import { isProfilePrivate, canSendMessage } from '../api/privacy';
 import { getFollowedUsers, getPostById } from '../api/posts';
+import { showToast } from '../utils/toast';
 import ScenesModal from '../components/ScenesModal';
 import { getFlagForHandle, getAvatarForHandle } from '../api/users';
 import Flag from '../components/Flag';
@@ -911,27 +913,41 @@ export default function StoriesPage() {
                                 </button>
                                 {currentGroup?.userHandle && (
                                     <button
-                                        onClick={() => {
+                                        onClick={async () => {
                                             setShowReplyModal(false);
+                                            
+                                            // Check if user can message (privacy check)
+                                            if (user?.id && user?.handle && currentGroup.userHandle) {
+                                                const followedUsers = await getFollowedUsers(user.id);
+                                                if (!canSendMessage(user.handle, currentGroup.userHandle, followedUsers)) {
+                                                    Swal.fire({
+                                                        title: 'Cannot Send Message',
+                                                        text: 'You must follow this user to send them a message.',
+                                                        icon: 'warning'
+                                                    });
+                                                    return;
+                                                }
+                                            }
+                                            
                                             setViewingStories(false);
 
-                                            // Get the current story to check if it's a shared post
-                                            const group = storyGroups[currentGroupIndex];
-                                            const story = group?.stories?.[currentStoryIndex];
+                                                // Get the current story to check if it's a shared post
+                                                const group = storyGroups[currentGroupIndex];
+                                                const story = group?.stories?.[currentStoryIndex];
 
-                                            // If this is a shared post, pass the post URL
-                                            let shareState: any = undefined;
-                                            if (story?.sharedFromPost) {
-                                                const postUrl = `${window.location.origin}/post/${story.sharedFromPost}`;
-                                                shareState = {
-                                                    sharePostUrl: postUrl,
-                                                    sharePostId: story.sharedFromPost
-                                                };
-                                            }
+                                                // If this is a shared post, pass the post URL
+                                                let shareState: any = undefined;
+                                                if (story?.sharedFromPost) {
+                                                    const postUrl = `${window.location.origin}/post/${story.sharedFromPost}`;
+                                                    shareState = {
+                                                        sharePostUrl: postUrl,
+                                                        sharePostId: story.sharedFromPost
+                                                    };
+                                                }
 
-                                            navigate(`/messages/${encodeURIComponent(currentGroup.userHandle!)}`, {
-                                                state: shareState
-                                            });
+                                                navigate(`/messages/${encodeURIComponent(currentGroup.userHandle!)}`, {
+                                                    state: shareState
+                                                });
                                         }}
                                         className="px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                                     >

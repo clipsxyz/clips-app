@@ -1,6 +1,6 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { FiCompass, FiX, FiSearch, FiMapPin, FiMenu, FiHome, FiHeart, FiPlay } from 'react-icons/fi';
+import { FiCompass, FiX, FiSearch, FiMapPin, FiMenu, FiHome, FiSend, FiPlay } from 'react-icons/fi';
 import Avatar from './Avatar';
 import { getUnreadTotal } from '../api/messages';
 import { useAuth } from '../context/Auth';
@@ -151,9 +151,12 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
 
             <button
               onClick={() => navigate('/feed')}
-              className="font-bold text-lg"
+              className="font-light text-lg tracking-tight"
               aria-label="Go to Home Feed"
               title="Gazetteer"
+              style={{ 
+                fontFamily: 'system-ui, -apple-system, sans-serif'
+              }}
             >
               <span
                 style={{
@@ -180,9 +183,12 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
             <div className="flex items-center gap-2">
               <button
                 onClick={() => navigate('/feed')}
-                className="font-bold text-lg"
+                className="font-light text-lg tracking-tight"
                 aria-label="Go to Home Feed"
                 title="Gazetteer"
+                style={{ 
+                  fontFamily: 'system-ui, -apple-system, sans-serif'
+                }}
               >
                 <span
                   style={{
@@ -202,7 +208,7 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
 
               <button
                 onClick={() => navigate('/stories')}
-                className="flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 relative overflow-hidden"
+                className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 relative overflow-hidden"
                 aria-label="View Stories"
                 title="Stories"
                 style={{
@@ -217,7 +223,7 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
               >
                 {/* Shimmer border effect */}
                 <div 
-                  className="absolute inset-0 rounded-full pointer-events-none"
+                  className="absolute inset-0 rounded pointer-events-none"
                   style={{
                     background: 'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.4) 50%, transparent 100%)',
                     backgroundSize: '200% 100%',
@@ -226,16 +232,16 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
                     margin: '-1px'
                   }}
                 />
-                <div className="relative w-6 h-6 z-10">
+                <div className="relative w-4 h-4 z-10">
                   {/* Gradient border ring when there are new stories (Gazetteer-style) */}
                   {hasNewStories ? (
-                    <div className="absolute -inset-0.5 rounded-full p-[2px]" style={{
+                    <div className="absolute -inset-0.5 rounded p-[2px]" style={{
                       background: 'linear-gradient(to right, rgb(255, 140, 0) 5%, rgb(248, 0, 50) 25%, rgb(255, 0, 160) 45%, rgb(140, 40, 255) 65%, rgb(0, 35, 255) 82%, rgb(25, 160, 255) 96%)',
                     }}>
-                      <div className="w-full h-full rounded-full bg-white dark:bg-gray-950 flex items-center justify-center relative overflow-hidden">
-                        <FiPlay className="w-3 h-3 text-gray-900 dark:text-gray-100 relative z-10" />
+                      <div className="w-full h-full rounded bg-white dark:bg-gray-950 flex items-center justify-center relative overflow-hidden">
+                        <FiPlay className="w-2.5 h-2.5 text-gray-900 dark:text-gray-100 relative z-10" />
                         <div 
-                          className="absolute inset-0 rounded-full"
+                          className="absolute inset-0 rounded"
                           style={{
                             background: 'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.6) 50%, transparent 100%)',
                             backgroundSize: '200% 100%',
@@ -249,10 +255,10 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
                     </div>
                   ) : (
                     /* Play button with gray border when no new stories */
-                    <div className="w-6 h-6 rounded-full overflow-hidden ring-2 ring-gray-300 dark:ring-gray-700 bg-white dark:bg-gray-950 flex items-center justify-center relative">
-                      <FiPlay className="w-3 h-3 text-gray-900 dark:text-gray-100 relative z-10" />
+                    <div className="w-4 h-4 rounded overflow-hidden ring-2 ring-gray-300 dark:ring-gray-700 bg-white dark:bg-gray-950 flex items-center justify-center relative">
+                      <FiPlay className="w-2.5 h-2.5 text-gray-900 dark:text-gray-100 relative z-10" />
                       <div 
-                        className="absolute inset-0 rounded-full"
+                        className="absolute inset-0 rounded"
                         style={{
                           background: 'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.6) 50%, transparent 100%)',
                           backgroundSize: '200% 100%',
@@ -287,7 +293,7 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
             <div className="flex items-center gap-2">
               <button
                 onClick={handleDiscoverClick}
-                className="flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors relative overflow-hidden"
+                className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors relative overflow-hidden"
                 aria-label="View Following feed"
                 style={{
                   border: '1px solid rgba(255, 255, 255, 0.2)'
@@ -295,7 +301,7 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
               >
                 {/* Shimmer border effect */}
                 <div 
-                  className="absolute inset-0 rounded-full pointer-events-none"
+                  className="absolute inset-0 rounded pointer-events-none"
                   style={{
                     background: 'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.4) 50%, transparent 100%)',
                     backgroundSize: '200% 100%',
@@ -304,16 +310,16 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
                     margin: '-1px'
                   }}
                 />
-                <div className="relative w-6 h-6 z-10">
-                  <div className="absolute inset-0 rounded-md bg-gradient-to-r from-emerald-500 via-blue-500 to-violet-500 opacity-75 blur-sm animate-pulse"></div>
-                  <div className="absolute inset-[1px] rounded-md bg-gray-950 dark:bg-gray-950">
-                    <div className="absolute inset-0 rounded-md" style={{
+                <div className="relative w-4 h-4 z-10">
+                  <div className="absolute inset-0 rounded bg-gradient-to-r from-emerald-500 via-blue-500 to-violet-500 opacity-75 blur-sm animate-pulse"></div>
+                  <div className="absolute inset-[1px] rounded bg-gray-950 dark:bg-gray-950">
+                    <div className="absolute inset-0 rounded" style={{
                       background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.5), transparent)',
                       backgroundSize: '200% 100%',
                       animation: 'shimmer 3s linear infinite',
                     }}></div>
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-                      <FiCompass className="w-3 h-3 text-white" />
+                      <FiCompass className="w-2.5 h-2.5 text-white" />
                     </div>
                   </div>
                 </div>
@@ -335,7 +341,7 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
                 </span>
               </button>
 
-              {/* Notifications Heart Icon */}
+              {/* Notifications Paper Airplane Icon */}
               <button
                 onClick={() => navigate('/inbox')}
                 className="relative p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
@@ -343,12 +349,9 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
                 title={hasInbox ? 'New notifications' : 'Notifications'}
               >
                 <div className={`relative w-6 h-6 ${hasInbox ? '' : ''}`}>
+                  <FiSend className={`relative w-6 h-6 ${hasInbox ? 'text-blue-500' : 'text-gray-600 dark:text-gray-300'}`} />
                   {hasInbox && (
-                    <div className="absolute -inset-1 rounded-full bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 opacity-80 blur-sm animate-pulse"></div>
-                  )}
-                  <FiHeart className={`relative w-6 h-6 ${hasInbox ? 'text-pink-500 animate-[pulseGlow_2s_ease-in-out_infinite]' : 'text-gray-600 dark:text-gray-300'}`} />
-                  {hasInbox && (
-                    <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 bg-pink-500 text-white text-[10px] leading-4 rounded-full text-center">
+                    <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 bg-blue-500 text-white text-[10px] leading-4 rounded-full text-center">
                       {unreadCount > 9 ? '9+' : unreadCount}
                     </span>
                   )}

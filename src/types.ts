@@ -20,9 +20,12 @@ export type User = {
     tiktok?: string;
   };
   is_verified?: boolean; // Backend field
+  is_private?: boolean; // Backend field - profile privacy setting
   followers_count?: number; // Backend field
   following_count?: number; // Backend field
   posts_count?: number; // Backend field
+  can_view?: boolean; // Whether current user can view this profile
+  has_pending_request?: boolean; // Whether current user has pending follow request
 };
 
 export type Post = {

@@ -1,11 +1,14 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile } from 'react-icons/fi';
+import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile, FiUserPlus } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { listConversations, seedMockDMs, type ConversationSummary } from '../api/messages';
 import { getAvatarForHandle } from '../api/users';
-import { getNotifications, type Notification, markNotificationRead, markAllNotificationsRead, getUnreadNotificationCount } from '../api/notifications';
+import { getNotifications, type Notification, markNotificationRead, markAllNotificationsRead, getUnreadNotificationCount, deleteNotification } from '../api/notifications';
+import Swal from 'sweetalert2';
+import { acceptFollowRequest, denyFollowRequest, removeFollowRequest } from '../api/privacy';
+import { getFollowedUsers } from '../api/posts';
 
 export default function InboxPage() {
     const navigate = useNavigate();
@@ -75,6 +78,8 @@ export default function InboxPage() {
                 return `Replied to your post`;
             case 'dm':
                 return `Sent you a message`;
+            case 'follow_request':
+                return `wants to follow you`;
             default:
                 return notif.message || '';
         }
@@ -88,8 +93,65 @@ export default function InboxPage() {
                 return <FiCornerUpLeft className="w-5 h-5 text-blue-500" />;
             case 'dm':
                 return <FiMessageCircle className="w-5 h-5 text-green-500" />;
+            case 'follow_request':
+                return <FiUserPlus className="w-5 h-5 text-amber-500" />;
             default:
                 return <FiMessageCircle className="w-5 h-5 text-gray-500" />;
+        }
+    };
+
+    const handleAcceptFollowRequest = async (notif: Notification, e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!user?.handle || !user?.id) return;
+        
+        try {
+            // Accept the follow request
+            acceptFollowRequest(notif.fromHandle, user.handle);
+            
+            // Add to followed users (using the posts API state)
+            const { toggleFollowForPost } = await import('../api/posts');
+            const { posts } = await import('../api/posts');
+            // Find a post by this user to toggle follow
+            const userPost = posts.find(p => p.userHandle === notif.fromHandle);
+            if (userPost) {
+                await toggleFollowForPost(user.id, userPost.id);
+            }
+            
+            await deleteNotification(notif.id, user.handle);
+            await loadData();
+            
+            Swal.fire({
+                title: 'Follow Request Accepted',
+                text: `You are now following ${notif.fromHandle}`,
+                icon: 'success',
+                timer: 2000,
+                showConfirmButton: false
+            });
+        } catch (error) {
+            console.error('Error accepting follow request:', error);
+            Swal.fire({
+                title: 'Error',
+                text: 'Failed to accept follow request',
+                icon: 'error'
+            });
+        }
+    };
+
+    const handleDenyFollowRequest = async (notif: Notification, e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!user?.handle) return;
+        
+        try {
+            denyFollowRequest(notif.fromHandle, user.handle);
+            await deleteNotification(notif.id, user.handle);
+            await loadData();
+        } catch (error) {
+            console.error('Error denying follow request:', error);
+            Swal.fire({
+                title: 'Error',
+                text: 'Failed to deny follow request',
+                icon: 'error'
+            });
         }
     };
 
@@ -172,37 +234,57 @@ export default function InboxPage() {
                             </div>
                         )}
                         {notifications.map(notif => (
-                            <button
+                            <div
                                 key={notif.id}
-                                onClick={() => handleNotificationClick(notif)}
                                 className={`w-full text-left flex items-center gap-3 py-3 px-2 rounded-lg transition-colors ${notif.read
                                         ? 'hover:bg-gray-100 dark:hover:bg-gray-800'
                                         : 'bg-purple-900/20 hover:bg-purple-900/30 border-l-4 border-purple-500'
                                     }`}
                             >
-                                <div className="flex-shrink-0">
-                                    {getNotificationIcon(notif.type)}
-                                </div>
-                                <Avatar
-                                    name={notif.fromHandle}
-                                    src={getAvatarForHandle(notif.fromHandle)}
-                                    size="sm"
-                                />
-                                <div className="flex-1 min-w-0">
-                                    <div className="font-medium truncate">{notif.fromHandle}</div>
-                                    <div className="text-xs text-gray-500 truncate">
-                                        {formatNotificationMessage(notif)}
+                                <button
+                                    onClick={() => handleNotificationClick(notif)}
+                                    className="flex items-center gap-3 flex-1 min-w-0"
+                                >
+                                    <div className="flex-shrink-0">
+                                        {getNotificationIcon(notif.type)}
                                     </div>
-                                </div>
-                                <div className="flex flex-col items-end gap-1">
-                                    <div className="text-[10px] text-gray-400">
-                                        {new Date(notif.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    <Avatar
+                                        name={notif.fromHandle}
+                                        src={getAvatarForHandle(notif.fromHandle)}
+                                        size="sm"
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                        <div className="font-medium truncate">{notif.fromHandle}</div>
+                                        <div className="text-xs text-gray-500 truncate">
+                                            {formatNotificationMessage(notif)}
+                                        </div>
                                     </div>
-                                    {!notif.read && (
-                                        <span className="w-2 h-2 bg-purple-500 rounded-full"></span>
-                                    )}
-                                </div>
-                            </button>
+                                    <div className="flex flex-col items-end gap-1">
+                                        <div className="text-[10px] text-gray-400">
+                                            {new Date(notif.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        </div>
+                                        {!notif.read && (
+                                            <span className="w-2 h-2 bg-purple-500 rounded-full"></span>
+                                        )}
+                                    </div>
+                                </button>
+                                {notif.type === 'follow_request' && (
+                                    <div className="flex gap-2 flex-shrink-0">
+                                        <button
+                                            onClick={(e) => handleAcceptFollowRequest(notif, e)}
+                                            className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm rounded-lg font-medium transition-colors"
+                                        >
+                                            Accept
+                                        </button>
+                                        <button
+                                            onClick={(e) => handleDenyFollowRequest(notif, e)}
+                                            className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-sm rounded-lg font-medium transition-colors"
+                                        >
+                                            Deny
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
                         ))}
                     </div>
                 )

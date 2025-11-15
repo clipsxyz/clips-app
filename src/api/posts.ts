@@ -397,17 +397,26 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       }
 
       // Predefined tab filtering - show only posts from users in that location
-      if (t === 'finglas') {
-        // Show posts from users who selected Finglas as their local location
-        return p.userLocal === 'Finglas';
+      // Check if tab matches user's local, regional, or national (case-insensitive)
+      const tabLower = t.toLowerCase();
+      const userLocalLower = (p.userLocal || '').toLowerCase();
+      const userRegionalLower = (p.userRegional || '').toLowerCase();
+      const userNationalLower = (p.userNational || '').toLowerCase();
+      
+      // Match against local, regional, or national
+      if (tabLower === userLocalLower || tabLower === userRegionalLower || tabLower === userNationalLower) {
+        return true;
       }
-      if (t === 'dublin') {
-        // Show posts from users who selected Dublin as their regional location
-        return p.userRegional === 'Dublin';
+      
+      // Legacy hardcoded checks for backward compatibility
+      if (t === 'finglas' && p.userLocal === 'Finglas') {
+        return true;
       }
-      if (t === 'ireland') {
-        // Show posts from users who selected Ireland as their national location
-        return p.userNational === 'Ireland';
+      if (t === 'dublin' && p.userRegional === 'Dublin') {
+        return true;
+      }
+      if (t === 'ireland' && p.userNational === 'Ireland') {
+        return true;
       }
 
       // Fallback - do not include any other posts for unknown tabs

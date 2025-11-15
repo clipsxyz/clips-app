@@ -29,7 +29,7 @@ import StickerOverlayComponent from './components/StickerOverlay';
 import EffectWrapper from './components/EffectWrapper';
 import type { EffectConfig } from './utils/effects';
 
-type Tab = 'Finglas' | 'Dublin' | 'Ireland' | 'Discover';
+type Tab = string; // Dynamic based on user location
 
 function BottomNav({ onCreateClick }: { onCreateClick: () => void }) {
   const nav = useNavigate();
@@ -99,9 +99,16 @@ export default function App() {
   );
 }
 
-function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCustom?: () => void }) {
+function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCustom?: () => void; userLocal?: string; userRegional?: string; userNational?: string }) {
   const navigate = useNavigate();
-  const tabs: Tab[] = ['Finglas', 'Dublin', 'Ireland', 'Discover'];
+  const { user } = useAuth();
+  
+  // Use user location from props or context, with fallback to defaults
+  const local = props.userLocal || user?.local || 'Finglas';
+  const regional = props.userRegional || user?.regional || 'Dublin';
+  const national = props.userNational || user?.national || 'Ireland';
+  
+  const tabs: Tab[] = [local, regional, national, 'Discover'];
 
   return (
     <div role="tablist" aria-label="Locations" className="grid grid-cols-4 gap-2 px-3">
@@ -2231,7 +2238,35 @@ function FeedPageWrapper() {
   const online = useOnline();
   const routerLocation = useLocation();
   const requestTokenRef = React.useRef(0);
-  const [active, setActive] = React.useState<Tab>('Ireland');
+  
+  // Initialize active tab based on user's national location, with fallback
+  const defaultNational = user?.national || 'Ireland';
+  const [active, setActive] = React.useState<Tab>(defaultNational);
+  
+  // Update active tab when user location changes
+  React.useEffect(() => {
+    if (user?.national) {
+      // If current active tab is one of the old location tabs, update to new national
+      const oldTabs = ['Finglas', 'Dublin', 'Ireland'];
+      if (oldTabs.includes(active)) {
+        setActive(user.national);
+      }
+    }
+  }, [user?.national, user?.regional, user?.local]);
+  
+  // Listen for location updates from profile page
+  React.useEffect(() => {
+    const handleLocationUpdate = (event: CustomEvent) => {
+      const { national, regional, local } = event.detail;
+      // Update active tab if it was one of the old location tabs
+      const oldTabs = ['Finglas', 'Dublin', 'Ireland'];
+      if (oldTabs.includes(active)) {
+        setActive(national || 'Ireland');
+      }
+    };
+    window.addEventListener('locationUpdated', handleLocationUpdate as EventListener);
+    return () => window.removeEventListener('locationUpdated', handleLocationUpdate as EventListener);
+  }, [active]);
   const [customLocation, setCustomLocation] = React.useState<string | null>(null);
   const [pages, setPages] = React.useState<Post[][]>([]);
   const [ads, setAds] = React.useState<Ad[]>([]);
@@ -2271,12 +2306,12 @@ function FeedPageWrapper() {
   React.useEffect(() => {
     const handleResetFeed = () => {
       setShowFollowingFeed(false);
-      setActive('Ireland');
+      setActive(user?.national || 'Ireland');
       setCustomLocation(null);
     };
     window.addEventListener('resetFeed', handleResetFeed);
     return () => window.removeEventListener('resetFeed', handleResetFeed);
-  }, []);
+  }, [user?.national]);
 
   // Determine current filter - showFollowingFeed overrides everything, then custom location, then active tab
   const currentFilter = showFollowingFeed ? 'discover' : (customLocation || active);
@@ -2644,7 +2679,14 @@ function FeedPageWrapper() {
 
       {/* Show location tabs only when not viewing a custom location */}
       {!customLocation ? (
-        <PillTabs active={active} onChange={setActive} onClearCustom={() => setCustomLocation(null)} />
+        <PillTabs 
+          active={active} 
+          onChange={setActive} 
+          onClearCustom={() => setCustomLocation(null)}
+          userLocal={user?.local}
+          userRegional={user?.regional}
+          userNational={user?.national}
+        />
       ) : (
         /* Show location header only when viewing custom location */
         <div className="px-3 py-2">
