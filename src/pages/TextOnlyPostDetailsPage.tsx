@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { FiChevronLeft, FiMapPin, FiUser } from 'react-icons/fi';
 import { useAuth } from '../context/Auth';
@@ -11,12 +11,91 @@ export default function TextOnlyPostDetailsPage() {
     const navigate = useNavigate();
     const location = useLocation();
     const text = (location.state as { text?: string })?.text || '';
+    const containerRef = useRef<HTMLDivElement>(null);
+    const textPreviewRef = useRef<HTMLDivElement>(null);
 
     const [locationText, setLocationText] = useState('');
     const [taggedUsers, setTaggedUsers] = useState<string[]>([]);
     const [bannerText, setBannerText] = useState('');
     const [showUserTagging, setShowUserTagging] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
+
+    // Scroll to top when component mounts - use useLayoutEffect to run before paint
+    useLayoutEffect(() => {
+        // Disable scroll restoration temporarily
+        if ('scrollRestoration' in window.history) {
+            window.history.scrollRestoration = 'manual';
+        }
+        
+        // Scroll main container if it exists (this is likely the scrollable container)
+        const mainElement = document.getElementById('main');
+        if (mainElement) {
+            mainElement.scrollTop = 0;
+            mainElement.scrollTo(0, 0);
+        }
+        
+        // Scroll window and document
+        window.scrollTo(0, 0);
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
+        
+        if (containerRef.current) {
+            containerRef.current.scrollTop = 0;
+        }
+    }, []);
+
+    // Also use useEffect as backup with multiple attempts
+    useEffect(() => {
+        const scrollToTop = () => {
+            // Find and scroll the main container (this is the scrollable element in App.tsx)
+            const mainElement = document.getElementById('main');
+            if (mainElement) {
+                mainElement.scrollTop = 0;
+                mainElement.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+            }
+            
+            // Scroll window
+            window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+            document.documentElement.scrollTop = 0;
+            document.body.scrollTop = 0;
+            
+            // Scroll this component's container
+            if (containerRef.current) {
+                containerRef.current.scrollTop = 0;
+                containerRef.current.scrollTo(0, 0);
+            }
+            
+            // Scroll to text preview if it exists
+            if (textPreviewRef.current) {
+                textPreviewRef.current.scrollIntoView({ behavior: 'instant', block: 'start' });
+            }
+        };
+
+        // Immediate
+        scrollToTop();
+        
+        // Multiple delayed attempts
+        const timeouts = [
+            setTimeout(scrollToTop, 0),
+            setTimeout(scrollToTop, 10),
+            setTimeout(scrollToTop, 50),
+            setTimeout(scrollToTop, 100),
+            setTimeout(scrollToTop, 200)
+        ];
+        
+        // Animation frame attempts
+        requestAnimationFrame(() => {
+            scrollToTop();
+            requestAnimationFrame(() => {
+                scrollToTop();
+                requestAnimationFrame(scrollToTop);
+            });
+        });
+
+        return () => {
+            timeouts.forEach(clearTimeout);
+        };
+    }, [text]);
 
     const handleSubmit = async () => {
         if (!text.trim()) {
@@ -64,9 +143,9 @@ export default function TextOnlyPostDetailsPage() {
     const canPost = text.trim().length > 0;
 
     return (
-        <div className="min-h-screen bg-black">
+        <div ref={containerRef} className="min-h-screen bg-black flex flex-col" style={{ overflowY: 'auto' }}>
             {/* Header */}
-            <div className="sticky top-0 z-10 bg-black border-b border-gray-800">
+            <div className="sticky top-0 z-10 bg-black border-b border-gray-800 flex-shrink-0">
                 <div className="flex items-center justify-between px-4 h-14">
                     <div className="flex items-center gap-3">
                         <button
@@ -98,8 +177,19 @@ export default function TextOnlyPostDetailsPage() {
                 </div>
             </div>
 
+            {/* Text Preview Box - Show at top */}
+            {text && (
+                <div ref={textPreviewRef} className="px-4 pt-4 pb-4 border-b border-gray-800 flex-shrink-0">
+                    <div className="p-4 rounded-xl bg-gray-900/30 border border-gray-800">
+                        <div className="text-white text-base whitespace-pre-wrap break-words">
+                            {text}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Main Content */}
-            <div className="px-4 py-4 space-y-4">
+            <div className="flex-1 px-4 py-4 space-y-4 overflow-y-auto" data-main-content style={{ scrollBehavior: 'smooth' }}>
                 {/* Location Input */}
                 <div className="flex items-center gap-3 p-4 rounded-xl bg-gray-900/30 border border-gray-800">
                     <FiMapPin className="w-5 h-5 text-gray-400 flex-shrink-0" />
@@ -186,6 +276,7 @@ export default function TextOnlyPostDetailsPage() {
         </div>
     );
 }
+
 
 
 

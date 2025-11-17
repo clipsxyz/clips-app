@@ -720,7 +720,13 @@ export default function StoriesPage() {
                                 </div>
                                 <div>
                                     <p className="text-white font-semibold text-sm">{currentGroup?.userHandle}</p>
-                                    {currentStory?.location && (
+                                    {currentStory?.sharedFromUser && (
+                                        <p className="text-white/80 text-xs flex items-center gap-1">
+                                            <span>shared from</span>
+                                            <span className="font-semibold">{currentStory.sharedFromUser}</span>
+                                        </p>
+                                    )}
+                                    {!currentStory?.sharedFromUser && currentStory?.location && (
                                         <p className="text-white/70 text-xs">{currentStory.location}</p>
                                     )}
                                 </div>

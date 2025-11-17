@@ -1,6 +1,6 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { FiX, FiHeart, FiShare2, FiRepeat, FiMapPin } from 'react-icons/fi';
+import { FiX, FiHeart, FiShare2, FiRepeat, FiMapPin, FiVolume2, FiVolumeX, FiMessageSquare, FiChevronUp } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import Avatar from './Avatar';
 import ShareModal from './ShareModal';
@@ -10,11 +10,96 @@ import Flag from './Flag';
 import type { EffectConfig } from '../utils/effects';
 import { useAuth } from '../context/Auth';
 import { useOnline } from '../hooks/useOnline';
-import { addComment } from '../api/posts';
+import { addComment, fetchComments } from '../api/posts';
+import type { Comment } from '../types';
 import { enqueue } from '../utils/mutationQueue';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
 import { timeAgo } from '../utils/timeAgo';
 import type { Post } from '../types';
+import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from '../constants';
+
+// Heart drop animation component - animates from tap position to like button
+function HeartDropAnimation({ startX, startY, targetElement, onComplete }: { startX: number; startY: number; targetElement: HTMLElement; onComplete: () => void }) {
+    const [progress, setProgress] = React.useState(0);
+    const [endPosition, setEndPosition] = React.useState<{ x: number; y: number } | null>(null);
+    const heartRef = React.useRef<HTMLDivElement>(null);
+    const animationFrameRef = React.useRef<number | null>(null);
+    const startTimeRef = React.useRef<number | null>(null);
+
+    React.useEffect(() => {
+        if (!targetElement) return;
+
+        // Get target position (like button center)
+        try {
+            const rect = targetElement.getBoundingClientRect();
+            const targetX = rect.left + rect.width / 2;
+            const targetY = rect.top + rect.height / 2;
+            setEndPosition({ x: targetX, y: targetY });
+            startTimeRef.current = Date.now();
+
+            // Animate using requestAnimationFrame
+            const animate = () => {
+                if (!startTimeRef.current) return;
+
+                const elapsed = Date.now() - startTimeRef.current;
+                const duration = 800; // 800ms
+                const t = Math.min(elapsed / duration, 1);
+
+                // Ease-in function
+                const eased = t * t;
+                setProgress(eased);
+
+                if (t < 1) {
+                    animationFrameRef.current = requestAnimationFrame(animate);
+                } else {
+                    onComplete();
+                }
+            };
+
+            animationFrameRef.current = requestAnimationFrame(animate);
+
+            return () => {
+                if (animationFrameRef.current) {
+                    cancelAnimationFrame(animationFrameRef.current);
+                }
+            };
+        } catch (error) {
+            console.error('Error calculating heart animation target:', error);
+            onComplete();
+        }
+    }, [targetElement, onComplete]);
+
+    if (!endPosition) return null;
+
+    const deltaX = endPosition.x - startX;
+    const deltaY = endPosition.y - startY;
+    const currentX = startX + deltaX * progress;
+    const currentY = startY + deltaY * progress;
+    const scale = 1 - (progress * 0.7); // Scale from 1 to 0.3
+    const opacity = 1 - progress;
+
+    return (
+        <div
+            ref={heartRef}
+            className="fixed pointer-events-none z-[9999]"
+            style={{
+                left: `${currentX}px`,
+                top: `${currentY}px`,
+                transform: `translate(-50%, -50%) scale(${scale})`,
+                opacity: opacity,
+                transition: 'none'
+            }}
+        >
+            <svg
+                className="w-20 h-20 text-red-500 drop-shadow-lg"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+            >
+                <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+            </svg>
+        </div>
+    );
+}
 
 type ScenesModalProps = {
     post: Post;
@@ -50,10 +135,23 @@ export default function ScenesModal({
     const [heartBurst, setHeartBurst] = React.useState(false);
     const [shareModalOpen, setShareModalOpen] = React.useState(false);
     const [videoProgress, setVideoProgress] = React.useState(0);
+    const [isMuted, setIsMuted] = React.useState(true);
+    const [isPaused, setIsPaused] = React.useState(false);
+    const [isCaptionExpanded, setIsCaptionExpanded] = React.useState(false);
+    const [commentsList, setCommentsList] = React.useState<Comment[]>([]);
+    const [isLoadingComments, setIsLoadingComments] = React.useState(false);
+    const [sheetDragY, setSheetDragY] = React.useState(0);
+    const [isDragging, setIsDragging] = React.useState(false);
+    const sheetRef = React.useRef<HTMLDivElement>(null);
+    const dragStartY = React.useRef<number>(0);
+    const [tapPosition, setTapPosition] = React.useState<{ x: number; y: number } | null>(null);
+    const [heartAnimation, setHeartAnimation] = React.useState<{ startX: number; startY: number } | null>(null);
     const videoRef = React.useRef<HTMLVideoElement>(null);
     const lastTapRef = React.useRef<number>(0);
     const touchHandledRef = React.useRef<boolean>(false);
     const mediaContainerRef = React.useRef<HTMLDivElement>(null);
+    const likeButtonRef = React.useRef<HTMLButtonElement>(null);
+    const isProcessingDoubleTap = React.useRef<boolean>(false);
     const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
     const { user } = useAuth();
     const online = useOnline();
@@ -91,10 +189,75 @@ export default function ScenesModal({
     // Reset video state when switching items
     React.useEffect(() => {
         if (currentItem?.type === 'video' && videoRef.current) {
+            // Pause any currently playing video before loading new one
+            if (!videoRef.current.paused) {
+                videoRef.current.pause();
+            }
             videoRef.current.load();
             setVideoProgress(0);
+            setIsMuted(true); // Reset to muted when switching videos
+            setIsPaused(false); // Reset to playing when switching videos
         }
+        // Reset animation states when switching items
+        setTapPosition(null);
+        setHeartAnimation(null);
+        setHeartBurst(false);
+        isProcessingDoubleTap.current = false;
     }, [currentIndex, currentItem?.type]);
+
+    // Sync video muted state with ref
+    React.useEffect(() => {
+        if (videoRef.current && currentItem?.type === 'video') {
+            videoRef.current.muted = isMuted;
+        }
+    }, [isMuted, currentItem?.type]);
+
+    // Ensure video is paused when isPaused is true
+    React.useEffect(() => {
+        if (videoRef.current && currentItem?.type === 'video') {
+            if (isPaused && !videoRef.current.paused) {
+                videoRef.current.pause();
+                // Force pause to ensure audio stops immediately
+                videoRef.current.currentTime = videoRef.current.currentTime;
+                // Also pause all other videos on the page to prevent background audio
+                const allVideos = document.querySelectorAll('video');
+                allVideos.forEach((video) => {
+                    if (video !== videoRef.current && !video.paused) {
+                        video.pause();
+                    }
+                });
+            } else if (!isPaused && videoRef.current.paused) {
+                videoRef.current.play().catch(console.error);
+            }
+        }
+    }, [isPaused, currentItem?.type]);
+
+    // Pause all videos on the page when Scenes opens
+    React.useEffect(() => {
+        if (isOpen) {
+            // Pause all video elements on the page to prevent background audio
+            const allVideos = document.querySelectorAll('video');
+            allVideos.forEach((video) => {
+                if (!video.paused) {
+                    video.pause();
+                }
+            });
+        }
+    }, [isOpen]);
+
+    // Cleanup animation states when modal closes
+    React.useEffect(() => {
+        if (!isOpen) {
+            // Pause video when modal closes to stop any audio
+            if (videoRef.current && !videoRef.current.paused) {
+                videoRef.current.pause();
+            }
+            setTapPosition(null);
+            setHeartAnimation(null);
+            setHeartBurst(false);
+            isProcessingDoubleTap.current = false;
+        }
+    }, [isOpen]);
 
     function handleNext() {
         if (hasMultipleItems) {
@@ -125,8 +288,17 @@ export default function ScenesModal({
 
     // Listen for engagement updates
     React.useEffect(() => {
-        const handleCommentAdded = () => {
+        const handleCommentAdded = async () => {
             setComments(prev => prev + 1);
+            // Refresh comments list if sheet is open
+            if (isCaptionExpanded) {
+                try {
+                    const fetchedComments = await fetchComments(post.id);
+                    setCommentsList(fetchedComments);
+                } catch (error) {
+                    console.error('Failed to refresh comments:', error);
+                }
+            }
         };
         const handleLikeToggled = (event: CustomEvent) => {
             console.log('ScenesModal: likeToggled event received', event.detail);
@@ -161,7 +333,7 @@ export default function ScenesModal({
             window.removeEventListener(`shareAdded-${post.id}`, handleShareAdded);
             window.removeEventListener(`reclipAdded-${post.id}`, handleReclipAdded as EventListener);
         };
-    }, [post.id]);
+    }, [post.id, isCaptionExpanded]);
 
     React.useEffect(() => {
         function onKeyDown(e: KeyboardEvent) {
@@ -200,15 +372,83 @@ export default function ScenesModal({
     }
 
     // Handle double tap to like
-    const handleMediaTap = React.useCallback(async () => {
+    const handleMediaTap = React.useCallback(async (e?: React.MouseEvent | React.TouchEvent) => {
+        // Prevent processing if already handling a double tap
+        if (isProcessingDoubleTap.current) {
+            return;
+        }
+
         const now = Date.now();
         const timeSinceLastTap = now - lastTapRef.current;
 
-        if (timeSinceLastTap < 300) {
-            // Double tap detected - trigger like
+        if (timeSinceLastTap < DOUBLE_TAP_THRESHOLD) {
+            // Double tap detected
+            isProcessingDoubleTap.current = true;
+
+            // Get tap position relative to media container
+            let tapX = 0;
+            let tapY = 0;
+            let clientX = 0;
+            let clientY = 0;
+
+            if (mediaContainerRef.current && e) {
+                const rect = mediaContainerRef.current.getBoundingClientRect();
+
+                if ('touches' in e && e.touches.length > 0) {
+                    // Touch event - use touch position
+                    clientX = e.touches[0].clientX;
+                    clientY = e.touches[0].clientY;
+                } else if ('changedTouches' in e && e.changedTouches.length > 0) {
+                    // Touch end event - use changedTouches
+                    clientX = e.changedTouches[0].clientX;
+                    clientY = e.changedTouches[0].clientY;
+                } else if ('clientX' in e) {
+                    // Mouse event
+                    clientX = e.clientX;
+                    clientY = e.clientY;
+                } else {
+                    // Fallback to center
+                    clientX = rect.left + rect.width / 2;
+                    clientY = rect.top + rect.height / 2;
+                }
+
+                tapX = clientX - rect.left;
+                tapY = clientY - rect.top;
+            } else {
+                // Fallback to center if no event or container
+                if (mediaContainerRef.current) {
+                    const rect = mediaContainerRef.current.getBoundingClientRect();
+                    tapX = rect.width / 2;
+                    tapY = rect.height / 2;
+                    clientX = rect.left + tapX;
+                    clientY = rect.top + tapY;
+                }
+            }
+
+            // Set tap position for heart pop-up animation
+            setTapPosition({ x: tapX, y: tapY });
+
+            // Show heart burst animation
             setHeartBurst(true);
-            // Always hide the heart burst animation after 1 second
-            setTimeout(() => setHeartBurst(false), 1000);
+
+            // Trigger heart animation to like button - start after pop-up animation has appeared
+            // The pop-up animation is 400ms, start drop animation at 200ms so they overlap smoothly
+            setTimeout(() => {
+                if (likeButtonRef.current) {
+                    setHeartAnimation({ startX: clientX, startY: clientY });
+                }
+            }, 200);
+
+            // Clear tap position and burst after pop-up animation completes (400ms)
+            setTimeout(() => {
+                setTapPosition(null);
+                setHeartBurst(false);
+            }, 400);
+
+            // Reset processing flag after all animations complete (pop-up 400ms + drop 800ms = 1200ms)
+            setTimeout(() => {
+                isProcessingDoubleTap.current = false;
+            }, 1200);
 
             if (!busy && !liked) {
                 setBusy(true);
@@ -226,13 +466,27 @@ export default function ScenesModal({
                     setBusy(false);
                 }
             }
+            // Note: Processing flag is reset after 1200ms regardless of whether we liked or not
         } else {
             // Single tap - toggle play/pause for videos
             if (currentItem?.type === 'video' && videoRef.current) {
                 if (videoRef.current.paused) {
-                    videoRef.current.play();
+                    videoRef.current.play().catch(console.error);
+                    setIsPaused(false);
                 } else {
+                    // Force pause and ensure audio stops immediately
                     videoRef.current.pause();
+                    // Ensure the pause takes effect by setting currentTime
+                    const currentTime = videoRef.current.currentTime;
+                    videoRef.current.currentTime = currentTime;
+                    setIsPaused(true);
+                    // Also pause all other videos on the page to prevent background audio
+                    const allVideos = document.querySelectorAll('video');
+                    allVideos.forEach((video) => {
+                        if (video !== videoRef.current && !video.paused) {
+                            video.pause();
+                        }
+                    });
                 }
             }
         }
@@ -244,12 +498,12 @@ export default function ScenesModal({
             e.preventDefault();
             return;
         }
-        handleMediaTap();
+        handleMediaTap(e);
     }, [handleMediaTap]);
 
-    const handleMediaTouchEnd = React.useCallback(() => {
+    const handleMediaTouchEnd = React.useCallback((e: React.TouchEvent) => {
         touchHandledRef.current = true;
-        handleMediaTap();
+        handleMediaTap(e);
         setTimeout(() => {
             touchHandledRef.current = false;
         }, 300);
@@ -300,6 +554,52 @@ export default function ScenesModal({
         }
     }
 
+    // Handle caption expansion
+    const handleCaptionClick = async () => {
+        if (isCaptionExpanded) {
+            setIsCaptionExpanded(false);
+            setSheetDragY(0);
+        } else {
+            setIsCaptionExpanded(true);
+            // Fetch comments when expanding
+            if (commentsList.length === 0 && !isLoadingComments) {
+                setIsLoadingComments(true);
+                try {
+                    const fetchedComments = await fetchComments(post.id);
+                    setCommentsList(fetchedComments);
+                } catch (error) {
+                    console.error('Failed to load comments:', error);
+                } finally {
+                    setIsLoadingComments(false);
+                }
+            }
+        }
+    };
+
+    // Drag handlers for bottom sheet
+    const handleSheetTouchStart = (e: React.TouchEvent) => {
+        setIsDragging(true);
+        dragStartY.current = e.touches[0].clientY;
+    };
+
+    const handleSheetTouchMove = (e: React.TouchEvent) => {
+        if (!isDragging) return;
+        const currentY = e.touches[0].clientY;
+        const deltaY = currentY - dragStartY.current;
+        if (deltaY > 0) {
+            setSheetDragY(deltaY);
+        }
+    };
+
+    const handleSheetTouchEnd = () => {
+        if (sheetDragY > 100) {
+            // Dismiss if dragged down more than 100px
+            setIsCaptionExpanded(false);
+        }
+        setSheetDragY(0);
+        setIsDragging(false);
+    };
+
     async function handleAddComment(e: React.FormEvent) {
         e.preventDefault();
         if (!commentText.trim() || isAddingComment || !user) return;
@@ -319,16 +619,15 @@ export default function ScenesModal({
             } else {
                 // Use the same addComment function as CommentsModal
                 await addComment(post.id, user?.handle || 'darraghdublin', text);
+                // Refresh comments list
+                const fetchedComments = await fetchComments(post.id);
+                setCommentsList(fetchedComments);
             }
 
             // Dispatch event after successful comment
             window.dispatchEvent(new CustomEvent(`commentAdded-${post.id}`, {
                 detail: { text }
             }));
-            // Open comments modal after successfully adding a comment
-            setTimeout(() => {
-                onOpenComments();
-            }, 100);
         } catch (error) {
             console.error('Error adding comment:', error);
             // Restore text on error
@@ -356,39 +655,55 @@ export default function ScenesModal({
                     aria-label="Scenes fullscreen viewer"
                     className="fixed inset-0 z-[100] bg-black flex items-center justify-center"
                 >
-                    {/* Scenes Logo - Top Left */}
-                    <div className="absolute top-6 left-4 z-10 flex items-center gap-2">
-                        <div className="p-1 rounded-md border-2 border-white">
-                            <svg
-                                width="28"
-                                height="28"
-                                viewBox="0 0 24 24"
-                                className="text-white flex-shrink-0"
-                                fill="none"
-                                xmlns="http://www.w3.org/2000/svg"
-                            >
-                                {/* Square border */}
-                                <rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" strokeWidth="2" fill="none" />
-                                {/* Play button triangle */}
-                                <path d="M9 7 L9 17 L17 12 Z" fill="currentColor" />
-                            </svg>
-                        </div>
-                        <span className="text-white text-xl font-bold tracking-tight">Scenes</span>
+                    {/* Top Left - Location and Time */}
+                    <div className="absolute top-6 left-4 z-10 flex flex-col gap-1">
+                        {post.locationLabel && (
+                            <div className="bg-red-500 text-white text-sm font-medium flex items-center gap-1.5 px-2 py-1 rounded">
+                                <FiMapPin className="w-4 h-4" />
+                                <span>{post.locationLabel}</span>
+                            </div>
+                        )}
+                        {post.createdAt && (
+                            <div className="bg-black text-white text-xs px-2 py-1 rounded">
+                                {timeAgo(post.createdAt)}
+                            </div>
+                        )}
                     </div>
 
-                    {/* Close Button - Top Right */}
-                    <button
-                        onClick={onClose}
-                        aria-label="Close scenes"
-                        className="absolute top-6 right-4 z-10 p-2 rounded-full bg-black/30 hover:bg-black/50 text-white transition-colors"
-                    >
-                        <FiX size={24} />
-                    </button>
+                    {/* Top Bar - Counter and Close Button - Evenly Spaced */}
+                    <div className="absolute top-4 left-0 right-0 z-30 flex items-center justify-between px-4">
+                        {/* Left side - Empty spacer */}
+                        <div className="flex-1 flex justify-start">
+                        </div>
+
+                        {/* Center - Counter (only for multi-item posts) */}
+                        <div className="flex-1 flex justify-center">
+                            {hasMultipleItems && (
+                                <div className="px-2 py-1 bg-black/50 text-white text-xs rounded-full">
+                                    {currentIndex + 1} / {items.length}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Right side - Close button */}
+                        <div className="flex-1 flex justify-end">
+                            <button
+                                onClick={onClose}
+                                aria-label="Close scenes"
+                                className="p-1.5 rounded-full bg-black/30 hover:bg-black/50 text-white transition-colors"
+                            >
+                                <FiX size={18} />
+                            </button>
+                        </div>
+                    </div>
 
                     {/* Main Media Content */}
                     <div
                         ref={mediaContainerRef}
-                        className="w-full h-full flex items-center justify-center relative select-none cursor-pointer"
+                        className={`w-full h-full flex items-center justify-center relative select-none cursor-pointer transition-all duration-300 ease-out ${isCaptionExpanded
+                            ? 'scale-[0.45] -translate-y-[25%] origin-top'
+                            : 'scale-100 translate-y-0'
+                            }`}
                         onClick={(e) => {
                             // Only handle media click if clicking directly on the media area (not on buttons)
                             if (e.target === e.currentTarget || (e.target instanceof HTMLElement && !e.target.closest('button'))) {
@@ -483,7 +798,9 @@ export default function ScenesModal({
                                         autoPlay
                                         loop
                                         playsInline
-                                        muted
+                                        muted={isMuted}
+                                        onPlay={() => setIsPaused(false)}
+                                        onPause={() => setIsPaused(true)}
                                         onTimeUpdate={(e) => {
                                             const video = e.currentTarget;
                                             if (video.duration) {
@@ -635,10 +952,10 @@ export default function ScenesModal({
                                             e.stopPropagation();
                                             handlePrevious();
                                         }}
-                                        className="absolute left-4 top-1/3 transform -translate-y-1/2 w-12 h-12 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center transition-colors z-30"
+                                        className="absolute left-4 top-1/4 transform -translate-y-1/2 w-9 h-9 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center transition-colors z-30"
                                         aria-label="Previous image"
                                     >
-                                        <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                                         </svg>
                                     </button>
@@ -651,10 +968,10 @@ export default function ScenesModal({
                                             e.stopPropagation();
                                             handleNext();
                                         }}
-                                        className="absolute right-4 top-1/3 transform -translate-y-1/2 w-12 h-12 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center transition-colors z-30"
+                                        className="absolute right-4 top-1/4 transform -translate-y-1/2 w-9 h-9 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center transition-colors z-30"
                                         aria-label="Next image"
                                     >
-                                        <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                                         </svg>
                                     </button>
@@ -678,10 +995,6 @@ export default function ScenesModal({
                                     ))}
                                 </div>
 
-                                {/* Image Counter */}
-                                <div className="absolute top-20 right-4 px-3 py-1.5 bg-black/50 text-white text-sm rounded-full z-30">
-                                    {currentIndex + 1} / {items.length}
-                                </div>
                             </>
                         )}
 
@@ -706,183 +1019,445 @@ export default function ScenesModal({
                             </div>
                         )}
 
-                        {/* Enhanced heart burst animation - only shows during burst */}
-                        <div className={`absolute inset-0 flex items-center justify-center pointer-events-none z-20 ${heartBurst ? 'opacity-100' : 'opacity-0'}`}>
-                            <div className="relative">
-                                {/* Main heart */}
-                                <svg className="w-24 h-24 drop-shadow-lg animate-pulse transition-opacity duration-300" viewBox="0 0 24 24" fill="#ef4444">
-                                    <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
-                                </svg>
+                        {/* Heart pop-up animation at tap position */}
+                        {tapPosition && (
+                            <div
+                                className="absolute pointer-events-none z-50 transition-opacity duration-300"
+                                style={{
+                                    left: `${tapPosition.x}px`,
+                                    top: `${tapPosition.y}px`,
+                                    transform: 'translate(-50%, -50%)',
+                                    animation: 'heartPopUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards'
+                                }}
+                            >
+                                {/* Enhanced heart burst animation */}
+                                <div className={`relative transition-all duration-300 ${heartBurst ? 'opacity-100 scale-100' : 'opacity-0 scale-50'}`}>
+                                    {/* Main heart */}
+                                    <svg className="w-20 h-20 text-red-500 drop-shadow-lg animate-pulse" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+                                    </svg>
 
-                                {/* Pulse rings */}
-                                <div className={`absolute inset-0 border-2 border-red-400 rounded-full transition-all duration-1000 ${heartBurst ? 'opacity-0 scale-150' : 'opacity-100 scale-100'}`}></div>
-                                <div className={`absolute inset-0 border border-red-300 rounded-full transition-all duration-1200 delay-100 ${heartBurst ? 'opacity-0 scale-200' : 'opacity-100 scale-100'}`}></div>
+                                    {/* Floating hearts */}
+                                    <div className="absolute inset-0">
+                                        <div className={`absolute top-2 left-2 w-4 h-4 text-red-400 transition-all duration-500 ${heartBurst ? 'opacity-100 translate-y-[-20px]' : 'opacity-0 translate-y-0'}`}>
+                                            <svg viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+                                            </svg>
+                                        </div>
+                                        <div className={`absolute top-4 right-2 w-3 h-3 text-red-300 transition-all duration-700 delay-100 ${heartBurst ? 'opacity-100 translate-y-[-25px] translate-x-[10px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
+                                            <svg viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+                                            </svg>
+                                        </div>
+                                        <div className={`absolute bottom-2 left-4 w-2 h-2 text-red-200 transition-all duration-600 delay-200 ${heartBurst ? 'opacity-100 translate-y-[-15px] translate-x-[-8px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
+                                            <svg viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+                                            </svg>
+                                        </div>
+                                        <div className={`absolute bottom-4 right-4 w-3 h-3 text-red-400 transition-all duration-500 delay-150 ${heartBurst ? 'opacity-100 translate-y-[-20px] translate-x-[5px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
+                                            <svg viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+                                            </svg>
+                                        </div>
+                                    </div>
+
+                                    {/* Pulse rings */}
+                                    <div className={`absolute inset-0 border-2 border-red-400 rounded-full transition-all duration-1000 ${heartBurst ? 'opacity-100 scale-150' : 'opacity-0 scale-100'}`}></div>
+                                    <div className={`absolute inset-0 border border-red-300 rounded-full transition-all duration-1200 delay-100 ${heartBurst ? 'opacity-100 scale-200' : 'opacity-0 scale-100'}`}></div>
+                                </div>
                             </div>
-                        </div>
+                        )}
+
+                        {/* Paused Overlay - Scenes Logo with Mute Button */}
+                        {isPaused && currentItem?.type === 'video' && (
+                            <div className="absolute inset-0 flex items-center justify-center z-40 pointer-events-none">
+                                <div className="flex flex-col items-center gap-3">
+                                    {/* Scenes Logo */}
+                                    <div className="p-3 rounded-lg border-2 border-white/80 bg-black/50 backdrop-blur-sm">
+                                        <svg
+                                            width="48"
+                                            height="48"
+                                            viewBox="0 0 24 24"
+                                            className="text-white"
+                                            fill="none"
+                                            xmlns="http://www.w3.org/2000/svg"
+                                        >
+                                            {/* Square border */}
+                                            <rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" strokeWidth="2" fill="none" />
+                                            {/* Play button triangle */}
+                                            <path d="M9 7 L9 17 L17 12 Z" fill="currentColor" />
+                                        </svg>
+                                    </div>
+                                    {/* Mute Button over logo */}
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            e.preventDefault();
+                                            setIsMuted(prev => !prev);
+                                        }}
+                                        onTouchEnd={(e) => {
+                                            e.stopPropagation();
+                                            e.preventDefault();
+                                            setIsMuted(prev => !prev);
+                                        }}
+                                        className="p-1.5 rounded-full bg-black/50 hover:bg-black/70 active:bg-black/80 text-white transition-colors pointer-events-auto z-50"
+                                        aria-label={isMuted ? 'Unmute video' : 'Mute video'}
+                                        title={isMuted ? 'Unmute video' : 'Mute video'}
+                                    >
+                                        {isMuted ? (
+                                            <FiVolumeX size={16} />
+                                        ) : (
+                                            <FiVolume2 size={16} />
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
-                    {/* Right Side Engagement Bar - Instagram Reels Style */}
-                    <div className="absolute right-4 bottom-32 z-20 flex flex-col items-center gap-6" onClick={(e) => e.stopPropagation()}>
-                        {/* Like Button */}
-                        <div className="flex flex-col items-center gap-2">
-                            <button
-                                onClick={handleLike}
-                                className={`p-3 rounded-full transition-all duration-200 ${liked
-                                    ? 'bg-white/20'
-                                    : 'bg-black/30 hover:bg-black/50'
-                                    }`}
-                                aria-label={liked ? 'Unlike' : 'Like'}
-                            >
-                                {liked ? (
-                                    <AiFillHeart className="text-red-500 w-6 h-6" />
-                                ) : (
-                                    <FiHeart className="text-white w-6 h-6" />
-                                )}
-                            </button>
-                            <span className="text-white text-xs font-semibold">{likes}</span>
-                        </div>
+                    {/* Right Side Engagement Bar - Instagram Reels Style with Scrim */}
+                    <div className="absolute right-0 bottom-32 z-20 flex flex-col items-center gap-6 px-4 py-3 pointer-events-none" onClick={(e) => e.stopPropagation()}>
+                        {/* Scrim effect - gradient overlay for better readability */}
+                        <div className="absolute inset-0 bg-gradient-to-l from-black/70 via-black/50 to-transparent pointer-events-none z-0 rounded-l-2xl" />
 
-                        {/* Share Button */}
-                        <div className="flex flex-col items-center gap-2">
-                            <button
-                                onClick={handleShare}
-                                className="p-3 rounded-full bg-black/30 hover:bg-black/50 transition-colors"
-                                aria-label="Share"
-                            >
-                                <FiShare2 className="text-white w-6 h-6" />
-                            </button>
-                            <span className="text-white text-xs font-semibold">{shares}</span>
-                        </div>
+                        {/* Content layer - above scrim */}
+                        <div className="relative z-10 flex flex-col items-center gap-6 pointer-events-auto">
+                            {/* Like Button */}
+                            <div className="flex flex-col items-center gap-1.5">
+                                <button
+                                    ref={likeButtonRef}
+                                    onClick={handleLike}
+                                    className={`w-8 h-8 flex items-center justify-center rounded transition-all duration-200 ${liked
+                                        ? 'bg-white/20'
+                                        : 'bg-black/30 hover:bg-black/50'
+                                        }`}
+                                    aria-label={liked ? 'Unlike' : 'Like'}
+                                >
+                                    {liked ? (
+                                        <AiFillHeart className="text-red-500 w-4 h-4" />
+                                    ) : (
+                                        <FiHeart className="text-white w-4 h-4" />
+                                    )}
+                                </button>
+                                <span className="text-white text-[10px] font-semibold drop-shadow-md">{likes}</span>
+                            </div>
 
-                        {/* Reclip Button */}
-                        <div className="flex flex-col items-center gap-2">
-                            <button
-                                onClick={(e) => handleReclip(e)}
-                                disabled={post.userHandle === user?.handle || userReclipped || busy}
-                                className={`p-3 rounded-full transition-colors relative z-10 ${post.userHandle === user?.handle || busy ? 'opacity-30 cursor-not-allowed' : userReclipped ? 'bg-green-500/20 hover:bg-green-500/30' : 'bg-black/30 hover:bg-black/50'}`}
-                                aria-label={post.userHandle === user?.handle ? "Cannot reclip your own post" : userReclipped ? "Post already reclipped" : "Reclip"}
-                                title={post.userHandle === user?.handle ? "Cannot reclip your own post" : userReclipped ? "Post already reclipped" : "Reclip"}
-                            >
-                                <FiRepeat className={`w-6 h-6 ${userReclipped ? 'text-green-500' : 'text-white'}`} />
-                            </button>
-                            <span className="text-white text-xs font-semibold">{reclips}</span>
+                            {/* Share Button */}
+                            <div className="flex flex-col items-center gap-1.5">
+                                <button
+                                    onClick={handleShare}
+                                    className="w-8 h-8 flex items-center justify-center rounded bg-black/30 hover:bg-black/50 transition-colors"
+                                    aria-label="Share"
+                                >
+                                    <FiShare2 className="text-white w-4 h-4" />
+                                </button>
+                                <span className="text-white text-[10px] font-semibold drop-shadow-md">{shares}</span>
+                            </div>
+
+                            {/* Reclip Button */}
+                            <div className="flex flex-col items-center gap-1.5">
+                                <button
+                                    onClick={(e) => handleReclip(e)}
+                                    disabled={post.userHandle === user?.handle || userReclipped || busy}
+                                    className={`w-8 h-8 flex items-center justify-center rounded transition-colors relative z-10 ${post.userHandle === user?.handle || busy ? 'opacity-30 cursor-not-allowed' : userReclipped ? 'bg-green-500/20 hover:bg-green-500/30' : 'bg-black/30 hover:bg-black/50'}`}
+                                    aria-label={post.userHandle === user?.handle ? "Cannot reclip your own post" : userReclipped ? "Post already reclipped" : "Reclip"}
+                                    title={post.userHandle === user?.handle ? "Cannot reclip your own post" : userReclipped ? "Post already reclipped" : "Reclip"}
+                                >
+                                    <FiRepeat className={`w-4 h-4 ${userReclipped ? 'text-green-500' : 'text-white'}`} />
+                                </button>
+                                <span className="text-white text-[10px] font-semibold drop-shadow-md">{reclips}</span>
+                            </div>
                         </div>
                     </div>
 
                     {/* Bottom Section with Profile, Caption, and Comment Input - Instagram Reels Style */}
-                    <div className="absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black/90 via-black/70 to-transparent">
-                        <div className="max-w-md mx-auto px-4 pr-16 pb-safe">
-                            {/* Profile & Caption Section */}
-                            <div className="pt-12 pb-4">
-                                {/* Profile Section */}
-                                <div className="flex items-center gap-3 mb-3">
-                                    <Avatar
-                                        name={post.userHandle.split('@')[0]}
-                                        size="sm"
-                                        className="border-2 border-white"
-                                    />
-                                    <div className="flex-1">
-                                        <button className="text-white font-semibold text-sm hover:opacity-80">
-                                            {post.userHandle}
-                                        </button>
+                    {!isCaptionExpanded && (
+                        <div className="absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black/90 via-black/70 to-transparent">
+                            <div className="max-w-md mx-auto px-4 pr-16 pb-safe">
+                                {/* Profile & Caption Section */}
+                                <div className="pt-12 pb-4">
+                                    {/* Profile Section */}
+                                    <div className="flex items-center gap-3 mb-3">
+                                        <Avatar
+                                            src={user?.handle === post.userHandle ? user?.avatarUrl : getAvatarForHandle(post.userHandle)}
+                                            name={post.userHandle.split('@')[0]}
+                                            size="sm"
+                                            className="border-2 border-white"
+                                        />
+                                        <div className="flex-1">
+                                            <button className="text-white font-semibold text-sm hover:opacity-80">
+                                                {post.userHandle}
+                                            </button>
+                                            {post.locationLabel && (
+                                                <div className="text-white/70 text-xs flex items-center gap-1 mt-0.5">
+                                                    <FiMapPin className="w-3 h-3" />
+                                                    {post.locationLabel}
+                                                </div>
+                                            )}
+                                        </div>
+                                        {!isFollowing && (
+                                            <button
+                                                onClick={handleFollow}
+                                                disabled={busy}
+                                                className="px-4 py-1.5 bg-white text-black text-sm font-semibold rounded-md hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                {busy ? 'Following...' : 'Follow'}
+                                            </button>
+                                        )}
+                                        {isFollowing && (
+                                            <button
+                                                onClick={handleFollow}
+                                                disabled={busy}
+                                                className="px-4 py-1.5 bg-white/10 text-white text-sm font-semibold rounded-md hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                {busy ? 'Unfollowing...' : 'Following'}
+                                            </button>
+                                        )}
                                     </div>
-                                    {!isFollowing && (
-                                        <button
-                                            onClick={handleFollow}
-                                            disabled={busy}
-                                            className="px-4 py-1.5 bg-white text-black text-sm font-semibold rounded-md hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-                                        >
-                                            {busy ? 'Following...' : 'Follow'}
-                                        </button>
+
+                                    {/* Caption - Only show if media is not a generated text image (data URL) */}
+                                    {post.caption && post.mediaUrl && !post.mediaUrl.startsWith('data:image') && (
+                                        <div className="text-white text-sm mb-2 text-left w-full">
+                                            <span className="line-clamp-1">{post.caption}</span>
+                                            {post.caption.length > 50 && (
+                                                <button
+                                                    onClick={handleCaptionClick}
+                                                    className="text-white/80 hover:text-white font-medium ml-1"
+                                                >
+                                                    more
+                                                </button>
+                                            )}
+                                        </div>
                                     )}
-                                    {isFollowing && (
+
+                                    {/* Text Content (for text-only posts without media) - Only show if NOT displaying as post card screenshot */}
+                                    {/* Don't show text in bottom if it's a text-only post (will be shown in post card screenshot above) */}
+                                    {!post.mediaUrl && !post.mediaItems?.length && post.text ? (
+                                        // Text-only post - text is shown in post card screenshot, so don't show here
+                                        null
+                                    ) : !post.mediaUrl && post.text ? (
+                                        // Other text-only cases (if any) - show text
+                                        <div className="text-white text-sm opacity-90 mb-2 text-left w-full">
+                                            <span className="line-clamp-1">{post.text}</span>
+                                            {post.text.length > 50 && (
+                                                <button
+                                                    onClick={handleCaptionClick}
+                                                    className="text-white/80 hover:text-white font-medium ml-1"
+                                                >
+                                                    more
+                                                </button>
+                                            )}
+                                        </div>
+                                    ) : null}
+
+                                    {/* Comment Count - Clickable to open comments */}
+                                    {comments > 0 && (
                                         <button
-                                            onClick={handleFollow}
-                                            disabled={busy}
-                                            className="px-4 py-1.5 bg-white/10 text-white text-sm font-semibold rounded-md hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                                            onClick={onOpenComments}
+                                            className="text-white text-xs opacity-80 hover:opacity-100 mb-3"
                                         >
-                                            {busy ? 'Unfollowing...' : 'Following'}
+                                            View all {comments} {comments === 1 ? 'comment' : 'comments'}
                                         </button>
                                     )}
                                 </div>
 
-                                {/* Caption - Only show if media is not a generated text image (data URL) */}
-                                {post.caption && post.mediaUrl && !post.mediaUrl.startsWith('data:image') && (
-                                    <div className="text-white text-sm mb-2 line-clamp-2">
-                                        {post.caption}
-                                    </div>
-                                )}
-
-                                {/* Text Content (for text-only posts without media) - Only show if NOT displaying as post card screenshot */}
-                                {/* Don't show text in bottom if it's a text-only post (will be shown in post card screenshot above) */}
-                                {!post.mediaUrl && !post.mediaItems?.length && post.text ? (
-                                    // Text-only post - text is shown in post card screenshot, so don't show here
-                                    null
-                                ) : !post.mediaUrl && post.text ? (
-                                    // Other text-only cases (if any) - show text
-                                    <div className="text-white text-sm opacity-90 whitespace-pre-line mb-2">
-                                        {post.text}
-                                    </div>
-                                ) : null}
-
-                                {/* Comment Count - Clickable to open comments */}
-                                {comments > 0 && (
-                                    <button
-                                        onClick={onOpenComments}
-                                        className="text-white text-xs opacity-80 hover:opacity-100 mb-3"
-                                    >
-                                        View all {comments} {comments === 1 ? 'comment' : 'comments'}
-                                    </button>
-                                )}
-                            </div>
-
-                            {/* Comment Input at Bottom - Instagram Reels Style */}
-                            <div className="pb-4">
-                                <form onSubmit={handleAddComment} className="flex items-center gap-2">
-                                    <Avatar
-                                        src={user?.avatarUrl}
-                                        name={user?.name || user?.handle || 'User'}
-                                        size="sm"
-                                        className="border border-white/50"
-                                    />
-                                    <div className="relative flex-1 rounded-full">
-                                        {/* Outer glow like Discover page */}
-                                        {!commentText && (
-                                            <div className="pointer-events-none absolute inset-0 rounded-full bg-gradient-to-r from-emerald-500 via-blue-500 to-violet-500 opacity-60 blur-sm animate-pulse"></div>
-                                        )}
-                                        {/* Shimmer sweep */}
-                                        {!commentText && (
-                                            <div className="pointer-events-none absolute inset-0 rounded-full overflow-hidden">
-                                                <div
-                                                    className="absolute inset-0 rounded-full"
-                                                    style={{
-                                                        background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.35), transparent)',
-                                                        backgroundSize: '200% 100%',
-                                                        animation: 'shimmer 3s linear infinite'
-                                                    }}
-                                                ></div>
-                                            </div>
-                                        )}
-                                        <input
-                                            type="text"
-                                            value={commentText}
-                                            onChange={(e) => setCommentText(e.target.value)}
-                                            placeholder="Add a comment..."
-                                            className="relative w-full px-4 py-2.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/50 focus:bg-white/15"
-                                            disabled={isAddingComment || !user}
+                                {/* Comment Input at Bottom - Instagram Reels Style */}
+                                <div className="pb-4">
+                                    <form onSubmit={handleAddComment} className="flex items-center gap-2">
+                                        <Avatar
+                                            src={user?.avatarUrl}
+                                            name={user?.name || user?.handle || 'User'}
+                                            size="sm"
+                                            className="border border-white/50"
                                         />
-                                    </div>
-                                    <button
-                                        type="submit"
-                                        disabled={!commentText.trim() || isAddingComment || !user}
-                                        className="px-4 py-2.5 text-white font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80 transition-opacity border-2 border-white rounded-full"
-                                    >
-                                        {isAddingComment ? 'Posting...' : 'Post'}
-                                    </button>
-                                </form>
+                                        <div className="relative flex-1 rounded">
+                                            {/* Scrim effect */}
+                                            <div className="pointer-events-none absolute inset-0 rounded bg-black/30 backdrop-blur-sm"></div>
+                                            <input
+                                                type="text"
+                                                value={commentText}
+                                                onChange={(e) => setCommentText(e.target.value)}
+                                                placeholder="Add Comment..."
+                                                className="relative w-full px-3 py-1.5 rounded bg-white/10 backdrop-blur-sm border border-white/20 text-white text-sm placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/50 focus:bg-white/15"
+                                                disabled={isAddingComment || !user}
+                                            />
+                                        </div>
+                                        <button
+                                            type="submit"
+                                            disabled={!commentText.trim() || isAddingComment || !user}
+                                            className="w-12 h-8 flex items-center justify-center text-white font-semibold text-xs disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80 transition-opacity border-2 border-white rounded"
+                                        >
+                                            {isAddingComment ? '...' : 'Post'}
+                                        </button>
+                                    </form>
+                                </div>
                             </div>
                         </div>
-                    </div>
+                    )}
+
+                    {/* Bottom Sheet - Caption and Comments (Instagram Reels Style) */}
+                    {isCaptionExpanded && (
+                        <>
+                            {/* Backdrop */}
+                            <div
+                                className="fixed inset-0 bg-black/50 z-40"
+                                onClick={handleCaptionClick}
+                            />
+                            {/* Bottom Sheet */}
+                            <div
+                                ref={sheetRef}
+                                className="fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-gray-900 rounded-t-3xl shadow-2xl transition-transform duration-300 ease-out flex flex-col"
+                                style={{
+                                    transform: `translateY(${Math.max(0, sheetDragY)}px)`,
+                                    maxHeight: '80vh',
+                                    height: sheetDragY > 0 ? `calc(80vh - ${sheetDragY}px)` : '80vh',
+                                    paddingBottom: 'env(safe-area-inset-bottom, 0px)'
+                                }}
+                                onTouchStart={handleSheetTouchStart}
+                                onTouchMove={handleSheetTouchMove}
+                                onTouchEnd={handleSheetTouchEnd}
+                            >
+                                {/* Drag Handle */}
+                                <div className="flex justify-center pt-3 pb-2 flex-shrink-0">
+                                    <div className="w-12 h-1 bg-gray-300 dark:bg-gray-600 rounded-full" />
+                                </div>
+
+                                {/* Content */}
+                                <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                                    {/* Scrollable Content */}
+                                    <div className="flex-1 overflow-y-auto px-4 pb-4 min-h-0">
+                                        {/* Profile Section */}
+                                        <div className="flex items-center gap-3 mb-4 pt-2">
+                                            <Avatar
+                                                src={getAvatarForHandle(post.userHandle)}
+                                                name={post.userHandle.split('@')[0]}
+                                                size="sm"
+                                                className="border-2 border-gray-200 dark:border-gray-700"
+                                            />
+                                            <div className="flex-1">
+                                                <button className="text-gray-900 dark:text-white font-semibold text-sm hover:opacity-80">
+                                                    {post.userHandle}
+                                                </button>
+                                                {post.locationLabel && (
+                                                    <div className="text-gray-500 dark:text-gray-400 text-xs flex items-center gap-1 mt-0.5">
+                                                        <FiMapPin className="w-3 h-3" />
+                                                        {post.locationLabel}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            {!isFollowing && (
+                                                <button
+                                                    onClick={handleFollow}
+                                                    disabled={busy}
+                                                    className="px-4 py-1.5 bg-black dark:bg-white text-white dark:text-black text-sm font-semibold rounded-md hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    {busy ? 'Following...' : 'Follow'}
+                                                </button>
+                                            )}
+                                            {isFollowing && (
+                                                <button
+                                                    onClick={handleFollow}
+                                                    disabled={busy}
+                                                    className="px-4 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-semibold rounded-md hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    {busy ? 'Unfollowing...' : 'Following'}
+                                                </button>
+                                            )}
+                                        </div>
+
+                                        {/* Full Caption */}
+                                        {(post.caption || post.text) && (
+                                            <div className="mb-6">
+                                                <p className="text-gray-900 dark:text-white text-sm whitespace-pre-line break-words">
+                                                    {post.caption || post.text}
+                                                </p>
+                                            </div>
+                                        )}
+
+                                        {/* Comments Section */}
+                                        <div className="mb-4">
+                                            <h3 className="text-gray-900 dark:text-white font-semibold text-base mb-4">
+                                                Comments ({comments})
+                                            </h3>
+
+                                            {isLoadingComments ? (
+                                                <div className="flex justify-center py-8">
+                                                    <div className="w-6 h-6 border-2 border-gray-300 dark:border-gray-600 border-t-black dark:border-t-white rounded-full animate-spin" />
+                                                </div>
+                                            ) : commentsList.length === 0 ? (
+                                                <div className="text-center py-8 text-gray-500 dark:text-gray-400 text-sm">
+                                                    No comments yet. Be the first to comment!
+                                                </div>
+                                            ) : (
+                                                <div className="space-y-4">
+                                                    {commentsList.map((comment) => (
+                                                        <div key={comment.id} className="flex gap-3">
+                                                            <Avatar
+                                                                name={comment.userHandle?.split('@')[0] || 'User'}
+                                                                size="sm"
+                                                            />
+                                                            <div className="flex-1">
+                                                                <div className="flex items-center gap-2 mb-1">
+                                                                    <span className="font-semibold text-sm text-gray-900 dark:text-white">
+                                                                        {comment.userHandle}
+                                                                    </span>
+                                                                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                                                                        {timeAgo(comment.createdAt)}
+                                                                    </span>
+                                                                </div>
+                                                                <p className="text-sm text-gray-800 dark:text-gray-200 mb-2">
+                                                                    {comment.text}
+                                                                </p>
+                                                                <div className="flex items-center gap-4">
+                                                                    <button className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white">
+                                                                        <FiHeart className="w-3.5 h-3.5" />
+                                                                        {comment.likes || 0}
+                                                                    </button>
+                                                                    <button className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white">
+                                                                        Reply
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Comment Input at Bottom */}
+                                    <div className="border-t border-gray-200 dark:border-gray-700 px-4 pt-4 pb-6 bg-white dark:bg-gray-900 flex-shrink-0 safe-area-inset-bottom">
+                                        <form onSubmit={handleAddComment} className="flex items-center gap-2">
+                                            <Avatar
+                                                src={user?.avatarUrl}
+                                                name={user?.name || user?.handle || 'User'}
+                                                size="sm"
+                                                className="border border-gray-200 dark:border-gray-700"
+                                            />
+                                            <div className="relative flex-1 rounded">
+                                                <div className="pointer-events-none absolute inset-0 rounded bg-gray-100 dark:bg-gray-800"></div>
+                                                <input
+                                                    type="text"
+                                                    value={commentText}
+                                                    onChange={(e) => setCommentText(e.target.value)}
+                                                    placeholder="Add a comment..."
+                                                    className="relative w-full px-3 py-1.5 rounded bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white text-sm placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white focus:bg-white dark:focus:bg-gray-700"
+                                                    disabled={isAddingComment || !user}
+                                                />
+                                            </div>
+                                            <button
+                                                type="submit"
+                                                disabled={!commentText.trim() || isAddingComment || !user}
+                                                className="w-12 h-8 flex items-center justify-center text-black dark:text-white font-semibold text-xs disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80 transition-opacity border-2 border-black dark:border-white rounded"
+                                            >
+                                                {isAddingComment ? '...' : 'Post'}
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </>
+                    )}
                 </div>
             )}
             {/* Share Modal - Render in portal outside ScenesModal */}
@@ -896,6 +1471,17 @@ export default function ScenesModal({
                     }}
                 />,
                 document.body
+            )}
+
+            {/* Heart animation from tap to like button - rendered after EngagementBar so ref is set */}
+            {heartAnimation && likeButtonRef.current && (
+                <HeartDropAnimation
+                    key={`heart-${post.id}-${heartAnimation.startX}-${heartAnimation.startY}`}
+                    startX={heartAnimation.startX}
+                    startY={heartAnimation.startY}
+                    targetElement={likeButtonRef.current}
+                    onComplete={() => setHeartAnimation(null)}
+                />
             )}
         </>
     );

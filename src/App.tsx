@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2 } from 'react-icons/fi';
+import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from './constants';
 import TopBar from './components/TopBar';
@@ -81,7 +81,7 @@ export default function App() {
 
   return (
     <>
-      <main id="main" className="mx-auto max-w-md min-h-screen pb-[calc(64px+theme(spacing.safe))] md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800" style={{ backgroundColor: '#000000' }}>
+      <main id="main" className="mx-auto max-w-md min-h-screen pb-[calc(64px+theme(spacing.safe))] md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800" style={{ backgroundColor: '#030712' }}>
         {loc.pathname !== '/login' && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
         <Outlet context={{ activeTab, setActiveTab, customLocation, setCustomLocation }} />
         {loc.pathname !== '/discover' && loc.pathname !== '/create/filters' && loc.pathname !== '/create/instant' && loc.pathname !== '/payment' && loc.pathname !== '/clip' && loc.pathname !== '/create' && loc.pathname !== '/template-editor' && loc.pathname !== '/login' && (
@@ -298,11 +298,12 @@ function BoostButton({ postId, onBoost }: { postId: string; onBoost: () => Promi
   );
 }
 
-function PostHeader({ post, onFollow, showBoostIcon, onBoost }: {
+function PostHeader({ post, onFollow, showBoostIcon, onBoost, isOverlaid = false }: {
   post: Post;
   onFollow?: () => Promise<void>;
   showBoostIcon?: boolean;
   onBoost?: () => Promise<void>;
+  isOverlaid?: boolean;
 }) {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -374,61 +375,85 @@ function PostHeader({ post, onFollow, showBoostIcon, onBoost }: {
   // Check if this is a reclipped post
   const isReclippedPost = post.isReclipped && post.originalUserHandle;
 
+  // Text colors based on whether header is overlaid on media
+  const textColorClass = isOverlaid 
+    ? "text-white drop-shadow-md" 
+    : "text-gray-900 dark:text-gray-100";
+  const subtextColorClass = isOverlaid
+    ? "text-white/90 drop-shadow-md"
+    : "text-gray-600 dark:text-gray-300";
+  const separatorColorClass = isOverlaid
+    ? "text-white/70"
+    : "text-gray-400";
+  const reclipColorClass = isOverlaid
+    ? "text-white/90 drop-shadow-md"
+    : "text-gray-500 dark:text-gray-400";
+
   return (
-      <div className="flex items-start justify-between px-4 pt-4 pb-3">
-      <div className="flex items-center gap-3 flex-1">
-        <div className="relative">
-          <Avatar
-            src={avatarSrc}
-            name={post.userHandle.split('@')[0]} // Extract name from handle like "John@Dublin"
-            size="sm"
-            hasStory={hasStory}
-            onClick={hasStory ? handleAvatarClick : undefined}
-          />
+      <div className="relative flex items-start justify-between px-4 pt-4 pb-3">
+      {/* Scrim effect - only show when overlaid on media */}
+      {isOverlaid && (
+        <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/50 to-transparent pointer-events-none z-0" />
+      )}
+      
+      {/* Content layer - above scrim */}
+      <div className="relative z-10 flex items-start justify-between w-full">
+        <div className="flex items-center gap-3 flex-1">
+          <div className="relative">
+            <Avatar
+              src={avatarSrc}
+              name={post.userHandle.split('@')[0]} // Extract name from handle like "John@Dublin"
+              size="sm"
+              hasStory={hasStory}
+              onClick={hasStory ? handleAvatarClick : undefined}
+            />
+          </div>
+          <div className="flex-1" onClick={(e) => e.stopPropagation()}>
+            {/* Show reclip indicator if this is a reclipped post */}
+            {isReclippedPost && (
+              <div className={`text-xs mb-1 flex items-center gap-1 ${reclipColorClass}`}>
+                <FiRepeat className="w-3 h-3" />
+                <span>{post.userHandle} reclipped</span>
+              </div>
+            )}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                // Navigate to original poster if reclipped, otherwise to reclipper
+                navigate(`/user/${isReclippedPost ? post.originalUserHandle : post.userHandle}`);
+              }}
+              className={`text-left transition-opacity w-full ${isOverlaid ? 'hover:opacity-80' : 'hover:opacity-70'}`}
+            >
+              <h3 id={titleId} className={`font-semibold flex items-center gap-1.5 ${textColorClass}`}>
+                <span>{isReclippedPost ? post.originalUserHandle : post.userHandle}</span>
+                <Flag
+                  value={isCurrentUser ? (user?.countryFlag || '') : (getFlagForHandle(isReclippedPost ? post.originalUserHandle! : post.userHandle) || '')}
+                  size={16}
+                />
+              </h3>
+              <div className={`text-xs flex items-center gap-2 mt-0.5 ${subtextColorClass}`}>
+                <span className="flex items-center gap-1">
+                  <FiMapPin className="w-3 h-3" />
+                  {post.locationLabel || 'No location set'}
+                </span>
+                {post.createdAt && (
+                  <>
+                    <span className={separatorColorClass}>·</span>
+                    <span>{timeAgo(post.createdAt)}</span>
+                  </>
+                )}
+              </div>
+            </button>
+          </div>
         </div>
-        <div className="flex-1" onClick={(e) => e.stopPropagation()}>
-          {/* Show reclip indicator if this is a reclipped post */}
-          {isReclippedPost && (
-            <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 flex items-center gap-1">
-              <FiRepeat className="w-3 h-3" />
-              <span>{post.userHandle} reclipped</span>
-            </div>
-          )}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              // Navigate to original poster if reclipped, otherwise to reclipper
-              navigate(`/user/${isReclippedPost ? post.originalUserHandle : post.userHandle}`);
-            }}
-            className="text-left hover:opacity-70 transition-opacity w-full"
-          >
-            <h3 id={titleId} className="font-semibold flex items-center gap-1.5 text-gray-900 dark:text-gray-100">
-              <span>{isReclippedPost ? post.originalUserHandle : post.userHandle}</span>
-              <Flag
-                value={isCurrentUser ? (user?.countryFlag || '') : (getFlagForHandle(isReclippedPost ? post.originalUserHandle! : post.userHandle) || '')}
-                size={16}
-              />
-            </h3>
-            <div className="text-xs text-gray-600 dark:text-gray-300 flex items-center gap-2 mt-0.5">
-              <span className="flex items-center gap-1">
-                <FiMapPin className="w-3 h-3" />
-                {post.locationLabel || 'No location set'}
-              </span>
-              {post.createdAt && (
-                <>
-                  <span className="text-gray-400">·</span>
-                  <span>{timeAgo(post.createdAt)}</span>
-                </>
-              )}
-            </div>
-          </button>
+        <div className="relative z-10">
+          {showBoostIcon && isCurrentUser && onBoost ? (
+            <BoostButton postId={post.id} onBoost={onBoost} />
+          ) : !isCurrentUser && onFollow ? (
+            <FollowButton initial={post.isFollowing} onToggle={onFollow} />
+          ) : null}
         </div>
       </div>
-      {showBoostIcon && isCurrentUser && onBoost ? (
-        <BoostButton postId={post.id} onBoost={onBoost} />
-      ) : !isCurrentUser && onFollow ? (
-        <FollowButton initial={post.isFollowing} onToggle={onFollow} />
-      ) : null}
     </div>
   );
 }
@@ -450,7 +475,7 @@ function TagRow({ tags }: { tags: string[] }) {
   );
 }
 
-function TextCard({ text, onDoubleLike, textStyle, stickers }: { text: string; onDoubleLike: () => Promise<void>; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string }; stickers?: StickerOverlay[] }) {
+function TextCard({ text, onDoubleLike, textStyle, stickers, userHandle, locationLabel, createdAt }: { text: string; onDoubleLike: () => Promise<void>; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string }; stickers?: StickerOverlay[]; userHandle?: string; locationLabel?: string; createdAt?: string }) {
   const [burst, setBurst] = React.useState(false);
   const [isExpanded, setIsExpanded] = React.useState(false);
   const lastTap = React.useRef<number>(0);
@@ -558,32 +583,32 @@ function TextCard({ text, onDoubleLike, textStyle, stickers }: { text: string; o
         }}
         onClick={handleClick}
         onTouchEnd={handleTouchEnd}
-        className="relative p-4 rounded-lg min-h-[80px] flex items-start shadow-sm hover:shadow-md transition-all duration-300 w-full overflow-hidden"
+        className="relative w-full rounded-2xl overflow-hidden bg-white border border-gray-200 shadow-2xl"
         style={{
-          background: '#000000', // Black background like in the reference image
-          boxShadow: 'none',
           maxWidth: '100%',
           boxSizing: 'border-box'
         }}
       >
-        {/* No fullscreen/scenes for text-only posts - they're read directly in feed */}
-
-        <div className="w-full relative z-10 overflow-hidden" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
-          <div className={`${getTextSizeClass()} leading-relaxed whitespace-pre-wrap font-normal break-words`} style={{ color: '#ffffff', wordBreak: 'break-word', overflowWrap: 'anywhere', maxWidth: '100%', boxSizing: 'border-box' }}>
-            {displayText}
-          </div>
-          {shouldTruncate && (
-            <div className="mt-3 flex justify-start">
-              <button
-                onClick={handleMoreClick}
-                className="text-blue-500 hover:text-blue-600 text-sm font-medium transition-colors focus:outline-none focus:ring-0"
-                style={{ outline: 'none', border: 'none' }}
-                aria-label={isExpanded ? 'Show less' : 'Show more'}
-              >
-                {isExpanded ? 'Show less' : 'Show more'}
-              </button>
+        {/* Twitter card style - white card with black text box */}
+        {/* Text Content - Twitter card style (white card with black text box) */}
+        <div className="p-4 w-full overflow-hidden" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
+          <div className="p-4 rounded-lg bg-black overflow-hidden w-full" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
+            <div className="text-base leading-relaxed whitespace-pre-wrap font-normal text-white break-words w-full" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', maxWidth: '100%', boxSizing: 'border-box' }}>
+              {displayText}
             </div>
-          )}
+            {shouldTruncate && (
+              <div className="mt-3 flex justify-start">
+                <button
+                  onClick={handleMoreClick}
+                  className="text-blue-400 hover:text-blue-300 text-sm font-medium transition-colors focus:outline-none focus:ring-0"
+                  style={{ outline: 'none', border: 'none' }}
+                  aria-label={isExpanded ? 'Show less' : 'Show more'}
+                >
+                  {isExpanded ? 'Show less' : 'Show more'}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* GIF/Sticker Overlays - Scaled down and repositioned for feed view */}
@@ -702,6 +727,47 @@ function CaptionText({ caption }: { caption: string }) {
   );
 }
 
+// Bottom caption overlay with scrim - shows only first line with "more" icon
+function BottomCaptionOverlay({ caption, onExpand }: { caption: string; onExpand?: () => void }) {
+  // Split caption into lines and check if there's more than one line
+  const lines = caption.split('\n').filter(line => line.trim().length > 0);
+  const hasMoreLines = lines.length > 1;
+  const firstLine = lines[0] || caption;
+  
+  // Also check if first line is too long (more than ~60 chars for single line display)
+  const isFirstLineLong = firstLine.length > 60;
+  const displayText = isFirstLineLong ? firstLine.substring(0, 60) + '...' : firstLine;
+  const hasMore = hasMoreLines || isFirstLineLong;
+
+  return (
+    <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none">
+      {/* Scrim effect - gradient overlay for better readability */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/60 to-transparent pointer-events-none z-0" />
+      
+      {/* Content layer - above scrim */}
+      <div className="relative z-10 px-4 pb-4 pt-6 pointer-events-auto">
+        <div className="flex items-start gap-2">
+          <p className="text-white text-sm leading-relaxed line-clamp-1 flex-1 drop-shadow-md">
+            {displayText}
+          </p>
+          {hasMore && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onExpand?.();
+              }}
+              className="flex-shrink-0 p-1 text-white/90 hover:text-white transition-colors drop-shadow-md"
+              aria-label="Show more"
+            >
+              <FiMoreHorizontal className="w-5 h-5" />
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onCarouselIndexChange, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled, videoCaptionText, subtitlesEnabled, subtitleText, postUserHandle, postLocationLabel, postCreatedAt }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onCarouselIndexChange?: (index: number) => void; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string }) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [burst, setBurst] = React.useState(false);
@@ -712,6 +778,8 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [showControls, setShowControls] = React.useState(false);
   const [isMuted, setIsMuted] = React.useState(true);
+  const [isPaused, setIsPaused] = React.useState(false);
+  const [isViewInScenesExpanded, setIsViewInScenesExpanded] = React.useState(true);
   const [progress, setProgress] = React.useState(0); // 0..1 for video progress
   const [aspectRatio, setAspectRatio] = React.useState<number | null>(null); // width/height ratio
   const [tapPosition, setTapPosition] = React.useState<{ x: number; y: number } | null>(null);
@@ -785,12 +853,17 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
 
   // Removed duplicate handleVideoClick and handleVideoTouch - using unified handleTap instead
 
-  const toggleMute = (e: React.MouseEvent) => {
+  const toggleMute = (e: React.MouseEvent | React.TouchEvent) => {
     e.stopPropagation();
-    if (videoRef.current) {
-      videoRef.current.muted = !videoRef.current.muted;
-      setIsMuted(videoRef.current.muted);
-    }
+    e.preventDefault();
+    setIsMuted(prev => {
+      const newMuted = !prev;
+      // Update video element directly for immediate feedback
+      if (videoRef.current) {
+        videoRef.current.muted = newMuted;
+      }
+      return newMuted;
+    });
   };
 
   // Intersection Observer for auto-play
@@ -831,6 +904,13 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     };
   }, [currentItem?.type]);
 
+  // Sync video muted state with isMuted state
+  React.useEffect(() => {
+    if (videoRef.current && currentItem?.type === 'video') {
+      videoRef.current.muted = isMuted;
+    }
+  }, [isMuted, currentItem?.type]);
+
   // Video event handlers
   const handleVideoLoad = () => {
     setIsLoading(false);
@@ -867,11 +947,13 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
 
   const handleVideoPlay = () => {
     setIsPlaying(true);
+    setIsPaused(false);
     setShowControls(false);
   };
 
   const handleVideoPause = () => {
     setIsPlaying(false);
+    setIsPaused(true);
     setShowControls(true);
   };
 
@@ -964,25 +1046,39 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     } else {
       // Single tap - wait to see if it's actually a double tap
       singleTapTimer.current = setTimeout(() => {
-        // Only open scenes if no second tap came within threshold
-        if (!isProcessingDoubleTap.current && onOpenScenes) {
-          // Check if the click was on an interactive element (button, link, etc.)
-          // We want to open scenes unless clicking on a real button/link
-          const target = e?.target as HTMLElement;
-          const mediaContainer = mediaContainerRef.current;
-          
-          // Check if target is within the media container
-          if (mediaContainer && (target === mediaContainer || mediaContainer.contains(target))) {
-            // Check if clicking on a real interactive element (button or link)
-            // Exclude the media container itself (which has role="button" for accessibility)
-            const clickedButton = target.closest('button');
-            const clickedLink = target.closest('a');
-            const isRealButton = clickedButton && clickedButton !== mediaContainer;
-            const isRealLink = clickedLink && clickedLink !== mediaContainer;
+        // Only process single tap if no second tap came within threshold
+        if (!isProcessingDoubleTap.current) {
+          // For videos, single tap toggles play/pause
+          if (currentItem?.type === 'video' && videoRef.current) {
+            if (videoRef.current.paused) {
+              videoRef.current.play().catch((error) => {
+                console.error('Error playing video:', error);
+              });
+              setIsPaused(false);
+            } else {
+              videoRef.current.pause();
+              setIsPaused(true);
+            }
+          } else if (onOpenScenes) {
+            // For non-videos, single tap opens scenes
+            // Check if the click was on an interactive element (button, link, etc.)
+            // We want to open scenes unless clicking on a real button/link
+            const target = e?.target as HTMLElement;
+            const mediaContainer = mediaContainerRef.current;
             
-            // Only open scenes if NOT clicking on a real button or link
-            if (!isRealButton && !isRealLink) {
-              onOpenScenes();
+            // Check if target is within the media container
+            if (mediaContainer && (target === mediaContainer || mediaContainer.contains(target))) {
+              // Check if clicking on a real interactive element (button or link)
+              // Exclude the media container itself (which has role="button" for accessibility)
+              const clickedButton = target.closest('button');
+              const clickedLink = target.closest('a');
+              const isRealButton = clickedButton && clickedButton !== mediaContainer;
+              const isRealLink = clickedLink && clickedLink !== mediaContainer;
+              
+              // Only open scenes if NOT clicking on a real button or link
+              if (!isRealButton && !isRealLink) {
+                onOpenScenes();
+              }
             }
           }
         }
@@ -1029,6 +1125,17 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     };
   }, [currentIndex]); // Reset when switching media items
 
+  // Retract "View in Scenes" button after 2 seconds
+  React.useEffect(() => {
+    if (currentItem?.type === 'video' && onOpenScenes && !isLoading) {
+      setIsViewInScenesExpanded(true);
+      const timer = setTimeout(() => {
+        setIsViewInScenesExpanded(false);
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [currentItem?.type, currentIndex, isLoading, onOpenScenes]);
+
   // Reset video state when switching items
   React.useEffect(() => {
     // Reset aspect ratio when switching items
@@ -1036,6 +1143,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     if (currentItem?.type === 'video' && videoRef.current) {
       setIsLoading(true);
       setIsPlaying(false);
+      setIsPaused(false);
       setShowControls(false);
       setProgress(0);
       videoRef.current.load();
@@ -1260,40 +1368,108 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                 </div>
               )}
 
-              {/* Mute/Unmute Button - Bottom of video */}
-              {!isLoading && !hasError && currentItem.type === 'video' && (
-                <div className="absolute bottom-4 right-4 z-40">
+              {/* View in Scenes Button - Bottom right of video */}
+              {!isLoading && !hasError && currentItem.type === 'video' && onOpenScenes && (
+                <div className="absolute bottom-4 right-4 z-50 pointer-events-auto">
                   <button
-                    onClick={toggleMute}
-                    className="w-10 h-10 bg-black bg-opacity-70 rounded-full flex items-center justify-center hover:bg-opacity-90 transition-all duration-200 shadow-lg"
-                    aria-label={isMuted ? 'Unmute video' : 'Mute video'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      // Pause the newsfeed video before opening Scenes
+                      if (videoRef.current && !videoRef.current.paused) {
+                        videoRef.current.pause();
+                      }
+                      // Also pause all other videos on the page
+                      const allVideos = document.querySelectorAll('video');
+                      allVideos.forEach((video) => {
+                        if (!video.paused) {
+                          video.pause();
+                        }
+                      });
+                      onOpenScenes();
+                    }}
+                    onTouchEnd={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      // Pause the newsfeed video before opening Scenes
+                      if (videoRef.current && !videoRef.current.paused) {
+                        videoRef.current.pause();
+                      }
+                      // Also pause all other videos on the page
+                      const allVideos = document.querySelectorAll('video');
+                      allVideos.forEach((video) => {
+                        if (!video.paused) {
+                          video.pause();
+                        }
+                      });
+                      onOpenScenes();
+                    }}
+                    onMouseEnter={() => setIsViewInScenesExpanded(true)}
+                    onMouseLeave={() => {
+                      // Retract after 2 seconds when mouse leaves
+                      setTimeout(() => {
+                        setIsViewInScenesExpanded(false);
+                      }, 2000);
+                    }}
+                    className={`${isViewInScenesExpanded ? 'px-3' : 'px-2'} py-1.5 bg-black/70 rounded text-white text-xs font-semibold hover:bg-black/90 active:bg-black transition-all duration-300 shadow-lg pointer-events-auto flex items-center gap-1.5`}
+                    aria-label="View in Scenes"
+                    title="View in Scenes"
                   >
-                    {isMuted ? (
-                      <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
-                      </svg>
+                    <FiEye className="w-3.5 h-3.5 flex-shrink-0" />
+                    {isViewInScenesExpanded ? (
+                      <span className="whitespace-nowrap">View in Scenes</span>
                     ) : (
-                      <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
-                      </svg>
+                      <span className="whitespace-nowrap">Scenes</span>
                     )}
                   </button>
                 </div>
               )}
 
-              {/* Gradient progress bar */}
-              {!isLoading && !hasError && currentItem.type === 'video' && (
-                <div className="absolute left-0 right-0 bottom-0 h-1.5 bg-black/30">
-                  <div
-                    className="h-full"
-                    style={{
-                      width: `${Math.max(0, Math.min(100, progress * 100))}%`,
-                      background: 'linear-gradient(to right, rgb(255, 140, 0) 5%, rgb(248, 0, 50) 25%, rgb(255, 0, 160) 45%, rgb(140, 40, 255) 65%, rgb(0, 35, 255) 82%, rgb(25, 160, 255) 96%)',
-                      boxShadow: '0 0 12px rgba(139,92,246,0.45)'
-                    }}
-                  />
+              {/* Paused Overlay - Scenes Logo with Mute Button */}
+              {isPaused && currentItem.type === 'video' && (
+                <div className="absolute inset-0 flex items-center justify-center z-40 pointer-events-none">
+                  <div className="flex flex-col items-center gap-3">
+                    {/* Scenes Logo */}
+                    <div className="p-3 rounded-lg border-2 border-white/80 bg-black/50 backdrop-blur-sm">
+                      <svg
+                        width="48"
+                        height="48"
+                        viewBox="0 0 24 24"
+                        className="text-white"
+                        fill="none"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
+                        {/* Square border */}
+                        <rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" strokeWidth="2" fill="none" />
+                        {/* Play button triangle */}
+                        <path d="M9 7 L9 17 L17 12 Z" fill="currentColor" />
+                      </svg>
+                    </div>
+                    {/* Mute Button over logo */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setIsMuted(prev => !prev);
+                      }}
+                      onTouchEnd={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setIsMuted(prev => !prev);
+                      }}
+                      className="p-1.5 rounded-full bg-black/50 hover:bg-black/70 active:bg-black/80 text-white transition-colors pointer-events-auto z-50"
+                      aria-label={isMuted ? 'Unmute video' : 'Mute video'}
+                      title={isMuted ? 'Unmute video' : 'Mute video'}
+                    >
+                      {isMuted ? (
+                        <FiVolumeX size={16} />
+                      ) : (
+                        <FiVolume2 size={16} />
+                      )}
+                    </button>
+                  </div>
                 </div>
               )}
+
 
               {/* Video Captions - Display when enabled */}
               {!isLoading && !hasError && currentItem.type === 'video' && videoCaptionsEnabled && videoCaptionText && (
@@ -1453,13 +1629,13 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                 }
                 onShowTaggedUsers?.();
               }}
-              className="w-10 h-10 rounded-full bg-black bg-opacity-70 flex items-center justify-center hover:bg-opacity-90 transition-all shadow-lg"
+              className="w-8 h-8 rounded-full bg-black bg-opacity-70 flex items-center justify-center hover:bg-opacity-90 transition-all shadow-lg"
               aria-label="View tagged users"
               title={`View ${taggedUsers?.length || 0} tagged ${(taggedUsers?.length || 0) === 1 ? 'person' : 'people'}`}
             >
               <svg
-                width="20"
-                height="20"
+                width="14"
+                height="14"
                 viewBox="0 0 24 24"
                 className="text-white"
                 fill="currentColor"
@@ -1747,7 +1923,7 @@ function EngagementBar({
   }
 
   return (
-    <div className="px-4 pb-4 pt-3 border-t border-gray-200 dark:border-gray-700">
+    <div className="px-4 pb-4 pt-3 border-t" style={{ borderColor: '#030712' }}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-6">
           {/* Like */}
@@ -2025,13 +2201,32 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
     return () => observer.disconnect();
   }, [hasBeenViewed]);
 
+  // Check if post has media
+  const hasMedia = !!(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0));
+  const isTextOnly = post.text && !post.mediaUrl && (!post.mediaItems || post.mediaItems.length === 0);
+
   return (
-    <article ref={articleRef} aria-labelledby={titleId} className="mx-0 mb-6 overflow-hidden border-0 border-b border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out]" style={{ backgroundColor: '#000000' }}>
-      <PostHeader post={post} onFollow={onFollow} showBoostIcon={showBoostIcon} onBoost={onBoost} />
+    <article ref={articleRef} aria-labelledby={titleId} className="mx-0 mb-6 overflow-hidden border-0 border-b border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out]" style={{ backgroundColor: '#030712' }}>
+      {/* Show PostHeader normally for text-only posts */}
+      {isTextOnly && <PostHeader post={post} onFollow={onFollow} showBoostIcon={showBoostIcon} onBoost={onBoost} isOverlaid={false} />}
       <TagRow tags={post.tags} />
       <div className="relative w-full overflow-hidden" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
-        {post.text && !post.mediaUrl && (!post.mediaItems || post.mediaItems.length === 0) ? (
-          <TextCard text={post.text} onDoubleLike={onLike} textStyle={post.textStyle} stickers={post.stickers} />
+        {/* PostHeader overlaid on media for posts with media */}
+        {hasMedia && (
+          <div className="absolute top-0 left-0 right-0 z-20">
+            <PostHeader post={post} onFollow={onFollow} showBoostIcon={showBoostIcon} onBoost={onBoost} isOverlaid={true} />
+          </div>
+        )}
+        {isTextOnly ? (
+          <TextCard 
+            text={post.text} 
+            onDoubleLike={onLike} 
+            textStyle={post.textStyle} 
+            stickers={post.stickers}
+            userHandle={post.userHandle}
+            locationLabel={post.locationLabel}
+            createdAt={post.createdAt}
+          />
         ) : (
           <Media
             url={post.mediaUrl}
@@ -2061,30 +2256,35 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             postCreatedAt={post.createdAt}
           />
         )}
-        {/* Carousel Indicator - Underneath the image/media */}
+        {/* Carousel Indicator - Overlaid on media with scrim */}
         {/* Show row if: multiple media items exist */}
         {post.mediaItems && post.mediaItems.length > 1 ? (
-          <div className="px-4 py-2 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
-            <div className="flex items-center justify-center">
-              {/* Center - Carousel Display (Dots and Number) */}
-              <div className="flex items-center gap-3">
-                {/* Baby Blue Dots */}
-                <div className="flex gap-1.5">
-                  {post.mediaItems.map((_, index) => (
-                    <div
-                      key={index}
-                      className={`w-2 h-2 rounded-full transition-all ${index === carouselIndex
-                        ? 'w-6'
-                        : 'bg-gray-300 dark:bg-gray-600'
-                        }`}
-                      style={index === carouselIndex ? { backgroundColor: '#2563eb' } : {}}
-                    />
-                  ))}
+          <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none">
+            {/* Scrim effect - gradient overlay for better readability */}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/60 to-transparent pointer-events-none z-0" />
+            
+            {/* Content layer - above scrim */}
+            <div className="relative z-10 px-4 py-3 pointer-events-auto">
+              <div className="flex items-center justify-center">
+                {/* Center - Carousel Display (Dots and Number) */}
+                <div className="flex items-center gap-3">
+                  {/* Baby Blue Dots */}
+                  <div className="flex gap-1.5">
+                    {post.mediaItems.map((_, index) => (
+                      <div
+                        key={index}
+                        className={`h-2 rounded-full transition-all ${index === carouselIndex
+                          ? 'w-6 bg-white'
+                          : 'w-2 bg-white/50'
+                          }`}
+                      />
+                    ))}
+                  </div>
+                  {/* Number Indicator */}
+                  <span className="text-sm font-medium text-white drop-shadow-md">
+                    {carouselIndex + 1} / {post.mediaItems.length}
+                  </span>
                 </div>
-                {/* Number Indicator */}
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  {carouselIndex + 1} / {post.mediaItems.length}
-                </span>
               </div>
             </div>
           </div>
@@ -2192,7 +2392,7 @@ const AdCard = React.memo(function AdCard({ ad, onImpression, onClick }: {
   };
 
   return (
-    <article ref={articleRef} aria-labelledby={titleId} className="mx-4 mb-6 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out]" style={{ backgroundColor: '#000000' }}>
+    <article ref={articleRef} aria-labelledby={titleId} className="mx-4 mb-6 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out]" style={{ backgroundColor: '#030712' }}>
       {/* Ad Header */}
       <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
         <div className="flex items-center gap-2">

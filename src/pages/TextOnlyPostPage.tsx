@@ -71,9 +71,9 @@ export default function TextOnlyPostPage() {
     const canPost = text.trim().length > 0;
 
     return (
-        <div className="min-h-screen bg-black" style={{ pointerEvents: 'auto' }}>
+        <div className="min-h-screen bg-black flex flex-col" style={{ pointerEvents: 'auto' }}>
             {/* Header */}
-            <div className="sticky top-0 z-10 bg-black border-b border-gray-800">
+            <div className="sticky top-0 z-10 bg-black border-b border-gray-800 flex-shrink-0">
                 <div className="flex items-center justify-between px-4 h-14">
                     <div className="flex items-center gap-3">
                         <button
@@ -153,7 +153,7 @@ export default function TextOnlyPostPage() {
             </div>
 
             {/* Main Content */}
-            <div className="px-4 pt-6 pb-4">
+            <div className="flex-1 px-4 pb-4 overflow-y-auto" style={{ paddingTop: '6rem', marginTop: '1rem' }}>
                 <div className="flex gap-4">
                     {/* Profile Picture */}
                     <div className="flex-shrink-0">
@@ -165,25 +165,29 @@ export default function TextOnlyPostPage() {
                     </div>
 
                     {/* Text Input */}
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                         <textarea
                             ref={textInputRef}
                             value={text}
                             onChange={(e) => setText(e.target.value)}
                             placeholder="What's on your mind?"
-                            maxLength={280}
-                            className="w-full bg-gray-900/30 text-white text-xl resize-none border border-gray-700 rounded-lg outline-none min-h-[200px] px-4 py-3 focus:outline-none focus:ring-0 focus:border-gray-600 placeholder:text-gray-500"
+                            maxLength={200}
+                            className="w-full bg-gray-900/30 text-white text-xl resize-none border border-gray-700 rounded-lg outline-none min-h-[200px] px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-gray-600 placeholder:text-gray-500"
                             rows={8}
+                            autoFocus={!isClip}
+                            disabled={false}
+                            readOnly={false}
+                            style={{ pointerEvents: 'auto', width: '100%' }}
                         />
                         {/* Character count */}
                         <div className="flex justify-end mt-2">
-                            <span className={`text-sm ${text.length > 260
-                                ? text.length >= 280
+                            <span className={`text-sm ${text.length > 180
+                                ? text.length >= 200
                                     ? 'text-red-500'
                                     : 'text-yellow-500'
                                 : 'text-gray-500'
                                 }`}>
-                                {text.length}/280
+                                {text.length}/200
                             </span>
                         </div>
                     </div>
