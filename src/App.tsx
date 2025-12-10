@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX } from 'react-icons/fi';
+import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from './constants';
 import TopBar from './components/TopBar';
@@ -15,8 +15,8 @@ import { useAuth } from './context/Auth';
 import { getFlagForHandle, getAvatarForHandle } from './api/users';
 import Flag from './components/Flag';
 import { useOnline } from './hooks/useOnline';
-import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser } from './api/posts';
-import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle } from './api/stories';
+import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState } from './api/posts';
+import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory } from './api/stories';
 import { enqueue, drain } from './utils/mutationQueue';
 import { timeAgo } from './utils/timeAgo';
 import { getActiveAds, trackAdImpression, trackAdClick } from './api/ads';
@@ -99,7 +99,7 @@ export default function App() {
   );
 }
 
-function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCustom?: () => void; userLocal?: string; userRegional?: string; userNational?: string }) {
+function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCustom?: () => void; userLocal?: string; userRegional?: string; userNational?: string; clipsCount?: number }) {
   const navigate = useNavigate();
   const { user } = useAuth();
   
@@ -107,28 +107,67 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
   const local = props.userLocal || user?.local || 'Finglas';
   const regional = props.userRegional || user?.regional || 'Dublin';
   const national = props.userNational || user?.national || 'Ireland';
+  const clipsCount = props.clipsCount || 0;
   
-  const tabs: Tab[] = [local, regional, national, 'Discover'];
+  const tabs: Tab[] = [regional, national, 'Clips', 'Discover', 'Following'];
 
   return (
-    <div role="tablist" aria-label="Locations" className="grid grid-cols-4 gap-2 px-3">
-      {tabs.map(t => {
-        const active = props.active === t;
-        const id = `tab-${t}`;
-        const panelId = `panel-${t}`;
+    <div role="tablist" aria-label="Locations" className="sticky top-0 z-30 bg-[#030712] py-2">
+      <div className="grid grid-cols-5 gap-2 px-3">
+        {tabs.map(t => {
+          const active = props.active === t;
+          const id = `tab-${t}`;
+          const panelId = `panel-${t}`;
 
-        // Special handling for Discover tab - navigate to discover page
-        const handleClick = (e: React.MouseEvent) => {
-          e.stopPropagation();
-          if (t === 'Discover') {
-            navigate('/discover');
-          } else {
-            props.onChange(t);
-            props.onClearCustom?.();
+          // Special handling for Discover, Clips, and Following tabs
+          const handleClick = (e: React.MouseEvent) => {
+            e.stopPropagation();
+            if (t === 'Discover') {
+              navigate('/discover');
+            } else if (t === 'Clips') {
+              navigate('/stories');
+            } else if (t === 'Following') {
+              // Set active tab to Following and trigger following feed
+              props.onChange('Following');
+              window.dispatchEvent(new CustomEvent('setFollowingTab'));
+              props.onClearCustom?.();
+            } else {
+              props.onChange(t);
+              props.onClearCustom?.();
+            }
+          };
+          
+          // Format tab label
+          const tabLabel = t === 'Clips' && props.clipsCount > 0 
+            ? `Clips ${props.clipsCount}` 
+            : t;
+
+          if (active) {
+            return (
+              <button
+                key={t}
+                id={id}
+                role="tab"
+                aria-selected={active}
+                aria-controls={panelId}
+                tabIndex={active ? 0 : -1}
+                onClick={handleClick}
+                className="rounded-full px-3 py-1.5 bg-black text-white text-sm font-medium transition-transform active:scale-[.98] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 flex items-center justify-center gap-1"
+                style={{
+                  outline: 'none',
+                  boxShadow: 'none'
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.outline = 'none';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                {tabLabel}
+                <FiEye className="text-white" style={{ width: '32px', height: '32px', minWidth: '32px', minHeight: '32px' }} />
+              </button>
+            );
           }
-        };
 
-        if (active) {
           return (
             <button
               key={t}
@@ -138,51 +177,22 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               aria-controls={panelId}
               tabIndex={active ? 0 : -1}
               onClick={handleClick}
-              className="rounded-lg p-[2px] animate-[shimmerGradient_3s_linear_infinite] transition-transform active:scale-[.98] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+              className="rounded-full px-3 py-1.5 bg-black text-gray-500 dark:text-gray-400 text-sm font-medium transition-transform active:scale-[.98] hover:text-gray-300 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
               style={{
-                background: 'linear-gradient(to right, #2A1FC2, #1FC2C2, #000000, #2A1FC2, #1FC2C2, #000000)',
-                backgroundSize: '400% 100%',
                 outline: 'none',
-                boxShadow: 'none'
+                boxShadow: 'none',
+                border: 'none'
               }}
               onFocus={(e) => {
                 e.currentTarget.style.outline = 'none';
                 e.currentTarget.style.boxShadow = 'none';
               }}
             >
-              <span className="block rounded-md bg-gray-900 text-white text-sm py-2 font-medium">
-                {t}
-              </span>
+              {tabLabel}
             </button>
           );
-        }
-
-        return (
-          <button
-            key={t}
-            id={id}
-            role="tab"
-            aria-selected={active}
-            aria-controls={panelId}
-            tabIndex={active ? 0 : -1}
-            onClick={handleClick}
-            className={`rounded-md border text-sm py-2 font-medium transition-transform active:scale-[.98] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0
-              ${active
-                ? 'bg-gray-900 text-white border-gray-900 dark:bg-white dark:text-gray-900 dark:border-white shadow-sm'
-                : 'bg-white border-gray-300 text-gray-800 hover:bg-gray-50 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800'}`}
-            style={{
-              outline: 'none',
-              boxShadow: 'none'
-            }}
-            onFocus={(e) => {
-              e.currentTarget.style.outline = 'none';
-              e.currentTarget.style.boxShadow = 'none';
-            }}
-          >
-            {t}
-          </button>
-        );
-      })}
+        })}
+      </div>
     </div>
   );
 }
@@ -210,12 +220,19 @@ function FollowButton({ initial, onToggle }: { initial: boolean; onToggle: () =>
       aria-pressed={following}
       aria-label={following ? 'Unfollow user' : 'Follow user'}
       title={following ? 'Unfollow' : 'Follow'}
-      className={`px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-60 transition-all duration-200 active:scale-[.98]
+      className={`px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-60 transition-all duration-200 active:scale-[.98] flex items-center justify-center gap-2
         ${following
           ? 'bg-gray-100 border border-gray-300 text-gray-700 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200'
           : 'bg-gray-900 text-white hover:bg-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600'}`}
     >
-      {following ? 'Following' : 'Follow +'}
+      {following ? (
+        <>
+          <FiCheck className="w-4 h-4" />
+          <span>Following</span>
+        </>
+      ) : (
+        <span>Follow +</span>
+      )}
     </button>
   );
 }
@@ -399,7 +416,7 @@ function PostHeader({ post, onFollow, showBoostIcon, onBoost, isOverlaid = false
       {/* Content layer - above scrim */}
       <div className="relative z-10 flex items-start justify-between w-full">
         <div className="flex items-center gap-3 flex-1">
-          <div className="relative">
+          <div className="relative overflow-visible">
             <Avatar
               src={avatarSrc}
               name={post.userHandle.split('@')[0]} // Extract name from handle like "John@Dublin"
@@ -407,6 +424,27 @@ function PostHeader({ post, onFollow, showBoostIcon, onBoost, isOverlaid = false
               hasStory={hasStory}
               onClick={hasStory ? handleAvatarClick : undefined}
             />
+            {/* + icon overlay on profile picture to follow (TikTok style) */}
+            {!isCurrentUser && onFollow && (post.isFollowing === false || post.isFollowing === undefined) && (
+              <button
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  if (onFollow) {
+                    await onFollow();
+                  }
+                }}
+                className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-blue-500 hover:bg-blue-600 border-2 border-white dark:border-gray-900 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30"
+                aria-label="Follow user"
+              >
+                <FiPlus className="w-3 h-3 text-white" strokeWidth={2.5} />
+              </button>
+            )}
+            {/* Checkmark icon when following (replaces + icon) */}
+            {!isCurrentUser && onFollow && post.isFollowing === true && (
+              <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-green-500 border-2 border-white dark:border-gray-900 flex items-center justify-center shadow-lg z-30">
+                <FiCheck className="w-3 h-3 text-white" strokeWidth={3} />
+              </div>
+            )}
           </div>
           <div className="flex-1" onClick={(e) => e.stopPropagation()}>
             {/* Show reclip indicator if this is a reclipped post */}
@@ -446,11 +484,30 @@ function PostHeader({ post, onFollow, showBoostIcon, onBoost, isOverlaid = false
             </button>
           </div>
         </div>
-        <div className="relative z-10">
+        <div className="relative z-10 flex items-center gap-2">
+          {/* Location Button - Pill shaped with pin icon */}
+          {post.locationLabel && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                // Navigate to feed with this location
+                window.dispatchEvent(new CustomEvent('locationChange', {
+                  detail: { location: post.locationLabel }
+                }));
+                navigate(`/feed?location=${encodeURIComponent(post.locationLabel)}`);
+              }}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all active:scale-[.98] flex items-center gap-1.5 ${
+                isOverlaid
+                  ? 'bg-white/20 backdrop-blur-sm text-white border border-white/30 hover:bg-white/30'
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 hover:bg-gray-200 dark:hover:bg-gray-700'
+              }`}
+            >
+              <FiMapPin className="w-3.5 h-3.5" />
+              <span>{post.locationLabel}</span>
+            </button>
+          )}
           {showBoostIcon && isCurrentUser && onBoost ? (
             <BoostButton postId={post.id} onBoost={onBoost} />
-          ) : !isCurrentUser && onFollow ? (
-            <FollowButton initial={post.isFollowing} onToggle={onFollow} />
           ) : null}
         </div>
       </div>
@@ -569,7 +626,7 @@ function TextCard({ text, onDoubleLike, textStyle, stickers, userHandle, locatio
   }
 
   return (
-    <div className="mx-4 mt-4 select-none max-w-full">
+    <div className="mx-4 mt-4 select-none max-w-full relative">
       <div
         ref={containerRef}
         role="button"
@@ -583,34 +640,44 @@ function TextCard({ text, onDoubleLike, textStyle, stickers, userHandle, locatio
         }}
         onClick={handleClick}
         onTouchEnd={handleTouchEnd}
-        className="relative w-full rounded-2xl overflow-hidden bg-white border border-gray-200 shadow-2xl"
+        className="relative w-full rounded-2xl bg-white shadow-lg"
         style={{
           maxWidth: '100%',
-          boxSizing: 'border-box'
+          boxSizing: 'border-box',
+          padding: '16px'
         }}
       >
-        {/* Twitter card style - white card with black text box */}
-        {/* Text Content - Twitter card style (white card with black text box) */}
-        <div className="p-4 w-full overflow-hidden" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
-          <div className="p-4 rounded-lg bg-black overflow-hidden w-full" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
-            <div className="text-base leading-relaxed whitespace-pre-wrap font-normal text-white break-words w-full" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', maxWidth: '100%', boxSizing: 'border-box' }}>
-              {displayText}
-            </div>
-            {shouldTruncate && (
-              <div className="mt-3 flex justify-start">
-                <button
-                  onClick={handleMoreClick}
-                  className="text-blue-400 hover:text-blue-300 text-sm font-medium transition-colors focus:outline-none focus:ring-0"
-                  style={{ outline: 'none', border: 'none' }}
-                  aria-label={isExpanded ? 'Show less' : 'Show more'}
-                >
-                  {isExpanded ? 'Show less' : 'Show more'}
-                </button>
-              </div>
-            )}
-          </div>
+        {/* Decorative lines on left side */}
+        <div className="absolute left-2 top-1/2 transform -translate-y-1/2 flex flex-col gap-1.5 pointer-events-none">
+          <div className="w-8 h-0.5 bg-white"></div>
+          <div className="w-8 h-0.5 bg-white"></div>
+          <div className="w-8 h-0.5 bg-white"></div>
         </div>
-
+        
+        {/* Decorative lines on right side */}
+        <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex flex-col gap-1.5 pointer-events-none">
+          <div className="w-8 h-0.5 bg-white"></div>
+          <div className="w-8 h-0.5 bg-white"></div>
+          <div className="w-8 h-0.5 bg-white"></div>
+        </div>
+        
+        {/* Speech bubble content */}
+        <div className="text-base leading-relaxed whitespace-pre-wrap font-normal text-gray-900 break-words w-full px-12" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', maxWidth: '100%', boxSizing: 'border-box' }}>
+          {displayText}
+        </div>
+        {shouldTruncate && (
+          <div className="mt-3 flex justify-start">
+            <button
+              onClick={handleMoreClick}
+              className="text-blue-500 hover:text-blue-600 text-sm font-medium transition-colors focus:outline-none focus:ring-0"
+              style={{ outline: 'none', border: 'none', background: 'none' }}
+              aria-label={isExpanded ? 'Show less' : 'Show more'}
+            >
+              {isExpanded ? 'Show less' : 'Show more'}
+            </button>
+          </div>
+        )}
+        
         {/* GIF/Sticker Overlays - Scaled down and repositioned for feed view */}
         {stickers && stickers.length > 0 && containerSize.width > 0 && (
           <>
@@ -695,6 +762,18 @@ function TextCard({ text, onDoubleLike, textStyle, stickers, userHandle, locatio
             <div className={`absolute inset-0 border border-red-300 rounded-full transition-all duration-1200 delay-100 ${burst ? 'opacity-0 scale-200' : 'opacity-100 scale-100'}`}></div>
           </div>
         </div>
+
+        {/* Speech bubble tail/pointer at bottom center */}
+        <div 
+          className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-full"
+          style={{
+            width: 0,
+            height: 0,
+            borderLeft: '12px solid transparent',
+            borderRight: '12px solid transparent',
+            borderTop: '12px solid white'
+          }}
+        />
       </div>
     </div>
   );
@@ -2495,11 +2574,15 @@ function FeedPageWrapper() {
     return () => window.removeEventListener('setFollowingTab', handleSetFollowingTab);
   }, []);
 
-  // Reset showFollowingFeed when clicking any tab (except Discover which navigates away)
+  // Reset showFollowingFeed when clicking any tab (except Discover and Following)
   React.useEffect(() => {
-    // When active tab changes, reset following feed
-    // (Discover tab navigates to /discover page, so it won't trigger this)
-    setShowFollowingFeed(false);
+    // When active tab changes to Following, set showFollowingFeed to true
+    if (active === 'Following') {
+      setShowFollowingFeed(true);
+    } else {
+      // Reset following feed for all other tabs
+      setShowFollowingFeed(false);
+    }
   }, [active]);
 
   // Listen for resetFeed event from Home button
@@ -2624,23 +2707,15 @@ function FeedPageWrapper() {
   };
 
   async function loadMore() {
-    console.log('loadMore called with:', { loading, end, cursor, currentFilter, customLocation, active });
     if (loading || end || cursor === null) {
-      console.log('loadMore early return:', { loading, end, cursor });
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      requestTokenRef.current++; // Invalidate any pending requests
-      const filterForRequest = currentFilter; // capture
-      console.log('=== ABOUT TO FETCH POSTS ===');
-      console.log('currentFilter:', currentFilter);
-      console.log('customLocation:', customLocation);
-      console.log('active:', active);
-      console.log('Calling fetchPostsPage with filter:', currentFilter);
+      requestTokenRef.current++;
+      const filterForRequest = currentFilter;
       const page = await fetchPostsPage(filterForRequest, cursor, 5, userId, user?.local || '', user?.regional || '', user?.national || '');
-      console.log('fetchPostsPage returned:', { itemsCount: page.items.length, nextCursor: page.nextCursor });
       // Drop stale results if currentFilter changed since we started (i.e., user changed location)
       if (filterForRequest !== currentFilter) {
         console.warn('Dropping stale page for filter', filterForRequest, 'current filter is now:', currentFilter);
@@ -2886,6 +2961,16 @@ function FeedPageWrapper() {
           userLocal={user?.local}
           userRegional={user?.regional}
           userNational={user?.national}
+          clipsCount={(() => {
+            const userId = user?.id ?? 'anon';
+            const userState = getState(userId);
+            return pages.flat().filter(p => {
+              const isFollowing = userState.follows[p.userHandle] === true;
+              if (!isFollowing) return false;
+              // Check if this post's media was from a story
+              return p.mediaUrl && wasEverAStory(p.mediaUrl);
+            }).length;
+          })()}
         />
       ) : (
         /* Show location header only when viewing custom location */
@@ -2964,11 +3049,34 @@ function FeedPageWrapper() {
             }}
             onFollow={async () => {
               if (!online) {
+                updateOne(p.id, post => ({ ...post, isFollowing: !post.isFollowing }));
                 await enqueue({ type: 'follow', postId: p.id, userId });
+                if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
+                  setPages([]);
+                  setCursor(0);
+                  setEnd(false);
+                  setError(null);
+                  requestTokenRef.current++;
+                }
                 return;
               }
-              updateOne(p.id, post => ({ ...post, isFollowing: !post.isFollowing }));
-              await toggleFollowForPost(userId, p.id);
+              
+              const updated = await toggleFollowForPost(userId, p.id);
+              updateOne(p.id, _post => ({ ...updated }));
+              
+              // Refresh feed if viewing following feed
+              if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
+                setPages([]);
+                setCursor(0);
+                setEnd(false);
+                setError(null);
+                setLoading(false);
+                requestTokenRef.current++;
+                // Reload after state update
+                setTimeout(() => {
+                  loadMore();
+                }, 50);
+              }
             }}
             onShare={async () => {
               setSelectedPostForShare(p);
@@ -3141,6 +3249,14 @@ function FeedPageWrapper() {
               }
               const updated = await toggleFollowForPost(userId, p.id);
               updateOne(p.id, _post => ({ ...updated }));
+              // Refresh feed if viewing following feed
+              if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
+                setPages([]);
+                setCursor(0);
+                setEnd(false);
+                setError(null);
+                requestTokenRef.current++;
+              }
             }}
             onShare={async () => {
               setSelectedPostForShare(p);

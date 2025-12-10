@@ -13,6 +13,8 @@ use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\StoryController;
 use App\Http\Controllers\Api\CollectionController;
+use App\Http\Controllers\Api\MusicController;
+use App\Http\Controllers\Api\MusicLibraryController;
 
 /*
 |--------------------------------------------------------------------------
@@ -44,6 +46,27 @@ Route::prefix('auth')->group(function () {
     Route::post('/login', [AuthController::class, 'login']);
 });
 
+// Public music routes (no auth required)
+Route::prefix('music')->group(function () {
+    Route::post('/generate', [MusicController::class, 'generate']); // Generate AI music (public)
+    Route::get('/library', [MusicLibraryController::class, 'index']); // Get music library (public - license-safe tracks only)
+    Route::get('/library/{id}', [MusicLibraryController::class, 'show']); // Get single library track (public)
+    Route::get('/file/{id}', [MusicLibraryController::class, 'serveFile']); // Serve music file for preview (public)
+});
+
+// Public upload routes (allow unauthenticated for video editing workflow)
+Route::prefix('upload')->group(function () {
+    Route::post('/single', [UploadController::class, 'single']);
+    Route::post('/multiple', [UploadController::class, 'multiple']);
+});
+
+// Public posts routes (allow viewing posts without auth)
+Route::prefix('posts')->group(function () {
+    Route::get('/', [PostController::class, 'index']); // Public - anyone can view feed
+    Route::get('/{id}', [PostController::class, 'show']); // Public - anyone can view single post
+    Route::post('/{id}/view', [PostController::class, 'incrementView']); // Public - track views without auth
+});
+
 // Protected routes
 Route::middleware('auth:sanctum')->group(function () {
     // Auth routes
@@ -52,15 +75,33 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
     });
 
-    // Posts routes
+    // Posts routes (protected - require auth for actions)
     Route::prefix('posts')->group(function () {
-        Route::get('/', [PostController::class, 'index']);
         Route::post('/', [PostController::class, 'store']);
-        Route::get('/{id}', [PostController::class, 'show']);
         Route::post('/{id}/like', [PostController::class, 'toggleLike']);
-        Route::post('/{id}/view', [PostController::class, 'incrementView']);
         Route::post('/{id}/share', [PostController::class, 'share']);
         Route::post('/{id}/reclip', [PostController::class, 'reclip']);
+    });
+
+    // Render jobs routes (for checking status)
+    Route::prefix('render-jobs')->group(function () {
+        Route::get('/{id}', function (string $id) {
+            $job = \App\Models\RenderJob::findOrFail($id);
+            
+            // Ensure user can only access their own jobs
+            if ($job->user_id !== Auth::id()) {
+                return response()->json(['error' => 'Unauthorized'], 403);
+            }
+            
+            return response()->json([
+                'id' => $job->id,
+                'status' => $job->status,
+                'finalVideoUrl' => $job->status === 'completed' ? $job->final_video_url : null,
+                'errorMessage' => $job->status === 'failed' ? $job->error_message : null,
+                'createdAt' => $job->created_at,
+                'updatedAt' => $job->updated_at,
+            ]);
+        });
     });
 
     // Comments routes
@@ -80,12 +121,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/{handle}/followers', [UserController::class, 'followers']);
         Route::get('/{handle}/following', [UserController::class, 'following']);
         Route::post('/privacy/toggle', [UserController::class, 'togglePrivacy']);
-    });
-
-    // Upload routes
-    Route::prefix('upload')->group(function () {
-        Route::post('/single', [UploadController::class, 'single']);
-        Route::post('/multiple', [UploadController::class, 'multiple']);
     });
 
     // Notifications routes
@@ -124,5 +159,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/{id}/posts', [CollectionController::class, 'removePost']);
         Route::get('/post/{postId}', [CollectionController::class, 'getCollectionsForPost']);
         Route::get('/{id}/posts', [CollectionController::class, 'getCollectionPosts']);
+    });
+
+    // Music routes (protected - require auth)
+    Route::prefix('music')->group(function () {
+        Route::get('/{id}', [MusicController::class, 'show']); // Get single track (AI or library)
+        Route::post('/upload', [MusicController::class, 'upload']); // Upload custom audio
+        Route::post('/{id}/use', [MusicController::class, 'incrementUsage']); // Increment usage count
     });
 });

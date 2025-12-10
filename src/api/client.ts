@@ -14,14 +14,32 @@ async function apiRequest(endpoint: string, options: RequestInit = {}) {
         ...options,
     };
 
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
+    try {
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
 
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: 'Network error' }));
-        throw new Error(error.error || `HTTP ${response.status}`);
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({ error: 'Network error' }));
+            throw new Error(error.error || `HTTP ${response.status}`);
+        }
+
+        return response.json();
+    } catch (error: any) {
+        // Suppress connection refused errors when backend isn't running
+        // Check for various connection error patterns
+        const isConnectionError = 
+            error?.message?.includes('Failed to fetch') || 
+            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
+            error?.message?.includes('NetworkError') ||
+            error?.name === 'TypeError' && error?.message?.includes('fetch');
+            
+        if (isConnectionError) {
+            // Re-throw with a specific error type that can be caught and handled gracefully
+            const connectionError = new Error('CONNECTION_REFUSED');
+            connectionError.name = 'ConnectionRefused';
+            throw connectionError;
+        }
+        throw error;
     }
-
-    return response.json();
 }
 
 // Auth API
@@ -76,6 +94,20 @@ export async function createPost(postData: {
     location?: string;
     mediaUrl?: string;
     mediaType?: 'image' | 'video';
+    caption?: string;
+    imageText?: string;
+    bannerText?: string;
+    stickers?: any[];
+    templateId?: string;
+    mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; text?: string; textStyle?: any }>;
+    textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string };
+    taggedUsers?: string[];
+    videoCaptionsEnabled?: boolean;
+    videoCaptionText?: string;
+    subtitlesEnabled?: boolean;
+    subtitleText?: string;
+    editTimeline?: any; // Edit timeline for hybrid editing pipeline
+    musicTrackId?: number; // Library music track ID
 }) {
     return apiRequest('/posts', {
         method: 'POST',
@@ -105,6 +137,11 @@ export async function reclipPost(postId: string) {
     return apiRequest(`/posts/${postId}/reclip`, {
         method: 'POST',
     });
+}
+
+// Render jobs API
+export async function getRenderJobStatus(jobId: string) {
+    return apiRequest(`/render-jobs/${jobId}`);
 }
 
 // Comments API
@@ -201,8 +238,14 @@ export async function uploadFile(file: File) {
     });
 
     if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: 'Upload failed' }));
-        throw new Error(error.error || 'Upload failed');
+        let errorMessage = 'Upload failed';
+        try {
+            const errorData = await response.json();
+            errorMessage = errorData.error || errorData.message || JSON.stringify(errorData);
+        } catch (e) {
+            errorMessage = `Upload failed: HTTP ${response.status} ${response.statusText}`;
+        }
+        throw new Error(errorMessage);
     }
 
     return response.json();

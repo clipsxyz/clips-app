@@ -1,10 +1,11 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
+import { noCache } from './vite-plugin-no-cache'
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), noCache()],
   resolve: {
     alias: {
       '@': resolve(__dirname, './src'),
@@ -17,6 +18,7 @@ export default defineConfig({
   publicDir: 'public',
   root: '.',
   optimizeDeps: {
+    force: true, // Force re-optimization
     // Exclude React Native dependencies from optimization (not needed for web)
     exclude: [
       'react-native',
@@ -45,15 +47,17 @@ export default defineConfig({
   },
   // Exclude React Native files from being scanned
   server: {
+    port: 5173,
+    host: 'localhost',
+    strictPort: false,
     fs: {
-      // Don't serve files outside of src/ and public/
       allow: ['.', './src', './public'],
     },
-    // Disable caching in development
     headers: {
-      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
       'Pragma': 'no-cache',
       'Expires': '0',
+      'Last-Modified': new Date().toUTCString(),
     },
   },
 })

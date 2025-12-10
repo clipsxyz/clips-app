@@ -2,13 +2,15 @@ import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react'
 import { useAuth } from '../context/Auth';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { createPost } from '../api/posts';
-import { FiImage, FiMapPin, FiX, FiZap, FiLayers, FiSmile, FiEdit, FiLoader, FiHome, FiSliders, FiType, FiCircle, FiUser } from 'react-icons/fi';
+import { FiImage, FiMapPin, FiX, FiZap, FiLayers, FiSmile, FiEdit, FiLoader, FiHome, FiSliders, FiType, FiCircle, FiUser, FiMusic } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import type { Post, StickerOverlay, Sticker } from '../types';
 import StickerPicker from '../components/StickerPicker';
 import StickerOverlayComponent from '../components/StickerOverlay';
 import TextStickerModal from '../components/TextStickerModal';
 import UserTaggingModal from '../components/UserTaggingModal';
+import MusicPicker from '../components/MusicPicker';
+import type { MusicTrack } from '../api/music';
 import { showToast } from '../utils/toast';
 
 // Debounce hook for performance
@@ -51,7 +53,28 @@ export default function CreatePage() {
         templateLocation?: string; // Location from template editor
         templateBannerText?: string; // Banner text from template editor
         templateTaggedUsers?: string[]; // Tagged users from template editor
+        trimStart?: number; // Trim start time in seconds (from InstantCreatePage)
+        trimEnd?: number; // Trim end time in seconds (from InstantCreatePage)
+        videoDuration?: number; // Original video duration
+        clips?: Array<{ // Multi-clip support
+            id: string;
+            url: string;
+            duration: number;
+            trimStart: number;
+            trimEnd: number;
+            speed: number;
+            reverse: boolean;
+        }>;
+        transitions?: Array<{ // Transitions between clips
+            type: 'none' | 'fade' | 'swipe' | 'zoom';
+            duration: number;
+        }>;
+        voiceoverUrl?: string; // Voiceover audio URL
+        greenScreenEnabled?: boolean; // Green screen enabled
+        greenScreenBackgroundUrl?: string; // Background URL for green screen
+        musicTrackId?: number; // Music track ID from library (from InstantCreatePage)
     } | null;
+    const MAX_VIDEO_SECONDS = 90;
     const [text, setText] = useState(''); // Main text - used for text-only posts OR captions for image posts
     const [location, setLocation] = useState('');
     const [selectedMedia, setSelectedMedia] = useState<string | null>(null);
@@ -76,6 +99,8 @@ export default function CreatePage() {
     const [filterHue, setFilterHue] = useState(0);
     const [showUserTagging, setShowUserTagging] = useState(false);
     const [taggedUsers, setTaggedUsers] = useState<string[]>([]);
+    const [showMusicPicker, setShowMusicPicker] = useState(false);
+    const [selectedMusicTrack, setSelectedMusicTrack] = useState<MusicTrack | null>(null);
     const mediaContainerRef = useRef<HTMLDivElement>(null);
     const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
     const captionRef = useRef<HTMLTextAreaElement | null>(null);
@@ -505,15 +530,164 @@ export default function CreatePage() {
 
         setIsUploading(true);
         try {
+            // Build editTimeline for hybrid editing pipeline (if we have trim data or video)
+            let editTimeline: any = undefined;
+            if (mediaType === 'video' && selectedMedia) {
+                // Check if we have multiple clips
+                const clips = locationState?.clips;
+                
+                if (clips && clips.length > 0) {
+                    // Multi-clip timeline
+                    const timelineClips = [];
+                    let currentStartTime = 0;
+                    let totalDuration = 0;
+                    
+                    for (const clip of clips) {
+                        const clipDuration = Math.min((clip.trimEnd - clip.trimStart) / clip.speed, 90 - totalDuration);
+                        if (clipDuration <= 0) break; // Stop if we've hit the 90s limit
+                        
+                        timelineClips.push({
+                            id: clip.id,
+                            mediaUrl: clip.url,
+                            type: 'video',
+                            startTime: currentStartTime,
+                            duration: clipDuration,
+                            trimStart: clip.trimStart,
+                            trimEnd: clip.trimEnd,
+                            speed: clip.speed,
+                            reverse: clip.reverse,
+                            originalDuration: clip.duration
+                        });
+                        
+                        currentStartTime += clipDuration;
+                        totalDuration += clipDuration;
+                        
+                        if (totalDuration >= 90) break; // Enforce 90s max
+                    }
+                    
+                    // Include transitions from locationState
+                    const transitions = locationState?.transitions || [];
+                    
+                    // Include stickers as overlays with timing
+                    const overlays = (stickers || []).map(sticker => ({
+                        id: sticker.id,
+                        type: 'sticker' as const,
+                        stickerId: sticker.stickerId,
+                        sticker: sticker.sticker,
+                        x: sticker.x,
+                        y: sticker.y,
+                        scale: sticker.scale,
+                        rotation: sticker.rotation,
+                        opacity: sticker.opacity,
+                        startTime: sticker.startTime ?? 0, // Start time in seconds
+                        endTime: sticker.endTime ?? totalDuration, // End time in seconds
+                        // Text content if it's a text sticker
+                        textContent: (sticker as any).textContent,
+                        textColor: (sticker as any).textColor,
+                        fontSize: (sticker as any).fontSize
+                    }));
+
+                    editTimeline = {
+                        clips: timelineClips,
+                        transitions: transitions.map((t, index) => ({
+                            id: `transition-${index}`,
+                            type: t.type,
+                            duration: t.duration,
+                            fromClipIndex: index,
+                            toClipIndex: index + 1
+                        })),
+                        overlays: overlays,
+                        totalDuration: totalDuration
+                    };
+                } else if (locationState?.trimStart !== undefined || locationState?.trimEnd !== undefined) {
+                    // Single clip with trim
+                    const trimStart = locationState?.trimStart ?? 0;
+                    const trimEnd = locationState?.trimEnd ?? (locationState?.videoDuration ?? 0);
+                    const originalDuration = locationState?.videoDuration ?? 0;
+                    const clipDuration = Math.min(trimEnd - trimStart, 90); // Enforce 90s max
+                    
+                    // Get speed and reverse values from locationState
+                    const speed = locationState?.speed ?? 1.0;
+                    const reverse = locationState?.reverse ?? false;
+                    
+                    // Include stickers as overlays with timing
+                    const overlays = (stickers || []).map(sticker => ({
+                        id: sticker.id,
+                        type: 'sticker' as const,
+                        stickerId: sticker.stickerId,
+                        sticker: sticker.sticker,
+                        x: sticker.x,
+                        y: sticker.y,
+                        scale: sticker.scale,
+                        rotation: sticker.rotation,
+                        opacity: sticker.opacity,
+                        startTime: sticker.startTime ? sticker.startTime / 1000 : 0, // Convert ms to seconds
+                        endTime: sticker.endTime ? sticker.endTime / 1000 : clipDuration, // Convert ms to seconds
+                        // Text content if it's a text sticker
+                        textContent: (sticker as any).textContent,
+                        textColor: (sticker as any).textColor,
+                        fontSize: (sticker as any).fontSize
+                    }));
+
+                    editTimeline = {
+                        clips: [{
+                            id: `clip-${Date.now()}`,
+                            mediaUrl: selectedMedia,
+                            type: 'video',
+                            startTime: 0, // Position in timeline (always 0 for single clip)
+                            duration: clipDuration,
+                            trimStart: trimStart,
+                            trimEnd: trimEnd,
+                            speed: speed,
+                            reverse: reverse,
+                            originalDuration: originalDuration
+                        }],
+                        transitions: [],
+                        overlays: overlays,
+                        voiceoverUrl: locationState?.voiceoverUrl, // Voiceover audio
+                        greenScreen: locationState?.greenScreenEnabled ? {
+                            enabled: true,
+                            backgroundUrl: locationState?.greenScreenBackgroundUrl
+                        } : undefined,
+                        totalDuration: clipDuration
+                    };
+                }
+            }
+
+            // Convert blob URL to data URL BEFORE calling createPost (while blob is still valid)
+            let persistentMediaUrl = selectedMedia;
+            if (selectedMedia && selectedMedia.startsWith('blob:')) {
+                console.log('Converting blob URL to data URL before upload...');
+                try {
+                    const response = await fetch(selectedMedia);
+                    const blob = await response.blob();
+                    const reader = new FileReader();
+                    const dataUrl = await new Promise<string>((resolve, reject) => {
+                        reader.onloadend = () => resolve(reader.result as string);
+                        reader.onerror = reject;
+                        reader.readAsDataURL(blob);
+                    });
+                    persistentMediaUrl = dataUrl;
+                    console.log('✅ Converted blob URL to data URL', {
+                        originalSize: blob.size,
+                        dataUrlSize: dataUrl.length,
+                        isDataUrl: dataUrl.startsWith('data:')
+                    });
+                } catch (error) {
+                    console.error('❌ Failed to convert blob URL to data URL:', error);
+                    // Continue with blob URL - it might still work if not revoked yet
+                }
+            }
+
             const newPost = await createPost(
                 user.id,
                 user.handle,
                 text.trim(),
                 location.trim(),
-                selectedMedia || undefined,
+                persistentMediaUrl || undefined,
                 mediaType || undefined,
                 imageText.trim() || undefined,
-                selectedMedia ? text.trim() : undefined, // Use text as caption if media is selected
+                persistentMediaUrl ? text.trim() : undefined, // Use text as caption if media is selected
                 user.local,
                 user.regional,
                 user.national,
@@ -522,11 +696,51 @@ export default function CreatePage() {
                 locationState?.templateMediaItems || locationState?.mediaItems || undefined, // Pass mediaItems from template or video editor if available
                 bannerText.trim() || undefined, // Pass banner text
                 undefined, // textStyle
-                taggedUsers.length > 0 ? taggedUsers : undefined // taggedUsers
+                taggedUsers.length > 0 ? taggedUsers : undefined, // taggedUsers
+                undefined, // videoCaptionsEnabled
+                undefined, // videoCaptionText
+                undefined, // subtitlesEnabled
+                undefined, // subtitleText
+                editTimeline, // Pass editTimeline for hybrid pipeline
+                locationState?.musicTrackId || selectedMusicTrack?.id // Pass music track ID from locationState (InstantCreatePage) or selected track (CreatePage)
             );
 
-            // Dispatch event to refresh feed
-            window.dispatchEvent(new CustomEvent('postCreated'));
+            // Dispatch event to refresh feed with render job info if available
+            const renderJobId = (newPost as any).renderJobId || (newPost as any).render_job_id;
+            
+            // Get video URL from selectedMedia or from editTimeline clips
+            let videoUrl = selectedMedia;
+            if (!videoUrl && editTimeline?.clips && editTimeline.clips.length > 0) {
+                videoUrl = editTimeline.clips[0].mediaUrl || editTimeline.clips[0].url;
+            }
+            
+            console.log('=== POST CREATED EVENT DEBUG ===');
+            console.log('renderJobId:', renderJobId);
+            console.log('postId:', newPost.id);
+            console.log('videoUrl:', videoUrl);
+            console.log('selectedMedia:', selectedMedia);
+            console.log('hasEditTimeline:', !!editTimeline);
+            console.log('clipsCount:', editTimeline?.clips?.length || 0);
+            console.log('newPost object:', newPost);
+            
+            if (renderJobId) {
+                const eventDetail = {
+                    postId: newPost.id,
+                    renderJobId: renderJobId,
+                    videoUrl: videoUrl || selectedMedia || '', // Use selectedMedia as fallback
+                };
+                
+                console.log('Dispatching postCreated event with detail:', eventDetail);
+                window.dispatchEvent(new CustomEvent('postCreated', {
+                    detail: eventDetail
+                }));
+                console.log('✅ postCreated event dispatched successfully');
+            } else {
+                console.warn('❌ No renderJobId found, PiP will not show');
+                console.warn('newPost keys:', Object.keys(newPost));
+                console.warn('newPost renderJobId:', (newPost as any).renderJobId);
+                console.warn('newPost render_job_id:', (newPost as any).render_job_id);
+            }
             showToast('Post created successfully!');
 
             // If user wants to boost, navigate to boost selection
@@ -549,6 +763,7 @@ export default function CreatePage() {
                 setBannerText('');
                 setStickers([]);
                 setTaggedUsers([]);
+                setSelectedMusicTrack(null);
 
                 // Navigate back to feed
                 navigate('/feed');
@@ -916,14 +1131,21 @@ export default function CreatePage() {
                                         className="w-full h-full transition-opacity duration-300"
                                         preload="auto"
                                         onLoadedMetadata={(e) => {
+                                            const duration = e.currentTarget.duration || 0;
                                             console.log('Video metadata loaded', {
                                                 videoWidth: e.currentTarget.videoWidth,
                                                 videoHeight: e.currentTarget.videoHeight,
-                                                duration: e.currentTarget.duration,
+                                                duration,
                                                 readyState: e.currentTarget.readyState,
                                                 clientWidth: e.currentTarget.clientWidth,
                                                 clientHeight: e.currentTarget.clientHeight
                                             });
+                                            if (duration > MAX_VIDEO_SECONDS) {
+                                                showToast(`Videos must be ${MAX_VIDEO_SECONDS} seconds or less. Please trim your video before uploading.`);
+                                                // Remove media that exceeds the limit
+                                                removeMedia();
+                                                return;
+                                            }
                                             // Ensure video is visible in Edge - force reflow
                                             const video = e.currentTarget;
                                             video.style.display = 'block';
@@ -1011,6 +1233,36 @@ export default function CreatePage() {
                                 }`}>
                                 {imageText.length}/100
                             </span>
+                        </div>
+                    </div>
+                )}
+
+                {/* Music Selection Display */}
+                {selectedMusicTrack && (
+                    <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 rounded-lg bg-brand-100 dark:bg-brand-900/30">
+                                    <FiMusic className="w-4 h-4 text-brand-600 dark:text-brand-400" />
+                                </div>
+                                <div>
+                                    <div className="font-semibold text-sm text-gray-900 dark:text-gray-100">
+                                        {selectedMusicTrack.title}
+                                    </div>
+                                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                                        {selectedMusicTrack.artist || 'Unknown Artist'}
+                                        {selectedMusicTrack.license_requires_attribution && (
+                                            <span className="ml-2 text-gray-400">({selectedMusicTrack.license_type})</span>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setSelectedMusicTrack(null)}
+                                className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-full transition-colors"
+                            >
+                                <FiX className="w-4 h-4 text-gray-500" />
+                            </button>
                         </div>
                     </div>
                 )}
@@ -1138,6 +1390,19 @@ export default function CreatePage() {
                 taggedUsers={taggedUsers}
             />
 
+            {/* Music Picker Modal */}
+            <MusicPicker
+                isOpen={showMusicPicker}
+                onClose={() => setShowMusicPicker(false)}
+                onSelectTrack={(track) => {
+                    setSelectedMusicTrack(track);
+                    if (track) {
+                        showToast(`Selected: ${track.title} by ${track.artist || 'Unknown'}`);
+                    }
+                }}
+                selectedTrackId={selectedMusicTrack?.id}
+            />
+
             {/* Footer - Navigation Bar */}
             <div className="fixed bottom-0 left-0 right-0 z-40 bg-gray-900 dark:bg-gray-950 border-t border-gray-800 dark:border-gray-700 shadow-lg">
                 <div className="mx-auto max-w-md h-16 flex items-center justify-around px-4">
@@ -1173,6 +1438,26 @@ export default function CreatePage() {
                         <span>Stickers</span>
                     </button>
 
+
+                    {/* Music Button */}
+                    <button
+                        onClick={() => {
+                            if (selectedMedia && mediaType === 'video') {
+                                setShowMusicPicker(true);
+                            } else {
+                                showToast('Please select a video first to add music');
+                            }
+                        }}
+                        className={`flex items-center gap-1.5 px-4 py-2 rounded-full border transition-all duration-200 active:scale-95 text-sm font-medium shadow-sm ${
+                            selectedMusicTrack
+                                ? 'bg-brand-500 border-brand-500 text-white hover:bg-brand-600'
+                                : 'bg-gray-800 dark:bg-gray-800 text-white border-gray-700 dark:border-gray-700 hover:bg-gray-700 dark:hover:bg-gray-700'
+                        }`}
+                        aria-label="Add Music"
+                    >
+                        <FiMusic className="w-4 h-4" />
+                        <span>Music</span>
+                    </button>
 
                     {/* Create Text Only Post Button */}
                     <button

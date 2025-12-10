@@ -1,7 +1,7 @@
 import { VideoTemplate } from '../types';
 
 // Mock storage for templates
-// Only top 3 templates: Gazetteer, Instagram, TikTok
+// Top templates: Gazetteer, Instagram, TikTok, YouTube Shorts
 const templates: VideoTemplate[] = [
     {
         id: 'template-9',
@@ -62,11 +62,31 @@ const templates: VideoTemplate[] = [
         usageCount: 45000,
         createdAt: Date.now() + 86400000, // Future date to appear first
         isTrending: true
+    },
+    {
+        id: 'template-10',
+        name: 'YouTube Shorts Video',
+        category: 'YouTube Shorts',
+        thumbnailUrl: '/placeholders/youtube-shorts-template.svg',
+        audioUrl: undefined,
+        audioDuration: 15000,
+        clips: [
+            {
+                id: 'clip-1',
+                duration: 15000,
+                startTime: 0,
+                mediaType: 'video' as const,
+                transition: 'cut' as const
+            }
+        ],
+        usageCount: 43000,
+        createdAt: Date.now() + 86400000, // Future date to appear first
+        isTrending: true
     }
 ];
 
 // Template categories
-export const TEMPLATE_CATEGORIES = ['Gazetteer', 'Instagram', 'TikTok'];
+export const TEMPLATE_CATEGORIES = ['Gazetteer', 'Instagram', 'TikTok', 'YouTube Shorts'];
 
 // Mock delay function
 function delay(ms: number): Promise<void> {

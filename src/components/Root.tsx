@@ -22,6 +22,7 @@ import CollectionFeedPage from '../pages/CollectionFeedPage';
 import TemplatesPage from '../pages/TemplatesPage';
 import TemplateEditorPage from '../pages/TemplateEditorPage';
 import VideoEditorPage from '../pages/VideoEditorPage';
+import CanvaVideoEditor from '../pages/CanvaVideoEditor';
 import TextOnlyPostPage from '../pages/TextOnlyPostPage';
 import TextOnlyPostDetailsPage from '../pages/TextOnlyPostDetailsPage';
 
@@ -40,6 +41,7 @@ export default function Root() {
                                 <Route path="create" element={<CreatePage />} />
                                 <Route path="create/instant" element={<InstantCreatePage />} />
                                 <Route path="create/filters" element={<InstantFiltersPage />} />
+                                <Route path="create/video-editor" element={<CanvaVideoEditor />} />
                                 <Route path="create/text-only" element={<TextOnlyPostPage />} />
                                 <Route path="create/text-only/details" element={<TextOnlyPostDetailsPage />} />
                                 <Route path="templates" element={<TemplatesPage />} />

@@ -3,7 +3,7 @@
  * Uses react-icons on web, react-native-vector-icons on native
  */
 import React from 'react';
-import { Platform } from 'react-native';
+import { isWeb } from './platform';
 import * as Icons from 'react-icons/io5';
 
 // Map Ionicons names to react-icons components
@@ -26,7 +26,7 @@ const iconMap: { [key: string]: React.ComponentType<any> } = {
 
 // Create a web-compatible Icon component that matches react-native-vector-icons API
 const WebIcon = ({ name, size = 24, color = '#000', ...props }: any) => {
-    if (Platform.OS === 'web') {
+    if (isWeb()) {
         const IconComponent = iconMap[name] || Icons.IoEllipseOutline;
 
         return React.createElement(IconComponent, {

@@ -35,6 +35,7 @@ export type Post = {
   locationLabel: string;
   tags: string[];
   mediaUrl?: string; // Optional for text-only posts (deprecated, use mediaItems for carousel)
+  finalVideoUrl?: string; // Final rendered video URL from backend (after processing)
   mediaType?: 'image' | 'video'; // New field to distinguish media types (deprecated, use mediaItems for carousel)
   mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<{ type: string; intensity?: number; duration?: number; startTime?: number; [key: string]: any }>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; // Multiple media items for carousel with effects/templates, including text-only clips
   text?: string; // Text content of the post (maps to text_content in DB)

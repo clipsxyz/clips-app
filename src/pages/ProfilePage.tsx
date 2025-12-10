@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import Avatar from '../components/Avatar';
-import { FiCamera, FiBookmark, FiMessageCircle, FiLock, FiUnlock, FiX, FiUser, FiMapPin, FiHeart, FiGlobe, FiEdit3, FiLink2, FiTwitter, FiInstagram, FiVideo, FiSettings } from 'react-icons/fi';
+import { FiCamera, FiBookmark, FiMessageCircle, FiLock, FiUnlock, FiX, FiUser, FiMapPin, FiHeart, FiGlobe, FiEdit3, FiLink2, FiTwitter, FiInstagram, FiVideo, FiSettings, FiFileText } from 'react-icons/fi';
 import Flag from '../components/Flag';
 import { getUserCollections } from '../api/collections';
 import type { Collection } from '../types';
@@ -10,6 +10,7 @@ import { posts } from '../api/posts';
 import Swal from 'sweetalert2';
 import { setProfilePrivacy } from '../api/privacy';
 import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMaps';
+import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
 
 export default function ProfilePage() {
   const { user, logout, login } = useAuth();
@@ -26,6 +27,8 @@ export default function ProfilePage() {
   const [collections, setCollections] = React.useState<Collection[]>([]);
   const [collectionsOpen, setCollectionsOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [draftsOpen, setDraftsOpen] = React.useState(false);
+  const [drafts, setDrafts] = React.useState<Draft[]>([]);
   const [isPrivate, setIsPrivate] = React.useState(user?.is_private || false);
   const [isTogglingPrivacy, setIsTogglingPrivacy] = React.useState(false);
   const [selectedCard, setSelectedCard] = React.useState<'bio' | 'social' | 'personal' | 'location' | 'interests' | 'flag' | null>(null);
@@ -162,6 +165,10 @@ export default function ProfilePage() {
     }
   }, [user?.id]);
 
+  React.useEffect(() => {
+    loadDrafts();
+  }, []);
+
   async function loadCollections() {
     if (!user?.id) return;
     try {
@@ -169,6 +176,24 @@ export default function ProfilePage() {
       setCollections(userCollections);
     } catch (error) {
       console.error('Error loading collections:', error);
+    }
+  }
+
+  async function loadDrafts() {
+    try {
+      const userDrafts = await getDrafts();
+      setDrafts(userDrafts);
+    } catch (error) {
+      console.error('Error loading drafts:', error);
+    }
+  }
+
+  async function handleDeleteDraft(draftId: string) {
+    try {
+      await deleteDraft(draftId);
+      await loadDrafts();
+    } catch (error) {
+      console.error('Error deleting draft:', error);
     }
   }
 
@@ -333,146 +358,221 @@ export default function ProfilePage() {
       <div className="max-w-2xl mx-auto p-6">
         {/* Header */}
         <div className="text-center mb-8 relative">
-          {/* Top Bar - Messages, Collections, Settings */}
-          <div className="flex items-center justify-between mb-6">
-            {/* Messages Icon - Left */}
-            <button
-              onClick={() => nav('/inbox')}
-              className="flex items-center gap-2 px-4 py-2 rounded-full bg-white dark:bg-gray-800 shadow-lg hover:shadow-xl transition-shadow"
-              aria-label="Messages"
-              title="Messages"
-            >
-              <FiMessageCircle className="w-5 h-5 text-gray-700 dark:text-gray-300" />
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Messages</span>
-            </button>
+          {/* Top Bar - Messages, Drafts, Collections, Settings */}
+          <div className="flex items-center justify-between mb-6 px-2">
+            {/* Messages */}
+            <div className="relative flex-1 flex justify-center">
+              <button
+                onClick={() => nav('/inbox')}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white dark:bg-gray-800 shadow-lg hover:shadow-xl transition-shadow"
+                aria-label="Messages"
+                title="Messages"
+              >
+                <FiMessageCircle className="w-4 h-4 text-gray-700 dark:text-gray-300" />
+                <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Messages</span>
+              </button>
+            </div>
             
-            {/* Collections and Settings Icons - Right */}
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <button
-                  onClick={() => setCollectionsOpen(!collectionsOpen)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-full bg-white dark:bg-gray-800 shadow-lg hover:shadow-xl transition-shadow"
-                  aria-label="Collections"
-                  title="Collections"
-                >
-                  <FiBookmark className="w-5 h-5 text-gray-700 dark:text-gray-300" />
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Collection</span>
-                </button>
-
-                {/* Collections Dropdown */}
-                {collectionsOpen && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-40"
-                      onClick={() => setCollectionsOpen(false)}
-                    />
-                    <div className="absolute top-full right-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 z-50 max-h-96 overflow-y-auto">
-                      <div className="p-2">
-                        {collections.length === 0 ? (
-                          <div className="p-4 text-center text-gray-500 dark:text-gray-400 text-sm">
-                            No collections yet
-                          </div>
-                        ) : (
-                          collections.map(collection => (
-                            <button
-                              key={collection.id}
-                              onClick={() => {
-                                setCollectionsOpen(false);
-                                nav(`/collection/${collection.id}`, { state: { collectionName: collection.name } });
-                              }}
-                              className="w-full p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left flex items-center gap-3"
-                            >
-                              <div className="w-12 h-12 rounded-lg bg-gray-200 dark:bg-gray-700 flex items-center justify-center overflow-hidden flex-shrink-0">
-                                {collection.thumbnailUrl ? (
-                                  (() => {
-                                    // Find the first post to check its mediaType
-                                    const firstPost = collection.postIds.length > 0
-                                      ? posts.find(p => p.id === collection.postIds[0])
-                                      : null;
-                                    const isVideo = firstPost?.mediaType === 'video' ||
-                                      collection.thumbnailUrl.toLowerCase().endsWith('.mp4') ||
-                                      collection.thumbnailUrl.toLowerCase().endsWith('.webm') ||
-                                      collection.thumbnailUrl.toLowerCase().endsWith('.mov');
-                                    return isVideo ? (
-                                      <video
-                                        src={collection.thumbnailUrl}
-                                        className="w-full h-full object-cover"
-                                        muted
-                                        playsInline
-                                        preload="metadata"
-                                        onLoadedMetadata={(e) => {
-                                          // Ensure first frame is shown
-                                          const video = e.currentTarget;
-                                          video.currentTime = 0;
-                                        }}
-                                      />
-                                    ) : (
-                                      <img
-                                        src={collection.thumbnailUrl}
-                                        alt={collection.name}
-                                        className="w-full h-full object-cover"
-                                      />
-                                    );
-                                  })()
-                                ) : (
-                                  <FiBookmark className="w-6 h-6 text-gray-400" />
-                                )}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="font-semibold text-gray-900 dark:text-gray-100 truncate">
-                                  {collection.name}
-                                </div>
-                                <div className="text-sm text-gray-500 dark:text-gray-400">
-                                  {collection.postIds.length} {collection.postIds.length === 1 ? 'post' : 'posts'}
-                                </div>
-                              </div>
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
+            {/* Drafts */}
+            <div className="relative flex-1 flex justify-center">
+              <button
+                onClick={() => setDraftsOpen(!draftsOpen)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white dark:bg-gray-800 shadow-lg hover:shadow-xl transition-shadow"
+                aria-label="Drafts"
+                title="Drafts"
+              >
+                <FiFileText className="w-4 h-4 text-gray-700 dark:text-gray-300" />
+                <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Drafts</span>
+              </button>
               
-              {/* Settings Icon - Small icon-only button with dropdown */}
-              <div className="relative">
-                <button
-                  onClick={() => setSettingsOpen(!settingsOpen)}
-                  className="p-2 rounded-full bg-white dark:bg-gray-800 shadow-lg hover:shadow-xl transition-shadow"
-                  aria-label="Settings"
-                  title="Settings"
-                >
-                  <FiSettings className="w-5 h-5 text-gray-700 dark:text-gray-300" />
-                </button>
-
-                {/* Settings Dropdown */}
-                {settingsOpen && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-40"
-                      onClick={() => setSettingsOpen(false)}
-                    />
-                    <div className="absolute top-full right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 z-50 overflow-hidden">
-                      <div className="py-1">
-                        <button
-                          onClick={() => {
-                            setSettingsOpen(false);
-                            logout();
-                            nav('/login', { replace: true });
-                          }}
-                          className="w-full px-4 py-3 text-left text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                          </svg>
-                          Sign Out
-                        </button>
-                      </div>
+              {/* Drafts Dropdown */}
+              {draftsOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setDraftsOpen(false)}
+                  />
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-72 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 z-50 max-h-96 overflow-y-auto">
+                    <div className="p-2">
+                      {drafts.length === 0 ? (
+                        <div className="p-4 text-center text-gray-500 dark:text-gray-400 text-sm">
+                          No drafts yet
+                        </div>
+                      ) : (
+                        drafts.map(draft => (
+                          <div
+                            key={draft.id}
+                            className="p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 group"
+                          >
+                            <video
+                              src={draft.videoUrl}
+                              className="w-16 h-24 rounded-lg object-cover flex-shrink-0"
+                              muted
+                              playsInline
+                              preload="metadata"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                                {new Date(draft.createdAt).toLocaleDateString()}
+                              </div>
+                              <div className="text-xs text-gray-400 dark:text-gray-500">
+                                {Math.floor(draft.videoDuration)}s
+                              </div>
+                            </div>
+                            <div className="flex gap-1">
+                              <button
+                                onClick={() => {
+                                  setDraftsOpen(false);
+                                  nav('/create/filters', { state: { videoUrl: draft.videoUrl, videoDuration: draft.videoDuration } });
+                                }}
+                                className="p-2 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
+                                title="Continue editing"
+                              >
+                                <FiEdit3 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteDraft(draft.id)}
+                                className="p-2 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
+                                title="Delete draft"
+                              >
+                                <FiX className="w-4 h-4 text-red-600 dark:text-red-400" />
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      )}
                     </div>
-                  </>
-                )}
-              </div>
+                  </div>
+                </>
+              )}
+            </div>
+            
+            {/* Collections */}
+            <div className="relative flex-1 flex justify-center">
+              <button
+                onClick={() => setCollectionsOpen(!collectionsOpen)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white dark:bg-gray-800 shadow-lg hover:shadow-xl transition-shadow"
+                aria-label="Collections"
+                title="Collections"
+              >
+                <FiBookmark className="w-4 h-4 text-gray-700 dark:text-gray-300" />
+                <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Collection</span>
+              </button>
+
+              {/* Collections Dropdown */}
+              {collectionsOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setCollectionsOpen(false)}
+                  />
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-64 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 z-50 max-h-96 overflow-y-auto">
+                    <div className="p-2">
+                      {collections.length === 0 ? (
+                        <div className="p-4 text-center text-gray-500 dark:text-gray-400 text-sm">
+                          No collections yet
+                        </div>
+                      ) : (
+                        collections.map(collection => (
+                          <button
+                            key={collection.id}
+                            onClick={() => {
+                              setCollectionsOpen(false);
+                              nav(`/collection/${collection.id}`, { state: { collectionName: collection.name } });
+                            }}
+                            className="w-full p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left flex items-center gap-3"
+                          >
+                            <div className="w-12 h-12 rounded-lg bg-gray-200 dark:bg-gray-700 flex items-center justify-center overflow-hidden flex-shrink-0">
+                              {collection.thumbnailUrl ? (
+                                (() => {
+                                  // Find the first post to check its mediaType
+                                  const firstPost = collection.postIds.length > 0
+                                    ? posts.find(p => p.id === collection.postIds[0])
+                                    : null;
+                                  const isVideo = firstPost?.mediaType === 'video' ||
+                                    collection.thumbnailUrl.toLowerCase().endsWith('.mp4') ||
+                                    collection.thumbnailUrl.toLowerCase().endsWith('.webm') ||
+                                    collection.thumbnailUrl.toLowerCase().endsWith('.mov');
+                                  return isVideo ? (
+                                    <video
+                                      src={collection.thumbnailUrl}
+                                      className="w-full h-full object-cover"
+                                      muted
+                                      playsInline
+                                      preload="metadata"
+                                      onLoadedMetadata={(e) => {
+                                        // Ensure first frame is shown
+                                        const video = e.currentTarget;
+                                        video.currentTime = 0;
+                                      }}
+                                    />
+                                  ) : (
+                                    <img
+                                      src={collection.thumbnailUrl}
+                                      alt={collection.name}
+                                      className="w-full h-full object-cover"
+                                    />
+                                  );
+                                })()
+                              ) : (
+                                <FiBookmark className="w-6 h-6 text-gray-400" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-semibold text-gray-900 dark:text-gray-100 truncate">
+                                {collection.name}
+                              </div>
+                              <div className="text-sm text-gray-500 dark:text-gray-400">
+                                {collection.postIds.length} {collection.postIds.length === 1 ? 'post' : 'posts'}
+                              </div>
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+            
+            {/* Settings */}
+            <div className="relative flex-1 flex justify-center">
+              <button
+                onClick={() => setSettingsOpen(!settingsOpen)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white dark:bg-gray-800 shadow-lg hover:shadow-xl transition-shadow"
+                aria-label="Settings"
+                title="Settings"
+              >
+                <FiSettings className="w-4 h-4 text-gray-700 dark:text-gray-300" />
+                <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Settings</span>
+              </button>
+
+              {/* Settings Dropdown */}
+              {settingsOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setSettingsOpen(false)}
+                  />
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-48 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 z-50 overflow-hidden">
+                    <div className="py-1">
+                      <button
+                        onClick={() => {
+                          setSettingsOpen(false);
+                          logout();
+                          nav('/login', { replace: true });
+                        }}
+                        className="w-full px-4 py-3 text-left text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                        </svg>
+                        Sign Out
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
           

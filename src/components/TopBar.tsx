@@ -1,6 +1,6 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { FiCompass, FiX, FiSearch, FiMapPin, FiMenu, FiHome, FiSend, FiPlay } from 'react-icons/fi';
+import { FiCompass, FiX, FiSearch, FiMapPin, FiMenu, FiHome, FiSend, FiPlay, FiMessageSquare } from 'react-icons/fi';
 import Avatar from './Avatar';
 import { getUnreadTotal } from '../api/messages';
 import { useAuth } from '../context/Auth';
@@ -151,13 +151,14 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
 
             <button
               onClick={() => navigate('/feed')}
-              className="font-light text-lg tracking-tight"
+              className="font-light text-lg tracking-tight flex items-center gap-1.5"
               aria-label="Go to Home Feed"
               title="Gazetteer"
               style={{ 
                 fontFamily: 'system-ui, -apple-system, sans-serif'
               }}
             >
+              <FiMapPin className="w-4 h-4 text-gray-700 dark:text-gray-200" />
               <span
                 style={{
                   background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
@@ -174,7 +175,24 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
               </span>
             </button>
 
-            <div className="flex items-center">
+            <div className="flex items-center gap-2">
+              {/* Local Button */}
+              <button
+                onClick={() => {
+                  const local = user?.local || 'Finglas';
+                  // Use the same mechanism as Discover page: set sessionStorage, dispatch event, and navigate with query param
+                  try {
+                    sessionStorage.setItem('pendingLocation', local);
+                    window.dispatchEvent(new CustomEvent('locationChange', { detail: { location: local } }));
+                  } catch { }
+                  // Navigate to feed with query parameter (same as Discover page does for Paris, London, etc.)
+                  navigate(`/feed?location=${encodeURIComponent(local)}`);
+                }}
+                className="px-3 py-1.5 rounded-xl text-xs font-medium transition-all active:scale-[.98] border-2 border-dashed border-blue-400 dark:border-blue-500 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
+                title={`View ${user?.local || 'Local'} feed`}
+              >
+                {user?.local || 'Local'}
+              </button>
               <Avatar src={user?.avatarUrl} name={(user?.handle || 'User').split('@')[0]} size="sm" />
             </div>
           </div>
@@ -183,13 +201,14 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
             <div className="flex items-center gap-2">
               <button
                 onClick={() => navigate('/feed')}
-                className="font-light text-lg tracking-tight"
+                className="font-light text-lg tracking-tight flex items-center gap-1.5"
                 aria-label="Go to Home Feed"
                 title="Gazetteer"
                 style={{ 
                   fontFamily: 'system-ui, -apple-system, sans-serif'
                 }}
               >
+                <FiMapPin className="w-4 h-4 text-gray-700 dark:text-gray-200" />
                 <span
                   style={{
                     background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
@@ -205,151 +224,18 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
                   Gazetteer
                 </span>
               </button>
-
-              <button
-                onClick={() => navigate('/stories')}
-                className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 relative overflow-hidden"
-                aria-label="View Stories"
-                title="Stories"
-                style={{
-                  outline: 'none',
-                  boxShadow: 'none',
-                  border: '1px solid rgba(255, 255, 255, 0.2)'
-                }}
-                onFocus={(e) => {
-                  e.currentTarget.style.outline = 'none';
-                  e.currentTarget.style.boxShadow = 'none';
-                }}
-              >
-                {/* Shimmer border effect */}
-                <div 
-                  className="absolute inset-0 rounded pointer-events-none"
-                  style={{
-                    background: 'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.4) 50%, transparent 100%)',
-                    backgroundSize: '200% 100%',
-                    animation: 'shimmer 3s linear infinite',
-                    border: '1px solid rgba(255, 255, 255, 0.3)',
-                    margin: '-1px'
-                  }}
-                />
-                <div className="relative w-4 h-4 z-10">
-                  {/* Gradient border ring when there are new stories (Gazetteer-style) */}
-                  {hasNewStories ? (
-                    <div className="absolute -inset-0.5 rounded p-[2px]" style={{
-                      background: 'linear-gradient(to right, rgb(255, 140, 0) 5%, rgb(248, 0, 50) 25%, rgb(255, 0, 160) 45%, rgb(140, 40, 255) 65%, rgb(0, 35, 255) 82%, rgb(25, 160, 255) 96%)',
-                    }}>
-                      <div className="w-full h-full rounded bg-white dark:bg-gray-950 flex items-center justify-center relative overflow-hidden">
-                        <FiPlay className="w-2.5 h-2.5 text-gray-900 dark:text-gray-100 relative z-10" />
-                        <div 
-                          className="absolute inset-0 rounded"
-                          style={{
-                            background: 'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.6) 50%, transparent 100%)',
-                            backgroundSize: '200% 100%',
-                            animation: 'shimmer 3s linear infinite',
-                            mixBlendMode: 'overlay',
-                            pointerEvents: 'none',
-                            zIndex: 11
-                          }}
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    /* Play button with gray border when no new stories */
-                    <div className="w-4 h-4 rounded overflow-hidden ring-2 ring-gray-300 dark:ring-gray-700 bg-white dark:bg-gray-950 flex items-center justify-center relative">
-                      <FiPlay className="w-2.5 h-2.5 text-gray-900 dark:text-gray-100 relative z-10" />
-                      <div 
-                        className="absolute inset-0 rounded"
-                        style={{
-                          background: 'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.6) 50%, transparent 100%)',
-                          backgroundSize: '200% 100%',
-                          animation: 'shimmer 3s linear infinite',
-                          mixBlendMode: 'overlay',
-                          pointerEvents: 'none',
-                          zIndex: 11
-                        }}
-                      />
-                    </div>
-                  )}
-                </div>
-                <span className="text-sm font-medium relative z-10">
-                  <span
-                    style={{
-                      background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
-                      backgroundSize: '200% 100%',
-                      WebkitBackgroundClip: 'text',
-                      backgroundClip: 'text',
-                      WebkitTextFillColor: 'transparent',
-                      color: 'transparent',
-                      animation: 'shimmer 3s linear infinite',
-                      display: 'inline-block'
-                    }}
-                  >
-                    Clips 24
-                  </span>
-                </span>
-              </button>
             </div>
 
             <div className="flex items-center gap-2">
-              <button
-                onClick={handleDiscoverClick}
-                className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors relative overflow-hidden"
-                aria-label="View Following feed"
-                style={{
-                  border: '1px solid rgba(255, 255, 255, 0.2)'
-                }}
-              >
-                {/* Shimmer border effect */}
-                <div 
-                  className="absolute inset-0 rounded pointer-events-none"
-                  style={{
-                    background: 'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.4) 50%, transparent 100%)',
-                    backgroundSize: '200% 100%',
-                    animation: 'shimmer 3s linear infinite',
-                    border: '1px solid rgba(255, 255, 255, 0.3)',
-                    margin: '-1px'
-                  }}
-                />
-                <div className="relative w-4 h-4 z-10">
-                  <div className="absolute inset-0 rounded bg-gradient-to-r from-emerald-500 via-blue-500 to-violet-500 opacity-75 blur-sm animate-pulse"></div>
-                  <div className="absolute inset-[1px] rounded bg-gray-950 dark:bg-gray-950">
-                    <div className="absolute inset-0 rounded" style={{
-                      background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.5), transparent)',
-                      backgroundSize: '200% 100%',
-                      animation: 'shimmer 3s linear infinite',
-                    }}></div>
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-                      <FiCompass className="w-2.5 h-2.5 text-white" />
-                    </div>
-                  </div>
-                </div>
-                <span className="text-sm font-medium relative z-10">
-                  <span
-                    style={{
-                      background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
-                      backgroundSize: '200% 100%',
-                      WebkitBackgroundClip: 'text',
-                      backgroundClip: 'text',
-                      WebkitTextFillColor: 'transparent',
-                      color: 'transparent',
-                      animation: 'shimmer 3s linear infinite',
-                      display: 'inline-block'
-                    }}
-                  >
-                    Following
-                  </span>
-                </span>
-              </button>
-
-              {/* Notifications Paper Airplane Icon */}
+              {/* Messages Icon */}
               <button
                 onClick={() => navigate('/inbox')}
                 className="relative p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                aria-label="Open notifications"
-                title={hasInbox ? 'New notifications' : 'Notifications'}
+                aria-label="Open messages"
+                title={hasInbox ? 'New messages' : 'Messages'}
               >
                 <div className={`relative w-6 h-6 ${hasInbox ? '' : ''}`}>
-                  <FiSend className={`relative w-6 h-6 ${hasInbox ? 'text-blue-500' : 'text-gray-600 dark:text-gray-300'}`} />
+                  <FiMessageSquare className={`relative w-6 h-6 ${hasInbox ? 'text-blue-500' : 'text-gray-600 dark:text-gray-300'}`} />
                   {hasInbox && (
                     <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 bg-blue-500 text-white text-[10px] leading-4 rounded-full text-center">
                       {unreadCount > 9 ? '9+' : unreadCount}

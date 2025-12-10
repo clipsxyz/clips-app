@@ -1,84 +1,165 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Image, FlatList, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { useAuth } from '../context/Auth';
+import { fetchPostsByUser } from '../api/posts';
+import { getUserCollections } from '../api/collections';
+import type { Post, Collection } from '../types';
+import Avatar from '../components/Avatar';
 
-const ProfileScreen: React.FC = () => {
-    const mockUser = {
-        name: 'John Doe',
-        handle: 'john@dublin',
-        bio: 'Content creator from Dublin, Ireland',
-        followers: 1250,
-        following: 340,
-        posts: 89,
-        profileImage: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?q=80&w=800',
+const ProfileScreen: React.FC = ({ navigation }: any) => {
+    const { user } = useAuth();
+    const [posts, setPosts] = useState<Post[]>([]);
+    const [collections, setCollections] = useState<Collection[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [activeTab, setActiveTab] = useState<'posts' | 'collections'>('posts');
+
+    useEffect(() => {
+        loadData();
+    }, [user?.handle]);
+
+    const loadData = async () => {
+        if (!user?.handle) return;
+        setLoading(true);
+        try {
+            const [userPosts, userCollections] = await Promise.all([
+                fetchPostsByUser(user.handle, 50),
+                getUserCollections(user.id || 'me'),
+            ]);
+            setPosts(userPosts);
+            setCollections(userCollections);
+        } catch (error) {
+            console.error('Error loading profile:', error);
+        } finally {
+            setLoading(false);
+        }
     };
 
-    const mockPosts = [
-        { id: '1', image: 'https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?q=80&w=400' },
-        { id: '2', image: 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=400' },
-        { id: '3', image: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?q=80&w=400' },
-        { id: '4', image: 'https://images.unsplash.com/photo-1469474968028-56623f02e42e?q=80&w=400' },
-        { id: '5', image: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?q=80&w=400' },
-        { id: '6', image: 'https://images.unsplash.com/photo-1501594907352-04cda38ebc29?q=80&w=400' },
-    ];
+    if (loading) {
+        return (
+            <SafeAreaView style={styles.container}>
+                <ActivityIndicator size="large" color="#8B5CF6" />
+            </SafeAreaView>
+        );
+    }
 
     return (
-        <SafeAreaView style={styles.container}>
+        <SafeAreaView style={styles.container} edges={['top']}>
             <View style={styles.header}>
                 <Text style={styles.title}>Profile</Text>
-                <TouchableOpacity style={styles.settingsButton}>
-                    <Icon name="settings" size={24} color="#6B7280" />
+                <TouchableOpacity onPress={() => navigation.navigate('Inbox')}>
+                    <Icon name="mail" size={24} color="#FFFFFF" />
                 </TouchableOpacity>
             </View>
 
             <View style={styles.profileSection}>
                 <View style={styles.profileInfo}>
-                    <Image source={{ uri: mockUser.profileImage }} style={styles.profileImage} />
+                    <Avatar
+                        src={user?.avatarUrl}
+                        name={user?.name || user?.handle || 'User'}
+                        size={80}
+                    />
                     <View style={styles.userInfo}>
-                        <Text style={styles.userName}>{mockUser.name}</Text>
-                        <Text style={styles.userHandle}>{mockUser.handle}</Text>
-                        <Text style={styles.userBio}>{mockUser.bio}</Text>
+                        <Text style={styles.userName}>{user?.name || user?.handle}</Text>
+                        <Text style={styles.userHandle}>{user?.handle}</Text>
+                        {user?.bio && (
+                            <Text style={styles.userBio}>{user.bio}</Text>
+                        )}
                     </View>
                 </View>
 
                 <View style={styles.statsContainer}>
                     <View style={styles.statItem}>
-                        <Text style={styles.statNumber}>{mockUser.posts}</Text>
+                        <Text style={styles.statNumber}>{posts.length}</Text>
                         <Text style={styles.statLabel}>Posts</Text>
                     </View>
                     <View style={styles.statItem}>
-                        <Text style={styles.statNumber}>{mockUser.followers}</Text>
+                        <Text style={styles.statNumber}>{user?.followers_count || 0}</Text>
                         <Text style={styles.statLabel}>Followers</Text>
                     </View>
                     <View style={styles.statItem}>
-                        <Text style={styles.statNumber}>{mockUser.following}</Text>
+                        <Text style={styles.statNumber}>{user?.following_count || 0}</Text>
                         <Text style={styles.statLabel}>Following</Text>
                     </View>
                 </View>
 
-                <TouchableOpacity style={styles.editButton}>
+                <TouchableOpacity 
+                    style={styles.editButton}
+                    onPress={() => {
+                        // Navigate to profile edit - would need to create that screen
+                    }}
+                >
                     <Text style={styles.editButtonText}>Edit Profile</Text>
                 </TouchableOpacity>
             </View>
 
             <View style={styles.postsSection}>
                 <View style={styles.postsHeader}>
-                    <TouchableOpacity style={styles.postsTab}>
-                        <Icon name="grid" size={20} color="#8B5CF6" />
+                    <TouchableOpacity
+                        onPress={() => setActiveTab('posts')}
+                        style={[styles.postsTab, activeTab === 'posts' && styles.postsTabActive]}
+                    >
+                        <Icon 
+                            name="grid" 
+                            size={20} 
+                            color={activeTab === 'posts' ? "#8B5CF6" : "#6B7280"} 
+                        />
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.postsTab}>
-                        <Icon name="bookmark" size={20} color="#6B7280" />
+                    <TouchableOpacity
+                        onPress={() => setActiveTab('collections')}
+                        style={[styles.postsTab, activeTab === 'collections' && styles.postsTabActive]}
+                    >
+                        <Icon 
+                            name="bookmark" 
+                            size={20} 
+                            color={activeTab === 'collections' ? "#8B5CF6" : "#6B7280"} 
+                        />
                     </TouchableOpacity>
                 </View>
 
-                <View style={styles.postsGrid}>
-                    {mockPosts.map((post) => (
-                        <TouchableOpacity key={post.id} style={styles.postItem}>
-                            <Image source={{ uri: post.image }} style={styles.postImage} />
-                        </TouchableOpacity>
-                    ))}
-                </View>
+                {activeTab === 'posts' ? (
+                    <FlatList
+                        data={posts}
+                        numColumns={3}
+                        keyExtractor={(item) => item.id}
+                        renderItem={({ item }) => (
+                            <TouchableOpacity
+                                onPress={() => navigation.navigate('PostDetail', { postId: item.id })}
+                                style={styles.postItem}
+                            >
+                                {item.mediaUrl ? (
+                                    <Image source={{ uri: item.mediaUrl }} style={styles.postImage} />
+                                ) : (
+                                    <View style={styles.postPlaceholder}>
+                                        <Icon name="text" size={24} color="#6B7280" />
+                                    </View>
+                                )}
+                            </TouchableOpacity>
+                        )}
+                        ListEmptyComponent={
+                            <View style={styles.emptyContainer}>
+                                <Text style={styles.emptyText}>No posts yet</Text>
+                            </View>
+                        }
+                    />
+                ) : (
+                    <FlatList
+                        data={collections}
+                        keyExtractor={(item) => item.id}
+                        renderItem={({ item }) => (
+                            <TouchableOpacity style={styles.collectionItem}>
+                                <Text style={styles.collectionName}>{item.name}</Text>
+                                <Text style={styles.collectionCount}>{item.postIds.length} posts</Text>
+                            </TouchableOpacity>
+                        )}
+                        ListEmptyComponent={
+                            <View style={styles.emptyContainer}>
+                                <Text style={styles.emptyText}>No collections yet</Text>
+                            </View>
+                        }
+                    />
+                )}
             </View>
         </SafeAreaView>
     );
@@ -87,7 +168,7 @@ const ProfileScreen: React.FC = () => {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#FFFFFF',
+        backgroundColor: '#030712',
     },
     header: {
         flexDirection: 'row',
@@ -95,17 +176,13 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingHorizontal: 16,
         paddingVertical: 12,
-        backgroundColor: '#FFFFFF',
         borderBottomWidth: 1,
-        borderBottomColor: '#E5E7EB',
+        borderBottomColor: '#1F2937',
     },
     title: {
         fontSize: 24,
         fontWeight: 'bold',
-        color: '#111827',
-    },
-    settingsButton: {
-        padding: 4,
+        color: '#FFFFFF',
     },
     profileSection: {
         paddingHorizontal: 16,
@@ -114,12 +191,7 @@ const styles = StyleSheet.create({
     profileInfo: {
         flexDirection: 'row',
         marginBottom: 20,
-    },
-    profileImage: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
-        marginRight: 16,
+        gap: 16,
     },
     userInfo: {
         flex: 1,
@@ -128,16 +200,16 @@ const styles = StyleSheet.create({
     userName: {
         fontSize: 20,
         fontWeight: '600',
-        color: '#111827',
+        color: '#FFFFFF',
     },
     userHandle: {
         fontSize: 16,
-        color: '#6B7280',
+        color: '#9CA3AF',
         marginTop: 2,
     },
     userBio: {
         fontSize: 14,
-        color: '#374151',
+        color: '#D1D5DB',
         marginTop: 4,
     },
     statsContainer: {
@@ -151,24 +223,26 @@ const styles = StyleSheet.create({
     statNumber: {
         fontSize: 18,
         fontWeight: '600',
-        color: '#111827',
+        color: '#FFFFFF',
     },
     statLabel: {
         fontSize: 14,
-        color: '#6B7280',
+        color: '#9CA3AF',
         marginTop: 2,
     },
     editButton: {
-        backgroundColor: '#F3F4F6',
-        paddingVertical: 8,
-        paddingHorizontal: 16,
+        backgroundColor: '#1F2937',
+        paddingVertical: 10,
+        paddingHorizontal: 24,
         borderRadius: 8,
         alignSelf: 'center',
+        borderWidth: 1,
+        borderColor: '#374151',
     },
     editButtonText: {
         fontSize: 16,
         fontWeight: '500',
-        color: '#111827',
+        color: '#FFFFFF',
     },
     postsSection: {
         flex: 1,
@@ -178,16 +252,16 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         paddingVertical: 12,
         borderTopWidth: 1,
-        borderTopColor: '#E5E7EB',
+        borderTopColor: '#1F2937',
+        gap: 32,
     },
     postsTab: {
         paddingHorizontal: 20,
         paddingVertical: 8,
     },
-    postsGrid: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        paddingHorizontal: 2,
+    postsTabActive: {
+        borderBottomWidth: 2,
+        borderBottomColor: '#8B5CF6',
     },
     postItem: {
         width: '33.33%',
@@ -197,7 +271,39 @@ const styles = StyleSheet.create({
     postImage: {
         width: '100%',
         height: '100%',
-        resizeMode: 'cover',
+        backgroundColor: '#111827',
+    },
+    postPlaceholder: {
+        width: '100%',
+        height: '100%',
+        backgroundColor: '#111827',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    collectionItem: {
+        padding: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#1F2937',
+    },
+    collectionName: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#FFFFFF',
+        marginBottom: 4,
+    },
+    collectionCount: {
+        fontSize: 14,
+        color: '#9CA3AF',
+    },
+    emptyContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 40,
+    },
+    emptyText: {
+        fontSize: 16,
+        color: '#6B7280',
     },
 });
 

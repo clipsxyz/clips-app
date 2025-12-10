@@ -1,6 +1,10 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FiArrowLeft, FiCircle, FiX, FiCheck, FiPlay, FiPause, FiRotateCw, FiMic, FiMicOff, FiImage } from 'react-icons/fi';
+import { FiArrowLeft, FiCircle, FiX, FiCheck, FiPlay, FiPause, FiRotateCw, FiMic, FiMicOff, FiImage, FiMusic, FiLayers, FiZap, FiGrid, FiUser, FiFilter, FiRefreshCw, FiEdit3, FiSearch, FiBookmark, FiUpload, FiSliders, FiDroplet, FiVideo, FiVideoOff, FiCopy, FiSave, FiPlus, FiType } from 'react-icons/fi';
+import { saveDraft } from '../api/drafts';
+import { getTemplate } from '../api/templates';
+import { TEMPLATE_IDS } from '../constants';
+import Swal from 'sweetalert2';
 
 export default function InstantCreatePage() {
     const navigate = useNavigate();
@@ -10,19 +14,30 @@ export default function InstantCreatePage() {
     const recordedChunksRef = React.useRef<Blob[]>([]);
     const streamRef = React.useRef<MediaStream | null>(null);
     const isMountedRef = React.useRef(true);
+    const blobRef = React.useRef<Blob | null>(null); // Keep blob reference alive
     const [recording, setRecording] = React.useState(false);
     const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
     const [videoDuration, setVideoDuration] = React.useState(0);
     const [currentTime, setCurrentTime] = React.useState(0);
+    const [trimStart, setTrimStart] = React.useState(0);
+    const [trimEnd, setTrimEnd] = React.useState(0);
     const [isPlaying, setIsPlaying] = React.useState(false);
     const [showControls, setShowControls] = React.useState(true);
     const controlsTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const [facingMode, setFacingMode] = React.useState<'user' | 'environment'>('user');
     const [micOn, setMicOn] = React.useState(true);
+    const [cameraOn, setCameraOn] = React.useState(true);
+    const [dualCamera, setDualCamera] = React.useState(false);
+    const dualCameraRef = React.useRef<HTMLVideoElement | null>(null);
+    const dualStreamRef = React.useRef<MediaStream | null>(null);
+    const [showGazetteerMenu, setShowGazetteerMenu] = React.useState(false);
+    const gazetteerCameraRollInputRef = React.useRef<HTMLInputElement | null>(null);
     const [countdown, setCountdown] = React.useState<number | null>(null);
     const [greenEnabled, setGreenEnabled] = React.useState(false);
     const [bgUrl, setBgUrl] = React.useState<string | null>(null);
+    const [showGreenScreenMenu, setShowGreenScreenMenu] = React.useState(false);
     const bgInputRef = React.useRef<HTMLInputElement | null>(null);
+    const cameraRollInputRef = React.useRef<HTMLInputElement | null>(null);
     const greenCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
     const segRef = React.useRef<any>(null);
     const segTimerRef = React.useRef<number | null>(null);
@@ -32,6 +47,51 @@ export default function InstantCreatePage() {
     const [bgBlurPx, setBgBlurPx] = React.useState(2);
     const [featherPx, setFeatherPx] = React.useState(3);
     const [showGuides, setShowGuides] = React.useState(false);
+    const [showEffectsCard, setShowEffectsCard] = React.useState(false);
+    const [showMusicCard, setShowMusicCard] = React.useState(false);
+    const [activeMusicTab, setActiveMusicTab] = React.useState('For you');
+    const [selectedMusicTrackId, setSelectedMusicTrackId] = React.useState<number | null>(null);
+    const [libraryTracks, setLibraryTracks] = React.useState<any[]>([]);
+    const [libraryLoading, setLibraryLoading] = React.useState(false);
+    const [librarySearch, setLibrarySearch] = React.useState('');
+    const [libraryGenre, setLibraryGenre] = React.useState('');
+    const [libraryMood, setLibraryMood] = React.useState('');
+    const [showLayoutOptions, setShowLayoutOptions] = React.useState(false);
+    const [selectedLayout, setSelectedLayout] = React.useState<string | null>(null);
+    const [showGreenScreenOptions, setShowGreenScreenOptions] = React.useState(false);
+    const [showFilters, setShowFilters] = React.useState(false);
+    const [selectedFilter, setSelectedFilter] = React.useState<string>('None');
+    const [showAdjustments, setShowAdjustments] = React.useState(false);
+    const [brightness, setBrightness] = React.useState(1.0);
+    const [contrast, setContrast] = React.useState(1.0);
+    const [saturation, setSaturation] = React.useState(1.0);
+    const [hue, setHue] = React.useState(0.0); // Hue adjustment for hybrid model
+    const [speed, setSpeed] = React.useState(1.0); // Video playback speed
+    const [reverse, setReverse] = React.useState(false); // Reverse video
+    
+    // Multi-clip support
+    type Clip = {
+        id: string;
+        url: string;
+        duration: number;
+        trimStart: number;
+        trimEnd: number;
+        speed: number;
+        reverse: boolean;
+        blob?: Blob; // Optional blob reference for upload
+    };
+    type Transition = {
+        type: 'none' | 'fade' | 'swipe' | 'zoom';
+        duration: number; // Transition duration in seconds
+    };
+    const [clips, setClips] = React.useState<Clip[]>([]);
+    const [transitions, setTransitions] = React.useState<Transition[]>([]); // Transitions between clips
+    
+    // Voiceover recording
+    const [voiceoverUrl, setVoiceoverUrl] = React.useState<string | null>(null);
+    const [isRecordingVoiceover, setIsRecordingVoiceover] = React.useState(false);
+    const voiceoverRecorderRef = React.useRef<MediaRecorder | null>(null);
+    const voiceoverChunksRef = React.useRef<Blob[]>([]);
     const presets = React.useRef<string[]>([
         'https://images.unsplash.com/photo-1519681393784-d120267933ba?w=1200',
         'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=1200',
@@ -39,15 +99,26 @@ export default function InstantCreatePage() {
         'https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=1200'
     ]);
     const presetIdxRef = React.useRef(0);
+    const MAX_VIDEO_SECONDS = 90;
 
-    async function initStream(mode: 'user' | 'environment', audio: boolean) {
+    async function initStream(mode: 'user' | 'environment', audio: boolean, video: boolean = true) {
         try {
             // Stop previous stream if any
             if (streamRef.current) {
                 streamRef.current.getTracks().forEach(t => t.stop());
                 streamRef.current = null;
             }
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: mode }, audio });
+            if (!video && !audio) {
+                // Both off, just clear the video
+                if (videoRef.current) {
+                    videoRef.current.srcObject = null;
+                }
+                return;
+            }
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: video ? { facingMode: mode } : false, 
+                audio 
+            });
             streamRef.current = stream;
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
@@ -55,6 +126,55 @@ export default function InstantCreatePage() {
             }
         } catch (e: any) {
             console.error('Stream init error:', e);
+        }
+    }
+
+    function toggleCamera() {
+        const newCameraOn = !cameraOn;
+        setCameraOn(newCameraOn);
+        if (streamRef.current) {
+            const videoTrack = streamRef.current.getVideoTracks()[0];
+            if (videoTrack) {
+                videoTrack.enabled = newCameraOn;
+            }
+        } else if (newCameraOn) {
+            // If stream doesn't exist and we're turning camera on, initialize it
+            initStream(facingMode, micOn, true);
+        }
+    }
+
+    async function toggleDualCamera() {
+        const newDualCamera = !dualCamera;
+        setDualCamera(newDualCamera);
+
+        if (newDualCamera) {
+            // Enable dual camera - get both front and back cameras
+            try {
+                // Get the opposite camera
+                const oppositeMode = facingMode === 'user' ? 'environment' : 'user';
+                const dualStream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: oppositeMode }, 
+                    audio: false 
+                });
+                dualStreamRef.current = dualStream;
+                
+                if (dualCameraRef.current) {
+                    dualCameraRef.current.srcObject = dualStream;
+                    try { await dualCameraRef.current.play(); } catch { }
+                }
+            } catch (e: any) {
+                console.error('Dual camera init error:', e);
+                setDualCamera(false);
+            }
+        } else {
+            // Disable dual camera
+            if (dualStreamRef.current) {
+                dualStreamRef.current.getTracks().forEach(t => t.stop());
+                dualStreamRef.current = null;
+            }
+            if (dualCameraRef.current) {
+                dualCameraRef.current.srcObject = null;
+            }
         }
     }
 
@@ -248,9 +368,37 @@ export default function InstantCreatePage() {
         };
     }, [greenEnabled, bgUrl]);
 
+    // Close green screen menu when clicking outside
+    React.useEffect(() => {
+        if (!showGreenScreenMenu) return;
+        
+        const handleClickOutside = (e: MouseEvent) => {
+            const target = e.target as HTMLElement;
+            if (!target.closest('.green-screen-menu-container')) {
+                setShowGreenScreenMenu(false);
+            }
+        };
+        
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [showGreenScreenMenu]);
+
     React.useEffect(() => {
         isMountedRef.current = true;
-        initStream(facingMode, micOn);
+        
+        // Only initialize stream if camera is enabled and we don't have a preview
+        if (cameraOn && !previewUrl) {
+            initStream(facingMode, micOn, cameraOn);
+        } else if (previewUrl) {
+            // If preview is showing, stop the camera stream
+            if (streamRef.current) {
+                streamRef.current.getTracks().forEach(t => t.stop());
+                streamRef.current = null;
+            }
+            if (videoRef.current) {
+                videoRef.current.srcObject = null;
+            }
+        }
 
         return () => {
             isMountedRef.current = false;
@@ -286,8 +434,14 @@ export default function InstantCreatePage() {
             if (previewUrl) {
                 URL.revokeObjectURL(previewUrl);
             }
+
+            // Clean up dual camera stream
+            if (dualStreamRef.current) {
+                dualStreamRef.current.getTracks().forEach(t => t.stop());
+                dualStreamRef.current = null;
+            }
         };
-    }, []);
+    }, [facingMode, micOn, cameraOn, previewUrl]);
 
     function startRecording() {
         const cameraStream = videoRef.current?.srcObject as MediaStream | null;
@@ -322,14 +476,213 @@ export default function InstantCreatePage() {
                 recordedChunksRef.current.push(e.data);
             }
         };
-        mr.onstop = () => {
+        mr.onstop = async () => {
             // Ensure all chunks are collected
             if (recordedChunksRef.current.length > 0) {
                 const blobType = options.mimeType || 'video/webm';
                 const blob = new Blob(recordedChunksRef.current, { type: blobType });
-                const url = URL.createObjectURL(blob);
-                console.log('Preview URL created:', url, 'Blob size:', blob.size, 'Type:', blobType);
-                setPreviewUrl(url);
+                
+                // CRITICAL: Store blob reference to keep it alive
+                blobRef.current = blob;
+                
+                console.log('📹 Recording stopped, blob created. Blob size:', blob.size, 'Type:', blobType);
+                
+                // Create a blob URL for immediate preview (will be replaced with backend URL after upload)
+                const blobUrl = URL.createObjectURL(blob);
+                let persistentUrl = blobUrl;
+                
+                // Upload video to backend immediately
+                try {
+                    console.log('📤 Uploading video to backend...', { size: blob.size, type: blobType });
+                    const file = new File([blob], `video-${Date.now()}.webm`, { type: blobType });
+                    const { uploadFile } = await import('../api/client');
+                    const uploadResult = await uploadFile(file);
+                    
+                    if (uploadResult && uploadResult.success && uploadResult.fileUrl) {
+                        persistentUrl = uploadResult.fileUrl;
+                        console.log('✅ Video uploaded to backend:', persistentUrl);
+                        // Revoke the blob URL since we now have a backend URL
+                        URL.revokeObjectURL(blobUrl);
+                        // Clear blob reference since we have backend URL
+                        blobRef.current = null;
+                    } else {
+                        throw new Error('Upload failed - invalid response: ' + JSON.stringify(uploadResult));
+                    }
+                } catch (error) {
+                    console.error('❌ Failed to upload video to backend:', error);
+                    console.error('Error details:', {
+                        errorMessage: error instanceof Error ? error.message : String(error),
+                        blobSize: blob.size,
+                        blobType: blobType
+                    });
+                    console.warn('⚠️ Using blob URL for preview - blob reference kept alive, will upload in InstantFiltersPage:', blobUrl.substring(0, 50));
+                    // Keep blob URL AND blob reference - don't revoke until uploaded
+                    // InstantFiltersPage will upload it and then we can revoke
+                }
+                
+                // Create a video element to get duration
+                const tempVideo = document.createElement('video');
+                tempVideo.preload = 'metadata';
+                tempVideo.muted = true;
+                tempVideo.playsInline = true;
+                tempVideo.crossOrigin = 'anonymous';
+                
+                let durationResolved = false;
+                const resolveDuration = (duration: number) => {
+                    if (durationResolved) return;
+                    durationResolved = true;
+                    
+                    const newClip: Clip = {
+                        id: `clip-${Date.now()}`,
+                        url: persistentUrl, // Use persistent URL (backend URL if uploaded, blob URL if not)
+                        duration: duration || 0,
+                        trimStart: 0,
+                        trimEnd: duration || 0,
+                        speed: 1.0,
+                        reverse: false,
+                        blob: blobRef.current || undefined // Keep blob reference for upload in next step
+                    };
+                    
+                    const urlType = persistentUrl.startsWith('http://') || persistentUrl.startsWith('https://') ? 'backend' :
+                                   persistentUrl.startsWith('data:') ? 'data' : 'blob';
+                    console.log('📝 Clip created with URL type:', urlType, 'duration:', duration);
+                    
+                    // Add to clips array
+                    setClips(prev => {
+                        const updated = [...prev, newClip];
+                        // Set as preview (for single clip view)
+                        setPreviewUrl(persistentUrl);
+                        setVideoDuration(duration || 0);
+                        setTrimStart(0);
+                        setTrimEnd(duration || 0);
+                        
+                        // Auto-navigate to edit page after recording/selecting
+                        setTimeout(() => {
+                            const clipsToPass = updated.length > 0 ? updated : [newClip];
+                            if (clipsToPass.length > 0) {
+                                // Stop camera stream before navigating
+                                if (streamRef.current) {
+                                    streamRef.current.getTracks().forEach(t => t.stop());
+                                    streamRef.current = null;
+                                }
+                                // Stop video playback
+                                if (videoRef.current) {
+                                    videoRef.current.pause();
+                                    videoRef.current.srcObject = null;
+                                }
+                                navigate('/create/filters', {
+                                    state: {
+                                        videoUrl: clipsToPass[0].url,
+                                        videoDuration: clipsToPass[0].duration,
+                                        trimStart: clipsToPass[0].trimStart,
+                                        trimEnd: clipsToPass[0].trimEnd,
+                                        speed: clipsToPass[0].speed,
+                                        reverse: clipsToPass[0].reverse,
+                                        selectedFilter: selectedFilter,
+                                        brightness: brightness,
+                                        contrast: contrast,
+                                        saturation: saturation,
+                                        hue: hue,
+                                        clips: clipsToPass,
+                                        mediaType: 'video', // Recorded videos
+                                        musicTrackId: selectedMusicTrackId
+                                    }
+                                });
+                            }
+                        }, 500); // Small delay to ensure state is set
+                        
+                        return updated;
+                    });
+                };
+                
+                tempVideo.onloadedmetadata = async () => {
+                    // Wait a bit for duration to be available (especially for blob URLs)
+                    let duration = tempVideo.duration;
+                    let attempts = 0;
+                    const maxAttempts = 20; // Wait up to 2 seconds
+                    
+                    while ((!isFinite(duration) || duration <= 0 || isNaN(duration)) && attempts < maxAttempts && !durationResolved) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                        duration = tempVideo.duration;
+                        attempts++;
+                    }
+                    
+                    if (isFinite(duration) && duration > 0 && !durationResolved) {
+                        console.log('✅ Video metadata loaded, duration:', duration);
+                        resolveDuration(duration);
+                    } else if (!durationResolved) {
+                        // Try seeking to end to get duration (for blob URLs)
+                        try {
+                            const originalTime = tempVideo.currentTime;
+                            tempVideo.currentTime = 1e10; // Seek to end
+                            await new Promise(resolve => setTimeout(resolve, 300));
+                            duration = tempVideo.duration;
+                            tempVideo.currentTime = originalTime;
+                            
+                            if (isFinite(duration) && duration > 0) {
+                                console.log('✅ Got duration from seeking:', duration);
+                                resolveDuration(duration);
+                            } else {
+                                // Fallback: estimate from blob size
+                                const estimatedDuration = Math.max(1, Math.min(90, Math.round(blob.size / 150000))); // Rough estimate
+                                console.warn('⚠️ Could not get video duration, using estimate:', estimatedDuration);
+                                resolveDuration(estimatedDuration);
+                            }
+                        } catch (e) {
+                            // Fallback: estimate from blob size
+                            const estimatedDuration = Math.max(1, Math.min(90, Math.round(blob.size / 150000)));
+                            console.warn('⚠️ Error seeking for duration, using estimate:', estimatedDuration);
+                            resolveDuration(estimatedDuration);
+                        }
+                    }
+                };
+                
+                tempVideo.ondurationchange = () => {
+                    const duration = tempVideo.duration;
+                    if (isFinite(duration) && duration > 0 && !durationResolved) {
+                        console.log('✅ Video duration changed, duration:', duration);
+                        resolveDuration(duration);
+                    }
+                };
+                
+                tempVideo.onseeked = () => {
+                    const duration = tempVideo.duration;
+                    if (isFinite(duration) && duration > 0 && !durationResolved) {
+                        console.log('✅ Video seeked, duration:', duration);
+                        resolveDuration(duration);
+                    }
+                };
+                
+                tempVideo.onerror = (e) => {
+                    console.error('❌ Error loading video for duration:', e);
+                    console.error('Video error details:', {
+                        error: tempVideo.error,
+                        networkState: tempVideo.networkState,
+                        readyState: tempVideo.readyState,
+                        urlType: persistentUrl.startsWith('data:') ? 'data' : 'blob',
+                        urlPreview: persistentUrl.substring(0, 50)
+                    });
+                    
+                    // Fallback: use a default duration or estimate from blob size
+                    if (!durationResolved) {
+                        const estimatedDuration = Math.max(1, Math.round(blob.size / 100000)); // Rough estimate: 1 second per 100KB
+                        console.warn('⚠️ Using estimated duration due to error:', estimatedDuration);
+                        resolveDuration(estimatedDuration);
+                    }
+                };
+                
+                // Set source and load
+                tempVideo.src = persistentUrl;
+                tempVideo.load();
+                
+                // Timeout fallback
+                setTimeout(() => {
+                    if (!durationResolved) {
+                        const estimatedDuration = Math.max(1, Math.round(blob.size / 100000));
+                        console.warn('⚠️ Duration detection timeout, using estimate:', estimatedDuration);
+                        resolveDuration(estimatedDuration);
+                    }
+                }, 5000);
             } else {
                 console.error('No video chunks recorded');
             }
@@ -377,8 +730,69 @@ export default function InstantCreatePage() {
             }
 
             const handleLoadedMetadata = async () => {
-                const duration = video.duration;
-                setVideoDuration(duration);
+                // Wait a bit for duration to be available (especially for blob URLs)
+                let duration = video.duration;
+                let attempts = 0;
+                const maxAttempts = 10;
+                
+                // For blob URLs, duration might not be immediately available
+                while ((!isFinite(duration) || duration <= 0 || isNaN(duration)) && attempts < maxAttempts) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    duration = video.duration;
+                    attempts++;
+                }
+                
+                // Check if duration is valid (not NaN or Infinity)
+                if (!isFinite(duration) || duration <= 0 || isNaN(duration)) {
+                    // Try to get duration by seeking to end (for blob URLs)
+                    let fallbackDuration = 0;
+                    if (video.readyState >= 2) {
+                        try {
+                            // Store original time
+                            const originalTime = video.currentTime;
+                            // Seek to end to trigger duration update
+                            video.currentTime = 1e10;
+                            await new Promise(resolve => setTimeout(resolve, 200));
+                            fallbackDuration = video.duration;
+                            // Reset to beginning
+                            video.currentTime = originalTime;
+                        } catch (e) {
+                            // Silent fail - will use default
+                        }
+                    }
+                    
+                    if (fallbackDuration > 0 && isFinite(fallbackDuration)) {
+                        duration = fallbackDuration;
+                    }
+                }
+                
+                // Final check - if still invalid, use a reasonable default
+                if (!isFinite(duration) || duration <= 0 || isNaN(duration)) {
+                    // Use a default duration of 5 seconds for videos without metadata
+                    duration = 5;
+                    setVideoDuration(duration);
+                    setTrimStart(0);
+                    setTrimEnd(duration);
+                } else {
+                    setVideoDuration(duration);
+                    setTrimStart(0);
+                    setTrimEnd(duration);
+
+                    // Enforce 90 second limit in Instant Create preview (only if duration is valid)
+                    if (duration > MAX_VIDEO_SECONDS) {
+                        Swal.fire({
+                            icon: 'warning',
+                            title: 'Video too long',
+                            text: `Videos created here must be ${MAX_VIDEO_SECONDS} seconds or less. Please record or select a shorter clip.`,
+                            confirmButtonText: 'OK'
+                        });
+                        setPreviewUrl(null);
+                        setCurrentTime(0);
+                        setIsPlaying(false);
+                        return;
+                    }
+                }
+
                 // Ensure video plays
                 try {
                     await video.play();
@@ -444,7 +858,52 @@ export default function InstantCreatePage() {
     }, [previewUrl, isPlaying]);
 
     function handleNext() {
-        if (!previewUrl) return;
+        // Use clips array if available, otherwise use single preview
+        const clipsToPass = clips.length > 0 ? clips : (previewUrl ? [{
+            id: `clip-${Date.now()}`,
+            url: previewUrl,
+            duration: videoDuration,
+            trimStart: trimStart,
+            trimEnd: trimEnd || videoDuration,
+            speed: speed,
+            reverse: reverse,
+            blob: blobRef.current || undefined // Pass blob reference for upload in next step
+        }] : []);
+
+        if (clipsToPass.length === 0) return;
+
+        // Check URL types - warn if blob URLs found (they'll be uploaded in InstantFiltersPage)
+        const blobUrls = clipsToPass.filter(clip => clip.url && clip.url.startsWith('blob:'));
+        const dataUrls = clipsToPass.filter(clip => clip.url && clip.url.startsWith('data:'));
+        const backendUrls = clipsToPass.filter(clip => clip.url && (clip.url.startsWith('http://') || clip.url.startsWith('https://')));
+        
+        if (blobUrls.length > 0) {
+            console.warn('⚠️ Found blob URLs in clips - will be uploaded to backend in next step:', blobUrls.map(c => ({ id: c.id, url: c.url.substring(0, 50) })));
+        }
+        
+        if (dataUrls.length > 0) {
+            console.warn('⚠️ Found data URLs in clips - will be uploaded to backend in next step:', dataUrls.length);
+        }
+        
+        if (backendUrls.length > 0) {
+            console.log('✅ Found backend URLs in clips:', backendUrls.length);
+        }
+
+        // Verify all URLs are data URLs
+        const allDataUrls = clipsToPass.every(clip => !clip.url || clip.url.startsWith('data:') || clip.url.startsWith('http'));
+        if (!allDataUrls) {
+            console.warn('⚠️ Some clips have unexpected URL types:', clipsToPass.map(c => ({ 
+                id: c.id, 
+                urlType: c.url?.substring(0, 10) 
+            })));
+        }
+
+        console.log('✅ All clips verified, navigating to filters page', {
+            clipCount: clipsToPass.length,
+            firstClipUrlType: clipsToPass[0].url?.startsWith('data:') ? 'data' : 
+                             clipsToPass[0].url?.startsWith('blob:') ? 'blob' : 
+                             clipsToPass[0].url?.startsWith('http') ? 'http' : 'unknown'
+        });
 
         // Stop camera stream before navigating
         if (streamRef.current) {
@@ -458,8 +917,233 @@ export default function InstantCreatePage() {
             videoRef.current.srcObject = null;
         }
 
-        navigate('/create/filters', { state: { videoUrl: previewUrl, videoDuration } });
+        // For now, pass the first clip's URL for preview in filters page
+        // The full clips array will be passed through to CreatePage
+        navigate('/create/filters', { 
+            state: { 
+                videoUrl: clipsToPass[0].url, // First clip for preview
+                videoDuration: clipsToPass[0].duration,
+                trimStart: clipsToPass[0].trimStart,
+                trimEnd: clipsToPass[0].trimEnd,
+                speed: clipsToPass[0].speed,
+                reverse: clipsToPass[0].reverse,
+                selectedFilter: selectedFilter,
+                brightness: brightness,
+                contrast: contrast,
+                saturation: saturation,
+                hue: hue,
+                clips: clipsToPass, // Pass all clips for multi-clip support
+                mediaType: 'video', // Recorded videos
+                musicTrackId: selectedMusicTrackId
+            } 
+        });
     }
+
+    async function handleSaveToDrafts() {
+        if (!previewUrl) return;
+        
+        try {
+            await saveDraft({
+                videoUrl: previewUrl,
+                videoDuration,
+                trimStart,
+                trimEnd,
+            });
+            
+            // Show success feedback with SweetAlert
+            await Swal.fire({
+                title: 'Saved to Drafts!',
+                html: `
+                  <div style="text-align: center; padding: 20px 0;">
+                    <p style="color: #ffffff; font-size: 14px; line-height: 20px; margin: 0;">
+                      Your video has been saved. You can find it in your profile page.
+                    </p>
+                  </div>
+                `,
+                showConfirmButton: true,
+                confirmButtonText: 'Done',
+                confirmButtonColor: '#0095f6',
+                background: '#262626',
+                color: '#ffffff',
+                customClass: {
+                  popup: 'instagram-style-modal',
+                  title: 'instagram-modal-title',
+                  htmlContainer: 'instagram-modal-content',
+                  confirmButton: 'instagram-confirm-btn',
+                  actions: 'instagram-modal-actions'
+                },
+                buttonsStyling: true,
+                timer: 3000,
+                timerProgressBar: false
+            });
+            
+            // Navigate back to feed
+            if (streamRef.current) {
+                streamRef.current.getTracks().forEach(t => t.stop());
+                streamRef.current = null;
+            }
+            if (videoRef.current) {
+                videoRef.current.pause();
+                videoRef.current.srcObject = null;
+            }
+            navigate('/feed');
+        } catch (error) {
+            console.error('Error saving draft:', error);
+            Swal.fire({
+                title: 'Failed to Save',
+                html: `
+                  <div style="text-align: center; padding: 20px 0;">
+                    <p style="color: #ffffff; font-size: 14px; line-height: 20px; margin: 0;">
+                      There was an error saving your draft. Please try again.
+                    </p>
+                  </div>
+                `,
+                showConfirmButton: true,
+                confirmButtonText: 'OK',
+                confirmButtonColor: '#0095f6',
+                background: '#262626',
+                color: '#ffffff',
+                customClass: {
+                  popup: 'instagram-style-modal',
+                  title: 'instagram-modal-title',
+                  htmlContainer: 'instagram-modal-content',
+                  confirmButton: 'instagram-confirm-btn',
+                  actions: 'instagram-modal-actions'
+                },
+                buttonsStyling: true
+            });
+        }
+    }
+
+    // Filter styles function
+    const getFilterStyle = (filterName: string): React.CSSProperties => {
+        let baseFilter = '';
+        let hasVignette = false;
+        
+        switch (filterName) {
+            case 'None':
+                baseFilter = '';
+                break;
+            case 'Beauty':
+                baseFilter = 'brightness(1.1) contrast(0.95) saturate(1.2)';
+                break;
+            case 'B&W':
+                baseFilter = 'grayscale(100%)';
+                break;
+            case 'Sepia':
+                baseFilter = 'sepia(100%)';
+                break;
+            case 'Vivid':
+                baseFilter = 'brightness(1.1) contrast(1.2) saturate(1.5)';
+                break;
+            case 'Cool':
+                baseFilter = 'brightness(1.05) contrast(1.1) saturate(0.8) hue-rotate(10deg)';
+                break;
+            case 'Vignette':
+                baseFilter = 'brightness(0.9) contrast(1.1)';
+                hasVignette = true;
+                break;
+            default:
+                baseFilter = '';
+        }
+        
+        // Combine base filter with adjustments (including hue)
+        const hueRotate = hue !== 0.0 ? `hue-rotate(${hue * 180}deg)` : '';
+        const adjustmentFilter = `brightness(${brightness}) contrast(${contrast}) saturate(${saturation})${hueRotate ? ` ${hueRotate}` : ''}`;
+        
+        const result: React.CSSProperties = {};
+        
+        if (baseFilter && (brightness !== 1.0 || contrast !== 1.0 || saturation !== 1.0 || hue !== 0.0)) {
+            result.filter = `${baseFilter} ${adjustmentFilter}`;
+        } else if (baseFilter) {
+            result.filter = baseFilter;
+        } else if (brightness !== 1.0 || contrast !== 1.0 || saturation !== 1.0 || hue !== 0.0) {
+            result.filter = adjustmentFilter;
+        }
+        
+        if (hasVignette) {
+            result.boxShadow = 'inset 0 0 200px rgba(0, 0, 0, 0.5)';
+        }
+        
+        return result;
+    };
+
+    // Custom icon components matching Instagram style
+    const EffectsIcon = ({ className }: { className?: string }) => (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
+            {/* Three sparkles in triangular pattern (two bottom, one top center) */}
+            {/* Top sparkle */}
+            <path d="M12 4 L12 8 M10 6 L14 6" strokeLinecap="round" />
+            <circle cx="12" cy="6" r="1.5" fill="currentColor" />
+            {/* Bottom left sparkle */}
+            <path d="M6 16 L6 20 M4 18 L8 18" strokeLinecap="round" />
+            <circle cx="6" cy="18" r="1.5" fill="currentColor" />
+            {/* Bottom right sparkle */}
+            <path d="M18 16 L18 20 M16 18 L20 18" strokeLinecap="round" />
+            <circle cx="18" cy="18" r="1.5" fill="currentColor" />
+        </svg>
+    );
+
+    const VideoLayoutIcon = ({ className }: { className?: string }) => (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+            {/* Rectangle divided into 4 quadrants */}
+            <rect x="4" y="4" width="16" height="16" stroke="currentColor" strokeWidth="2" />
+            <line x1="12" y1="4" x2="12" y2="20" stroke="currentColor" strokeWidth="2" />
+            <line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" strokeWidth="2" />
+            {/* Fill top-left and bottom-right quadrants */}
+            <rect x="4" y="4" width="8" height="8" fill="currentColor" />
+            <rect x="12" y="12" width="8" height="8" fill="currentColor" />
+        </svg>
+    );
+
+    const GreenScreenIcon = ({ className }: { className?: string }) => (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
+            {/* Dashed square outline */}
+            <rect x="4" y="4" width="16" height="16" stroke="currentColor" strokeWidth="1.5" strokeDasharray="2 2" fill="none" />
+            {/* Person silhouette inside - head and shoulders */}
+            <circle cx="12" cy="9" r="2.5" fill="currentColor" />
+            <path d="M9 16 Q12 12 15 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="currentColor" />
+        </svg>
+    );
+
+    // Layout option icons
+    const VerticalSplitIcon = ({ className, selected }: { className?: string; selected?: boolean }) => (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+            <rect x="4" y="4" width="7" height="16" fill={selected ? "currentColor" : "none"} stroke="currentColor" />
+            <rect x="13" y="4" width="7" height="16" fill={selected ? "currentColor" : "none"} stroke="currentColor" />
+        </svg>
+    );
+
+    const HorizontalSplitIcon = ({ className, selected }: { className?: string; selected?: boolean }) => (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+            <rect x="4" y="4" width="16" height="7" fill={selected ? "currentColor" : "none"} stroke="currentColor" />
+            <rect x="4" y="13" width="16" height="7" fill={selected ? "currentColor" : "none"} stroke="currentColor" />
+        </svg>
+    );
+
+    const Grid2x2Icon = ({ className, selected }: { className?: string; selected?: boolean }) => (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+            <rect x="4" y="4" width="7" height="7" fill={selected ? "currentColor" : "none"} stroke="currentColor" />
+            <rect x="13" y="4" width="7" height="7" fill={selected ? "currentColor" : "none"} stroke="currentColor" />
+            <rect x="4" y="13" width="7" height="7" fill={selected ? "currentColor" : "none"} stroke="currentColor" />
+            <rect x="13" y="13" width="7" height="7" fill={selected ? "currentColor" : "none"} stroke="currentColor" />
+        </svg>
+    );
+
+    const Grid3x3Icon = ({ className, selected }: { className?: string; selected?: boolean }) => (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
+            {/* 3x3 grid */}
+            <rect x="4" y="4" width="4.5" height="4.5" fill={selected ? "currentColor" : "none"} stroke="currentColor" />
+            <rect x="9.75" y="4" width="4.5" height="4.5" fill={selected ? "currentColor" : "none"} stroke="currentColor" />
+            <rect x="15.5" y="4" width="4.5" height="4.5" fill={selected ? "currentColor" : "none"} stroke="currentColor" />
+            <rect x="4" y="9.75" width="4.5" height="4.5" fill={selected ? "currentColor" : "none"} stroke="currentColor" />
+            <rect x="9.75" y="9.75" width="4.5" height="4.5" fill={selected ? "currentColor" : "none"} stroke="currentColor" />
+            <rect x="15.5" y="9.75" width="4.5" height="4.5" fill={selected ? "currentColor" : "none"} stroke="currentColor" />
+            <rect x="4" y="15.5" width="4.5" height="4.5" fill={selected ? "currentColor" : "none"} stroke="currentColor" />
+            <rect x="9.75" y="15.5" width="4.5" height="4.5" fill={selected ? "currentColor" : "none"} stroke="currentColor" />
+            <rect x="15.5" y="15.5" width="4.5" height="4.5" fill={selected ? "currentColor" : "none"} stroke="currentColor" />
+        </svg>
+    );
 
     return (
         <div className="fixed inset-0 bg-black z-50 flex flex-col">
@@ -474,6 +1158,162 @@ export default function InstantCreatePage() {
                 <div className="w-10"></div>
             </div>
 
+            {/* Regular Icons - Top Bar (always visible) */}
+            {!previewUrl && (
+                <div className="absolute top-16 left-0 right-0 z-40 flex items-center justify-between px-6 py-2">
+                    <button 
+                        title="Flip camera" 
+                        className="p-2 rounded-lg bg-black/60 text-white hover:bg-black/80 active:scale-95 transition-all duration-200" 
+                        onClick={() => { 
+                            const next = facingMode === 'user' ? 'environment' : 'user'; 
+                            setFacingMode(next); 
+                            initStream(next, micOn, cameraOn);
+                            // If dual camera is on, update the dual camera stream
+                            if (dualCamera && dualStreamRef.current) {
+                                dualStreamRef.current.getTracks().forEach(t => t.stop());
+                                toggleDualCamera(); // Turn off and on to get new camera
+                                setTimeout(() => toggleDualCamera(), 100);
+                            }
+                        }}
+                    >
+                        <FiRotateCw className="w-4 h-4" />
+                    </button>
+                    <button 
+                        title={dualCamera ? 'Disable dual camera' : 'Enable dual camera'} 
+                        className={`p-2 rounded-lg ${dualCamera ? 'bg-purple-600/80' : 'bg-black/60'} text-white hover:bg-black/80 active:scale-95 transition-all duration-200`}
+                        onClick={toggleDualCamera}
+                    >
+                        <FiCopy className="w-4 h-4" />
+                    </button>
+                    <button 
+                        title={cameraOn ? 'Turn camera off' : 'Turn camera on'} 
+                        className={`p-2 rounded-lg ${cameraOn ? 'bg-black/60' : 'bg-red-600/80'} text-white hover:bg-black/80 active:scale-95 transition-all duration-200`}
+                        onClick={toggleCamera}
+                    >
+                        {cameraOn ? <FiVideo className="w-4 h-4" /> : <FiVideoOff className="w-4 h-4" />}
+                    </button>
+                    <button 
+                        title={micOn ? 'Mute mic' : 'Unmute mic'} 
+                        className={`p-2 rounded-lg ${micOn ? 'bg-black/60' : 'bg-red-600/80'} text-white hover:bg-black/80 active:scale-95 transition-all duration-200`}
+                        onClick={() => { 
+                            const next = !micOn; 
+                            setMicOn(next); 
+                            if (streamRef.current) {
+                                const audioTrack = streamRef.current.getAudioTracks()[0];
+                                if (audioTrack) {
+                                    audioTrack.enabled = next;
+                                }
+                            } else if (next) {
+                                initStream(facingMode, true, cameraOn);
+                            }
+                        }}
+                    >
+                        {micOn ? <FiMic className="w-4 h-4" /> : <FiMicOff className="w-4 h-4" />}
+                    </button>
+                    <button
+                        title={showGuides ? 'Hide guides' : 'Show guides'}
+                        className={`p-2 rounded-lg ${showGuides ? 'bg-white/70 text-black' : 'bg-black/60 text-white'} hover:bg-black/80 active:scale-95 transition-all duration-200`}
+                        onClick={() => setShowGuides(!showGuides)}
+                    >
+                        <span className="text-xs font-semibold">G</span>
+                    </button>
+                    <div className="relative green-screen-menu-container">
+                        <button
+                            title={greenEnabled ? 'Green screen options' : 'Enable green screen'}
+                            className={`p-2 rounded-lg ${greenEnabled ? 'bg-green-600 shadow-lg shadow-green-500/50' : 'bg-black/60'} text-white hover:bg-green-600/80 active:scale-95 transition-all duration-200`}
+                            onClick={() => setShowGreenScreenMenu(!showGreenScreenMenu)}
+                        >
+                            <GreenScreenIcon className="w-4 h-4" />
+                        </button>
+                        
+                        {/* Hidden file input for green screen background */}
+                        <input
+                            ref={bgInputRef}
+                            type="file"
+                            accept="image/*,video/*"
+                            className="hidden"
+                            onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (!f) return;
+                                const url = URL.createObjectURL(f);
+                                console.log('GS: File selected', { type: f.type, size: f.size, name: f.name });
+                                setBgUrl(url);
+                                setGreenEnabled(true);
+                                setShowGreenScreenMenu(false);
+                            }}
+                        />
+                        
+                        {/* Green Screen Menu */}
+                        {showGreenScreenMenu && (
+                            <div className="absolute top-12 right-0 z-50 bg-black/90 backdrop-blur-sm rounded-xl border border-white/20 shadow-2xl p-2 min-w-[200px] green-screen-menu-container">
+                                {!greenEnabled ? (
+                                    <>
+                                        <button
+                                            onClick={() => {
+                                                bgInputRef.current?.click();
+                                                setShowGreenScreenMenu(false);
+                                            }}
+                                            className="w-full p-3 rounded-lg bg-gray-800/80 hover:bg-gray-700 text-white flex items-center gap-3 transition-all duration-200 text-left"
+                                        >
+                                            <FiImage className="w-5 h-5 text-green-400" />
+                                            <span className="text-sm font-medium">Choose Image</span>
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                const list = presets.current;
+                                                setBgUrl(list[presetIdxRef.current]);
+                                                setGreenEnabled(true);
+                                                setShowGreenScreenMenu(false);
+                                            }}
+                                            className="w-full p-3 rounded-lg bg-gray-800/80 hover:bg-gray-700 text-white flex items-center gap-3 transition-all duration-200 text-left mt-2"
+                                        >
+                                            <FiDroplet className="w-5 h-5 text-purple-400" />
+                                            <span className="text-sm font-medium">Use Preset</span>
+                                        </button>
+                                    </>
+                                ) : (
+                                    <>
+                                        <button
+                                            onClick={() => {
+                                                bgInputRef.current?.click();
+                                                setShowGreenScreenMenu(false);
+                                            }}
+                                            className="w-full p-3 rounded-lg bg-gray-800/80 hover:bg-gray-700 text-white flex items-center gap-3 transition-all duration-200 text-left"
+                                        >
+                                            <FiImage className="w-5 h-5 text-green-400" />
+                                            <span className="text-sm font-medium">Change Image</span>
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                const list = presets.current;
+                                                presetIdxRef.current = (presetIdxRef.current + 1) % list.length;
+                                                setBgUrl(list[presetIdxRef.current]);
+                                                setShowGreenScreenMenu(false);
+                                            }}
+                                            className="w-full p-3 rounded-lg bg-gray-800/80 hover:bg-gray-700 text-white flex items-center gap-3 transition-all duration-200 text-left mt-2"
+                                        >
+                                            <FiDroplet className="w-5 h-5 text-purple-400" />
+                                            <span className="text-sm font-medium">Next Preset</span>
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setGreenEnabled(false);
+                                                setBgUrl(null);
+                                                setShowGreenScreenMenu(false);
+                                            }}
+                                            className="w-full p-3 rounded-lg bg-red-600/80 hover:bg-red-600 text-white flex items-center gap-3 transition-all duration-200 text-left mt-2"
+                                        >
+                                            <FiX className="w-5 h-5" />
+                                            <span className="text-sm font-medium">Disable</span>
+                                        </button>
+                                    </>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
             {/* Video Preview - Full Screen */}
             <div className="flex-1 flex items-center justify-center bg-black relative">
                 {!previewUrl ? (
@@ -483,13 +1323,23 @@ export default function InstantCreatePage() {
                             playsInline
                             muted
                             className={`w-full h-full ${greenEnabled ? 'hidden' : 'block'} object-cover`}
+                            style={getFilterStyle(selectedFilter)}
                         />
                         {/* Green screen composited canvas */}
                         <canvas
                             ref={greenCanvasRef}
                             className={`${greenEnabled ? 'block' : 'hidden'} absolute inset-0 w-full h-full object-cover`}
-                            style={{ zIndex: greenEnabled ? 10 : 0 }}
+                            style={{ zIndex: greenEnabled ? 10 : 0, ...getFilterStyle(selectedFilter) }}
                         />
+                        {/* Dual Camera - Picture in Picture */}
+                        {dualCamera && !greenEnabled && (
+                            <video
+                                ref={dualCameraRef}
+                                playsInline
+                                muted
+                                className="absolute bottom-20 right-4 w-32 h-48 rounded-xl border-2 border-white/30 shadow-2xl object-cover z-20"
+                            />
+                        )}
                     </>
                 ) : (
                     <div
@@ -533,6 +1383,7 @@ export default function InstantCreatePage() {
                             muted={false}
                             className="w-full h-full object-contain"
                             loop
+                            style={getFilterStyle(selectedFilter)}
                         />
 
                         {/* Custom Play/Pause Overlay */}
@@ -570,6 +1421,37 @@ export default function InstantCreatePage() {
                                 </div>
                             </div>
 
+                            {/* Timeline Scrubber - Enhanced */}
+                            <div className="relative mb-3">
+                                <div className="h-1.5 bg-white/20 rounded-full overflow-hidden cursor-pointer"
+                                    onClick={(e) => {
+                                        if (!previewVideoRef.current) return;
+                                        const rect = e.currentTarget.getBoundingClientRect();
+                                        const clickX = e.clientX - rect.left;
+                                        const percentage = clickX / rect.width;
+                                        const newTime = percentage * videoDuration;
+                                        previewVideoRef.current.currentTime = Math.max(0, Math.min(newTime, videoDuration));
+                                    }}
+                                >
+                                    <div className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-100"
+                                        style={{ width: `${videoDuration > 0 ? (currentTime / videoDuration) * 100 : 0}%` }}
+                                    />
+                                    {/* Trim markers */}
+                                    {videoDuration > 0 && (
+                                        <>
+                                            <div 
+                                                className="absolute top-0 bottom-0 w-0.5 bg-yellow-400 shadow-lg"
+                                                style={{ left: `${(trimStart / videoDuration) * 100}%` }}
+                                            />
+                                            <div 
+                                                className="absolute top-0 bottom-0 w-0.5 bg-yellow-400 shadow-lg"
+                                                style={{ left: `${((trimEnd || videoDuration) / videoDuration) * 100}%` }}
+                                            />
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+
                             {/* Time Display and Controls */}
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
@@ -578,7 +1460,7 @@ export default function InstantCreatePage() {
                                             e.stopPropagation();
                                             togglePlayPause();
                                         }}
-                                        className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center hover:bg-white/30 transition-colors"
+                                        className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center hover:bg-white/30 transition-colors active:scale-95"
                                         aria-label={isPlaying ? 'Pause' : 'Play'}
                                     >
                                         {isPlaying ? (
@@ -591,16 +1473,40 @@ export default function InstantCreatePage() {
                                         {formatTime(currentTime)} / {formatTime(videoDuration)}
                                     </span>
                                 </div>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => {
+                                            if (previewVideoRef.current) {
+                                                previewVideoRef.current.currentTime = Math.max(0, previewVideoRef.current.currentTime - 1);
+                                            }
+                                        }}
+                                        className="px-2 py-1 rounded bg-white/10 text-white text-xs hover:bg-white/20 transition-colors"
+                                        title="Rewind 1s"
+                                    >
+                                        -1s
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            if (previewVideoRef.current) {
+                                                previewVideoRef.current.currentTime = Math.min(videoDuration, previewVideoRef.current.currentTime + 1);
+                                            }
+                                        }}
+                                        className="px-2 py-1 rounded bg-white/10 text-white text-xs hover:bg-white/20 transition-colors"
+                                        title="Forward 1s"
+                                    >
+                                        +1s
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
                 )}
             </div>
 
-            {/* Controls - Bottom */}
-            <div className="absolute bottom-0 left-0 right-0 z-50 bg-gradient-to-t from-black/80 to-transparent p-6 pb-safe">
-                {!recording && !previewUrl && (
-                    <div className="flex items-center justify-center">
+            {/* Record Button */}
+            {!previewUrl && (
+                <div className="absolute bottom-24 left-0 right-0 z-50 flex items-center justify-center">
+                    {!recording && countdown === null ? (
                         <button
                             onClick={() => {
                                 // Optional 3s countdown before recording
@@ -609,112 +1515,1380 @@ export default function InstantCreatePage() {
                                 const t2 = setTimeout(() => setCountdown(1), 2000);
                                 const t3 = setTimeout(() => { setCountdown(null); startRecording(); }, 3000);
                             }}
-                            className="w-20 h-20 rounded-full bg-red-600 border-4 border-white shadow-2xl flex items-center justify-center hover:scale-105 transition-transform active:scale-95"
+                            className="w-20 h-20 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 border-4 border-white shadow-2xl flex items-center justify-center hover:scale-105 transition-all duration-300 active:scale-95"
                             aria-label="Record video"
                         >
                             <FiCircle className="w-10 h-10 text-white" fill="white" />
                         </button>
-                    </div>
-                )}
-                {recording && (
-                    <div className="flex items-center justify-center">
+                    ) : (
                         <button
                             onClick={stopRecording}
-                            className="w-20 h-20 rounded-full bg-gray-900 border-4 border-white shadow-2xl flex items-center justify-center hover:scale-105 transition-transform active:scale-95"
-                            aria-label="Stop recording"
+                            className={`w-20 h-20 rounded-full border-4 border-white shadow-2xl flex items-center justify-center hover:scale-105 transition-all duration-500 active:scale-95 ${
+                                countdown !== null 
+                                    ? 'bg-gradient-to-br from-green-500 via-yellow-500 to-red-500 animate-pulse' 
+                                    : 'bg-gradient-to-br from-red-500 to-red-700'
+                            }`}
+                            aria-label={recording ? "Stop recording" : "Recording starting..."}
                         >
-                            <div className="w-8 h-8 rounded bg-white"></div>
+                            {recording ? (
+                                <div className="w-8 h-8 rounded bg-white"></div>
+                            ) : countdown !== null ? (
+                                <div className="text-white text-2xl font-bold">{countdown}</div>
+                            ) : (
+                                <div className="w-8 h-8 rounded bg-white"></div>
+                            )}
                         </button>
-                    </div>
-                )}
-                {previewUrl && (
-                    <div className="flex items-center justify-center gap-4 pt-20">
-                        <button
-                            onClick={() => { setPreviewUrl(null); }}
-                            className="w-16 h-16 rounded-full bg-gray-800/90 backdrop-blur-sm border-2 border-white/30 shadow-2xl flex items-center justify-center hover:scale-105 hover:bg-gray-700 transition-all active:scale-95"
-                            aria-label="Retake"
-                        >
-                            <FiX className="w-7 h-7 text-white" />
-                        </button>
-                        <button
-                            onClick={handleNext}
-                            className="w-16 h-16 rounded-full bg-gradient-to-r from-blue-600 to-blue-500 border-2 border-white/30 shadow-2xl flex items-center justify-center hover:scale-105 hover:from-blue-700 hover:to-blue-600 transition-all active:scale-95"
-                            aria-label="Next"
-                        >
-                            <FiCheck className="w-7 h-7 text-white" />
-                        </button>
-                    </div>
-                )}
-            </div>
+                    )}
+                </div>
+            )}
 
-            {/* Left Action Rail (icons similar to Instagram) */}
+            {/* Platform Icons Footer */}
             {!previewUrl && (
-                <div className="absolute left-2 top-1/4 z-40 flex flex-col gap-3">
-                    <button title="Flip camera" className="p-2 rounded-full bg-black/40 text-white hover:bg-black/60" onClick={() => { const next = facingMode === 'user' ? 'environment' : 'user'; setFacingMode(next); initStream(next, micOn); }}>
-                        <FiRotateCw className="w-5 h-5" />
-                    </button>
-                    <button title={micOn ? 'Mute mic' : 'Unmute mic'} className="p-2 rounded-full bg-black/40 text-white hover:bg-black/60" onClick={() => { const next = !micOn; setMicOn(next); initStream(facingMode, next); }}>
-                        {micOn ? <FiMic className="w-5 h-5" /> : <FiMicOff className="w-5 h-5" />}
-                    </button>
+                <div className="absolute bottom-0 left-0 right-0 z-50 flex items-center justify-center gap-4 pb-4 bg-gradient-to-t from-black/80 via-black/60 to-transparent pt-6">
+                    {/* TikTok Icon */}
                     <button
-                        title="Choose Green Screen background"
-                        className={`p-2 rounded-full ${greenEnabled ? 'bg-green-600' : 'bg-black/40'} text-white hover:bg-black/60`}
+                        onClick={async () => {
+                            try {
+                                const tiktokTemplate = await getTemplate(TEMPLATE_IDS.TIKTOK);
+                                if (tiktokTemplate) {
+                                    navigate('/template-editor', {
+                                        state: { template: tiktokTemplate }
+                                    });
+                                } else {
+                                    Swal.fire({
+                                        icon: 'error',
+                                        title: 'Error',
+                                        text: 'Could not load TikTok template',
+                                        timer: 2000,
+                                        showConfirmButton: false
+                                    });
+                                }
+                            } catch (error) {
+                                console.error('Error loading TikTok template:', error);
+                                Swal.fire({
+                                    icon: 'error',
+                                    title: 'Error',
+                                    text: 'Failed to load TikTok template',
+                                    timer: 2000,
+                                    showConfirmButton: false
+                                });
+                            }
+                        }}
+                        className="w-10 h-10 rounded-lg bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/20 hover:bg-black/80 active:scale-95 transition-all cursor-pointer"
+                        aria-label="Open TikTok template"
+                    >
+                        <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 text-white">
+                            <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.65 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z"/>
+                        </svg>
+                    </button>
+                    
+                    {/* Instagram Icon */}
+                    <button
+                        onClick={async () => {
+                            try {
+                                const instagramTemplate = await getTemplate(TEMPLATE_IDS.INSTAGRAM);
+                                if (instagramTemplate) {
+                                    navigate('/template-editor', {
+                                        state: { template: instagramTemplate }
+                                    });
+                                } else {
+                                    Swal.fire({
+                                        icon: 'error',
+                                        title: 'Error',
+                                        text: 'Could not load Instagram template',
+                                        timer: 2000,
+                                        showConfirmButton: false
+                                    });
+                                }
+                            } catch (error) {
+                                console.error('Error loading Instagram template:', error);
+                                Swal.fire({
+                                    icon: 'error',
+                                    title: 'Error',
+                                    text: 'Failed to load Instagram template',
+                                    timer: 2000,
+                                    showConfirmButton: false
+                                });
+                            }
+                        }}
+                        className="w-10 h-10 rounded-lg bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/20 hover:bg-black/80 active:scale-95 transition-all cursor-pointer"
+                        aria-label="Open Instagram template"
+                    >
+                        <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 text-white">
+                            <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+                        </svg>
+                    </button>
+                    
+                    {/* Gazetteer Icon */}
+                    <button
                         onClick={() => {
-                            // Always open picker to choose a background
-                            bgInputRef.current?.click();
+                            setShowGazetteerMenu(true);
                         }}
+                        className="px-3 h-10 rounded-lg bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/20 hover:bg-black/80 active:scale-95 transition-all cursor-pointer"
+                        aria-label="Open Gazetteer menu"
                     >
-                        GS
+                        <span 
+                            className="text-xs font-bold"
+                            style={{
+                                background: 'linear-gradient(90deg, #22c55e, #ffffff)',
+                                WebkitBackgroundClip: 'text',
+                                backgroundClip: 'text',
+                                WebkitTextFillColor: 'transparent',
+                                color: 'transparent'
+                            }}
+                        >
+                            +Gazetteer+
+                        </span>
                     </button>
+                    
+                    {/* YouTube Shorts Icon */}
                     <button
-                        title="Preset background"
-                        className="p-2 rounded-full bg-black/40 text-white hover:bg-black/60"
+                        onClick={async () => {
+                            try {
+                                const youtubeShortsTemplate = await getTemplate(TEMPLATE_IDS.YOUTUBE_SHORTS);
+                                if (youtubeShortsTemplate) {
+                                    navigate('/template-editor', {
+                                        state: { template: youtubeShortsTemplate }
+                                    });
+                                } else {
+                                    Swal.fire({
+                                        icon: 'error',
+                                        title: 'Error',
+                                        text: 'Could not load YouTube Shorts template',
+                                        timer: 2000,
+                                        showConfirmButton: false
+                                    });
+                                }
+                            } catch (error) {
+                                console.error('Error loading YouTube Shorts template:', error);
+                                Swal.fire({
+                                    icon: 'error',
+                                    title: 'Error',
+                                    text: 'Failed to load YouTube Shorts template',
+                                    timer: 2000,
+                                    showConfirmButton: false
+                                });
+                            }
+                        }}
+                        className="w-10 h-10 rounded-lg bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/20 hover:bg-black/80 active:scale-95 transition-all cursor-pointer"
+                        aria-label="Open YouTube Shorts template"
+                    >
+                        <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 text-white">
+                            <path d="M17.77 10.32c-.77-.32-1.2-.5-1.2-.5L18 9.06c1.84-.96 2.53-3.23 1.56-5.06s-3.24-2.53-5.07-1.56L6 6.94c-1.29.68-2.07 2.04-2 3.49.07 1.42.93 2.67 2.22 3.25.03.01 1.2.5 1.2.5L6 14.94c-1.84.96-2.53 3.23-1.56 5.06.97 1.83 3.24 2.53 5.07 1.56l8.5-4.5c1.29-.68 2.06-2.04 1.99-3.49-.06-1.42-.92-2.67-2.21-3.25zM10 14.65v-5.3L15 12l-5 2.65z"/>
+                        </svg>
+                    </button>
+                    
+                    {/* Text Icon */}
+                    <button
                         onClick={() => {
-                            const list = presets.current;
-                            presetIdxRef.current = (presetIdxRef.current + 1) % list.length;
-                            setBgUrl(list[presetIdxRef.current]);
-                            setGreenEnabled(true);
+                            navigate('/create/text-only');
                         }}
+                        className="w-10 h-10 rounded-lg bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/20 hover:bg-black/80 active:scale-95 transition-all cursor-pointer"
+                        aria-label="Create text post"
                     >
-                        PR
+                        <FiType className="w-6 h-6 text-white" />
                     </button>
-                    <button
-                        title={showGuides ? 'Hide guides' : 'Show guides'}
-                        className={`p-2 rounded-full ${showGuides ? 'bg-white/70 text-black' : 'bg-black/40 text-white'} hover:bg-black/60`}
-                        onClick={() => setShowGuides(!showGuides)}
-                    >
-                        G
-                    </button>
-                    <input
-                        ref={bgInputRef}
-                        type="file"
-                        accept="image/*,video/*"
-                        className="hidden"
-                        onChange={(e) => {
-                            const f = e.target.files?.[0];
-                            if (!f) return;
-                            const url = URL.createObjectURL(f);
-                            console.log('GS: File selected', { type: f.type, size: f.size, name: f.name });
-                            setBgUrl(url);
-                            setGreenEnabled(true);
-                        }}
-                    />
                 </div>
             )}
 
-            {/* GS Adjustments */}
-            {greenEnabled && (
-                <div className="absolute bottom-20 right-2 z-40 bg-black/50 text-white rounded-xl p-3 space-y-3 backdrop-blur">
-                    <div>
-                        <div className="text-xs mb-1">Background blur</div>
-                        <input type="range" min={0} max={10} step={1} value={bgBlurPx} onChange={(e) => setBgBlurPx(parseInt(e.target.value))} />
-                    </div>
-                    <div>
-                        <div className="text-xs mb-1">Edge feather</div>
-                        <input type="range" min={0} max={8} step={1} value={featherPx} onChange={(e) => setFeatherPx(parseInt(e.target.value))} />
+            {/* No preview controls - auto-navigates to edit page */}
+
+
+            {/* Effects Card - Slides up from bottom */}
+            {showEffectsCard && !previewUrl && (
+                <div className="absolute inset-0 z-50 flex items-end">
+                    {/* Backdrop */}
+                    <div 
+                        className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
+                        onClick={() => setShowEffectsCard(false)}
+                    />
+                    {/* Card */}
+                    <div className="relative w-full bg-gradient-to-b from-gray-900 to-gray-950 rounded-t-3xl p-6 pb-safe transform transition-transform duration-300 ease-out shadow-2xl border-t border-white/10">
+                        {/* Handle bar */}
+                        <div className="w-16 h-1.5 bg-gray-500/50 rounded-full mx-auto mb-6" />
+                        
+                        {/* Title */}
+                        <div className="flex items-center justify-center gap-2 mb-6">
+                            <EffectsIcon className="w-5 h-5 text-red-400" />
+                            <h3 className="text-white text-xl font-bold">Effects</h3>
+                        </div>
+                        
+                        {/* Options */}
+                        <div className="flex flex-col gap-3">
+                            {/* Boomerang Option */}
+                            <button
+                                onClick={() => {
+                                    // TODO: Implement boomerang functionality
+                                    console.log('Boomerang option clicked');
+                                    setShowEffectsCard(false);
+                                }}
+                                className="group flex items-center gap-4 p-4 bg-gray-800/80 hover:bg-purple-600/20 rounded-xl border border-gray-700/50 hover:border-purple-500/50 transition-all duration-200 active:scale-98"
+                            >
+                                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-purple-500/30 to-purple-600/20 flex items-center justify-center group-hover:scale-110 transition-transform shadow-lg shadow-purple-500/20">
+                                    <FiRefreshCw className="w-7 h-7 text-purple-400" />
+                                </div>
+                                <div className="flex-1 text-left">
+                                    <div className="text-white font-semibold text-base mb-0.5">Boomerang</div>
+                                    <div className="text-gray-400 text-sm">Record a boomerang video</div>
+                                </div>
+                                <div className="text-gray-500 group-hover:text-purple-400 transition-colors">
+                                    <FiArrowLeft className="w-5 h-5 rotate-180" />
+                                </div>
+                            </button>
+                            
+                            {/* Edit Option */}
+                            <button
+                                onClick={() => {
+                                    // Navigate to filters page for editing
+                                    if (previewUrl || clips.length > 0) {
+                                        const clipsToPass = clips.length > 0 ? clips : (previewUrl ? [{
+                                            id: `clip-${Date.now()}`,
+                                            url: previewUrl,
+                                            duration: videoDuration,
+                                            trimStart: trimStart,
+                                            trimEnd: trimEnd || videoDuration,
+                                            speed: speed,
+                                            reverse: reverse,
+                                            blob: blobRef.current || undefined
+                                        }] : []);
+
+                                        if (clipsToPass.length > 0) {
+                                            // Stop camera stream before navigating
+                                            if (streamRef.current) {
+                                                streamRef.current.getTracks().forEach(t => t.stop());
+                                                streamRef.current = null;
+                                            }
+
+                                            // Stop video playback
+                                            if (videoRef.current) {
+                                                videoRef.current.pause();
+                                                videoRef.current.srcObject = null;
+                                            }
+
+                                            navigate('/create/filters', {
+                                                state: {
+                                                    videoUrl: clipsToPass[0].url,
+                                                    videoDuration: clipsToPass[0].duration,
+                                                    trimStart: clipsToPass[0].trimStart,
+                                                    trimEnd: clipsToPass[0].trimEnd,
+                                                    speed: clipsToPass[0].speed,
+                                                    reverse: clipsToPass[0].reverse,
+                                                    selectedFilter: selectedFilter,
+                                                    brightness: brightness,
+                                                    contrast: contrast,
+                                                    saturation: saturation,
+                                                    hue: hue,
+                                                    clips: clipsToPass,
+                                                    mediaType: 'video', // From Effects Card Edit button
+                                                    musicTrackId: selectedMusicTrackId
+                                                }
+                                            });
+                                        }
+                                    } else {
+                                        // No video to edit, show message
+                                        Swal.fire({
+                                            icon: 'info',
+                                            title: 'No Video to Edit',
+                                            text: 'Please record or select a video first',
+                                            confirmButtonColor: '#6366f1',
+                                            background: '#1f2937',
+                                            color: '#fff'
+                                        });
+                                    }
+                                    setShowEffectsCard(false);
+                                }}
+                                className="group flex items-center gap-4 p-4 bg-gray-800/80 hover:bg-green-600/20 rounded-xl border border-gray-700/50 hover:border-green-500/50 transition-all duration-200 active:scale-98"
+                            >
+                                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-green-500/30 to-green-600/20 flex items-center justify-center group-hover:scale-110 transition-transform shadow-lg shadow-green-500/20">
+                                    <FiEdit3 className="w-7 h-7 text-green-400" />
+                                </div>
+                                <div className="flex-1 text-left">
+                                    <div className="text-white font-semibold text-base mb-0.5">Edit</div>
+                                    <div className="text-gray-400 text-sm">Edit video settings</div>
+                                </div>
+                                <div className="text-gray-500 group-hover:text-green-400 transition-colors">
+                                    <FiArrowLeft className="w-5 h-5 rotate-180" />
+                                </div>
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
+
+            {/* Filters Card - Slides up from bottom */}
+            {showFilters && !previewUrl && (
+                <div className="absolute inset-0 z-50 flex items-end">
+                    {/* Backdrop */}
+                    <div 
+                        className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
+                        onClick={() => setShowFilters(false)}
+                    />
+                    {/* Card */}
+                    <div className="relative w-full bg-gradient-to-b from-gray-900 to-gray-950 rounded-t-3xl p-6 pb-safe transform transition-transform duration-300 ease-out shadow-2xl border-t border-white/10">
+                        {/* Handle bar */}
+                        <div className="w-16 h-1.5 bg-gray-500/50 rounded-full mx-auto mb-6" />
+                        
+                        {/* Title */}
+                        <div className="flex items-center justify-center gap-2 mb-6">
+                            <FiFilter className="w-5 h-5 text-purple-400" />
+                            <h3 className="text-white text-xl font-bold">Filters</h3>
+                        </div>
+                        
+                        {/* Filter Options - Horizontal Scroll */}
+                        <div className="flex gap-3 overflow-x-auto pb-2 mb-4 scrollbar-hide">
+                            {['None', 'B&W', 'Sepia', 'Vivid', 'Cool', 'Vignette', 'Beauty'].map((filter) => (
+                                <button
+                                    key={filter}
+                                    onClick={() => setSelectedFilter(filter)}
+                                    className={`flex-shrink-0 px-4 py-3 rounded-xl font-medium text-sm transition-all duration-200 ${
+                                        selectedFilter === filter
+                                            ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/50'
+                                            : 'bg-gray-800/80 text-gray-300 hover:bg-gray-700'
+                                    }`}
+                                >
+                                    {filter}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Adjustments Toggle */}
+                        <button
+                            onClick={() => {
+                                setShowAdjustments(!showAdjustments);
+                                setShowFilters(false);
+                            }}
+                            className="w-full flex items-center justify-between p-4 bg-gray-800/80 hover:bg-gray-700 rounded-xl border border-gray-700/50 transition-all duration-200"
+                        >
+                            <div className="flex items-center gap-3">
+                                <FiSliders className="w-5 h-5 text-blue-400" />
+                                <div className="text-left">
+                                    <div className="text-white font-semibold text-base">Adjustments</div>
+                                    <div className="text-gray-400 text-sm">Brightness, Contrast, Saturation, Hue</div>
+                                </div>
+                            </div>
+                            <FiArrowLeft className="w-5 h-5 text-gray-400 rotate-180" />
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Adjustments Card - Slides up from bottom */}
+            {showAdjustments && !previewUrl && (
+                <div className="absolute inset-0 z-50 flex items-end">
+                    {/* Backdrop */}
+                    <div 
+                        className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
+                        onClick={() => setShowAdjustments(false)}
+                    />
+                    {/* Card */}
+                    <div className="relative w-full bg-gradient-to-b from-gray-900 to-gray-950 rounded-t-3xl p-6 pb-safe transform transition-transform duration-300 ease-out shadow-2xl border-t border-white/10">
+                        {/* Handle bar */}
+                        <div className="w-16 h-1.5 bg-gray-500/50 rounded-full mx-auto mb-6" />
+                        
+                        {/* Title */}
+                        <div className="flex items-center justify-center gap-2 mb-6">
+                            <FiSliders className="w-5 h-5 text-blue-400" />
+                            <h3 className="text-white text-xl font-bold">Adjustments</h3>
+                        </div>
+                        
+                        {/* Adjustment Controls */}
+                        <div className="space-y-6">
+                            {/* Brightness */}
+                            <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <FiZap className="w-4 h-4 text-yellow-400" />
+                                        <span className="text-sm font-medium text-gray-200">Brightness</span>
+                                    </div>
+                                    <span className="text-xs font-semibold text-blue-400 bg-blue-500/20 px-2 py-0.5 rounded">
+                                        {Math.round(brightness * 100)}%
+                                    </span>
+                                </div>
+                                <input 
+                                    type="range" 
+                                    min={0.4} 
+                                    max={1.8} 
+                                    step={0.01} 
+                                    value={brightness} 
+                                    onChange={(e) => setBrightness(parseFloat(e.target.value))}
+                                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                                    style={{
+                                        background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${((brightness - 0.4) / 1.4) * 100}%, #374151 ${((brightness - 0.4) / 1.4) * 100}%, #374151 100%)`
+                                    }}
+                                />
+                            </div>
+
+                            {/* Contrast */}
+                            <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <FiLayers className="w-4 h-4 text-purple-400" />
+                                        <span className="text-sm font-medium text-gray-200">Contrast</span>
+                                    </div>
+                                    <span className="text-xs font-semibold text-purple-400 bg-purple-500/20 px-2 py-0.5 rounded">
+                                        {Math.round(contrast * 100)}%
+                                    </span>
+                                </div>
+                                <input 
+                                    type="range" 
+                                    min={0.5} 
+                                    max={2.0} 
+                                    step={0.01} 
+                                    value={contrast} 
+                                    onChange={(e) => setContrast(parseFloat(e.target.value))}
+                                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                    style={{
+                                        background: `linear-gradient(to right, #a855f7 0%, #a855f7 ${((contrast - 0.5) / 1.5) * 100}%, #374151 ${((contrast - 0.5) / 1.5) * 100}%, #374151 100%)`
+                                    }}
+                                />
+                            </div>
+
+                            {/* Saturation */}
+                            <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <FiDroplet className="w-4 h-4 text-pink-400" />
+                                        <span className="text-sm font-medium text-gray-200">Saturation</span>
+                                    </div>
+                                    <span className="text-xs font-semibold text-pink-400 bg-pink-500/20 px-2 py-0.5 rounded">
+                                        {Math.round(saturation * 100)}%
+                                    </span>
+                                </div>
+                                <input 
+                                    type="range" 
+                                    min={0.0} 
+                                    max={2.0} 
+                                    step={0.01} 
+                                    value={saturation} 
+                                    onChange={(e) => setSaturation(parseFloat(e.target.value))}
+                                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-pink-500"
+                                    style={{
+                                        background: `linear-gradient(to right, #ec4899 0%, #ec4899 ${(saturation / 2.0) * 100}%, #374151 ${(saturation / 2.0) * 100}%, #374151 100%)`
+                                    }}
+                                />
+                            </div>
+
+                            {/* Hue */}
+                            <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <FiGrid className="w-4 h-4 text-green-400" />
+                                        <span className="text-sm font-medium text-gray-200">Hue</span>
+                                    </div>
+                                    <span className="text-xs font-semibold text-green-400 bg-green-500/20 px-2 py-0.5 rounded">
+                                        {hue > 0 ? '+' : ''}{Math.round(hue * 100)}%
+                                    </span>
+                                </div>
+                                <input 
+                                    type="range" 
+                                    min={-1.0} 
+                                    max={1.0} 
+                                    step={0.01} 
+                                    value={hue} 
+                                    onChange={(e) => setHue(parseFloat(e.target.value))}
+                                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-green-500"
+                                    style={{
+                                        background: `linear-gradient(to right, #10b981 0%, #10b981 ${((hue + 1.0) / 2.0) * 100}%, #374151 ${((hue + 1.0) / 2.0) * 100}%, #374151 100%)`
+                                    }}
+                                />
+                            </div>
+
+                            {/* Reset Button */}
+                            <button
+                                onClick={() => {
+                                    setBrightness(1.0);
+                                    setContrast(1.0);
+                                    setSaturation(1.0);
+                                    setHue(0.0);
+                                }}
+                                className="w-full p-3 rounded-xl bg-gray-800/80 hover:bg-gray-700 text-white font-medium transition-colors flex items-center justify-center gap-2"
+                            >
+                                <FiRefreshCw className="w-4 h-4" />
+                                Reset to Default
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Music Card - Slides up from bottom */}
+            {showMusicCard && !previewUrl && (
+                <div className="absolute inset-0 z-50 flex items-end">
+                    {/* Backdrop */}
+                    <div 
+                        className="absolute inset-0 bg-black/50 transition-opacity"
+                        onClick={() => setShowMusicCard(false)}
+                    />
+                    {/* Card */}
+                    <div className="relative w-full bg-gray-900 rounded-t-3xl h-[85vh] flex flex-col transform transition-transform duration-300 ease-out">
+                        {/* Handle bar */}
+                        <div className="w-12 h-1 bg-gray-600 rounded-full mx-auto mt-3 mb-4" />
+                        
+                        {/* Search Bar and Import Button */}
+                        <div className="px-4 mb-4 flex gap-2">
+                            <div className="flex-1 relative">
+                                <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                                <input
+                                    type="text"
+                                    placeholder="Search music"
+                                    value={librarySearch}
+                                    onChange={(e) => {
+                                        setLibrarySearch(e.target.value);
+                                        // Auto-load when typing (debounced)
+                                        const timer = setTimeout(async () => {
+                                            if (e.target.value.length > 2 || e.target.value.length === 0) {
+                                                setLibraryLoading(true);
+                                                try {
+                                                    const { getMusicLibrary } = await import('../api/music');
+                                                    const result = await getMusicLibrary({
+                                                        genre: libraryGenre || undefined,
+                                                        mood: libraryMood || undefined,
+                                                        search: e.target.value || undefined,
+                                                    });
+                                                    if (result.success && result.data) {
+                                                        setLibraryTracks(result.data);
+                                                    }
+                                                } catch (error) {
+                                                    console.error('Failed to search music:', error);
+                                                } finally {
+                                                    setLibraryLoading(false);
+                                                }
+                                            }
+                                        }, 500);
+                                        return () => clearTimeout(timer);
+                                    }}
+                                    className="w-full bg-gray-800 text-white placeholder-gray-400 rounded-lg pl-10 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                                />
+                            </div>
+                            <button className="px-4 py-3 bg-gray-800 hover:bg-gray-700 rounded-lg flex items-center gap-2 text-white transition-colors">
+                                <FiUpload className="w-5 h-5" />
+                                <span className="text-sm font-medium">Import</span>
+                            </button>
+                        </div>
+
+                        {/* Tabs */}
+                        <div className="px-4 mb-4 flex gap-4 border-b border-gray-700 overflow-x-auto">
+                            {['Library'].map((tab) => (
+                                <button
+                                    key={tab}
+                                    onClick={async () => {
+                                        setActiveMusicTab(tab);
+                                        // Auto-load library when tab is clicked
+                                        if (libraryTracks.length === 0) {
+                                            setLibraryLoading(true);
+                                            try {
+                                                const { getMusicLibrary } = await import('../api/music');
+                                                const result = await getMusicLibrary({
+                                                    genre: libraryGenre || undefined,
+                                                    mood: libraryMood || undefined,
+                                                    search: librarySearch || undefined,
+                                                });
+                                                if (result.success && result.data) {
+                                                    setLibraryTracks(result.data);
+                                                }
+                                            } catch (error) {
+                                                console.error('Failed to load music library:', error);
+                                            } finally {
+                                                setLibraryLoading(false);
+                                            }
+                                        }
+                                    }}
+                                    className={`pb-3 px-2 text-sm font-medium whitespace-nowrap transition-colors ${
+                                        activeMusicTab === tab
+                                            ? 'text-white border-b-2 border-white'
+                                            : 'text-gray-400'
+                                    }`}
+                                >
+                                    {tab}
+                                </button>
+                            ))}
+                        </div>
+                        
+                        {/* Genre and Mood Filters */}
+                        <div className="px-4 mb-4 grid grid-cols-2 gap-2">
+                            <select
+                                value={libraryGenre}
+                                onChange={(e) => {
+                                    setLibraryGenre(e.target.value);
+                                    // Auto-reload when filter changes
+                                    setLibraryLoading(true);
+                                    (async () => {
+                                        try {
+                                            const { getMusicLibrary } = await import('../api/music');
+                                            const result = await getMusicLibrary({
+                                                genre: e.target.value || undefined,
+                                                mood: libraryMood || undefined,
+                                                search: librarySearch || undefined,
+                                            });
+                                            if (result.success && result.data) {
+                                                setLibraryTracks(result.data);
+                                            }
+                                        } catch (error) {
+                                            console.error('Failed to filter music:', error);
+                                        } finally {
+                                            setLibraryLoading(false);
+                                        }
+                                    })();
+                                }}
+                                className="px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                            >
+                                <option value="">All Genres</option>
+                                <option value="pop">Pop</option>
+                                <option value="rock">Rock</option>
+                                <option value="electronic">Electronic</option>
+                                <option value="hip-hop">Hip-Hop</option>
+                                <option value="jazz">Jazz</option>
+                                <option value="classical">Classical</option>
+                                <option value="ambient">Ambient</option>
+                            </select>
+                            <select
+                                value={libraryMood}
+                                onChange={(e) => {
+                                    setLibraryMood(e.target.value);
+                                    // Auto-reload when filter changes
+                                    setLibraryLoading(true);
+                                    (async () => {
+                                        try {
+                                            const { getMusicLibrary } = await import('../api/music');
+                                            const result = await getMusicLibrary({
+                                                genre: libraryGenre || undefined,
+                                                mood: e.target.value || undefined,
+                                                search: librarySearch || undefined,
+                                            });
+                                            if (result.success && result.data) {
+                                                setLibraryTracks(result.data);
+                                            }
+                                        } catch (error) {
+                                            console.error('Failed to filter music:', error);
+                                        } finally {
+                                            setLibraryLoading(false);
+                                        }
+                                    })();
+                                }}
+                                className="px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                            >
+                                <option value="">All Moods</option>
+                                <option value="happy">Happy</option>
+                                <option value="energetic">Energetic</option>
+                                <option value="calm">Calm</option>
+                                <option value="dramatic">Dramatic</option>
+                                <option value="romantic">Romantic</option>
+                                <option value="upbeat">Upbeat</option>
+                            </select>
+                        </div>
+
+                        {/* Featured Music Carousel */}
+                        <div className="px-4 mb-4">
+                            <div className="relative h-48 rounded-xl overflow-hidden bg-gradient-to-br from-purple-600 to-blue-600">
+                                <div className="absolute inset-0 bg-black/30" />
+                                <div className="absolute bottom-0 left-0 right-0 p-4">
+                                    <div className="text-white font-bold text-lg">HARD</div>
+                                    <div className="text-white/80 text-sm">FKA twigs</div>
+                                </div>
+                                {/* Carousel dots */}
+                                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5">
+                                    {[true, false, false, false, false].map((active, i) => (
+                                        <div
+                                            key={i}
+                                            className={`w-1.5 h-1.5 rounded-full ${active ? 'bg-white' : 'bg-white/40'}`}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Music List */}
+                        <div className="flex-1 overflow-y-auto px-4 pb-4">
+                            {libraryLoading ? (
+                                <div className="flex items-center justify-center py-12">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-yellow-500"></div>
+                                </div>
+                            ) : libraryTracks.length > 0 ? (
+                                libraryTracks.map((track) => {
+                                    const isSelected = selectedMusicTrackId === track.id;
+                                    const duration = track.duration ? `${Math.floor(track.duration / 60)}:${(track.duration % 60).toString().padStart(2, '0')}` : 'N/A';
+                                    
+                                    return (
+                                        <button
+                                            key={track.id}
+                                            onClick={async () => {
+                                                setSelectedMusicTrackId(track.id);
+                                                setShowMusicCard(false);
+                                                Swal.fire({
+                                                    icon: 'success',
+                                                    title: 'Music Selected!',
+                                                    text: `"${track.title}" by ${track.artist || 'Unknown'}`,
+                                                    confirmButtonColor: '#fbbf24',
+                                                    background: '#1f2937',
+                                                    color: '#fff',
+                                                    timer: 2000,
+                                                    showConfirmButton: false
+                                                });
+                                            }}
+                                            className={`w-full flex items-center gap-3 p-3 hover:bg-gray-800 rounded-lg transition-colors mb-2 ${
+                                                isSelected ? 'bg-yellow-500/20 border border-yellow-500/50' : ''
+                                            }`}
+                                        >
+                                            {/* Album Art Placeholder */}
+                                            <div className="w-14 h-14 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg flex-shrink-0 flex items-center justify-center">
+                                                <FiMusic className="w-6 h-6 text-white" />
+                                            </div>
+                                            
+                                            {/* Track Info */}
+                                            <div className="flex-1 text-left min-w-0">
+                                                <div className="text-white font-medium text-sm truncate">{track.title}</div>
+                                                <div className="text-gray-400 text-xs truncate">{track.artist || 'Unknown Artist'}</div>
+                                                <div className="text-gray-500 text-xs mt-1">
+                                                    {track.genre || 'N/A'} • {track.mood || 'N/A'} • {duration}
+                                                    {track.license_type && (
+                                                        <span className="ml-2">({track.license_type})</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            
+                                            {isSelected && (
+                                                <div className="w-6 h-6 rounded-full bg-yellow-500 flex items-center justify-center flex-shrink-0">
+                                                    <FiCheck className="w-4 h-4 text-black" />
+                                                </div>
+                                            )}
+                                        </button>
+                                    );
+                                })
+                            ) : (
+                                <div className="text-center py-12">
+                                    <FiMusic className="w-12 h-12 text-gray-600 mx-auto mb-4" />
+                                    <p className="text-gray-400 text-sm mb-4">No tracks loaded</p>
+                                    <button
+                                        onClick={async () => {
+                                            setLibraryLoading(true);
+                                            try {
+                                                const { getMusicLibrary } = await import('../api/music');
+                                                const result = await getMusicLibrary({
+                                                    genre: libraryGenre || undefined,
+                                                    mood: libraryMood || undefined,
+                                                    search: librarySearch || undefined,
+                                                });
+                                                if (result.success && result.data) {
+                                                    setLibraryTracks(result.data);
+                                                }
+                                            } catch (error: any) {
+                                                console.error('Failed to load music library:', error);
+                                                Swal.fire({
+                                                    icon: 'error',
+                                                    title: 'Load Failed',
+                                                    text: error.message || 'Failed to load music library.',
+                                                    confirmButtonColor: '#fbbf24',
+                                                    background: '#1f2937',
+                                                    color: '#fff'
+                                                });
+                                            } finally {
+                                                setLibraryLoading(false);
+                                            }
+                                        }}
+                                        className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white rounded-lg font-medium"
+                                    >
+                                        Load Music Library
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Gazetteer Menu Modal */}
+            {showGazetteerMenu && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowGazetteerMenu(false)}>
+                    <div className="bg-gray-900 rounded-2xl p-6 w-80 max-w-[90vw] border border-white/20 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-white text-lg font-semibold">Gazetteer</h3>
+                            <button
+                                onClick={() => setShowGazetteerMenu(false)}
+                                className="text-gray-400 hover:text-white transition-colors"
+                            >
+                                <FiX className="w-5 h-5" />
+                            </button>
+                        </div>
+                        
+                        <div className="space-y-3">
+                            {/* Create a carousel */}
+                            <button
+                                onClick={async () => {
+                                    setShowGazetteerMenu(false);
+                                    try {
+                                        const gazetteerTemplate = await getTemplate(TEMPLATE_IDS.GAZETTEER);
+                                        if (gazetteerTemplate) {
+                                            navigate('/template-editor', {
+                                                state: { template: gazetteerTemplate }
+                                            });
+                                        } else {
+                                            Swal.fire({
+                                                icon: 'error',
+                                                title: 'Error',
+                                                text: 'Could not load Gazetteer template',
+                                                timer: 2000,
+                                                showConfirmButton: false
+                                            });
+                                        }
+                                    } catch (error) {
+                                        console.error('Error loading Gazetteer template:', error);
+                                        Swal.fire({
+                                            icon: 'error',
+                                            title: 'Error',
+                                            text: 'Failed to load Gazetteer template',
+                                            timer: 2000,
+                                            showConfirmButton: false
+                                        });
+                                    }
+                                }}
+                                className="w-full p-4 rounded-xl bg-gradient-to-br from-green-500/20 to-white/10 border border-green-500/30 hover:border-green-500/50 transition-all text-left"
+                            >
+                                <div className="text-white font-semibold mb-1">Create a carousel</div>
+                                <div className="text-gray-400 text-sm">Create a multi-clip carousel post</div>
+                            </button>
+                            
+                            {/* Create a scenes */}
+                            <button
+                                onClick={() => {
+                                    setShowGazetteerMenu(false);
+                                    gazetteerCameraRollInputRef.current?.click();
+                                }}
+                                className="w-full p-4 rounded-xl bg-gradient-to-br from-green-500/20 to-white/10 border border-green-500/30 hover:border-green-500/50 transition-all text-left"
+                            >
+                                <div className="text-white font-semibold mb-1">Create a scenes</div>
+                                <div className="text-gray-400 text-sm">Select from camera roll</div>
+                            </button>
+                            
+                            {/* Create a 24hr clip */}
+                            <button
+                                onClick={() => {
+                                    setShowGazetteerMenu(false);
+                                    navigate('/clip');
+                                }}
+                                className="w-full p-4 rounded-xl bg-gradient-to-br from-green-500/20 to-white/10 border border-green-500/30 hover:border-green-500/50 transition-all text-left"
+                            >
+                                <div className="text-white font-semibold mb-1">Create a 24hr clip</div>
+                                <div className="text-gray-400 text-sm">Create a 24-hour story clip</div>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Hidden Camera Roll Input for Gazetteer */}
+            <input
+                ref={gazetteerCameraRollInputRef}
+                type="file"
+                accept="image/*,video/*"
+                multiple
+                className="hidden"
+                onChange={async (e) => {
+                    const files = e.target.files;
+                    if (!files || files.length === 0) {
+                        return;
+                    }
+                    
+                    // Process files similar to the main camera roll input
+                    const clips: Clip[] = [];
+                    
+                    for (const file of Array.from(files)) {
+                        if (file.type.startsWith('video/')) {
+                            const url = URL.createObjectURL(file);
+                            const tempVideo = document.createElement('video');
+                            tempVideo.src = url;
+                            tempVideo.preload = 'metadata';
+                            
+                            await new Promise<void>((resolve) => {
+                                let resolved = false;
+                                const handleLoaded = () => {
+                                    if (resolved) return;
+                                    resolved = true;
+                                    const duration = tempVideo.duration && isFinite(tempVideo.duration) ? tempVideo.duration : 5;
+                                    const newClip: Clip = {
+                                        id: `clip-${Date.now()}-${Math.random()}`,
+                                        url: url,
+                                        duration: duration,
+                                        trimStart: 0,
+                                        trimEnd: duration,
+                                        speed: 1.0,
+                                        reverse: false,
+                                        blob: file
+                                    };
+                                    clips.push(newClip);
+                                    resolve();
+                                };
+                                tempVideo.addEventListener('loadedmetadata', handleLoaded);
+                                setTimeout(() => {
+                                    if (!resolved) {
+                                        resolved = true;
+                                        const newClip: Clip = {
+                                            id: `clip-${Date.now()}-${Math.random()}`,
+                                            url: url,
+                                            duration: 5,
+                                            trimStart: 0,
+                                            trimEnd: 5,
+                                            speed: 1.0,
+                                            reverse: false,
+                                            blob: file
+                                        };
+                                        clips.push(newClip);
+                                        resolve();
+                                    }
+                                }, 5000);
+                            });
+                        } else if (file.type.startsWith('image/')) {
+                            const url = URL.createObjectURL(file);
+                            const newClip: Clip = {
+                                id: `clip-${Date.now()}-${Math.random()}`,
+                                url: url,
+                                duration: 3,
+                                trimStart: 0,
+                                trimEnd: 3,
+                                speed: 1.0,
+                                reverse: false,
+                                blob: file
+                            };
+                            clips.push(newClip);
+                        }
+                    }
+                    
+                    // Navigate to filters page with clips
+                    if (clips.length > 0) {
+                        navigate('/create/filters', {
+                            state: {
+                                videoUrl: clips[0].url, // Required for backward compatibility
+                                videoDuration: clips[0].duration,
+                                clips: clips,
+                                mediaType: clips[0].blob?.type.startsWith('image/') ? 'image' : 'video',
+                                fromGazetteer: true
+                            }
+                        });
+                    }
+                    
+                    // Reset input
+                    if (gazetteerCameraRollInputRef.current) {
+                        gazetteerCameraRollInputRef.current.value = '';
+                    }
+                }}
+            />
+
+            {/* Hidden Camera Roll Input */}
+            <input
+                ref={cameraRollInputRef}
+                type="file"
+                accept="image/*,video/*"
+                multiple
+                className="hidden"
+                onChange={async (e) => {
+                    const files = e.target.files;
+                    if (!files || files.length === 0) {
+                        console.log('No files selected');
+                        return;
+                    }
+                    
+                    console.log('📁 Files selected:', files.length, Array.from(files).map(f => ({ name: f.name, type: f.type, size: f.size })));
+                    
+                    // Process each file (video or image)
+                    for (const file of Array.from(files)) {
+                        console.log('Processing file:', file.name, file.type);
+                        
+                        if (file.type.startsWith('video/')) {
+                            const url = URL.createObjectURL(file);
+                            console.log('Created blob URL:', url);
+                            
+                            const tempVideo = document.createElement('video');
+                            tempVideo.src = url;
+                            tempVideo.preload = 'metadata';
+                            
+                            await new Promise<void>((resolve) => {
+                                let resolved = false;
+                                
+                                const handleLoaded = () => {
+                                    if (resolved) return;
+                                    resolved = true;
+                                    
+                                    const duration = tempVideo.duration && isFinite(tempVideo.duration) ? tempVideo.duration : 5;
+                                    console.log('Video duration:', duration);
+                                    
+                                    if (duration > MAX_VIDEO_SECONDS) {
+                                        Swal.fire({
+                                            icon: 'warning',
+                                            title: 'Video Too Long',
+                                            text: `Video "${file.name}" is ${Math.round(duration)}s. Maximum is ${MAX_VIDEO_SECONDS}s. It will be trimmed.`,
+                                            confirmButtonText: 'OK'
+                                        });
+                                    }
+                                    
+                                    const newClip: Clip = {
+                                        id: `clip-${Date.now()}-${Math.random()}`,
+                                        url: url,
+                                        duration: Math.min(duration, MAX_VIDEO_SECONDS),
+                                        trimStart: 0,
+                                        trimEnd: Math.min(duration, MAX_VIDEO_SECONDS),
+                                        speed: 1.0,
+                                        reverse: false,
+                                        blob: file // Store the file blob
+                                    };
+                                    
+                                    console.log('Created clip:', newClip);
+                                    
+                                    setClips(prev => {
+                                        const updated = [...prev, newClip];
+                                        // Set the first clip as preview
+                                        if (updated.length === 1) {
+                                            setPreviewUrl(newClip.url);
+                                            setVideoDuration(newClip.duration);
+                                            setTrimStart(0);
+                                            setTrimEnd(newClip.duration);
+                                            
+                                            // Auto-navigate to edit page after selecting from camera roll
+                                            setTimeout(() => {
+                                                const clipsToPass = updated.length > 0 ? updated : [newClip];
+                                                if (clipsToPass.length > 0) {
+                                                    console.log('Navigating to edit page with clips:', clipsToPass);
+                                                    
+                                                    // Stop camera stream before navigating
+                                                    if (streamRef.current) {
+                                                        streamRef.current.getTracks().forEach(t => t.stop());
+                                                        streamRef.current = null;
+                                                    }
+                                                    // Stop video playback
+                                                    if (videoRef.current) {
+                                                        videoRef.current.pause();
+                                                        videoRef.current.srcObject = null;
+                                                    }
+                                                    navigate('/create/filters', {
+                                                        state: {
+                                                            videoUrl: clipsToPass[0].url,
+                                                            videoDuration: clipsToPass[0].duration,
+                                                            trimStart: clipsToPass[0].trimStart,
+                                                            trimEnd: clipsToPass[0].trimEnd,
+                                                            speed: clipsToPass[0].speed,
+                                                            reverse: clipsToPass[0].reverse,
+                                                            selectedFilter: selectedFilter,
+                                                            brightness: brightness,
+                                                            contrast: contrast,
+                                                            saturation: saturation,
+                                                            hue: hue,
+                                                            clips: clipsToPass,
+                                                            mediaType: file.type.startsWith('image/') ? 'image' : 'video',
+                                                            musicTrackId: selectedMusicTrackId
+                                                        }
+                                                    });
+                                                }
+                                            }, 500); // Small delay to ensure state is set
+                                        }
+                                        return updated;
+                                    });
+                                    resolve();
+                                };
+                                
+                                tempVideo.onloadedmetadata = handleLoaded;
+                                tempVideo.oncanplay = () => {
+                                    if (!resolved) {
+                                        console.log('Video can play, using fallback duration');
+                                        handleLoaded();
+                                    }
+                                };
+                                
+                                tempVideo.onerror = (err) => {
+                                    if (resolved) return;
+                                    resolved = true;
+                                    console.error('Error loading video:', file.name, err);
+                                    Swal.fire({
+                                        icon: 'error',
+                                        title: 'Error Loading Video',
+                                        text: `Could not load "${file.name}". Please try a different file.`,
+                                        confirmButtonText: 'OK'
+                                    });
+                                    resolve();
+                                };
+                                
+                                // Timeout fallback
+                                setTimeout(() => {
+                                    if (!resolved) {
+                                        console.log('Video loading timeout, using default duration');
+                                        resolved = true;
+                                        const newClip: Clip = {
+                                            id: `clip-${Date.now()}-${Math.random()}`,
+                                            url: url,
+                                            duration: 5, // Default duration
+                                            trimStart: 0,
+                                            trimEnd: 5,
+                                            speed: 1.0,
+                                            reverse: false,
+                                            blob: file
+                                        };
+                                        
+                                        setClips(prev => {
+                                            const updated = [...prev, newClip];
+                                            if (updated.length === 1) {
+                                                setPreviewUrl(newClip.url);
+                                                setVideoDuration(newClip.duration);
+                                                setTrimStart(0);
+                                                setTrimEnd(newClip.duration);
+                                                
+                                                setTimeout(() => {
+                                                    navigate('/create/filters', {
+                                                        state: {
+                                                            videoUrl: newClip.url,
+                                                            videoDuration: newClip.duration,
+                                                            trimStart: 0,
+                                                            trimEnd: newClip.duration,
+                                                            speed: 1.0,
+                                                            reverse: false,
+                                                            selectedFilter: selectedFilter,
+                                                            brightness: brightness,
+                                                            contrast: contrast,
+                                                            saturation: saturation,
+                                                            hue: hue,
+                                                            clips: [newClip],
+                                                            mediaType: file.type.startsWith('image/') ? 'image' : 'video',
+                                                            musicTrackId: selectedMusicTrackId
+                                                        }
+                                                    });
+                                                }, 500);
+                                            }
+                                            return updated;
+                                        });
+                                        resolve();
+                                    }
+                                }, 5000); // 5 second timeout
+                            });
+                        } else if (file.type.startsWith('image/')) {
+                            // Handle image files
+                            const url = URL.createObjectURL(file);
+                            console.log('Created image blob URL:', url);
+                            
+                            // Images get a default duration of 3 seconds
+                            const imageDuration = 3;
+                            
+                            const newClip: Clip = {
+                                id: `clip-${Date.now()}-${Math.random()}`,
+                                url: url,
+                                duration: imageDuration,
+                                trimStart: 0,
+                                trimEnd: imageDuration,
+                                speed: 1.0,
+                                reverse: false,
+                                blob: file // Store the file blob
+                            };
+                            
+                            console.log('Created image clip:', newClip);
+                            
+                            setClips(prev => {
+                                const updated = [...prev, newClip];
+                                // Set the first clip as preview
+                                if (updated.length === 1) {
+                                    setPreviewUrl(newClip.url);
+                                    setVideoDuration(newClip.duration);
+                                    setTrimStart(0);
+                                    setTrimEnd(newClip.duration);
+                                    
+                                    // Auto-navigate to edit page after selecting from camera roll
+                                    setTimeout(() => {
+                                        const clipsToPass = updated.length > 0 ? updated : [newClip];
+                                        if (clipsToPass.length > 0) {
+                                            console.log('Navigating to edit page with image clip:', clipsToPass);
+                                            
+                                            // Stop camera stream before navigating
+                                            if (streamRef.current) {
+                                                streamRef.current.getTracks().forEach(t => t.stop());
+                                                streamRef.current = null;
+                                            }
+                                            // Stop video playback
+                                            if (videoRef.current) {
+                                                videoRef.current.pause();
+                                                videoRef.current.srcObject = null;
+                                            }
+                                            navigate('/create/filters', {
+                                                state: {
+                                                    videoUrl: clipsToPass[0].url,
+                                                    videoDuration: clipsToPass[0].duration,
+                                                    trimStart: clipsToPass[0].trimStart,
+                                                    trimEnd: clipsToPass[0].trimEnd,
+                                                    speed: clipsToPass[0].speed,
+                                                    reverse: clipsToPass[0].reverse,
+                                                    selectedFilter: selectedFilter,
+                                                    brightness: brightness,
+                                                    contrast: contrast,
+                                                    saturation: saturation,
+                                                    hue: hue,
+                                                    clips: clipsToPass,
+                                                    mediaType: file.type.startsWith('image/') ? 'image' : 'video',
+                                                    musicTrackId: selectedMusicTrackId
+                                                }
+                                            });
+                                        }
+                                    }, 500); // Small delay to ensure state is set
+                                }
+                                return updated;
+                            });
+                        } else {
+                            console.warn('File type not supported:', file.type);
+                            Swal.fire({
+                                icon: 'info',
+                                title: 'File Type Not Supported',
+                                text: `"${file.name}" is not a supported file type. Please select a video or image file.`,
+                                confirmButtonText: 'OK'
+                            });
+                        }
+                    }
+                    
+                    // Reset input so same file can be selected again
+                    if (cameraRollInputRef.current) {
+                        cameraRollInputRef.current.value = '';
+                    }
+                }}
+            />
+
+            {/* Left Action Rail - Layout Options or Green Screen Options */}
+            {!previewUrl && (
+                <>
+                    {showLayoutOptions ? (
+                        /* Layout Options */
+                        <div className="absolute left-2 top-1/4 z-40 flex flex-col gap-3">
+                            <button
+                                title="Vertical Split"
+                                onClick={() => {
+                                    setSelectedLayout('vertical');
+                                    // TODO: Apply vertical split layout
+                                    console.log('Vertical split selected');
+                                }}
+                                className={`p-3 rounded-xl ${selectedLayout === 'vertical' ? 'bg-purple-600 shadow-lg shadow-purple-500/50' : 'bg-black/60'} text-white hover:bg-purple-500/80 active:scale-95 transition-all duration-200`}
+                            >
+                                <VerticalSplitIcon className="w-6 h-6" selected={selectedLayout === 'vertical'} />
+                            </button>
+                            <button
+                                title="Horizontal Split"
+                                onClick={() => {
+                                    setSelectedLayout('horizontal');
+                                    // TODO: Apply horizontal split layout
+                                    console.log('Horizontal split selected');
+                                }}
+                                className={`p-3 rounded-xl ${selectedLayout === 'horizontal' ? 'bg-purple-600 shadow-lg shadow-purple-500/50' : 'bg-black/60'} text-white hover:bg-purple-500/80 active:scale-95 transition-all duration-200`}
+                            >
+                                <HorizontalSplitIcon className="w-6 h-6" selected={selectedLayout === 'horizontal'} />
+                            </button>
+                            <button
+                                title="Grid 2x2"
+                                onClick={() => {
+                                    setSelectedLayout('grid2x2');
+                                    // TODO: Apply 2x2 grid layout
+                                    console.log('2x2 grid selected');
+                                }}
+                                className={`p-3 rounded-xl ${selectedLayout === 'grid2x2' ? 'bg-purple-600 shadow-lg shadow-purple-500/50' : 'bg-black/60'} text-white hover:bg-purple-500/80 active:scale-95 transition-all duration-200`}
+                            >
+                                <Grid2x2Icon className="w-6 h-6" selected={selectedLayout === 'grid2x2'} />
+                            </button>
+                            <button
+                                title="Grid 3x3"
+                                onClick={() => {
+                                    setSelectedLayout('grid3x3');
+                                    // TODO: Apply 3x3 grid layout
+                                    console.log('3x3 grid selected');
+                                }}
+                                className={`p-3 rounded-xl ${selectedLayout === 'grid3x3' ? 'bg-purple-600 shadow-lg shadow-purple-500/50' : 'bg-black/60'} text-white hover:bg-purple-500/80 active:scale-95 transition-all duration-200`}
+                            >
+                                <Grid3x3Icon className="w-6 h-6" selected={selectedLayout === 'grid3x3'} />
+                            </button>
+                        </div>
+                    ) : showGreenScreenOptions ? (
+                        /* Green Screen Options */
+                        <div className="absolute left-2 top-1/4 z-40 flex flex-col gap-3">
+                            {/* Choose Background Button */}
+                            <button
+                                title="Choose Green Screen background"
+                                onClick={() => {
+                                    bgInputRef.current?.click();
+                                }}
+                                className={`p-3 rounded-xl ${greenEnabled ? 'bg-green-600 shadow-lg shadow-green-500/50' : 'bg-black/60'} text-white hover:bg-green-500/80 active:scale-95 transition-all duration-200 flex items-center justify-center`}
+                            >
+                                <FiImage className="w-5 h-5" />
+                            </button>
+                            
+                            {/* Preset Background Button */}
+                            <button
+                                title="Preset background"
+                                onClick={() => {
+                                    const list = presets.current;
+                                    presetIdxRef.current = (presetIdxRef.current + 1) % list.length;
+                                    setBgUrl(list[presetIdxRef.current]);
+                                    setGreenEnabled(true);
+                                }}
+                                className="p-3 rounded-xl bg-black/60 text-white hover:bg-purple-600/80 active:scale-95 transition-all duration-200 flex items-center justify-center"
+                            >
+                                <FiDroplet className="w-5 h-5" />
+                            </button>
+                            
+                            {/* Adjustments - Only show when green screen is enabled */}
+                            {greenEnabled && (
+                                <div className="bg-black/60 rounded-xl p-3 space-y-4 backdrop-blur-sm border border-white/10">
+                                    {/* Blur Control */}
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                <FiSliders className="w-4 h-4 text-gray-300" />
+                                                <span className="text-xs font-medium text-gray-200">Blur</span>
+                                            </div>
+                                            <span className="text-xs font-semibold text-green-400 bg-green-500/20 px-2 py-0.5 rounded">{bgBlurPx}</span>
+                                        </div>
+                                        <input 
+                                            type="range" 
+                                            min={0} 
+                                            max={10} 
+                                            step={1} 
+                                            value={bgBlurPx} 
+                                            onChange={(e) => setBgBlurPx(parseInt(e.target.value))}
+                                            className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-green-500"
+                                            style={{
+                                                background: `linear-gradient(to right, #10b981 0%, #10b981 ${(bgBlurPx / 10) * 100}%, #374151 ${(bgBlurPx / 10) * 100}%, #374151 100%)`
+                                            }}
+                                        />
+                                    </div>
+                                    
+                                    {/* Feather Control */}
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                <FiLayers className="w-4 h-4 text-gray-300" />
+                                                <span className="text-xs font-medium text-gray-200">Feather</span>
+                                            </div>
+                                            <span className="text-xs font-semibold text-green-400 bg-green-500/20 px-2 py-0.5 rounded">{featherPx}</span>
+                                        </div>
+                                        <input 
+                                            type="range" 
+                                            min={0} 
+                                            max={8} 
+                                            step={1} 
+                                            value={featherPx} 
+                                            onChange={(e) => setFeatherPx(parseInt(e.target.value))}
+                                            className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-green-500"
+                                            style={{
+                                                background: `linear-gradient(to right, #10b981 0%, #10b981 ${(featherPx / 8) * 100}%, #374151 ${(featherPx / 8) * 100}%, #374151 100%)`
+                                            }}
+                                        />
+                                    </div>
+                                    
+                                    {/* Disable Button */}
+                                    <button
+                                        title="Disable Green Screen"
+                                        onClick={() => {
+                                            setGreenEnabled(false);
+                                            setBgUrl(null);
+                                        }}
+                                        className="w-full p-2.5 rounded-lg bg-red-600/80 hover:bg-red-600 text-white active:scale-95 transition-all duration-200 flex items-center justify-center gap-2 mt-2"
+                                    >
+                                        <FiX className="w-4 h-4" />
+                                        <span className="text-xs font-medium">Disable</span>
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    ) : null}
+                </>
+            )}
+
 
             {/* Framing guides overlay */}
             {showGuides && !previewUrl && (

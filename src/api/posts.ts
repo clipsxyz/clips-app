@@ -1,5 +1,7 @@
 import raw from '../data/posts.json';
 import type { Post, Comment, StickerOverlay } from '../types';
+import * as apiClient from './client';
+import { wasEverAStory } from './stories';
 
 /**
  * MOCK API - TO SWAP WITH REAL BACKEND
@@ -285,7 +287,7 @@ type UserState = {
 
 const userState: Record<string, UserState> = {};
 
-function getState(userId: string): UserState {
+export function getState(userId: string): UserState {
   if (!userState[userId]) {
     userState[userId] = { likes: {}, bookmarks: {}, follows: {}, reclips: {}, lastViewed: {} };
   }
@@ -327,7 +329,95 @@ export function decorateForUser(userId: string, p: Post): Post {
   return decorated;
 }
 
+// Transform Laravel API post response to frontend Post format
+function transformLaravelPost(response: any): Post {
+  const finalVideoUrl = response.final_video_url || response.finalVideoUrl;
+  const originalMediaUrl = response.media_url || response.mediaUrl || '';
+  
+  return {
+    id: response.id,
+    userHandle: response.user_handle || response.userHandle,
+    locationLabel: response.location_label || response.locationLabel || 'Unknown Location',
+    tags: response.tags || [],
+    // Use final_video_url if available (from completed render job), otherwise use original media_url
+    mediaUrl: finalVideoUrl || originalMediaUrl,
+    finalVideoUrl: finalVideoUrl || undefined, // Set as separate field for Media component
+    mediaType: response.media_type || response.mediaType,
+    mediaItems: response.media_items || response.mediaItems,
+    text: response.text_content || response.text,
+    imageText: response.image_text || response.imageText,
+    caption: response.caption,
+    createdAt: new Date(response.created_at || response.createdAt).getTime(),
+    stats: {
+      likes: response.likes_count || response.stats?.likes || 0,
+      views: response.views_count || response.stats?.views || 0,
+      comments: response.comments_count || response.stats?.comments || 0,
+      shares: response.shares_count || response.stats?.shares || 0,
+      reclips: response.reclips_count || response.stats?.reclips || 0,
+    },
+    isBookmarked: response.is_bookmarked || false,
+    isFollowing: response.is_following || false,
+    userLiked: response.user_liked || false,
+    userReclipped: response.user_reclipped || false,
+    stickers: response.stickers,
+    templateId: response.template_id || response.templateId,
+    bannerText: response.banner_text || response.bannerText,
+    textStyle: response.text_style || response.textStyle,
+    taggedUsers: response.taggedUsers || response.tagged_users,
+    videoCaptionsEnabled: response.video_captions_enabled || response.videoCaptionsEnabled,
+    videoCaptionText: response.video_caption_text || response.videoCaptionText,
+    subtitlesEnabled: response.subtitles_enabled || response.subtitlesEnabled,
+    subtitleText: response.subtitle_text || response.subtitleText,
+    userLocal: response.user?.local || response.userLocal || '',
+    userRegional: response.user?.regional || response.userRegional || '',
+    userNational: response.user?.national || response.userNational || '',
+    renderJobId: response.render_job_id || response.renderJobId,
+  } as Post;
+}
+
 export async function fetchPostsPage(tab: string, cursor: number | null, limit = 5, userId = 'me', userLocal = '', userRegional = '', userNational = ''): Promise<Page> {
+  // Try Laravel API first, fallback to mock if it fails
+  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+  
+  if (useLaravelAPI) {
+    try {
+      const t = tab.toLowerCase();
+      
+      // Map frontend tab names to Laravel filter values
+      let filter: string;
+      if (t === 'discover') {
+        filter = 'Following';
+      } else if (t === 'finglas') {
+        filter = 'Finglas';
+      } else if (t === 'dublin') {
+        filter = 'Dublin';
+      } else if (t === 'ireland') {
+        filter = 'Ireland';
+      } else {
+        // Custom location - use as-is (Laravel will handle it via byLocation scope)
+        filter = tab.charAt(0).toUpperCase() + tab.slice(1).toLowerCase();
+      }
+      
+      const apiCursor = cursor ?? 0;
+      const response = await apiClient.fetchPostsPage(apiCursor, limit, filter, userId !== 'me' ? userId : undefined);
+      
+      // Transform Laravel response to frontend format
+      const transformedItems = response.items.map((item: any) => transformLaravelPost(item));
+      
+      return {
+        items: transformedItems,
+        nextCursor: response.nextCursor
+      };
+    } catch (error: any) {
+      // Only log if it's not a connection refused error (backend not running)
+      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
+        console.warn('Laravel API call failed, falling back to mock data:', error);
+      }
+      // Fall through to mock implementation
+    }
+  }
+  
+  // Mock implementation (fallback)
   try {
     await delay();
     const t = tab.toLowerCase();
@@ -347,9 +437,32 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
     const filtered = posts.filter(p => {
       if (t === 'discover') {
         const userState = getState(userId);
-        const isFollowing = userState.follows[p.userHandle];
-        // Only show posts from users you actually follow
-        return isFollowing === true;
+        const isFollowing = userState.follows[p.userHandle] === true;
+        
+        // Debug: Log what we're checking
+        if (p.userHandle.includes('Sarah') || p.userHandle.includes('sarah')) {
+          console.log('CHECKING SARAH POST:', {
+            userId,
+            userHandle: p.userHandle,
+            isFollowing,
+            allFollows: Object.keys(userState.follows).filter(h => userState.follows[h] === true),
+            fullState: userState.follows
+          });
+        }
+        
+        return isFollowing;
+      }
+
+      if (t.toLowerCase() === 'clips') {
+        // Clips tab: Show stories (posts that were originally stories) from people you follow
+        const userState = getState(userId);
+        const isFollowing = userState.follows[p.userHandle] === true;
+        if (!isFollowing) return false;
+        // Check if this post's media was from a story
+        if (p.mediaUrl && wasEverAStory(p.mediaUrl)) {
+          return true;
+        }
+        return false;
       }
 
       // Check if this is a custom location search (not one of the predefined tabs)
@@ -475,7 +588,8 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       // Debug: Log taggedUsers after decoration
       if (decorated.taggedUsers && decorated.taggedUsers.length > 0) {
         console.log('fetchPostsPage - post has taggedUsers AFTER decorateForUser:', { postId: decorated.id.substring(0, 30), taggedUsers: decorated.taggedUsers, templateId: decorated.templateId });
-      } else if (p.templateId && !decorated.taggedUsers) {
+      } else if (p.taggedUsers && p.taggedUsers.length > 0 && !decorated.taggedUsers) {
+        // Only warn if taggedUsers were present BEFORE decoration but missing AFTER
         console.warn('fetchPostsPage - taggedUsers LOST during decoration:', {
           postId: p.id.substring(0, 30),
           templateId: p.templateId,
@@ -498,6 +612,23 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
 }
 
 export async function toggleLike(userId: string, id: string): Promise<Post> {
+  // Try Laravel API first, fallback to mock if it fails
+  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+  
+  if (useLaravelAPI) {
+    try {
+      const response = await apiClient.toggleLike(id);
+      return transformLaravelPost(response);
+    } catch (error: any) {
+      // Only log if it's not a connection refused error (backend not running)
+      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
+        console.warn('Laravel API call failed, falling back to mock data:', error);
+      }
+      // Fall through to mock implementation
+    }
+  }
+  
+  // Mock implementation (fallback)
   await delay(150);
   const s = getState(userId);
   const p = posts.find(x => x.id === id)!;
@@ -518,12 +649,43 @@ export async function toggleBookmark(userId: string, id: string): Promise<Post> 
 export async function toggleFollowForPost(userId: string, id: string): Promise<Post> {
   await delay(150);
   const p = posts.find(x => x.id === id)!;
+  if (!p) {
+    throw new Error('Post not found');
+  }
   const s = getState(userId);
-  s.follows[p.userHandle] = !s.follows[p.userHandle];
+  const wasFollowing = s.follows[p.userHandle] === true;
+  // Set to true if not following, false if following
+  s.follows[p.userHandle] = !wasFollowing;
+  
+  // Debug: Log the state after update
+  console.log('FOLLOW STATE UPDATED:', {
+    userId,
+    userHandle: p.userHandle,
+    nowFollowing: s.follows[p.userHandle],
+    allFollows: Object.keys(s.follows).filter(h => s.follows[h] === true)
+  });
+  
   return decorateForUser(userId, p);
 }
 
 export async function incrementViews(userId: string, id: string): Promise<Post> {
+  // Try Laravel API first, fallback to mock if it fails
+  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+  
+  if (useLaravelAPI) {
+    try {
+      const response = await apiClient.incrementView(id);
+      return transformLaravelPost(response);
+    } catch (error: any) {
+      // Only log if it's not a connection refused error (backend not running)
+      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
+        console.warn('Laravel API call failed, falling back to mock data:', error);
+      }
+      // Fall through to mock implementation
+    }
+  }
+  
+  // Mock implementation (fallback)
   await delay(100);
   const p = posts.find(x => x.id === id);
   if (!p) {
@@ -593,6 +755,23 @@ export function wasViewedRecently(userId: string, postId: string, timeWindowMs: 
 }
 
 export async function incrementShares(userId: string, id: string): Promise<Post> {
+  // Try Laravel API first, fallback to mock if it fails
+  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+  
+  if (useLaravelAPI) {
+    try {
+      const response = await apiClient.sharePost(id);
+      return transformLaravelPost(response);
+    } catch (error: any) {
+      // Only log if it's not a connection refused error (backend not running)
+      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
+        console.warn('Laravel API call failed, falling back to mock data:', error);
+      }
+      // Fall through to mock implementation
+    }
+  }
+  
+  // Mock implementation (fallback)
   await delay(100);
   const p = posts.find(x => x.id === id);
   if (!p) {
@@ -604,6 +783,23 @@ export async function incrementShares(userId: string, id: string): Promise<Post>
 }
 
 export async function incrementReclips(userId: string, id: string): Promise<Post> {
+  // Try Laravel API first, fallback to mock if it fails
+  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+  
+  if (useLaravelAPI) {
+    try {
+      const response = await apiClient.reclipPost(id);
+      return transformLaravelPost(response);
+    } catch (error: any) {
+      // Only log if it's not a connection refused error (backend not running)
+      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
+        console.warn('Laravel API call failed, falling back to mock data:', error);
+      }
+      // Fall through to mock implementation
+    }
+  }
+  
+  // Mock implementation (fallback)
   await delay(100);
   const p = posts.find(x => x.id === id);
   if (!p) {
@@ -690,6 +886,31 @@ export async function fetchPostsByUser(userHandle: string, limit = 30): Promise<
 }
 
 export async function addComment(postId: string, userHandle: string, text: string): Promise<Comment> {
+  // Try Laravel API first, fallback to mock if it fails
+  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+  
+  if (useLaravelAPI) {
+    try {
+      const response = await apiClient.addComment(postId, text);
+      // Transform Laravel comment response to frontend format
+      return {
+        id: response.id,
+        postId: response.post_id || response.postId || postId,
+        userHandle: response.user_handle || response.userHandle || userHandle,
+        text: response.text || response.text_content,
+        createdAt: new Date(response.created_at || response.createdAt).getTime(),
+        likes: response.likes_count || response.likes || 0
+      };
+    } catch (error: any) {
+      // Only log if it's not a connection refused error (backend not running)
+      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
+        console.warn('Laravel API call failed, falling back to mock data:', error);
+      }
+      // Fall through to mock implementation
+    }
+  }
+  
+  // Mock implementation (fallback)
   await delay(300);
   console.log('addComment called:', { postId, userHandle, text, postsCount: posts.length });
   
@@ -828,12 +1049,116 @@ export async function createPost(
   videoCaptionsEnabled?: boolean, // Whether video captions are enabled
   videoCaptionText?: string, // Caption text to display on video
   subtitlesEnabled?: boolean, // Whether video subtitles are enabled
-  subtitleText?: string // Subtitle text to display on video
+  subtitleText?: string, // Subtitle text to display on video
+  editTimeline?: any, // Edit timeline for hybrid editing pipeline (clips, trims, transitions, etc.)
+  musicTrackId?: number // Library music track ID
 ): Promise<Post> {
-  await delay(500);
+  // Use real Laravel API
+  const { createPost: createPostAPI } = await import('./client');
+  
+  try {
+    const response = await createPostAPI({
+      text: text || undefined,
+      location: location || undefined,
+      mediaUrl: imageUrl || undefined,
+      mediaType: mediaType || undefined,
+      caption: caption || undefined,
+      imageText: imageText || undefined,
+      bannerText: bannerText || undefined,
+      stickers: stickers || undefined,
+      templateId: templateId || undefined,
+      mediaItems: mediaItems || undefined,
+      textStyle: textStyle || undefined,
+      taggedUsers: taggedUsers || undefined,
+      videoCaptionsEnabled: videoCaptionsEnabled || undefined,
+      videoCaptionText: videoCaptionText || undefined,
+      subtitlesEnabled: subtitlesEnabled || undefined,
+      subtitleText: subtitleText || undefined,
+      editTimeline: editTimeline || undefined,
+      musicTrackId: musicTrackId || undefined,
+    });
 
-  // Debug: Log taggedUsers parameter
-  console.log('createPost function - received taggedUsers parameter:', taggedUsers, 'type:', typeof taggedUsers, 'isArray:', Array.isArray(taggedUsers), 'length:', taggedUsers?.length);
+    // Transform Laravel response to frontend Post format
+    const finalVideoUrl = response.final_video_url || response.finalVideoUrl;
+    const originalMediaUrl = response.media_url || response.mediaUrl || imageUrl || '';
+    
+    const transformedPost = {
+      id: response.id,
+      userHandle: response.user_handle || response.userHandle,
+      locationLabel: response.location_label || response.locationLabel || location || 'Unknown Location',
+      tags: response.tags || [],
+      // Use final_video_url if available (from completed render job), otherwise use original media_url
+      mediaUrl: finalVideoUrl || originalMediaUrl,
+      finalVideoUrl: finalVideoUrl || undefined, // Set as separate field for Media component
+      mediaType: response.media_type || response.mediaType || mediaType,
+      mediaItems: response.media_items || response.mediaItems || (imageUrl ? [{ url: imageUrl, type: mediaType || 'image' }] : undefined),
+      text: response.text_content || response.text || text || undefined,
+      imageText: response.image_text || response.imageText || imageText || undefined,
+      caption: response.caption || caption || undefined,
+      createdAt: new Date(response.created_at || response.createdAt).getTime(),
+      stats: {
+        likes: response.likes_count || response.stats?.likes || 0,
+        views: response.views_count || response.stats?.views || 0,
+        comments: response.comments_count || response.stats?.comments || 0,
+        shares: response.shares_count || response.stats?.shares || 0,
+        reclips: response.reclips_count || response.stats?.reclips || 0,
+      },
+      isBookmarked: response.is_bookmarked || false,
+      isFollowing: response.is_following || false,
+      userLiked: response.user_liked || false,
+      stickers: response.stickers || stickers || undefined,
+      templateId: response.template_id || response.templateId || templateId || undefined,
+      bannerText: response.banner_text || response.bannerText || bannerText || undefined,
+      textStyle: response.text_style || response.textStyle || textStyle || undefined,
+      taggedUsers: response.taggedUsers || taggedUsers || undefined,
+      videoCaptionsEnabled: response.video_captions_enabled || response.videoCaptionsEnabled || undefined,
+      videoCaptionText: response.video_caption_text || response.videoCaptionText || undefined,
+      subtitlesEnabled: response.subtitles_enabled || response.subtitlesEnabled || undefined,
+      subtitleText: response.subtitle_text || response.subtitleText || undefined,
+      userLocal: userLocal,
+      userRegional: userRegional,
+      userNational: userNational,
+      // Include renderJobId for PiP tracking
+      renderJobId: response.render_job_id || response.renderJobId,
+    } as Post & { renderJobId?: string };
+    
+    return transformedPost;
+  } catch (error) {
+    console.error('Error creating post via API:', error);
+    // Fallback to mock for now if API fails
+    await delay(500);
+    
+    // Helper function to convert blob URL to data URL for persistence
+    async function convertBlobToDataUrl(blobUrl: string): Promise<string> {
+      if (!blobUrl.startsWith('blob:')) {
+        return blobUrl; // Not a blob URL, return as-is
+      }
+      
+      try {
+        console.log('Converting blob URL to data URL for persistence:', blobUrl.substring(0, 50));
+        const response = await fetch(blobUrl);
+        const blob = await response.blob();
+        const reader = new FileReader();
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+        console.log('Converted blob URL to data URL', {
+          originalSize: blob.size,
+          dataUrlSize: dataUrl.length,
+          isDataUrl: dataUrl.startsWith('data:')
+        });
+        return dataUrl;
+      } catch (error) {
+        console.error('Failed to convert blob URL to data URL:', error);
+        // Return a placeholder or the original URL
+        return blobUrl; // Fallback to original (will fail later, but at least we tried)
+      }
+    }
+    
+    // Debug: Log taggedUsers parameter
+    console.log('createPost function - received taggedUsers parameter:', taggedUsers, 'type:', typeof taggedUsers, 'isArray:', Array.isArray(taggedUsers), 'length:', taggedUsers?.length);
 
   console.log('Creating post with:', {
     userId,
@@ -856,11 +1181,43 @@ export async function createPost(
 
   const postCreatedAt = Date.now(); // Epoch timestamp in milliseconds
 
+  // Convert blob URLs to data URLs for persistence
+  // Only convert if we have a valid blob URL (not empty/undefined)
+  let persistentImageUrl = imageUrl;
+  if (imageUrl && imageUrl.trim() !== '' && imageUrl.startsWith('blob:')) {
+    try {
+      persistentImageUrl = await convertBlobToDataUrl(imageUrl);
+    } catch (error) {
+      console.error('Failed to convert blob URL, using original:', error);
+      persistentImageUrl = imageUrl; // Fallback to original
+    }
+  }
+
+  // Convert blob URLs in mediaItems to data URLs
+  let persistentMediaItems = mediaItems;
+  if (mediaItems && mediaItems.length > 0) {
+    persistentMediaItems = await Promise.all(
+      mediaItems.map(async (item) => {
+        if (item.url && item.url.trim() !== '' && item.url.startsWith('blob:')) {
+          try {
+            const dataUrl = await convertBlobToDataUrl(item.url);
+            return { ...item, url: dataUrl };
+          } catch (error) {
+            console.error('Failed to convert blob URL in mediaItems, using original:', error);
+            return item; // Fallback to original
+          }
+        }
+        return item;
+      })
+    );
+  }
+
   // If mediaItems provided, use that; otherwise fall back to single mediaUrl
-  const finalMediaItems = mediaItems && mediaItems.length > 0
-    ? mediaItems
-    : imageUrl
-      ? [{ url: imageUrl, type: mediaType || 'image' }]
+  // Only create mediaItems if we have actual media (not for text-only posts)
+  const finalMediaItems = persistentMediaItems && persistentMediaItems.length > 0
+    ? persistentMediaItems
+    : persistentImageUrl && persistentImageUrl.trim() !== ''
+      ? [{ url: persistentImageUrl, type: mediaType || 'image' }]
       : undefined;
 
   const newPost: Post = {
@@ -868,9 +1225,11 @@ export async function createPost(
     userHandle,
     locationLabel: location || 'Unknown Location',
     tags: [],
-    mediaUrl: imageUrl || '', // Keep for backward compatibility
+    // Only set mediaUrl if we have actual media (not empty string for text-only posts)
+    mediaUrl: persistentImageUrl && persistentImageUrl.trim() !== '' ? persistentImageUrl : undefined,
+    finalVideoUrl: undefined, // Will be set when render job completes
     mediaType: mediaType || undefined, // Keep for backward compatibility
-    mediaItems: finalMediaItems, // New: support multiple media items
+    mediaItems: finalMediaItems, // New: support multiple media items (with persistent URLs)
     text: text || undefined, // Store the text content
     imageText: imageText || undefined, // Store the image text overlay
     caption: caption || undefined, // Store the caption for image/video posts
@@ -900,10 +1259,21 @@ export async function createPost(
   // Add to posts array (at the beginning for newest first)
   posts.unshift(newPost);
 
-  console.log('Post created and added to posts array. Total posts:', posts.length);
-  console.log('New post:', newPost);
-  console.log('New post taggedUsers:', newPost.taggedUsers);
-  console.log('New post templateId:', newPost.templateId);
+  console.log('📝 Post created and added to posts array. Total posts:', posts.length);
+  console.log('📝 New post mediaUrl:', newPost.mediaUrl?.substring(0, 50) || 'undefined', 'isBlob:', newPost.mediaUrl?.startsWith('blob:'), 'isData:', newPost.mediaUrl?.startsWith('data:'));
+  console.log('📝 New post mediaItems:', newPost.mediaItems?.map(item => ({
+    type: item.type,
+    urlType: item.url?.startsWith('blob:') ? 'blob' : item.url?.startsWith('data:') ? 'data' : 'http',
+    urlPreview: item.url?.substring(0, 50)
+  })));
+  console.log('📝 New post:', {
+    id: newPost.id.substring(0, 30),
+    mediaType: newPost.mediaType,
+    hasMediaUrl: !!newPost.mediaUrl,
+    hasMediaItems: !!newPost.mediaItems && newPost.mediaItems.length > 0,
+    taggedUsers: newPost.taggedUsers,
+    templateId: newPost.templateId
+  });
 
   // Verify the post in the array has taggedUsers
   const postInArray = posts[0];
@@ -911,6 +1281,7 @@ export async function createPost(
   console.log('Post in array [0] templateId:', postInArray?.templateId);
 
   return decorateForUser(userId, newPost);
+  }
 }
 
 export type SearchResults = {

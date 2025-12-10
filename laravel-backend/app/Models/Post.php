@@ -40,6 +40,11 @@ class Post extends Model
         'video_caption_text',
         'subtitles_enabled',
         'subtitle_text',
+        'edit_timeline', // JSON: Edit timeline for hybrid editing pipeline (clips, trims, transitions, etc.)
+        'render_job_id', // Reference to render job
+        'final_video_url', // Final rendered video URL
+        'music_track_id', // Reference to music track from library
+        'music_attribution', // Attribution text for music track
     ];
 
     protected $casts = [
@@ -47,6 +52,7 @@ class Post extends Model
         'stickers' => 'array',
         'media_items' => 'array',
         'text_style' => 'array', // { "color": "#FFFFFF", "size": "medium", "background": "gradient-1" }
+        'edit_timeline' => 'array', // Edit timeline for hybrid editing pipeline
         'likes_count' => 'integer',
         'views_count' => 'integer',
         'comments_count' => 'integer',
@@ -119,6 +125,12 @@ class Post extends Model
                     ->withTimestamps();
     }
 
+    // Music track relationship
+    public function musicTrack()
+    {
+        return $this->belongsTo(Music::class, 'music_track_id');
+    }
+
     // Scopes
     public function scopeNotReclipped($query)
     {
@@ -181,6 +193,12 @@ class Post extends Model
         return $this->belongsToMany(Collection::class, 'collection_posts')
                     ->withTimestamps()
                     ->orderBy('collection_posts.created_at', 'desc');
+    }
+
+    // Render job relationship
+    public function renderJob()
+    {
+        return $this->belongsTo(RenderJob::class, 'render_job_id');
     }
 
     // Helper method to check if post is in a collection

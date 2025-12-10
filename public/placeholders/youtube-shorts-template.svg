@@ -1,0 +1,32 @@
+<svg width="400" height="711" viewBox="0 0 400 711" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background gradient - YouTube Red to Black -->
+  <rect width="400" height="711" fill="url(#youtubeGradient)"/>
+  
+  <!-- YouTube Shorts Icon/Logo -->
+  <g transform="translate(150, 250)">
+    <!-- Play button triangle -->
+    <path d="M50 30 L50 70 L80 50 Z" fill="#FF0000" opacity="0.9"/>
+    <!-- YouTube "Shorts" text representation -->
+    <rect x="20" y="85" width="60" height="8" rx="4" fill="#FFFFFF" opacity="0.8"/>
+    <rect x="20" y="100" width="45" height="8" rx="4" fill="#FFFFFF" opacity="0.8"/>
+  </g>
+  
+  <!-- Vertical lines representing Shorts format -->
+  <line x1="100" y1="100" x2="100" y2="600" stroke="#FF0000" stroke-width="2" opacity="0.3"/>
+  <line x1="300" y1="100" x2="300" y2="600" stroke="#FF0000" stroke-width="2" opacity="0.3"/>
+  
+  <!-- Gradient definition -->
+  <defs>
+    <linearGradient id="youtubeGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#FF0000;stop-opacity:0.8" />
+      <stop offset="50%" style="stop-color:#CC0000;stop-opacity:0.9" />
+      <stop offset="100%" style="stop-color:#000000;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+</svg>
+
+
+
+
+
+

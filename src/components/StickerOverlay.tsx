@@ -41,13 +41,19 @@ export default function StickerOverlayComponent({
         if (isReadOnly) {
             return; // Read-only mode
         }
-        onSelect();
-
-        if (e.target === stickerRef.current || (e.target as HTMLElement).closest('.sticker-content')) {
-            setIsDragging(true);
-            setDragStart({ x: e.clientX - pixelX, y: e.clientY - pixelY });
-            setInitialState({ ...overlay });
+        
+        // Don't start dragging if clicking on controls (remove button, resize handle, etc.)
+        const target = e.target as HTMLElement;
+        if (target.closest('button') || target.closest('.cursor-nwse-resize') || target.closest('.cursor-w-resize') || target.closest('.cursor-e-resize')) {
+            return; // Let controls handle their own clicks
         }
+        
+        onSelect();
+        
+        // Allow dragging from anywhere on the sticker
+        setIsDragging(true);
+        setDragStart({ x: e.clientX - pixelX, y: e.clientY - pixelY });
+        setInitialState({ ...overlay });
     }
 
     function handleMouseMove(e: React.MouseEvent) {
@@ -183,16 +189,17 @@ export default function StickerOverlayComponent({
                 width: `${size}px`,
                 height: `${size}px`,
                 zIndex: isSelected ? 10 : 1,
-                pointerEvents: isReadOnly ? 'none' : 'auto'
+                pointerEvents: isReadOnly ? 'none' : 'auto',
+                userSelect: 'none' // Prevent text selection while dragging
             }}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
         >
             {/* Sticker Content */}
-            <div className="sticker-content w-full h-full flex items-center justify-center">
+            <div className="sticker-content w-full h-full flex items-center justify-center" style={{ pointerEvents: 'none' }}>
                 {overlay.sticker.emoji ? (
-                    <span className="text-4xl" style={{ fontSize: `${size * 0.8}px` }}>
+                    <span className="text-4xl" style={{ fontSize: `${size * 0.8}px`, pointerEvents: 'none' }}>
                         {overlay.sticker.emoji}
                     </span>
                 ) : overlay.sticker.url ? (
@@ -213,7 +220,8 @@ export default function StickerOverlayComponent({
                         style={{
                             fontSize: `${size * 0.6}px`,
                             color: (overlay as any).textColor || '#FFFFFF',
-                            textShadow: '2px 2px 4px rgba(0,0,0,0.8), -1px -1px 2px rgba(0,0,0,0.8)'
+                            textShadow: '2px 2px 4px rgba(0,0,0,0.8), -1px -1px 2px rgba(0,0,0,0.8)',
+                            pointerEvents: 'none'
                         }}
                     >
                         {(overlay as any).textContent || overlay.sticker.name}
@@ -222,7 +230,7 @@ export default function StickerOverlayComponent({
                     // For GIFs, only show image, no fallback text
                     null
                 ) : (
-                    <span className="text-white text-xs">{overlay.sticker.name}</span>
+                    <span className="text-white text-xs" style={{ pointerEvents: 'none' }}>{overlay.sticker.name}</span>
                 )}
             </div>
 

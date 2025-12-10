@@ -17,6 +17,7 @@ export const TEMPLATE_IDS = {
   INSTAGRAM: 'template-7',
   TIKTOK: 'template-8',
   GAZETTEER: 'template-9',
+  YOUTUBE_SHORTS: 'template-10',
 } as const;
 
 // Maximum clips for top templates
@@ -30,7 +31,8 @@ export const DEFAULT_CLIP_DURATION = 15000;
 export const TEMPLATE_GRADIENTS = {
   INSTAGRAM: 'linear-gradient(90deg, #feda75, #fa7e1e, #d62976, #962fbf, #4f5bd5, #feda75)',
   TIKTOK: 'linear-gradient(90deg, #69c9d0, #ee1d52, #000000, #69c9d0)',
-  GAZETTEER: 'linear-gradient(to right, rgb(255, 140, 0) 5%, rgb(248, 0, 50) 25%, rgb(255, 0, 160) 45%, rgb(140, 40, 255) 65%, rgb(0, 35, 255) 82%, rgb(25, 160, 255) 96%)',
+  GAZETTEER: 'linear-gradient(90deg, #22c55e, #ffffff, #22c55e)',
+  YOUTUBE_SHORTS: 'linear-gradient(180deg, #FF0000, #CC0000, #000000)',
   SILVER_WHITE: 'linear-gradient(90deg, #C0C0C0, #FFFFFF, #D3D3D3, #FFFFFF, #A8A8A8, #FFFFFF, #C0C0C0, #FFFFFF, #D3D3D3, #FFFFFF, #A8A8A8, #C0C0C0)',
   MARKETING: 'linear-gradient(90deg, #87ceeb, #ffb6c1, #87cefa, #c084fc, #34d399, #f59e0b, #ef4444, #dc2626, #fca5a5, #60a5fa, #fb7185, #87ceeb)',
 } as const;

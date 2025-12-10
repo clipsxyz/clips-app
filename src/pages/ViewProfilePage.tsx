@@ -5,8 +5,9 @@ import Avatar from '../components/Avatar';
 import { getFlagForHandle } from '../api/users';
 import Flag from '../components/Flag';
 import { useAuth } from '../context/Auth';
-import { fetchPostsPage, toggleFollowForPost, getFollowedUsers } from '../api/posts';
+import { fetchPostsPage, toggleFollowForPost, getFollowedUsers, posts as allPosts } from '../api/posts';
 import { userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/stories';
+import { fetchUserProfile, toggleFollow } from '../api/client';
 import type { Post } from '../types';
 import { 
   isProfilePrivate, 
@@ -29,68 +30,202 @@ export default function ViewProfilePage() {
     const [stats, setStats] = React.useState({ following: 0, followers: 0, likes: 0, views: 0 });
     const [selectedPost, setSelectedPost] = React.useState<Post | null>(null);
     const [hasStory, setHasStory] = React.useState(false);
-    const [canViewProfile, setCanViewProfile] = React.useState(true);
+    const [canViewProfileState, setCanViewProfileState] = React.useState(true);
     const [hasPendingRequest, setHasPendingRequest] = React.useState(false);
     const [profileIsPrivate, setProfileIsPrivate] = React.useState(false);
 
     const handleFollow = async () => {
-        if (!user?.id || !handle || !user?.handle) return;
+        if (!user?.id || !handle || !user?.handle) {
+            console.error('Missing required data for follow:', { userId: user?.id, handle, userHandle: user?.handle });
+            Swal.fire({
+                title: 'Error',
+                text: 'Unable to follow user. Please try again.',
+                icon: 'error',
+                timer: 2000,
+                showConfirmButton: false
+            });
+            return;
+        }
+        
+        // Decode the handle from URL (in case it was encoded)
+        // React Router may already decode it, but decodeURIComponent is safe to call on already-decoded strings
+        const decodedHandle = decodeURIComponent(handle);
+        console.log('Follow button clicked for:', decodedHandle);
         
         try {
             const followedUsers = await getFollowedUsers(user.id);
-            const isCurrentlyFollowing = followedUsers.includes(handle);
-            const profilePrivate = isProfilePrivate(handle);
+            const isCurrentlyFollowing = followedUsers.includes(decodedHandle);
+            const profilePrivate = isProfilePrivate(decodedHandle);
             
-            if (isCurrentlyFollowing) {
+            console.log('Current follow state:', { isCurrentlyFollowing, profilePrivate });
+            
+            // Try backend API first, fallback to mock if connection fails
+            let result;
+            let useMockFallback = false;
+            
+            try {
+                // Call backend API to toggle follow - encode handle for URL
+                const encodedHandleForAPI = encodeURIComponent(decodedHandle);
+                console.log('Calling toggleFollow with encoded handle:', encodedHandleForAPI);
+                result = await toggleFollow(encodedHandleForAPI);
+                console.log('Toggle follow result:', result);
+            } catch (apiError: any) {
+                // Check if it's a connection error (backend not running)
+                const isConnectionError = 
+                    apiError?.message === 'CONNECTION_REFUSED' ||
+                    apiError?.name === 'ConnectionRefused' ||
+                    apiError?.message?.includes('Failed to fetch') ||
+                    apiError?.message?.includes('ERR_CONNECTION_REFUSED') ||
+                    apiError?.message?.includes('NetworkError');
+                
+                if (isConnectionError) {
+                    console.log('Backend not available, using mock fallback');
+                    useMockFallback = true;
+                    
+                    // Use mock/local state approach (same as news feed cards)
+                    // Try to update via toggleFollowForPost if we have posts
+                    if (posts[0]?.id) {
+                        await toggleFollowForPost(user.id, posts[0].id);
+                    } else {
+                        // If no posts, find any post from this user in the allPosts array to update state
+                        const userPost = allPosts.find(p => p.userHandle === decodedHandle);
+                        if (userPost) {
+                            await toggleFollowForPost(user.id, userPost.id);
+                        }
+                    }
+                    
+                    // Toggle local state
+                    const newFollowingState = !isCurrentlyFollowing;
+                    setIsFollowing(newFollowingState);
+                    setHasPendingRequest(false);
+                    
+                    if (newFollowingState) {
+                        setCanViewProfile(true);
+                    } else if (profilePrivate) {
+                        setCanViewProfile(false);
+                    }
+                    
+                    // Dispatch event to update newsfeed
+                    window.dispatchEvent(new CustomEvent('followToggled', {
+                        detail: { handle: decodedHandle, isFollowing: newFollowingState }
+                    }));
+                    
+                    // Update stats optimistically (mock doesn't update backend counts)
+                    return; // Exit early since we handled it with mock
+                } else {
+                    // Re-throw if it's a different error
+                    throw apiError;
+                }
+            }
+            
+            // Continue with API result handling if we got here
+            
+            // Use the API response to determine the new state
+            if (result.status === 'unfollowed') {
                 // Unfollow
-                await toggleFollowForPost(user.id, posts[0]?.id || '');
+                // Also update local state for consistency
+                if (posts[0]?.id) {
+                    await toggleFollowForPost(user.id, posts[0].id);
+                }
                 setIsFollowing(false);
                 setHasPendingRequest(false);
-                removeFollowRequest(user.handle, handle);
+                removeFollowRequest(user.handle, decodedHandle);
                 
                 // If profile was private, user can no longer view
                 if (profilePrivate) {
                     setCanViewProfile(false);
                 }
-            } else {
-                // Follow
-                if (profilePrivate) {
-                    // Create follow request for private profile
-                    createFollowRequest(user.handle, handle);
-                    setHasPendingRequest(true);
-                    setIsFollowing(false);
-                    
-                    // Create notification (using the notifications system)
-                    const { createNotification } = await import('../api/notifications');
-                    await createNotification({
-                        type: 'follow_request',
-                        fromHandle: user.handle,
-                        toHandle: handle,
-                        message: `${user.handle} wants to follow you`
-                    });
-                    
-                    Swal.fire({
-                        title: 'Follow Request Sent',
-                        text: 'Your follow request has been sent. You will be notified when they accept.',
-                        icon: 'success',
-                        timer: 2000,
-                        showConfirmButton: false
-                    });
-                } else {
-                    // Public profile - follow immediately
-                    await toggleFollowForPost(user.id, posts[0]?.id || '');
-                    setIsFollowing(true);
-                    setHasPendingRequest(false);
-                    setCanViewProfile(true);
+            } else if (result.status === 'pending') {
+                // Private profile - follow request sent
+                createFollowRequest(user.handle, decodedHandle);
+                setHasPendingRequest(true);
+                setIsFollowing(false);
+                
+                Swal.fire({
+                    title: 'Follow Request Sent',
+                    text: 'Your follow request has been sent. You will be notified when they accept.',
+                    icon: 'success',
+                    timer: 2000,
+                    showConfirmButton: false
+                });
+            } else if (result.status === 'accepted' || result.following === true) {
+                // Public profile - follow immediately
+                // Also update local state for consistency
+                if (posts[0]?.id) {
+                    await toggleFollowForPost(user.id, posts[0].id);
                 }
+                setIsFollowing(true);
+                setHasPendingRequest(false);
+                setCanViewProfile(true);
             }
 
             // Dispatch event to update newsfeed
             window.dispatchEvent(new CustomEvent('followToggled', {
-                detail: { handle, isFollowing: !isCurrentlyFollowing }
+                detail: { handle: decodedHandle, isFollowing: !isCurrentlyFollowing }
             }));
-        } catch (error) {
+
+            // Refresh profile data to update counts
+            try {
+                const userProfileData = await fetchUserProfile(decodedHandle, user?.id);
+                const followingCount = userProfileData.following_count || 0;
+                const followersCount = userProfileData.followers_count || 0;
+                
+                setStats(prev => ({
+                    ...prev,
+                    following: followingCount,
+                    followers: followersCount
+                }));
+
+                // Update profileUser state if it exists
+                if (profileUser) {
+                    setProfileUser(prev => ({
+                        ...prev,
+                        stats: {
+                            ...prev.stats,
+                            following: followingCount,
+                            followers: followersCount
+                        }
+                    }));
+                }
+            } catch (error) {
+                console.error('Error refreshing profile counts:', error);
+            }
+        } catch (error: any) {
             console.error('Error toggling follow:', error);
+            
+            // Check if it's a connection error (backend not running)
+            const isConnectionError = 
+                error?.message === 'CONNECTION_REFUSED' ||
+                error?.name === 'ConnectionRefused' ||
+                error?.message?.includes('Failed to fetch') ||
+                error?.message?.includes('ERR_CONNECTION_REFUSED') ||
+                error?.message?.includes('NetworkError');
+            
+            if (isConnectionError) {
+                Swal.fire({
+                    title: 'Backend Server Not Running',
+                    html: `
+                        <p>The Laravel backend server is not running.</p>
+                        <p style="margin-top: 10px; font-size: 14px;">To enable the follow feature:</p>
+                        <ol style="text-align: left; margin-top: 10px; font-size: 14px;">
+                            <li>Open a terminal</li>
+                            <li>Navigate to: <code>laravel-backend</code></li>
+                            <li>Run: <code>php artisan serve</code></li>
+                        </ol>
+                    `,
+                    icon: 'warning',
+                    confirmButtonText: 'OK',
+                    width: '500px'
+                });
+            } else {
+                Swal.fire({
+                    title: 'Error',
+                    text: error?.message || 'Failed to follow user. Please try again.',
+                    icon: 'error',
+                    timer: 3000,
+                    showConfirmButton: false
+                });
+            }
         }
     };
 
@@ -98,24 +233,26 @@ export default function ViewProfilePage() {
         const loadProfile = async () => {
             if (!handle) return;
 
+            // Decode the handle from URL (in case it was encoded)
+            const decodedHandle = decodeURIComponent(handle);
             setLoading(true);
             try {
                 // Check privacy using localStorage
-                const profilePrivate = isProfilePrivate(handle);
+                const profilePrivate = isProfilePrivate(decodedHandle);
                 setProfileIsPrivate(profilePrivate);
                 
                 if (user?.id && user?.handle) {
                     const followedUsers = await getFollowedUsers(user.id);
-                    const canView = canViewProfile(user.handle, handle, followedUsers);
-                    const isFollowingUser = followedUsers.includes(handle);
-                    const hasPending = hasPendingFollowRequest(user.handle, handle);
+                    const canView = canViewProfile(user.handle, decodedHandle, followedUsers);
+                    const isFollowingUser = followedUsers.includes(decodedHandle);
+                    const hasPending = hasPendingFollowRequest(user.handle, decodedHandle);
                     
-                    setCanViewProfile(canView);
+                    setCanViewProfileState(canView);
                     setIsFollowing(isFollowingUser);
                     setHasPendingRequest(hasPending);
                     
                     // Show SweetAlert if profile is private and user can't view
-                    if (!canView && profilePrivate && handle !== user.handle) {
+                    if (!canView && profilePrivate && decodedHandle !== user.handle) {
                         Swal.fire({
                             title: 'Private Profile',
                             text: 'To view this user\'s profile you must be following them.',
@@ -140,15 +277,31 @@ export default function ViewProfilePage() {
                     }
                 }
 
-                // Fetch all posts from all tabs to find this user's posts
-                // We fetch from all tabs because posts might be in different location feeds
-                const allTabs = ['finglas', 'dublin', 'ireland', 'following'];
+                // Fetch posts by userHandle - check posts array first (instant, no API calls)
+                // This is much faster than fetching from multiple tabs
                 let userPosts: Post[] = [];
-
-                for (const tab of allTabs) {
-                    const page = await fetchPostsPage(tab, null, 100, user?.id || 'me', user?.local || '', user?.regional || '', user?.national || '');
-                    const postsForThisTab = page.items.filter(post => post.userHandle === handle);
-                    userPosts = [...userPosts, ...postsForThisTab];
+                
+                // First, check the exported posts array directly (instant, no delays)
+                if (allPosts && allPosts.length > 0) {
+                    userPosts = allPosts.filter(post => post.userHandle === decodedHandle);
+                }
+                
+                // If we found posts, we're done. Otherwise, try fetching from tabs as fallback
+                // (This should rarely be needed since posts array should have all posts)
+                if (userPosts.length === 0) {
+                    const allTabs = ['finglas', 'dublin', 'ireland'];
+                    // Fetch from tabs in parallel for better performance
+                    const tabPromises = allTabs.map(async (tab) => {
+                        try {
+                            const page = await fetchPostsPage(tab, null, 100, user?.id || 'me', user?.local || '', user?.regional || '', user?.national || '');
+                            return page.items.filter(post => post.userHandle === decodedHandle);
+                        } catch (error) {
+                            return [];
+                        }
+                    });
+                    
+                    const tabResults = await Promise.all(tabPromises);
+                    userPosts = tabResults.flat();
                 }
 
                 // Remove duplicates by post ID
@@ -156,22 +309,26 @@ export default function ViewProfilePage() {
                     index === self.findIndex(p => p.id === post.id)
                 );
 
-
-
                 // Try to get avatar from user object if viewing own profile, otherwise use placeholder
-                let avatarUrl = handle === user?.handle ? user?.avatarUrl : undefined;
+                let avatarUrl = decodedHandle === user?.handle ? user?.avatarUrl : undefined;
+
+                // Try to get avatar from avatar mapping
+                if (!avatarUrl) {
+                    const { getAvatarForHandle } = await import('../api/users');
+                    avatarUrl = getAvatarForHandle(decodedHandle);
+                }
 
                 // Mock profile picture for Sarah@Artane
-                if (handle === 'Sarah@Artane') {
+                if (decodedHandle === 'Sarah@Artane') {
                     avatarUrl = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=400&fit=crop';
                 }
 
                 // Get bio and social links if viewing own profile
-                let bio = handle === user?.handle ? user?.bio : undefined;
-                let socialLinks = handle === user?.handle ? user?.socialLinks : undefined;
+                let bio = decodedHandle === user?.handle ? user?.bio : undefined;
+                let socialLinks = decodedHandle === user?.handle ? user?.socialLinks : undefined;
 
                 // Mock data for test user Sarah@Artane
-                if (handle === 'Sarah@Artane') {
+                if (decodedHandle === 'Sarah@Artane') {
                     bio = '📍 Living in Artane, Dublin! Love exploring Ireland, sharing local spots, and connecting with the community. Food enthusiast 🍳 Travel lover 🌍 Always up for an adventure!';
                     socialLinks = {
                         website: 'https://sarah-artane.com',
@@ -185,17 +342,42 @@ export default function ViewProfilePage() {
                 const totalLikes = uniquePosts.reduce((sum, post) => sum + (post.stats?.likes || 0), 0);
                 const totalViews = uniquePosts.reduce((sum, post) => sum + (post.stats?.views || 0), 0);
 
+                // Fetch user profile data from API to get actual following/followers counts
+                let followingCount = 0;
+                let followersCount = 0;
+                try {
+                    const userProfileData = await fetchUserProfile(decodedHandle, user?.id);
+                    followingCount = userProfileData.following_count || 0;
+                    followersCount = userProfileData.followers_count || 0;
+                    
+                    // Update avatar and bio from API if available
+                    if (userProfileData.avatar_url && !avatarUrl) {
+                        avatarUrl = userProfileData.avatar_url;
+                    }
+                    if (userProfileData.bio && !bio) {
+                        bio = userProfileData.bio;
+                    }
+                    if (userProfileData.social_links && !socialLinks) {
+                        socialLinks = userProfileData.social_links;
+                    }
+                } catch (error) {
+                    console.error('Error fetching user profile data:', error);
+                    // Fallback to 0 if API call fails
+                }
+
+                // Always create profile data, even if no posts found
+                // This ensures the profile page shows even for users with no posts
                 const profileData = {
-                    handle: handle,
-                    name: handle.split('@')[0],
+                    handle: decodedHandle,
+                    name: decodedHandle.split('@')[0],
                     avatarUrl: avatarUrl,
                     bio: bio || undefined,
                     socialLinks: socialLinks || undefined,
                     stats: {
-                        following: 71,
-                        followers: 43900,
-                        likes: totalLikes || 941800,
-                        views: totalViews
+                        following: followingCount,
+                        followers: followersCount,
+                        likes: totalLikes || 0,
+                        views: totalViews || 0
                     }
                 };
 
@@ -286,7 +468,7 @@ export default function ViewProfilePage() {
     }
 
     // Show private profile message if can't view
-    if (!canViewProfile && profileIsPrivate && !loading) {
+    if (!canViewProfileState && profileIsPrivate && !loading) {
         return (
             <div className="min-h-screen bg-gray-950 text-white">
                 <div className="sticky top-0 bg-gray-950 z-10 border-b border-gray-800">
@@ -392,8 +574,14 @@ export default function ViewProfilePage() {
                 {/* Action Buttons */}
                 <div className="flex gap-2 mb-4 relative z-10">
                     <button
-                        onClick={handleFollow}
-                        className="flex-1 py-2 rounded-lg font-semibold transition-colors bg-brand-600 hover:bg-brand-700 text-white"
+                        onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            console.log('Follow button clicked');
+                            handleFollow();
+                        }}
+                        className="flex-1 py-2 rounded-lg font-semibold transition-colors bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={!user?.id || !handle || !user?.handle}
                     >
                         {hasPendingRequest ? 'Requested' : isFollowing ? 'Following' : 'Follow'}
                     </button>
@@ -402,9 +590,11 @@ export default function ViewProfilePage() {
                             e.stopPropagation();
                             e.preventDefault();
                             if (handle && user?.handle && user?.id) {
+                                // Decode the handle from URL
+                                const decodedHandle = decodeURIComponent(handle);
                                 // Check if user can message (privacy check)
                                 const followedUsers = await getFollowedUsers(user.id);
-                                if (!canSendMessage(user.handle, handle, followedUsers)) {
+                                if (!canSendMessage(user.handle, decodedHandle, followedUsers)) {
                                     Swal.fire({
                                         title: 'Cannot Send Message',
                                         text: 'You must follow this user to send them a message.',
@@ -412,7 +602,7 @@ export default function ViewProfilePage() {
                                     });
                                     return;
                                 }
-                                navigate(`/messages/${handle}`);
+                                navigate(`/messages/${decodedHandle}`);
                             }
                         }}
                         className="flex-1 py-2 rounded-lg bg-gray-800 text-white font-semibold hover:bg-gray-700 transition-colors relative z-20"
@@ -479,11 +669,11 @@ export default function ViewProfilePage() {
                                 href={`https://tiktok.com/@${profileUser.socialLinks.tiktok.replace('@', '')}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="w-10 h-10 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center justify-center"
+                                className="w-10 h-10 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors flex items-center justify-center"
                                 title={profileUser.socialLinks.tiktok}
                             >
-                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                                    <path d="M16.6 5.82s.51.5 2.13.5V1.63h-2.81v6.94s1.62-.07 2.81-.07v2.81c-1.68 0-2.81.07-2.81.07v3.39c0 3.89-3.53 5.21-6.7 5.21s-6.7-1.32-6.7-5.21c0-3.89 3.53-5.21 6.7-5.21.7 0 1.36.05 1.93.11V9.94h-2.93v2.81c1.24.28 2.03 1.32 2.03 2.29s-.79 2.01-2.03 2.29c-1.24.28-2.03 1.32-2.03 2.29s-.79 2.01-2.03 2.29c-1.24.28-2.03 1.32-2.03 2.29s-.79 2.01-2.03 2.29c-1.24.28-2.03 1.32-2.03 2.29s.79 2.01 2.03 2.29c1.24.28 2.03 1.32 2.03 2.29s-.79 2.01-2.03 2.29c-1.24.28-2.03 1.32-2.03 2.29s.79 2.01 2.03 2.29c1.24.28 2.03 1.32 2.03 2.29s-.79 2.01-2.03 2.29z" />
+                                <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 text-white">
+                                    <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.65 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z"/>
                                 </svg>
                             </a>
                         )}

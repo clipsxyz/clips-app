@@ -13,6 +13,9 @@ import TextStickerModal from '../components/TextStickerModal';
 import UserTaggingModal from '../components/UserTaggingModal';
 import EffectWrapper from '../components/EffectWrapper';
 import type { EffectConfig } from '../utils/effects';
+import { pickFiles, filterFilesByPlatform, type PlatformType } from '../utils/filePicker';
+import { isWeb } from '../utils/platform';
+import Swal from 'sweetalert2';
 
 type UserMedia = {
     clipId: string;
@@ -69,18 +72,200 @@ export default function TemplateEditorPage() {
     const [selectedStickerOverlay, setSelectedStickerOverlay] = React.useState<string | null>(null);
     const [taggedUsers, setTaggedUsers] = React.useState<string[]>([]);
     const [showUserTagging, setShowUserTagging] = React.useState(false);
-    const [currentStep, setCurrentStep] = React.useState<'media' | 'stickers' | 'details'>('media');
+    const [currentStep, setCurrentStep] = React.useState<'media' | 'details'>('media');
     const mediaContainerRef = React.useRef<HTMLDivElement>(null);
+    const postDetailsRef = React.useRef<HTMLDivElement>(null);
     const isAddingClipRef = React.useRef(false); // Prevent multiple rapid clicks
+    
+    // Immediately scroll to top on mount (before any rendering)
+    React.useLayoutEffect(() => {
+        window.scrollTo(0, 0);
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
+    }, []);
+    
+    // Force scroll to Post Details when on details step
+    React.useEffect(() => {
+        if (currentStep === 'details') {
+            // First, scroll to absolute top to reset
+            window.scrollTo(0, 0);
+            document.documentElement.scrollTop = 0;
+            document.body.scrollTop = 0;
+            
+            const scrollToPostDetails = () => {
+                const element = document.getElementById('post-details-section');
+                if (element) {
+                    // Get the element's position
+                    const rect = element.getBoundingClientRect();
+                    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+                    const elementTop = rect.top + scrollTop;
+                    
+                    // Force scroll using all methods
+                    window.scrollTo({
+                        top: elementTop,
+                        left: 0,
+                        behavior: 'auto'
+                    });
+                    document.documentElement.scrollTop = elementTop;
+                    document.body.scrollTop = elementTop;
+                    if (document.scrollingElement) {
+                        (document.scrollingElement as HTMLElement).scrollTop = elementTop;
+                    }
+                    
+                    // Also try scrollIntoView
+                    element.scrollIntoView({ 
+                        block: 'start', 
+                        inline: 'nearest',
+                        behavior: 'auto'
+                    });
+                }
+            };
+            
+            // Try multiple times with increasing delays to catch it after render
+            scrollToPostDetails();
+            const timeouts = [
+                setTimeout(scrollToPostDetails, 0),
+                setTimeout(scrollToPostDetails, 10),
+                setTimeout(scrollToPostDetails, 50),
+                setTimeout(scrollToPostDetails, 100),
+                setTimeout(scrollToPostDetails, 200),
+                setTimeout(scrollToPostDetails, 300),
+                setTimeout(scrollToPostDetails, 500),
+                setTimeout(scrollToPostDetails, 800)
+            ];
+            
+            return () => {
+                timeouts.forEach(clearTimeout);
+            };
+        } else {
+            // For other steps, scroll to top
+            window.scrollTo(0, 0);
+        }
+    }, [currentStep]);
+    
+    // Ref callback to scroll immediately when element is rendered
+    const postDetailsRefCallback = React.useCallback((node: HTMLDivElement | null) => {
+        postDetailsRef.current = node;
+        if (node && currentStep === 'details') {
+            // Scroll immediately when element is rendered - use multiple methods
+            const scrollIt = () => {
+                const y = node.offsetTop;
+                window.scrollTo(0, y);
+                document.documentElement.scrollTop = y;
+                document.body.scrollTop = y;
+                node.scrollIntoView({ block: 'start', behavior: 'auto' });
+            };
+            
+            // Try immediately and with delays
+            scrollIt();
+            setTimeout(scrollIt, 0);
+            setTimeout(scrollIt, 50);
+            setTimeout(scrollIt, 100);
+        }
+    }, [currentStep]);
 
-    // For top 3 templates (Gazetteer, Instagram, TikTok), support dynamic clips (1-20)
-    const isTopTemplate = template?.id === TEMPLATE_IDS.INSTAGRAM || template?.id === TEMPLATE_IDS.TIKTOK || template?.id === TEMPLATE_IDS.GAZETTEER;
+    // For top templates (Gazetteer, Instagram, TikTok, YouTube Shorts), support dynamic clips (1-20)
+    const isTopTemplate = template?.id === TEMPLATE_IDS.INSTAGRAM || template?.id === TEMPLATE_IDS.TIKTOK || template?.id === TEMPLATE_IDS.GAZETTEER || template?.id === TEMPLATE_IDS.YOUTUBE_SHORTS;
     const [dynamicClips, setDynamicClips] = React.useState<Array<{ id: string; mediaType: 'image' | 'video' | 'text'; duration: number }>>(
         isTopTemplate ? [{ id: 'clip-1', mediaType: 'video', duration: DEFAULT_CLIP_DURATION }] : []
     );
 
     // Use dynamic clips for top templates, otherwise use template.clips
     const activeClips = isTopTemplate ? dynamicClips : (template?.clips || []);
+
+    // Scroll on route change
+    React.useEffect(() => {
+        // Disable scroll restoration
+        if ('scrollRestoration' in history) {
+            history.scrollRestoration = 'manual';
+        }
+        
+        // Always scroll to top first when route changes
+        window.scrollTo(0, 0);
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
+        
+        // If on details step, also scroll to Post Details after a delay
+        if (currentStep === 'details') {
+            setTimeout(() => {
+                const element = document.getElementById('post-details-section');
+                if (element) {
+                    const rect = element.getBoundingClientRect();
+                    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+                    const elementTop = rect.top + scrollTop;
+                    window.scrollTo(0, elementTop);
+                    element.scrollIntoView({ block: 'start', behavior: 'auto' });
+                }
+            }, 100);
+        }
+    }, [location.pathname, currentStep]);
+
+    // Force scroll to top of Post Details section
+    React.useEffect(() => {
+        if (currentStep === 'details') {
+            const scrollToPostDetails = () => {
+                const element = document.getElementById('post-details-section');
+                if (element) {
+                    // Get the bounding rect to see where it actually is
+                    const rect = element.getBoundingClientRect();
+                    const currentScroll = window.pageYOffset || document.documentElement.scrollTop;
+                    const elementTop = rect.top + currentScroll;
+                    
+                    // Account for any sticky headers (if header is ~56px, subtract it)
+                    // But actually, we want the element at the very top, so use elementTop directly
+                    const targetScroll = elementTop;
+                    
+                    // Force scroll - use instant behavior
+                    window.scrollTo({
+                        top: targetScroll,
+                        left: 0,
+                        behavior: 'auto'
+                    });
+                    
+                    // Also set directly on all possible scroll containers
+                    document.documentElement.scrollTop = targetScroll;
+                    document.body.scrollTop = targetScroll;
+                    if (document.scrollingElement) {
+                        (document.scrollingElement as HTMLElement).scrollTop = targetScroll;
+                    }
+                    
+                    // Use scrollIntoView as well to ensure it's at the top
+                    element.scrollIntoView({ 
+                        block: 'start', 
+                        inline: 'nearest',
+                        behavior: 'auto'
+                    });
+                    
+                    // Verify the scroll worked and force again if needed
+                    setTimeout(() => {
+                        const finalRect = element.getBoundingClientRect();
+                        // If element is not at top of viewport (within 5px tolerance), force scroll again
+                        if (finalRect.top > 5) {
+                            window.scrollTo(0, targetScroll);
+                            element.scrollIntoView({ block: 'start', behavior: 'auto' });
+                        }
+                    }, 50);
+                }
+            };
+            
+            // First scroll to top to reset
+            window.scrollTo(0, 0);
+            
+            // Then scroll to Post Details with multiple attempts
+            scrollToPostDetails();
+            const timeouts = [
+                setTimeout(scrollToPostDetails, 10),
+                setTimeout(scrollToPostDetails, 50),
+                setTimeout(scrollToPostDetails, 100),
+                setTimeout(scrollToPostDetails, 200),
+                setTimeout(scrollToPostDetails, 400)
+            ];
+            
+            return () => {
+                timeouts.forEach(clearTimeout);
+            };
+        }
+    }, [currentStep]);
 
     React.useEffect(() => {
         // Only redirect if we've checked sessionStorage and still don't have a template
@@ -108,6 +293,7 @@ export default function TemplateEditorPage() {
         const timeoutId = setTimeout(checkTemplate, 100);
         return () => clearTimeout(timeoutId);
     }, [template, navigate]);
+
 
     if (!template) {
         return null;
@@ -253,6 +439,17 @@ export default function TemplateEditorPage() {
                 animation: `shimmer ${ANIMATION_DURATIONS.SHIMMER}ms linear infinite`,
                 display: 'block'
             };
+        } else if (template?.id === TEMPLATE_IDS.YOUTUBE_SHORTS) {
+            return {
+                background: TEMPLATE_GRADIENTS.YOUTUBE_SHORTS,
+                backgroundSize: '200% 100%',
+                WebkitBackgroundClip: 'text',
+                backgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                color: 'transparent',
+                animation: `shimmer ${ANIMATION_DURATIONS.SHIMMER}ms linear infinite`,
+                display: 'block'
+            };
         }
         return { color: 'white', display: 'block' };
     }, [template?.id]);
@@ -267,9 +464,142 @@ export default function TemplateEditorPage() {
         }
     }, [allClipsFilled, currentStep]);
 
+    // Get platform type from template
+    const getPlatformType = (): PlatformType | null => {
+        if (template?.id === TEMPLATE_IDS.TIKTOK) return 'tiktok';
+        if (template?.id === TEMPLATE_IDS.INSTAGRAM) return 'instagram';
+        if (template?.id === TEMPLATE_IDS.YOUTUBE_SHORTS) return 'youtube-shorts';
+        return null;
+    };
+
+    // Handle platform-specific file selection
+    async function handlePlatformFileSelect(clipId: string) {
+        const platformType = getPlatformType();
+        if (!platformType) {
+            // Fallback to regular file input for non-platform templates
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = isTopTemplate ? 'image/*,video/mp4,.mp4' : (activeClips.find(c => c.id === clipId)?.mediaType === 'video' ? 'video/mp4,.mp4' : 'image/*');
+            input.onchange = (e) => handleMediaSelect(clipId, e as any);
+            input.click();
+            return;
+        }
+
+        try {
+            if (isWeb()) {
+                // Web: Use custom file picker with filtering
+                const files = await pickFiles(platformType);
+                if (files.length === 0) {
+                    Swal.fire({
+                        icon: 'info',
+                        title: 'No matching files',
+                        text: `No ${platformType === 'tiktok' ? 'TikTok' : platformType === 'instagram' ? 'Instagram' : 'YouTube Shorts'} videos found. Please select files that match the platform.`,
+                        timer: 3000,
+                        showConfirmButton: false
+                    });
+                    return;
+                }
+                
+                // Use the first file
+                const file = files[0] as File;
+                const fakeEvent = {
+                    target: { files: [file] }
+                } as React.ChangeEvent<HTMLInputElement>;
+                handleMediaSelect(clipId, fakeEvent);
+            } else {
+                // React Native: Use native picker
+                const results = await pickFiles(platformType);
+                if (results.length === 0) {
+                    Swal.fire({
+                        icon: 'info',
+                        title: 'No matching files',
+                        text: `No ${platformType === 'tiktok' ? 'TikTok' : platformType === 'instagram' ? 'Instagram' : 'YouTube Shorts'} videos found.`,
+                        timer: 3000,
+                        showConfirmButton: false
+                    });
+                    return;
+                }
+                
+                // Process the first result (React Native format from react-native-image-crop-picker)
+                const result = results[0];
+                // react-native-image-crop-picker returns: { path, mime, size, width, height, duration, etc. }
+                const mediaType = result.mime?.startsWith('image/') ? 'image' : 'video';
+                const url = result.path || result.uri;
+                
+                if (!url) {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Error',
+                        text: 'Could not access file path.',
+                        timer: 2000,
+                        showConfirmButton: false
+                    });
+                    return;
+                }
+
+                // For React Native, we use the path/uri directly
+                // The media will be loaded from the path
+                setUserMedia(prev => {
+                    const newMap = new Map(prev);
+                    newMap.set(clipId, {
+                        clipId,
+                        url: url, // Use path/uri for React Native
+                        mediaType,
+                        file: undefined // No File object in React Native
+                    });
+                    return newMap;
+                });
+
+                // Update clip mediaType if needed
+                if (isTopTemplate) {
+                    const clipIndex = dynamicClips.findIndex(c => c.id === clipId);
+                    if (clipIndex !== -1) {
+                        setDynamicClips(prev => {
+                            const newClips = [...prev];
+                            newClips[clipIndex] = { ...newClips[clipIndex], mediaType };
+                            return newClips;
+                        });
+                    }
+                }
+
+                // Auto-advance to next clip if available
+                const currentIndex = activeClips.findIndex(c => c.id === clipId);
+                if (currentIndex < activeClips.length - 1) {
+                    setTimeout(() => {
+                        setCurrentClipIndex(currentIndex + 1);
+                    }, 300);
+                }
+            }
+        } catch (error) {
+            console.error('Error selecting platform files:', error);
+            Swal.fire({
+                icon: 'error',
+                title: 'Error',
+                text: 'Failed to select files. Please try again.',
+                timer: 2000,
+                showConfirmButton: false
+            });
+        }
+    }
+
     function handleMediaSelect(clipId: string, event: React.ChangeEvent<HTMLInputElement>) {
         const file = event.target.files?.[0];
         if (!file) return;
+
+        // For platform templates, check if file matches platform
+        const platformType = getPlatformType();
+        if (platformType && isWeb()) {
+            if (!filterFilesByPlatform([file], platformType).length) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'File doesn\'t match platform',
+                    text: `This file doesn't appear to be a ${platformType === 'tiktok' ? 'TikTok' : platformType === 'instagram' ? 'Instagram' : 'YouTube Shorts'} video. Please select a matching file.`,
+                    timer: 3000,
+                    showConfirmButton: false
+                });
+                return;
+            }
+        }
 
         // Validate MP4 for video templates (but top templates accept both images and videos)
         if (!isTopTemplate) {
@@ -708,10 +1038,6 @@ export default function TemplateEditorPage() {
                                     />
                                 </div>
                             </>
-                        ) : currentStep === 'stickers' ? (
-                            <div className="text-sm font-medium text-white">
-                                Add Stickers
-                            </div>
                         ) : (
                             <div className="text-sm font-medium text-white">
                                 Post Details
@@ -749,12 +1075,7 @@ export default function TemplateEditorPage() {
                                 {/* Next Button - Right */}
                                 <button
                                     onClick={() => {
-                                        // Skip stickers step for Instagram and TikTok templates
-                                        if (template?.id === TEMPLATE_IDS.INSTAGRAM || template?.id === TEMPLATE_IDS.TIKTOK) {
-                                            setCurrentStep('details');
-                                        } else {
-                                            setCurrentStep('stickers');
-                                        }
+                                        setCurrentStep('details');
                                     }}
                                     className={`py-2.5 bg-black text-white border border-white/40 rounded-lg text-sm font-semibold hover:bg-black/80 transition-colors flex items-center justify-center gap-1.5 ${isTopTemplate && activeClips.length < MAX_CLIPS ? 'px-4' : 'w-full'}`}
                                 >
@@ -1000,29 +1321,80 @@ export default function TemplateEditorPage() {
                                                 <span className="sr-only">Previous clip</span>
                                             </button>
                                         )}
-                                        <label className={`block aspect-[9/16] max-h-[55vh] rounded-2xl cursor-pointer mx-auto bg-gray-900/30 transition-colors ${template.id === TEMPLATE_IDS.INSTAGRAM
-                                            ? 'ig-animated-border'
-                                            : template.id === TEMPLATE_IDS.TIKTOK
-                                                ? 'tt-animated-border'
-                                                : template.id === TEMPLATE_IDS.GAZETTEER
-                                                    ? 'gz-animated-border'
-                                                    : 'border-2 border-dashed border-gray-700 hover:border-gray-600'
-                                            }`}>
-                                            <input
-                                                type="file"
-                                                accept={isTopTemplate ? 'image/*,video/mp4,.mp4' : (currentClip?.mediaType === 'video' ? 'video/mp4,.mp4' : 'image/*')}
-                                                onChange={(e) => handleMediaSelect(currentClip?.id || '', e)}
-                                                className="hidden"
-                                            />
+                                        <label 
+                                            className={`block aspect-[9/16] max-h-[55vh] rounded-2xl cursor-pointer mx-auto bg-gray-900/30 transition-colors ${template.id === TEMPLATE_IDS.INSTAGRAM
+                                                ? 'ig-animated-border'
+                                                : template.id === TEMPLATE_IDS.TIKTOK
+                                                    ? 'tt-animated-border'
+                                                    : template.id === TEMPLATE_IDS.GAZETTEER
+                                                        ? 'gz-animated-border'
+                                                        : template.id === TEMPLATE_IDS.YOUTUBE_SHORTS
+                                                            ? 'border-2 border-red-500/50'
+                                                            : 'border-2 border-dashed border-gray-700 hover:border-gray-600'
+                                                }`}
+                                            onClick={!isWeb() ? () => {
+                                                const platformType = getPlatformType();
+                                                if (platformType) {
+                                                    handlePlatformFileSelect(currentClip?.id || '');
+                                                }
+                                            } : undefined}
+                                        >
+                                            {isWeb() ? (
+                                                <input
+                                                    type="file"
+                                                    accept={isTopTemplate ? 'image/*,video/mp4,.mp4' : (currentClip?.mediaType === 'video' ? 'video/mp4,.mp4' : 'image/*')}
+                                                    onChange={(e) => {
+                                                        // For platform templates, filter by filename
+                                                        const platformType = getPlatformType();
+                                                        if (platformType) {
+                                                            const files = Array.from(e.target.files || []);
+                                                            const filtered = filterFilesByPlatform(files, platformType);
+                                                            if (filtered.length === 0) {
+                                                                Swal.fire({
+                                                                    icon: 'warning',
+                                                                    title: 'No matching files',
+                                                                    text: `No ${platformType === 'tiktok' ? 'TikTok' : platformType === 'instagram' ? 'Instagram' : 'YouTube Shorts'} videos found. Please select files with matching filenames.`,
+                                                                    timer: 3000,
+                                                                    showConfirmButton: false
+                                                                });
+                                                                e.target.value = '';
+                                                                return;
+                                                            }
+                                                            // Use first filtered file
+                                                            const fakeEvent = {
+                                                                target: { files: [filtered[0]] }
+                                                            } as React.ChangeEvent<HTMLInputElement>;
+                                                            handleMediaSelect(currentClip?.id || '', fakeEvent);
+                                                        } else {
+                                                            handleMediaSelect(currentClip?.id || '', e);
+                                                        }
+                                                    }}
+                                                    className="hidden"
+                                                />
+                                            ) : null}
                                             <div className="h-full flex flex-col items-center justify-center p-8 text-center">
                                                 {isTopTemplate ? (
                                                     <>
                                                         <FiImage className="w-12 h-12 text-gray-500 mb-4" />
                                                         <div className="text-white text-lg font-semibold mb-2">
-                                                            Add Photo or Video
+                                                            {template?.id === TEMPLATE_IDS.TIKTOK
+                                                                ? 'Add a TikTok video to your location newsfeed'
+                                                                : template?.id === TEMPLATE_IDS.INSTAGRAM
+                                                                    ? 'Add an Instagram video to your location newsfeed'
+                                                                    : template?.id === TEMPLATE_IDS.YOUTUBE_SHORTS
+                                                                        ? 'Add a YouTube Shorts video to your location newsfeed'
+                                                                        : 'Add Photo or Video'
+                                                            }
                                                         </div>
                                                         <div className="text-gray-400 text-sm">
-                                                            Tap to select image or MP4 video
+                                                            {template?.id === TEMPLATE_IDS.TIKTOK
+                                                                ? 'Tap to select your TikTok video'
+                                                                : template?.id === TEMPLATE_IDS.INSTAGRAM
+                                                                    ? 'Tap to select your Instagram video'
+                                                                    : template?.id === TEMPLATE_IDS.YOUTUBE_SHORTS
+                                                                        ? 'Tap to select your YouTube Shorts video'
+                                                                        : 'Tap to select image or MP4 video'
+                                                            }
                                                         </div>
                                                         <div className="text-gray-500 text-xs mt-2">
                                                             {activeClips.length === 1 ? `Add ${MIN_CLIPS}-${MAX_CLIPS} items` : `Add up to ${MAX_CLIPS - activeClips.length} more`}
@@ -1057,85 +1429,6 @@ export default function TemplateEditorPage() {
                                         )}
                                     </div>
 
-                                    {/* Text Only Post Placeholder - Only for Gazetteer - Compact design to fit on page */}
-                                    {template?.id === TEMPLATE_IDS.GAZETTEER && !currentMedia && !currentTextOnlyClip && (
-                                        <button
-                                            onClick={() => {
-                                                // Check if we already have video clips - if so, add text-only as a clip
-                                                if (userMedia.size > 0 || textOnlyClips.size > 0) {
-                                                    // Add a new text-only clip using functional update
-                                                    const newClipId = `text-clip-${Date.now()}`;
-                                                    const newClip = {
-                                                        id: newClipId,
-                                                        mediaType: 'text' as const,
-                                                        duration: DEFAULT_CLIP_DURATION
-                                                    };
-                                                    
-                                                    // Use functional update to get the latest state
-                                                    setDynamicClips(prev => {
-                                                        const updatedClips = [...prev, newClip];
-                                                        
-                                                        // Store current state in sessionStorage to restore when returning
-                                                        // Note: File objects can't be serialized, so we only store URLs
-                                                        const serializableUserMedia = Array.from(userMedia.entries()).map(([id, media]) => ({
-                                                            id,
-                                                            url: media.url,
-                                                            mediaType: media.mediaType
-                                                            // Note: file is not stored as it can't be serialized
-                                                        }));
-                                                        sessionStorage.setItem('templateEditorState', JSON.stringify({
-                                                            template: template,
-                                                            dynamicClips: updatedClips,
-                                                            userMedia: serializableUserMedia,
-                                                            textOnlyClips: Array.from(textOnlyClips.entries()),
-                                                            stickers: Array.from(stickers.entries()),
-                                                            currentClipIndex: prev.length, // Index of new clip
-                                                            text: text,
-                                                            locationLabel: locationLabel,
-                                                            bannerText: bannerText,
-                                                            taggedUsers: taggedUsers
-                                                        }));
-                                                        
-                                                        // Navigate to text-only page after state update
-                                                        setTimeout(() => {
-                                                            setCurrentClipIndex(prev.length); // Navigate to the new clip
-                                                            navigate('/create/text-only', { 
-                                                                state: { 
-                                                                    isClip: true, 
-                                                                    clipId: newClipId,
-                                                                    templateId: template.id
-                                                                } 
-                                                            });
-                                                        }, 0);
-                                                        
-                                                        return updatedClips;
-                                                    });
-                                                } else {
-                                                    // No existing clips, navigate normally for standalone text-only post
-                                                    navigate('/create/text-only');
-                                                }
-                                            }}
-                                            className="w-full rounded-xl bg-white border-2 border-gray-300 transition-all duration-200 p-3.5 flex items-center gap-3 cursor-pointer group mt-3"
-                                        >
-                                            {/* Icon with black background */}
-                                            <div className="flex-shrink-0 relative">
-                                                <div className="w-11 h-11 rounded-full bg-black flex items-center justify-center">
-                                                    <FiType className="w-5 h-5 text-white" />
-                                                </div>
-                                            </div>
-                                            {/* Text content */}
-                                            <div className="flex-1 text-left">
-                                                <div className="text-black font-semibold text-sm mb-0.5">
-                                                    {userMedia.size > 0 ? 'Add Text-Only Clip' : 'Text Only Post'}
-                                                </div>
-                                                <div className="text-gray-600 text-xs">
-                                                    {userMedia.size > 0 
-                                                        ? 'Add a text-only clip to your post' 
-                                                        : 'Create a text-only post'}
-                                                </div>
-                                            </div>
-                                        </button>
-                                    )}
                                 </div>
                             )}
                         </div>
@@ -1164,283 +1457,11 @@ export default function TemplateEditorPage() {
                         </div>
 
                     </>
-                ) : currentStep === 'stickers' ? (
-                    <>
-                        {/* Step 2: Add Stickers */}
-                        <div className="mb-6">
-                            <div className="flex items-center justify-between mb-4">
-                                <button
-                                    onClick={() => setCurrentStep('media')}
-                                    className="p-2 rounded-full hover:bg-gray-800 transition-colors flex items-center gap-2"
-                                    aria-label="Back to media"
-                                >
-                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                                    </svg>
-                                    <span className="text-sm font-medium">Back</span>
-                                </button>
-                                <div className="text-sm text-gray-400">
-                                    Step 2 of 3
-                                </div>
-                            </div>
-
-                            <h2 className="text-xl font-semibold text-white mb-6">Add Stickers</h2>
-                        </div>
-
-                        {/* Add Stickers Section */}
-                        <div className="mb-6">
-                            <div className="mb-4">
-                                <div className="text-sm text-gray-400 mb-3">
-                                    Select a clip to add stickers
-                                </div>
-                                {/* Clip Thumbnails for Sticker Selection */}
-                                <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-2">
-                                    {activeClips
-                                        .filter(clip => {
-                                            // Only show clips that have media or text content
-                                            const media = userMedia.get(clip.id);
-                                            const textClip = clip.mediaType === 'text' ? textOnlyClips.get(clip.id) : null;
-                                            return media || textClip;
-                                        })
-                                        .map((clip, index) => {
-                                        const media = userMedia.get(clip.id);
-                                        const textClip = clip.mediaType === 'text' ? textOnlyClips.get(clip.id) : null;
-                                        const clipStickers = stickers.get(clip.id) || [];
-                                        // Find the actual index in activeClips for selection
-                                        const actualIndex = activeClips.findIndex(c => c.id === clip.id);
-                                        const isSelected = actualIndex === currentClipIndex;
-
-                                        return (
-                                            <button
-                                                key={clip.id}
-                                                onClick={() => setCurrentClipIndex(actualIndex)}
-                                                className={`flex-shrink-0 aspect-[9/16] w-20 rounded-lg overflow-hidden relative ${isSelected ? 'ring-2 ring-white' : 'ring-1 ring-gray-700'
-                                                    }`}
-                                            >
-                                                {textClip ? (
-                                                    // Text-only clip preview - Twitter card style
-                                                    <div className="w-full h-full bg-white rounded-lg overflow-hidden p-0.5">
-                                                        <div className="w-full h-full bg-black rounded flex items-center justify-center p-1">
-                                                            <div className="text-white text-[5px] leading-tight text-center line-clamp-5 whitespace-pre-wrap break-words overflow-hidden w-full">
-                                                                {textClip.text}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                ) : media ? (
-                                                    media.mediaType === 'video' ? (
-                                                        <video
-                                                            src={media.url}
-                                                            className="w-full h-full object-cover"
-                                                            muted
-                                                            playsInline
-                                                            preload="metadata"
-                                                        />
-                                                    ) : (
-                                                        <img
-                                                            src={media.url}
-                                                            alt={`Clip ${index + 1}`}
-                                                            className="w-full h-full object-cover"
-                                                        />
-                                                    )
-                                                ) : (
-                                                    <div className="w-full h-full bg-gray-900 flex items-center justify-center">
-                                                        <FiPlus className="w-4 h-4 text-gray-600" />
-                                                    </div>
-                                                )}
-                                                {clipStickers.length > 0 && (
-                                                    <div className="absolute top-1 right-1 w-5 h-5 bg-brand-500 rounded-full flex items-center justify-center text-xs font-semibold text-white">
-                                                        {clipStickers.length}
-                                                    </div>
-                                                )}
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-
-                            {/* Current Clip Preview with Stickers */}
-                            {(currentMedia || currentTextOnlyClip) && (
-                                <div className="mb-4">
-                                    <div
-                                        ref={mediaContainerRef}
-                                        className="relative aspect-[9/16] max-h-[50vh] rounded-xl overflow-hidden bg-gray-900 mx-auto shadow-lg"
-                                        style={{
-                                            aspectRatio: '9/16',
-                                            maxHeight: '50vh',
-                                            width: '100%',
-                                            position: 'relative',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center'
-                                        }}
-                                        onClick={(e) => {
-                                            if (e.target === e.currentTarget || (e.target as HTMLElement).tagName === 'VIDEO' || (e.target as HTMLElement).tagName === 'IMG') {
-                                                setSelectedStickerOverlay(null);
-                                            }
-                                        }}
-                                    >
-                                        {/* Display text-only clip in Twitter card format */}
-                                        {currentTextOnlyClip ? (
-                                            <div className="w-full h-full flex items-center justify-center p-4 bg-black">
-                                                <div className="w-full max-w-md rounded-2xl overflow-hidden bg-white border border-gray-200 shadow-2xl" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
-                                                    {/* Post Header */}
-                                                    <div className="flex items-start justify-between px-4 pt-4 pb-3 border-b border-gray-200">
-                                                        <div className="flex items-center gap-3 flex-1">
-                                                            <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0">
-                                                                <span className="text-gray-600 text-sm font-semibold">
-                                                                    {user?.handle?.split('@')[0]?.charAt(0).toUpperCase() || 'U'}
-                                                                </span>
-                                                            </div>
-                                                            <div className="flex-1">
-                                                                <h3 className="font-semibold flex items-center gap-1.5 text-gray-900 text-sm">
-                                                                    <span>{user?.handle || 'User'}</span>
-                                                                </h3>
-                                                                <div className="text-xs text-gray-600 flex items-center gap-2 mt-0.5">
-                                                                    {locationLabel && (
-                                                                        <>
-                                                                            <span className="flex items-center gap-1">
-                                                                                <FiMapPin className="w-3 h-3" />
-                                                                                {locationLabel}
-                                                                            </span>
-                                                                        </>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-
-                                                    {/* Text Content - Twitter card style (white card with black text box) */}
-                                                    <div className="p-4 w-full overflow-hidden" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
-                                                        <div className="p-4 rounded-lg bg-black overflow-hidden w-full" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
-                                                            <div className="text-base leading-relaxed whitespace-pre-wrap font-normal text-white break-words w-full" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', maxWidth: '100%', boxSizing: 'border-box' }}>
-                                                                {currentTextOnlyClip.text}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        ) : currentMedia ? (
-                                        /* Apply effects from template clip */
-                                        (() => {
-                                            // Get effects from template clip if it exists, otherwise empty array
-                                            const clipEffects: any[] = 'effects' in currentClip && Array.isArray(currentClip.effects) ? currentClip.effects : [];
-                                            let mediaElement: React.ReactNode = currentMedia.mediaType === 'video' ? (
-                                                <video
-                                                    src={currentMedia.url}
-                                                    className="w-full h-full object-cover"
-                                                    controls
-                                                    autoPlay
-                                                    loop
-                                                    muted
-                                                    playsInline
-                                                    preload="metadata"
-                                                    style={{
-                                                        objectFit: 'cover',
-                                                        width: '100%',
-                                                        height: '100%',
-                                                        display: 'block',
-                                                        position: 'absolute',
-                                                        top: 0,
-                                                        left: 0
-                                                    }}
-                                                />
-                                            ) : (
-                                                <img
-                                                    src={currentMedia.url}
-                                                    alt={`Clip ${currentClipIndex + 1}`}
-                                                    className="w-full h-full object-cover"
-                                                    style={{
-                                                        objectFit: 'cover',
-                                                        width: '100%',
-                                                        height: '100%',
-                                                        display: 'block',
-                                                        position: 'absolute',
-                                                        top: 0,
-                                                        left: 0
-                                                    }}
-                                                />
-                                            );
-
-                                            // Apply effects in reverse order (last effect wraps everything)
-                                            clipEffects.forEach((effect: EffectConfig) => {
-                                                mediaElement = (
-                                                    <EffectWrapper key={effect.type} effect={effect} isActive={true}>
-                                                        {mediaElement}
-                                                    </EffectWrapper>
-                                                );
-                                            });
-
-                                            return mediaElement;
-                                        })()
-                                        ) : null}
-
-                                        {/* Show active effects indicator */}
-                                        {(() => {
-                                            const hasEffects = 'effects' in (currentClip || {}) && currentClip && 'effects' in currentClip && Array.isArray(currentClip.effects) && currentClip.effects.length > 0;
-                                            if (!hasEffects) return null;
-                                            return (
-                                                <div className="absolute top-3 left-3 z-20 flex flex-wrap gap-1">
-                                                    {Array.isArray(currentClip.effects) && currentClip.effects.map((effect: EffectConfig, idx: number) => (
-                                                        <div
-                                                            key={idx}
-                                                            className="px-2 py-1 bg-black/70 backdrop-blur-sm text-white text-xs rounded-full"
-                                                            title={`${effect.type}${effect.colorGrading ? ` - ${effect.colorGrading}` : ''}`}
-                                                        >
-                                                            {effect.type === 'color-grading' && effect.colorGrading ? (
-                                                                <span className="capitalize">{effect.colorGrading.replace('-', ' ')}</span>
-                                                            ) : (
-                                                                <span className="capitalize">{effect.type.replace('-', ' ')}</span>
-                                                            )}
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            );
-                                        })()}
-
-                                        {/* Sticker Overlays */}
-                                        {currentStickers.map((overlay) => (
-                                            <StickerOverlayComponent
-                                                key={overlay.id}
-                                                overlay={overlay}
-                                                onUpdate={(updated) => handleUpdateSticker(currentClip.id, overlay.id, updated)}
-                                                onRemove={() => handleRemoveSticker(currentClip.id, overlay.id)}
-                                                isSelected={selectedStickerOverlay === overlay.id}
-                                                onSelect={() => setSelectedStickerOverlay(overlay.id)}
-                                                containerWidth={containerSize.width || 400}
-                                                containerHeight={containerSize.height || 711}
-                                            />
-                                        ))}
-                                    </div>
-
-                                    <button
-                                        onClick={() => setShowStickerPicker(true)}
-                                        className="w-full mt-3 py-3 bg-gray-800 text-white rounded-xl text-sm font-medium hover:bg-gray-700 transition-colors flex items-center justify-center gap-2"
-                                    >
-                                        <FiSmile className="w-5 h-5" />
-                                        <span>Add Stickers to Clip {currentClipIndex + 1}</span>
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Next Button */}
-                        <div className="mt-6">
-                            <button
-                                onClick={() => setCurrentStep('details')}
-                                className="w-full py-4 bg-white text-black rounded-xl text-base font-semibold hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
-                            >
-                                <span>Next</span>
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                </svg>
-                            </button>
-                        </div>
-                    </>
                 ) : (
                     <>
                         {/* Step 3: Post Details */}
                         {/* Post Details - Simple and Clean */}
-                        <div className="space-y-4 mb-6">
+                        <div id="post-details-section" ref={postDetailsRefCallback} className="space-y-4 mb-6">
                             {/* Caption */}
                             <div>
                                 <label className="block text-sm font-medium text-gray-300 mb-2">
