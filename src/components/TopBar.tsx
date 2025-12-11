@@ -149,31 +149,6 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
               <FiHome className="w-5 h-5 text-gray-700 dark:text-gray-200" />
             </button>
 
-            <button
-              onClick={() => navigate('/feed')}
-              className="font-light text-lg tracking-tight flex items-center gap-1.5"
-              aria-label="Go to Home Feed"
-              title="Gazetteer"
-              style={{ 
-                fontFamily: 'system-ui, -apple-system, sans-serif'
-              }}
-            >
-              <FiMapPin className="w-4 h-4 text-gray-700 dark:text-gray-200" />
-              <span
-                style={{
-                  background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
-                  backgroundSize: '200% 100%',
-                  WebkitBackgroundClip: 'text',
-                  backgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                  color: 'transparent',
-                  animation: 'shimmer 3s linear infinite',
-                  display: 'inline-block'
-                }}
-              >
-                Gazetteer
-              </span>
-            </button>
 
             <div className="flex items-center gap-2">
               {/* Local Button */}
@@ -199,51 +174,8 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
         ) : (
           <div className="mx-auto max-w-md px-4 h-11 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => navigate('/feed')}
-                className="font-light text-lg tracking-tight flex items-center gap-1.5"
-                aria-label="Go to Home Feed"
-                title="Gazetteer"
-                style={{ 
-                  fontFamily: 'system-ui, -apple-system, sans-serif'
-                }}
-              >
-                <FiMapPin className="w-4 h-4 text-gray-700 dark:text-gray-200" />
-                <span
-                  style={{
-                    background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
-                    backgroundSize: '200% 100%',
-                    WebkitBackgroundClip: 'text',
-                    backgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
-                    color: 'transparent',
-                    animation: 'shimmer 3s linear infinite',
-                    display: 'inline-block'
-                  }}
-                >
-                  Gazetteer
-                </span>
-              </button>
             </div>
 
-            <div className="flex items-center gap-2">
-              {/* Messages Icon */}
-              <button
-                onClick={() => navigate('/inbox')}
-                className="relative p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                aria-label="Open messages"
-                title={hasInbox ? 'New messages' : 'Messages'}
-              >
-                <div className={`relative w-6 h-6 ${hasInbox ? '' : ''}`}>
-                  <FiMessageSquare className={`relative w-6 h-6 ${hasInbox ? 'text-blue-500' : 'text-gray-600 dark:text-gray-300'}`} />
-                  {hasInbox && (
-                    <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 bg-blue-500 text-white text-[10px] leading-4 rounded-full text-center">
-                      {unreadCount > 9 ? '9+' : unreadCount}
-                    </span>
-                  )}
-                </div>
-              </button>
-            </div>
           </div>
         )}
       </div>

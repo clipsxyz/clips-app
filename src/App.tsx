@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck } from 'react-icons/fi';
+import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiBell } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from './constants';
 import TopBar from './components/TopBar';
@@ -15,6 +15,7 @@ import { useAuth } from './context/Auth';
 import { getFlagForHandle, getAvatarForHandle } from './api/users';
 import Flag from './components/Flag';
 import { useOnline } from './hooks/useOnline';
+import { getUnreadTotal } from './api/messages';
 import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState } from './api/posts';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory } from './api/stories';
 import { enqueue, drain } from './utils/mutationQueue';
@@ -82,7 +83,7 @@ export default function App() {
   return (
     <>
       <main id="main" className="mx-auto max-w-md min-h-screen pb-[calc(64px+theme(spacing.safe))] md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800" style={{ backgroundColor: '#030712' }}>
-        {loc.pathname !== '/login' && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
+        {loc.pathname !== '/login' && loc.pathname !== '/feed' && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
         <Outlet context={{ activeTab, setActiveTab, customLocation, setCustomLocation }} />
         {loc.pathname !== '/discover' && loc.pathname !== '/create/filters' && loc.pathname !== '/create/instant' && loc.pathname !== '/payment' && loc.pathname !== '/clip' && loc.pathname !== '/create' && loc.pathname !== '/template-editor' && loc.pathname !== '/login' && (
           <BottomNav onCreateClick={() => setShowCreateModal(true)} />
@@ -112,8 +113,10 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
   const tabs: Tab[] = [regional, national, 'Clips', 'Discover', 'Following'];
 
   return (
-    <div role="tablist" aria-label="Locations" className="sticky top-0 z-30 bg-[#030712] py-2">
-      <div className="grid grid-cols-5 gap-2 px-3">
+    <div role="tablist" aria-label="Locations" className="sticky top-0 z-30 bg-[#030712] py-2 relative">
+      {/* Scrim effect */}
+      <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/50 to-transparent pointer-events-none z-0" />
+      <div className="grid grid-cols-5 gap-2 px-3 relative z-10">
         {tabs.map(t => {
           const active = props.active === t;
           const id = `tab-${t}`;
@@ -163,7 +166,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                 }}
               >
                 {tabLabel}
-                <FiEye className="text-white" style={{ width: '32px', height: '32px', minWidth: '32px', minHeight: '32px' }} />
+                <FiEye className="text-white" style={{ width: '15px', height: '15px', minWidth: '15px', minHeight: '15px' }} />
               </button>
             );
           }
@@ -469,22 +472,15 @@ function PostHeader({ post, onFollow, showBoostIcon, onBoost, isOverlaid = false
                   size={16}
                 />
               </h3>
-              <div className={`text-xs flex items-center gap-2 mt-0.5 ${subtextColorClass}`}>
-                <span className="flex items-center gap-1">
-                  <FiMapPin className="w-3 h-3" />
-                  {post.locationLabel || 'No location set'}
-                </span>
-                {post.createdAt && (
-                  <>
-                    <span className={separatorColorClass}>·</span>
-                    <span>{timeAgo(post.createdAt)}</span>
-                  </>
-                )}
-              </div>
+              {post.createdAt && (
+                <div className={`text-xs flex items-center gap-2 mt-0.5 ${subtextColorClass}`}>
+                  <span>{timeAgo(post.createdAt)}</span>
+                </div>
+              )}
             </button>
           </div>
         </div>
-        <div className="relative z-10 flex items-center gap-2">
+        <div className="relative z-10 flex flex-col items-end gap-2">
           {/* Location Button - Pill shaped with pin icon */}
           {post.locationLabel && (
             <button
@@ -506,6 +502,22 @@ function PostHeader({ post, onFollow, showBoostIcon, onBoost, isOverlaid = false
               <span>{post.locationLabel}</span>
             </button>
           )}
+          {/* Gazetteer logo overlay with shimmer */}
+          <span
+            className="text-xs font-light tracking-tight text-white"
+            style={{
+              background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
+              backgroundSize: '200% 100%',
+              WebkitBackgroundClip: 'text',
+              backgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              color: 'transparent',
+              animation: 'shimmer 3s linear infinite',
+              display: 'inline-block'
+            }}
+          >
+            Gazetteer
+          </span>
           {showBoostIcon && isCurrentUser && onBoost ? (
             <BoostButton postId={post.id} onBoost={onBoost} />
           ) : null}
@@ -1227,12 +1239,34 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       setProgress(0);
       videoRef.current.load();
     } else if (currentItem?.type === 'image') {
-      setIsLoading(true);
+      // Check if image is already loaded (cached images)
+      // Use a small timeout to check after the ref is set
+      setTimeout(() => {
+        if (imageRef.current && imageRef.current.complete && imageRef.current.naturalWidth > 0) {
+          setIsLoading(false);
+          setAspectRatio(imageRef.current.naturalWidth / imageRef.current.naturalHeight);
+        } else {
+          setIsLoading(true);
+        }
+      }, 0);
       setIsPlaying(false);
       setShowControls(false);
       setProgress(0);
     }
   }, [currentIndex, currentItem?.type]);
+
+  // Check if image is already loaded (for cached images)
+  React.useEffect(() => {
+    if (currentItem?.type === 'image' && imageRef.current) {
+      // Check immediately if image is already loaded
+      if (imageRef.current.complete && imageRef.current.naturalWidth > 0) {
+        setIsLoading(false);
+        if (!aspectRatio) {
+          setAspectRatio(imageRef.current.naturalWidth / imageRef.current.naturalHeight);
+        }
+      }
+    }
+  }, [currentItem?.url, currentItem?.type, aspectRatio]);
 
   // If this is a text-only post, render TextCard
   if (text && !url && (!mediaItems || mediaItems.length === 0)) {
@@ -1412,8 +1446,15 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
               decoding="async"
               className="w-full h-full object-cover"
               draggable={false}
+              ref={imageRef}
               onLoad={handleImageLoad}
               onError={handleImageError}
+              onLoadStart={() => {
+                // Only set loading if image isn't already loaded
+                if (!imageRef.current?.complete) {
+                  setIsLoading(true);
+                }
+              }}
             />
           );
 
@@ -1863,7 +1904,10 @@ function EngagementBar({
   showMetricsIcon,
   onToggleMetrics,
   isMetricsOpen,
-  likeButtonRef
+  likeButtonRef,
+  onNotificationsPress,
+  unreadCount,
+  hasInbox
 }: {
   post: Post;
   onLike: () => Promise<void>;
@@ -1877,6 +1921,9 @@ function EngagementBar({
   onToggleMetrics?: () => void;
   isMetricsOpen?: boolean;
   likeButtonRef?: React.RefObject<HTMLButtonElement>;
+  onNotificationsPress?: () => void;
+  unreadCount?: number;
+  hasInbox?: boolean;
 }) {
   const [isSaved, setIsSaved] = React.useState(false);
 
@@ -2075,17 +2122,36 @@ function EngagementBar({
           )}
         </div>
 
-        {/* Save */}
-        {onSave && (
-          <button
-            className="transition-opacity hover:opacity-70 active:opacity-50"
-            onClick={onSave}
-            aria-label={isSaved ? 'Unsave post' : 'Save post'}
-            title={isSaved ? 'Unsave post' : 'Save post'}
-          >
-            <FiBookmark className={`w-5 h-5 ${isSaved ? 'text-white fill-white' : 'text-gray-600 dark:text-gray-400'}`} />
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {/* Notifications */}
+          {onNotificationsPress && (
+            <button
+              className="relative transition-opacity hover:opacity-70 active:opacity-50"
+              onClick={onNotificationsPress}
+              aria-label="Notifications"
+              title={hasInbox ? 'New notifications' : 'Notifications'}
+            >
+              <FiBell className={`w-5 h-5 ${hasInbox ? 'text-blue-500' : 'text-gray-600 dark:text-gray-400'}`} />
+              {hasInbox && unreadCount && unreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 bg-blue-500 text-white text-[10px] leading-4 rounded-full text-center">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {/* Save */}
+          {onSave && (
+            <button
+              className="transition-opacity hover:opacity-70 active:opacity-50"
+              onClick={onSave}
+              aria-label={isSaved ? 'Unsave post' : 'Save post'}
+              title={isSaved ? 'Unsave post' : 'Save post'}
+            >
+              <FiBookmark className={`w-5 h-5 ${isSaved ? 'text-white fill-white' : 'text-gray-600 dark:text-gray-400'}`} />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -2210,7 +2276,7 @@ function BoostMetrics({ post, isOpen }: { post: Post; isOpen: boolean }) {
   );
 }
 
-export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare, onOpenComments, onView, onReclip, onOpenScenes, showBoostIcon, onBoost }: {
+export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare, onOpenComments, onView, onReclip, onOpenScenes, showBoostIcon, onBoost, onNotificationsPress, unreadCount, hasInbox }: {
   post: Post;
   onLike: () => Promise<void>;
   onFollow?: () => Promise<void>;
@@ -2221,6 +2287,9 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   onOpenScenes: () => void;
   showBoostIcon?: boolean;
   onBoost?: () => Promise<void>;
+  onNotificationsPress?: () => void;
+  unreadCount?: number;
+  hasInbox?: boolean;
 }) {
   const { user } = useAuth();
   const titleId = `post-title-${post.id}`;
@@ -2388,6 +2457,9 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         onToggleMetrics={() => setIsMetricsOpen(!isMetricsOpen)}
         isMetricsOpen={isMetricsOpen}
         likeButtonRef={likeButtonRef}
+        onNotificationsPress={onNotificationsPress}
+        unreadCount={unreadCount}
+        hasInbox={hasInbox}
       />
       {/* Heart animation from tap to like button - rendered after EngagementBar so ref is set */}
       {heartAnimation && likeButtonRef.current && (
@@ -2516,6 +2588,7 @@ function FeedPageWrapper() {
   const userId = user?.id ?? 'anon';
   const online = useOnline();
   const routerLocation = useLocation();
+  const navigate = useNavigate();
   const requestTokenRef = React.useRef(0);
   
   // Initialize active tab based on user's national location, with fallback
@@ -2559,6 +2632,8 @@ function FeedPageWrapper() {
   const [selectedPostForShare, setSelectedPostForShare] = React.useState<Post | null>(null);
   const [scenesOpen, setScenesOpen] = React.useState(false);
   const [selectedPostForScenes, setSelectedPostForScenes] = React.useState<Post | null>(null);
+  const [unreadCount, setUnreadCount] = React.useState(0);
+  const [hasInbox, setHasInbox] = React.useState(false);
 
   // Internal state for Following feed (separate from tabs)
   const [showFollowingFeed, setShowFollowingFeed] = React.useState(false);
@@ -2595,6 +2670,44 @@ function FeedPageWrapper() {
     window.addEventListener('resetFeed', handleResetFeed);
     return () => window.removeEventListener('resetFeed', handleResetFeed);
   }, [user?.national]);
+
+  // Listen for unread messages count
+  React.useEffect(() => {
+    if (!user?.handle) return;
+
+    const updateUnreadCount = async () => {
+      try {
+        const count = await getUnreadTotal(user.handle!);
+        setUnreadCount(count);
+        setHasInbox(count > 0);
+      } catch (error) {
+        console.error('Error fetching unread count:', error);
+      }
+    };
+
+    // Initialize unread count
+    updateUnreadCount();
+
+    // Poll for updates every 10 seconds
+    const interval = setInterval(updateUnreadCount, 10000);
+
+    // Listen for unread changes
+    const handleUnreadChanged = (event: CustomEvent) => {
+      const handle = event.detail?.handle;
+      const unread = event.detail?.unread ?? 0;
+      if (handle === user.handle) {
+        setHasInbox(unread > 0);
+        setUnreadCount(unread);
+      }
+    };
+
+    window.addEventListener('inboxUnreadChanged', handleUnreadChanged as EventListener);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('inboxUnreadChanged', handleUnreadChanged as EventListener);
+    };
+  }, [user?.handle]);
 
   // Determine current filter - showFollowingFeed overrides everything, then custom location, then active tab
   const currentFilter = showFollowingFeed ? 'discover' : (customLocation || active);
@@ -3146,6 +3259,9 @@ function FeedPageWrapper() {
               setSelectedPostForScenes(p);
               setScenesOpen(true);
             }}
+            onNotificationsPress={() => navigate('/inbox')}
+            unreadCount={unreadCount}
+            hasInbox={hasInbox}
           />
         );
       })}
@@ -3513,6 +3629,9 @@ function BoostPageWrapper() {
               setSelectedPostForScenes(p);
               setScenesOpen(true);
             }}
+            onNotificationsPress={() => navigate('/inbox')}
+            unreadCount={unreadCount}
+            hasInbox={hasInbox}
           />
         ))
       )}

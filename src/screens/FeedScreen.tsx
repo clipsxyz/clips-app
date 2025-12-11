@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
     View,
     Text,
@@ -14,7 +15,9 @@ import {
     Alert,
     Share,
     Linking,
+    Animated,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
@@ -30,6 +33,7 @@ import {
     incrementShares,
 } from '../api/posts';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle } from '../api/stories';
+import { getUnreadTotal } from '../api/messages';
 import { timeAgo } from '../utils/timeAgo';
 import { enqueue, drain } from '../utils/mutationQueue';
 import type { Post, Comment } from '../types';
@@ -72,7 +76,7 @@ function PillTabs({
                                 {t}
                             </Text>
                             {isActive && (
-                                <Icon name="eye" size={28} color="#FFFFFF" style={styles.eyeIcon} />
+                                <Icon name="eye" size={15} color="#FFFFFF" style={styles.eyeIcon} />
                             )}
                         </TouchableOpacity>
                     );
@@ -109,7 +113,12 @@ function Avatar({
     if (hasStory) {
         return (
             <Component onPress={onPress} style={styles.avatarContainer}>
-                <View style={[styles.storyBorder, { width: size + 4, height: size + 4 }]}>
+                <LinearGradient
+                    colors={['#a78bfa', '#7c3aed']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={[styles.storyBorder, { width: size + 4, height: size + 4, borderRadius: (size + 4) / 2 }]}
+                >
                     <View style={[styles.avatarInner, { width: size, height: size }]}>
                         {src ? (
                             <Image source={{ uri: src }} style={styles.avatarImage} />
@@ -119,7 +128,7 @@ function Avatar({
                             </View>
                         )}
                     </View>
-                </View>
+                </LinearGradient>
             </Component>
         );
     }
@@ -149,6 +158,24 @@ function PostHeader({
     isCurrentUser: boolean;
 }) {
     const [hasStory, setHasStory] = useState(false);
+    const shimmerAnim = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+        Animated.loop(
+            Animated.sequence([
+                Animated.timing(shimmerAnim, {
+                    toValue: 1,
+                    duration: 3000,
+                    useNativeDriver: true,
+                }),
+                Animated.timing(shimmerAnim, {
+                    toValue: 0,
+                    duration: 3000,
+                    useNativeDriver: true,
+                }),
+            ])
+        ).start();
+    }, [shimmerAnim]);
 
     useEffect(() => {
         async function checkStory() {
@@ -201,25 +228,33 @@ function PostHeader({
                     onPress={onAvatarPress}
                 >
                     <Text style={styles.userHandle}>{post.userHandle}</Text>
-                    <View style={styles.postMeta}>
-                        <Icon name="location" size={12} color="#6B7280" />
-                        <Text style={styles.locationText}>{post.locationLabel || 'No location'}</Text>
-                        {post.createdAt && (
-                            <>
-                                <Text style={styles.separator}>·</Text>
-                                <Text style={styles.timeText}>{timeAgo(post.createdAt)}</Text>
-                            </>
-                        )}
-                    </View>
+                    {post.createdAt && (
+                        <View style={styles.postMeta}>
+                            <Text style={styles.timeText}>{timeAgo(post.createdAt)}</Text>
+                        </View>
+                    )}
                 </View>
             </View>
-            {post.locationLabel && (
-                <View style={styles.postHeaderRight}>
+            <View style={styles.postHeaderRight}>
+                {post.locationLabel && (
                     <TouchableOpacity style={styles.locationButton}>
                         <Icon name="location" size={12} color="#8B5CF6" />
                     </TouchableOpacity>
-                </View>
-            )}
+                )}
+                {/* Gazetteer logo overlay with shimmer */}
+                <Animated.View 
+                    style={[
+                        {
+                            opacity: shimmerAnim.interpolate({
+                                inputRange: [0, 0.5, 1],
+                                outputRange: [0.7, 1, 0.7],
+                            }),
+                        },
+                    ]}
+                >
+                    <Text style={styles.gazetteerOverlayText}>Gazetteer</Text>
+                </Animated.View>
+            </View>
         </View>
     );
 }
@@ -406,6 +441,9 @@ function FeedCard({
     onPostPress,
     onAvatarPress,
     onStoryPress,
+    onNotificationsPress,
+    unreadCount,
+    hasInbox,
     isCurrentUser 
 }: { 
     post: Post; 
@@ -419,6 +457,9 @@ function FeedCard({
     onPostPress?: () => void;
     onAvatarPress?: () => void;
     onStoryPress?: () => void;
+    onNotificationsPress?: () => void;
+    unreadCount?: number;
+    hasInbox?: boolean;
     isCurrentUser: boolean;
 }) {
     return (
@@ -487,13 +528,34 @@ function FeedCard({
                     </View>
                 </View>
 
-                <TouchableOpacity onPress={onBookmark}>
-                    <Icon
-                        name={post.isBookmarked ? "bookmark" : "bookmark-outline"}
-                        size={18}
-                        color={post.isBookmarked ? "#8B5CF6" : "#6B7280"}
-                    />
-                </TouchableOpacity>
+                <View style={styles.rightActions}>
+                    {onNotificationsPress && (
+                        <TouchableOpacity 
+                            onPress={onNotificationsPress} 
+                            style={styles.notificationButton}
+                        >
+                            <Icon 
+                                name="notifications" 
+                                size={18} 
+                                color={hasInbox ? "#3B82F6" : "#6B7280"} 
+                            />
+                            {hasInbox && unreadCount && unreadCount > 0 && (
+                                <View style={styles.notificationBadge}>
+                                    <Text style={styles.notificationBadgeText}>
+                                        {unreadCount > 9 ? '9+' : unreadCount}
+                                    </Text>
+                                </View>
+                            )}
+                        </TouchableOpacity>
+                    )}
+                    <TouchableOpacity onPress={onBookmark}>
+                        <Icon
+                            name={post.isBookmarked ? "bookmark" : "bookmark-outline"}
+                            size={18}
+                            color={post.isBookmarked ? "#8B5CF6" : "#6B7280"}
+                        />
+                    </TouchableOpacity>
+                </View>
             </View>
         </TouchableOpacity>
     );
@@ -517,6 +579,8 @@ const FeedScreen: React.FC = ({ navigation }: any) => {
     const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [selectedPostForShare, setSelectedPostForShare] = useState<Post | null>(null);
+    const [unreadCount, setUnreadCount] = useState(0);
+    const [hasInbox, setHasInbox] = useState(false);
     const requestTokenRef = useRef(0);
 
     const currentFilter = showFollowingFeed ? 'discover' : active;
@@ -549,6 +613,58 @@ const FeedScreen: React.FC = ({ navigation }: any) => {
             loadMore();
         }
     }, [cursor, currentFilter]);
+
+    // Update unread count function
+    const updateUnreadCount = React.useCallback(async () => {
+        if (!user?.handle) return;
+        try {
+            const count = await getUnreadTotal(user.handle);
+            setUnreadCount(count);
+            setHasInbox(count > 0);
+        } catch (error) {
+            console.error('Error fetching unread count:', error);
+        }
+    }, [user?.handle]);
+
+    // Listen for unread messages count
+    useEffect(() => {
+        if (!user?.handle) return;
+
+        // Initialize unread count
+        updateUnreadCount();
+
+        // Poll for updates every 10 seconds
+        const interval = setInterval(updateUnreadCount, 10000);
+
+        // Try to listen for events (works in React Native Web)
+        const handleUnreadChanged = (event: any) => {
+            const handle = event.detail?.handle;
+            const unread = event.detail?.unread ?? 0;
+            if (handle === user.handle) {
+                setHasInbox(unread > 0);
+                setUnreadCount(unread);
+            }
+        };
+
+        // Only add listeners if window is available (React Native Web)
+        if (typeof window !== 'undefined') {
+            window.addEventListener('inboxUnreadChanged', handleUnreadChanged);
+        }
+
+        return () => {
+            clearInterval(interval);
+            if (typeof window !== 'undefined') {
+                window.removeEventListener('inboxUnreadChanged', handleUnreadChanged);
+            }
+        };
+    }, [user?.handle, updateUnreadCount]);
+
+    // Refresh unread count when screen comes into focus
+    useFocusEffect(
+        React.useCallback(() => {
+            updateUnreadCount();
+        }, [updateUnreadCount])
+    );
 
     async function loadMore() {
         if (loading || end || cursor === null) {
@@ -617,17 +733,16 @@ const FeedScreen: React.FC = ({ navigation }: any) => {
     const flat = pages.flat();
 
     return (
-        <SafeAreaView style={styles.container} edges={['top']}>
-            <View style={styles.header}>
-                <Text style={styles.title}>Clips</Text>
+        <View style={styles.container}>
+            <View style={styles.stickyTabsContainer}>
+                <View style={styles.scrim} />
+                <PillTabs
+                    active={showFollowingFeed ? 'Following' : active}
+                    onChange={handleTabChange}
+                    userRegional={defaultRegional}
+                    userNational={defaultNational}
+                />
             </View>
-
-            <PillTabs
-                active={showFollowingFeed ? 'Following' : active}
-                onChange={handleTabChange}
-                userRegional={defaultRegional}
-                userNational={defaultNational}
-            />
 
             {error && (
                 <View style={styles.errorContainer}>
@@ -637,6 +752,7 @@ const FeedScreen: React.FC = ({ navigation }: any) => {
 
             <FlatList
                 data={flat}
+                contentContainerStyle={{ paddingTop: 60 }}
                 renderItem={({ item: post }) => (
                     <FeedCard
                         post={post}
@@ -717,6 +833,9 @@ const FeedScreen: React.FC = ({ navigation }: any) => {
                         onPostPress={() => navigation.navigate('PostDetail', { postId: post.id })}
                         onAvatarPress={() => navigation.navigate('ViewProfile', { handle: post.userHandle })}
                         onStoryPress={() => navigation.navigate('Stories', { openUserHandle: post.userHandle })}
+                        onNotificationsPress={() => navigation.navigate('Inbox')}
+                        unreadCount={unreadCount}
+                        hasInbox={hasInbox}
                         isCurrentUser={user?.handle === post.userHandle}
                     />
                 )}
@@ -768,7 +887,7 @@ const FeedScreen: React.FC = ({ navigation }: any) => {
                     setSelectedPostForShare(null);
                 }}
             />
-        </SafeAreaView>
+        </View>
     );
 };
 
@@ -777,19 +896,60 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#030712',
     },
-    header: {
-        paddingHorizontal: 16,
-        paddingVertical: 12,
+    stickyTabsContainer: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 1000,
         backgroundColor: '#030712',
+        elevation: 10,
+        width: '100%',
     },
-    title: {
-        fontSize: 24,
-        fontWeight: 'bold',
+    scrim: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    },
+    gazetteerButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    gazetteerText: {
+        fontSize: 18,
+        fontWeight: '300',
         color: '#FFFFFF',
+        letterSpacing: 0.5,
+    },
+    notificationButton: {
+        position: 'relative',
+    },
+    notificationBadge: {
+        position: 'absolute',
+        top: -4,
+        right: -4,
+        minWidth: 16,
+        height: 16,
+        borderRadius: 8,
+        backgroundColor: '#3B82F6',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 4,
+    },
+    notificationBadgeText: {
+        color: '#FFFFFF',
+        fontSize: 9,
+        fontWeight: 'bold',
     },
     tabContainer: {
-        backgroundColor: '#030712',
+        backgroundColor: 'transparent',
         paddingVertical: 8,
+        position: 'relative',
+        zIndex: 1,
     },
     tabGrid: {
         flexDirection: 'row',
@@ -823,7 +983,7 @@ const styles = StyleSheet.create({
         color: '#6B7280',
     },
     eyeIcon: {
-        marginLeft: 2,
+        marginLeft: 4,
     },
     feedContent: {
         paddingBottom: 20,
@@ -853,9 +1013,7 @@ const styles = StyleSheet.create({
         position: 'relative',
     },
     storyBorder: {
-        borderRadius: 18,
         padding: 2,
-        backgroundColor: '#22c55e',
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -933,9 +1091,15 @@ const styles = StyleSheet.create({
         color: '#9CA3AF',
     },
     postHeaderRight: {
-        flexDirection: 'row',
-        alignItems: 'center',
+        flexDirection: 'column',
+        alignItems: 'flex-end',
         gap: 8,
+    },
+    gazetteerOverlayText: {
+        fontSize: 12,
+        fontWeight: '300',
+        color: '#FFFFFF',
+        letterSpacing: 0.5,
     },
     locationButton: {
         width: 28,
@@ -996,6 +1160,11 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 16,
+    },
+    rightActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
     },
     actionButton: {
         flexDirection: 'row',

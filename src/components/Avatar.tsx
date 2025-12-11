@@ -40,9 +40,9 @@ export default function Avatar({ src, name, size = 'md', className = '', hasStor
                 onClick={onClick}
                 className={`${sizeClass} ${className} relative rounded-full overflow-visible ${onClick ? 'cursor-pointer hover:scale-105 transition-transform' : ''}`}
             >
-                {/* Outer green border ring */}
+                {/* Outer purple gradient border ring */}
                 <div className="absolute -inset-0.5 rounded-full p-[2px]" style={{
-                    background: '#22c55e',
+                    background: 'linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%)',
                 }}>
                     <div className="w-full h-full rounded-full bg-white dark:bg-gray-950"></div>
                 </div>
