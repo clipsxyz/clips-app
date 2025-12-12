@@ -290,6 +290,65 @@ class PostController extends Controller
     }
 
     /**
+     * Update post (text and location only)
+     */
+    public function update(Request $request, string $id): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'text' => 'nullable|string|max:500',
+            'location' => 'nullable|string|max:200',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $user = Auth::user();
+        $post = Post::findOrFail($id);
+
+        // Ensure user owns the post
+        if ($post->user_id !== $user->id) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        // Update only text and location
+        if ($request->has('text')) {
+            $post->text_content = $request->text;
+        }
+        if ($request->has('location')) {
+            $post->location_label = $request->location;
+        }
+
+        $post->save();
+
+        // Reload relationships
+        $post->load(['user', 'taggedUsers']);
+
+        // Transform to frontend format (same as store method)
+        $postData = $post->toArray();
+        $postData['taggedUsers'] = $post->taggedUsers->pluck('handle')->toArray();
+        
+        // Map backend fields to frontend format
+        $postData['text'] = $postData['text_content'] ?? '';
+        $postData['locationLabel'] = $postData['location_label'] ?? '';
+        $postData['userHandle'] = $postData['user_handle'] ?? '';
+        $postData['createdAt'] = $post->created_at ? strtotime($post->created_at) * 1000 : time() * 1000;
+        $postData['stats'] = [
+            'likes' => $postData['likes_count'] ?? 0,
+            'views' => $postData['views_count'] ?? 0,
+            'comments' => $postData['comments_count'] ?? 0,
+            'shares' => $postData['shares_count'] ?? 0,
+            'reclips' => $postData['reclips_count'] ?? 0,
+        ];
+        $postData['userLiked'] = $post->isLikedBy($user);
+        $postData['isBookmarked'] = $post->isBookmarkedBy($user);
+        $postData['isFollowing'] = $post->isFollowingAuthor($user);
+        $postData['userReclipped'] = $post->isReclippedBy($user);
+
+        return response()->json($postData);
+    }
+
+    /**
      * Toggle like on post
      */
     public function toggleLike(Request $request, string $id): JsonResponse

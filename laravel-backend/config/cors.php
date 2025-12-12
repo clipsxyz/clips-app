@@ -24,6 +24,11 @@ return [
         'http://localhost:3000',
         'http://127.0.0.1:5173',
         'http://127.0.0.1:3000',
+        'http://192.168.1.3:5173', // Allow network access from phone
+    ],
+    
+    'allowed_origins_patterns' => [
+        '/^http:\/\/192\.168\.\d+\.\d+:5173$/', // Allow any local network IP
     ],
 
     'allowed_origins_patterns' => [],

@@ -17,6 +17,7 @@ import Flag from './components/Flag';
 import { useOnline } from './hooks/useOnline';
 import { getUnreadTotal } from './api/messages';
 import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState } from './api/posts';
+import { updatePost } from './api/client';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory } from './api/stories';
 import { enqueue, drain } from './utils/mutationQueue';
 import { timeAgo } from './utils/timeAgo';
@@ -24,11 +25,15 @@ import { getActiveAds, trackAdImpression, trackAdClick } from './api/ads';
 import { getActiveBoost, getBoostTimeRemaining } from './api/boost';
 import BoostSelectionModal from './components/BoostSelectionModal';
 import SavePostModal from './components/SavePostModal';
+import PostMenuModal from './components/PostMenuModal';
+import EditPostModal from './components/EditPostModal';
 import { getCollectionsForPost } from './api/collections';
 import type { Post, Ad, StickerOverlay } from './types';
 import StickerOverlayComponent from './components/StickerOverlay';
 import EffectWrapper from './components/EffectWrapper';
 import type { EffectConfig } from './utils/effects';
+import ProgressiveImage from './components/ProgressiveImage';
+import { getInstagramImageDimensions, getImageSize } from './utils/imageDimensions';
 
 type Tab = string; // Dynamic based on user location
 
@@ -41,7 +46,7 @@ function BottomNav({ onCreateClick }: { onCreateClick: () => void }) {
     return (
       <button
         onClick={onClick || (() => nav(path))}
-        className={`flex flex-col items-center justify-center flex-1 py-2 ${active ? 'text-brand-600 font-semibold' : 'text-gray-500'} transition-colors`}
+        className={`flex flex-col items-center justify-center flex-1 py-2 ${active ? 'text-white font-semibold' : 'text-gray-500'} transition-colors`}
         aria-current={active ? 'page' : undefined}
         title={label}
       >
@@ -103,19 +108,71 @@ export default function App() {
 function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCustom?: () => void; userLocal?: string; userRegional?: string; userNational?: string; clipsCount?: number }) {
   const navigate = useNavigate();
   const { user } = useAuth();
-  
+  const [showTopProgress, setShowTopProgress] = React.useState(true);
+  const [showBottomProgress, setShowBottomProgress] = React.useState(false);
+  const isMountedRef = React.useRef(false);
+
   // Use user location from props or context, with fallback to defaults
   const local = props.userLocal || user?.local || 'Finglas';
   const regional = props.userRegional || user?.regional || 'Dublin';
   const national = props.userNational || user?.national || 'Ireland';
   const clipsCount = props.clipsCount || 0;
-  
+
   const tabs: Tab[] = [regional, national, 'Clips', 'Discover', 'Following'];
+
+  // Show progress bars on initial mount and when active tab changes
+  React.useEffect(() => {
+    if (!isMountedRef.current) {
+      // First mount - show top progress bar
+      isMountedRef.current = true;
+      setShowTopProgress(true);
+      setShowBottomProgress(false);
+
+      // After top progress bar finishes (1.5s), start bottom progress bar
+      const bottomTimer = setTimeout(() => {
+        setShowTopProgress(false);
+        setShowBottomProgress(true);
+        // Hide bottom progress bar after animation
+        setTimeout(() => {
+          setShowBottomProgress(false);
+        }, 1500);
+      }, 1500);
+
+      return () => clearTimeout(bottomTimer);
+    } else {
+      // Tab changed - show progress bars again
+      setShowTopProgress(true);
+      setShowBottomProgress(false);
+
+      const bottomTimer = setTimeout(() => {
+        setShowTopProgress(false);
+        setShowBottomProgress(true);
+        setTimeout(() => {
+          setShowBottomProgress(false);
+        }, 1500);
+      }, 1500);
+
+      return () => clearTimeout(bottomTimer);
+    }
+  }, [props.active]);
 
   return (
     <div role="tablist" aria-label="Locations" className="sticky top-0 z-30 bg-[#030712] py-2 relative">
       {/* Scrim effect */}
       <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/50 to-transparent pointer-events-none z-0" />
+
+      {/* Top progress bar - goes left to right */}
+      {showTopProgress && (
+        <div
+          className="absolute top-0 left-0 h-0.5 z-20"
+          style={{
+            width: '100%',
+            background: 'linear-gradient(90deg, #ec4899 0%, #a855f7 50%, #7c3aed 100%)',
+            animation: 'progressBar 1.5s ease-out forwards'
+          }}
+        />
+      )}
+
       <div className="grid grid-cols-5 gap-2 px-3 relative z-10">
         {tabs.map(t => {
           const active = props.active === t;
@@ -139,13 +196,16 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               props.onClearCustom?.();
             }
           };
-          
+
           // Format tab label
-          const tabLabel = t === 'Clips' && props.clipsCount > 0 
-            ? `Clips ${props.clipsCount}` 
+          const tabLabel = t === 'Clips' && (props.clipsCount ?? 0) > 0
+            ? `Clips ${props.clipsCount}`
             : t;
 
           if (active) {
+            // Check if this tab should have shimmer animation (regional, national, or Following)
+            const shouldShimmer = t === regional || t === national || t === 'Following';
+
             return (
               <button
                 key={t}
@@ -165,8 +225,24 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                   e.currentTarget.style.boxShadow = 'none';
                 }}
               >
-                {tabLabel}
-                <FiEye className="text-white" style={{ width: '15px', height: '15px', minWidth: '15px', minHeight: '15px' }} />
+                {shouldShimmer ? (
+                  <span
+                    style={{
+                      background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
+                      backgroundSize: '200% 100%',
+                      WebkitBackgroundClip: 'text',
+                      backgroundClip: 'text',
+                      WebkitTextFillColor: 'transparent',
+                      color: 'transparent',
+                      animation: 'shimmer 3s linear infinite',
+                      display: 'inline-block'
+                    }}
+                  >
+                    {tabLabel}
+                  </span>
+                ) : (
+                  tabLabel
+                )}
               </button>
             );
           }
@@ -196,6 +272,18 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
           );
         })}
       </div>
+
+      {/* Bottom progress bar - goes right to left, starts after top bar finishes */}
+      {showBottomProgress && (
+        <div
+          className="absolute bottom-0 right-0 h-0.5 z-20"
+          style={{
+            background: 'linear-gradient(90deg, #ec4899 0%, #a855f7 50%, #7c3aed 100%)',
+            animation: 'progressBarReverse 1.5s ease-out forwards',
+            transformOrigin: 'right'
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -318,12 +406,11 @@ function BoostButton({ postId, onBoost }: { postId: string; onBoost: () => Promi
   );
 }
 
-function PostHeader({ post, onFollow, showBoostIcon, onBoost, isOverlaid = false }: {
+function PostHeader({ post, onFollow, isOverlaid = false, onMenuClick }: {
   post: Post;
   onFollow?: () => Promise<void>;
-  showBoostIcon?: boolean;
-  onBoost?: () => Promise<void>;
   isOverlaid?: boolean;
+  onMenuClick?: () => void;
 }) {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -396,8 +483,8 @@ function PostHeader({ post, onFollow, showBoostIcon, onBoost, isOverlaid = false
   const isReclippedPost = post.isReclipped && post.originalUserHandle;
 
   // Text colors based on whether header is overlaid on media
-  const textColorClass = isOverlaid 
-    ? "text-white drop-shadow-md" 
+  const textColorClass = isOverlaid
+    ? "text-white drop-shadow-md"
     : "text-gray-900 dark:text-gray-100";
   const subtextColorClass = isOverlaid
     ? "text-white/90 drop-shadow-md"
@@ -410,12 +497,12 @@ function PostHeader({ post, onFollow, showBoostIcon, onBoost, isOverlaid = false
     : "text-gray-500 dark:text-gray-400";
 
   return (
-      <div className="relative flex items-start justify-between px-4 pt-4 pb-3">
+    <div className="relative flex items-start justify-between px-4 pt-4 pb-3">
       {/* Scrim effect - only show when overlaid on media */}
       {isOverlaid && (
         <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/50 to-transparent pointer-events-none z-0" />
       )}
-      
+
       {/* Content layer - above scrim */}
       <div className="relative z-10 flex items-start justify-between w-full">
         <div className="flex items-center gap-3 flex-1">
@@ -481,27 +568,53 @@ function PostHeader({ post, onFollow, showBoostIcon, onBoost, isOverlaid = false
           </div>
         </div>
         <div className="relative z-10 flex flex-col items-end gap-2">
-          {/* Location Button - Pill shaped with pin icon */}
-          {post.locationLabel && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                // Navigate to feed with this location
-                window.dispatchEvent(new CustomEvent('locationChange', {
-                  detail: { location: post.locationLabel }
-                }));
-                navigate(`/feed?location=${encodeURIComponent(post.locationLabel)}`);
-              }}
-              className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all active:scale-[.98] flex items-center gap-1.5 ${
-                isOverlaid
+          {/* Location and 3 dots - side by side */}
+          <div className="flex items-center gap-2">
+            {/* Location Button - Smaller pill shaped with pin icon */}
+            {post.locationLabel && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // Navigate to feed with this location
+                  window.dispatchEvent(new CustomEvent('locationChange', {
+                    detail: { location: post.locationLabel }
+                  }));
+                  navigate(`/feed?location=${encodeURIComponent(post.locationLabel)}`);
+                }}
+                className={`px-2 py-1 rounded-full text-[10px] font-medium transition-all active:scale-[.98] flex items-center gap-1 ${isOverlaid
                   ? 'bg-white/20 backdrop-blur-sm text-white border border-white/30 hover:bg-white/30'
                   : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 hover:bg-gray-200 dark:hover:bg-gray-700'
-              }`}
-            >
-              <FiMapPin className="w-3.5 h-3.5" />
-              <span>{post.locationLabel}</span>
-            </button>
-          )}
+                  }`}
+              >
+                <FiMapPin className="w-2.5 h-2.5" />
+                <span>{post.locationLabel}</span>
+              </button>
+            )}
+            {/* 3-dot menu button - no background, vertical dots */}
+            {onMenuClick && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  onMenuClick();
+                }}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                }}
+                onTouchStart={(e) => {
+                  e.stopPropagation();
+                }}
+                className={`p-1 transition-all active:scale-[.98] z-50 relative ${isOverlaid
+                  ? 'text-white hover:opacity-70'
+                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
+                  }`}
+                aria-label="More options"
+                title="More options"
+              >
+                <FiMoreHorizontal className="w-4 h-4" />
+              </button>
+            )}
+          </div>
           {/* Gazetteer logo overlay with shimmer */}
           <span
             className="text-xs font-light tracking-tight text-white"
@@ -518,9 +631,6 @@ function PostHeader({ post, onFollow, showBoostIcon, onBoost, isOverlaid = false
           >
             Gazetteer
           </span>
-          {showBoostIcon && isCurrentUser && onBoost ? (
-            <BoostButton postId={post.id} onBoost={onBoost} />
-          ) : null}
         </div>
       </div>
     </div>
@@ -544,7 +654,7 @@ function TagRow({ tags }: { tags: string[] }) {
   );
 }
 
-function TextCard({ text, onDoubleLike, textStyle, stickers, userHandle, locationLabel, createdAt }: { text: string; onDoubleLike: () => Promise<void>; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string }; stickers?: StickerOverlay[]; userHandle?: string; locationLabel?: string; createdAt?: string }) {
+function TextCard({ text, onDoubleLike, textStyle, stickers }: { text: string; onDoubleLike: () => Promise<void>; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string }; stickers?: StickerOverlay[]; userHandle?: string; locationLabel?: string; createdAt?: string }) {
   const [burst, setBurst] = React.useState(false);
   const [isExpanded, setIsExpanded] = React.useState(false);
   const lastTap = React.useRef<number>(0);
@@ -639,6 +749,20 @@ function TextCard({ text, onDoubleLike, textStyle, stickers, userHandle, locatio
 
   return (
     <div className="mx-4 mt-4 select-none max-w-full relative">
+      {/* Decorative horizontal stripes on the left */}
+      <div className="absolute left-0 top-1/2 transform -translate-y-1/2 -translate-x-8 flex flex-col gap-2 pointer-events-none z-0">
+        <div className="w-12 h-0.5 bg-white/30"></div>
+        <div className="w-12 h-0.5 bg-white/30"></div>
+        <div className="w-12 h-0.5 bg-white/30"></div>
+      </div>
+
+      {/* Decorative horizontal stripes on the right */}
+      <div className="absolute right-0 top-1/2 transform -translate-y-1/2 translate-x-8 flex flex-col gap-2 pointer-events-none z-0">
+        <div className="w-12 h-0.5 bg-white/30"></div>
+        <div className="w-12 h-0.5 bg-white/30"></div>
+        <div className="w-12 h-0.5 bg-white/30"></div>
+      </div>
+
       <div
         ref={containerRef}
         role="button"
@@ -652,29 +776,16 @@ function TextCard({ text, onDoubleLike, textStyle, stickers, userHandle, locatio
         }}
         onClick={handleClick}
         onTouchEnd={handleTouchEnd}
-        className="relative w-full rounded-2xl bg-white shadow-lg"
+        className="relative w-full rounded-lg bg-white shadow-lg z-10"
         style={{
           maxWidth: '100%',
           boxSizing: 'border-box',
-          padding: '16px'
+          padding: '16px',
+          marginBottom: '12px'
         }}
       >
-        {/* Decorative lines on left side */}
-        <div className="absolute left-2 top-1/2 transform -translate-y-1/2 flex flex-col gap-1.5 pointer-events-none">
-          <div className="w-8 h-0.5 bg-white"></div>
-          <div className="w-8 h-0.5 bg-white"></div>
-          <div className="w-8 h-0.5 bg-white"></div>
-        </div>
-        
-        {/* Decorative lines on right side */}
-        <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex flex-col gap-1.5 pointer-events-none">
-          <div className="w-8 h-0.5 bg-white"></div>
-          <div className="w-8 h-0.5 bg-white"></div>
-          <div className="w-8 h-0.5 bg-white"></div>
-        </div>
-        
         {/* Speech bubble content */}
-        <div className="text-base leading-relaxed whitespace-pre-wrap font-normal text-gray-900 break-words w-full px-12" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', maxWidth: '100%', boxSizing: 'border-box' }}>
+        <div className="text-base leading-relaxed whitespace-pre-wrap font-normal text-gray-800 break-words w-full" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', maxWidth: '100%', boxSizing: 'border-box' }}>
           {displayText}
         </div>
         {shouldTruncate && (
@@ -689,7 +800,19 @@ function TextCard({ text, onDoubleLike, textStyle, stickers, userHandle, locatio
             </button>
           </div>
         )}
-        
+
+        {/* Speech bubble tail - downward pointing triangle at bottom center */}
+        <div
+          className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-full"
+          style={{
+            width: 0,
+            height: 0,
+            borderLeft: '8px solid transparent',
+            borderRight: '8px solid transparent',
+            borderTop: '12px solid white'
+          }}
+        />
+
         {/* GIF/Sticker Overlays - Scaled down and repositioned for feed view */}
         {stickers && stickers.length > 0 && containerSize.width > 0 && (
           <>
@@ -776,7 +899,7 @@ function TextCard({ text, onDoubleLike, textStyle, stickers, userHandle, locatio
         </div>
 
         {/* Speech bubble tail/pointer at bottom center */}
-        <div 
+        <div
           className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-full"
           style={{
             width: 0,
@@ -824,7 +947,7 @@ function BottomCaptionOverlay({ caption, onExpand }: { caption: string; onExpand
   const lines = caption.split('\n').filter(line => line.trim().length > 0);
   const hasMoreLines = lines.length > 1;
   const firstLine = lines[0] || caption;
-  
+
   // Also check if first line is too long (more than ~60 chars for single line display)
   const isFirstLineLong = firstLine.length > 60;
   const displayText = isFirstLineLong ? firstLine.substring(0, 60) + '...' : firstLine;
@@ -834,7 +957,7 @@ function BottomCaptionOverlay({ caption, onExpand }: { caption: string; onExpand
     <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none">
       {/* Scrim effect - gradient overlay for better readability */}
       <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/60 to-transparent pointer-events-none z-0" />
-      
+
       {/* Content layer - above scrim */}
       <div className="relative z-10 px-4 pb-4 pt-6 pointer-events-auto">
         <div className="flex items-start gap-2">
@@ -859,7 +982,7 @@ function BottomCaptionOverlay({ caption, onExpand }: { caption: string; onExpand
   );
 }
 
-function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onCarouselIndexChange, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled, videoCaptionText, subtitlesEnabled, subtitleText, postUserHandle, postLocationLabel, postCreatedAt }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onCarouselIndexChange?: (index: number) => void; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string }) {
+function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onCarouselIndexChange, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled, videoCaptionText, subtitlesEnabled, subtitleText, postUserHandle, postLocationLabel, postCreatedAt, priority = false }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onCarouselIndexChange?: (index: number) => void; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string; priority?: boolean }) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [burst, setBurst] = React.useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1021,13 +1144,15 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     setHasError(true);
   };
 
-  // Image load handler to detect aspect ratio
+  // Image load handler to detect aspect ratio with Instagram clamping
   const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
     setIsLoading(false);
     setHasError(false);
     const img = e.currentTarget;
     if (img.naturalWidth > 0 && img.naturalHeight > 0) {
-      setAspectRatio(img.naturalWidth / img.naturalHeight);
+      // Calculate clamped dimensions using Instagram rules
+      const dimensions = getInstagramImageDimensions(img.naturalWidth, img.naturalHeight);
+      setAspectRatio(dimensions.aspectRatio);
     }
   };
 
@@ -1156,18 +1281,22 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
             // We want to open scenes unless clicking on a real button/link
             const target = e?.target as HTMLElement;
             const mediaContainer = mediaContainerRef.current;
-            
+
             // Check if target is within the media container
             if (mediaContainer && (target === mediaContainer || mediaContainer.contains(target))) {
               // Check if clicking on a real interactive element (button or link)
               // Exclude the media container itself (which has role="button" for accessibility)
               const clickedButton = target.closest('button');
               const clickedLink = target.closest('a');
-              const isRealButton = clickedButton && clickedButton !== mediaContainer;
-              const isRealLink = clickedLink && clickedLink !== mediaContainer;
-              
-              // Only open scenes if NOT clicking on a real button or link
-              if (!isRealButton && !isRealLink) {
+              const isRealButton = clickedButton && clickedButton !== (mediaContainer as any);
+              const isRealLink = clickedLink && clickedLink !== (mediaContainer as any);
+
+              // Check if click originated from PostHeader (which is absolutely positioned over media)
+              const postHeader = target.closest('[class*="PostHeader"], [class*="postHeader"], [class*="relative flex items-start justify-between"]');
+              const isFromPostHeader = postHeader !== null;
+
+              // Only open scenes if NOT clicking on a real button, link, or PostHeader
+              if (!isRealButton && !isRealLink && !isFromPostHeader) {
                 onOpenScenes();
               }
             }
@@ -1200,6 +1329,17 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     }
     handleTap(e);
   }
+
+  // Set loading to false after timeout (fallback if image doesn't load)
+  React.useEffect(() => {
+    if (currentItem?.type === 'image' && isLoading) {
+      const timeout = setTimeout(() => {
+        console.warn('Image load timeout, setting loading to false');
+        setIsLoading(false);
+      }, 10000); // 10 second timeout
+      return () => clearTimeout(timeout);
+    }
+  }, [currentItem?.type, isLoading]);
 
   // Cleanup timers and reset state on unmount or media change
   React.useEffect(() => {
@@ -1299,17 +1439,38 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     setCurrentIndex(index);
   }
 
-  // Match create post page exactly - fixed aspect ratio container
-  const containerStyle: React.CSSProperties = {
-    aspectRatio: '9/16',
-    maxHeight: '55vh',
-    width: '100%',
-    position: 'relative',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    boxSizing: 'border-box'
-  };
+  // Calculate container style with Instagram aspect ratio clamping
+  const containerStyle: React.CSSProperties = React.useMemo(() => {
+    // If we have aspect ratio, use Instagram clamping
+    if (aspectRatio) {
+      const dimensions = getInstagramImageDimensions(
+        window.innerWidth,
+        window.innerWidth / aspectRatio
+      );
+      return {
+        width: '100%',
+        height: dimensions.height,
+        maxHeight: '90vh', // Prevent extremely tall images
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        boxSizing: 'border-box'
+      };
+    }
+
+    // Default aspect ratio while loading
+    return {
+      aspectRatio: '9/16',
+      maxHeight: '55vh',
+      width: '100%',
+      position: 'relative',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      boxSizing: 'border-box'
+    };
+  }, [aspectRatio]);
 
   return (
     <div className="mx-0 my-0 select-none">
@@ -1342,7 +1503,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
             // Extract text from data URL or use text property
             let textContent = '';
             let textStyle: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } | undefined;
-            
+
             if ((currentItem as any).text) {
               textContent = (currentItem as any).text;
               textStyle = (currentItem as any).textStyle;
@@ -1356,7 +1517,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                 textContent = 'Text content';
               }
             }
-            
+
             // Display as Twitter card preview (white card with black text box)
             return (
               <div className="w-full h-full flex items-center justify-center p-4 bg-black">
@@ -1390,7 +1551,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                             </>
                           )}
                           {postCreatedAt && (
-                            <span>{timeAgo(postCreatedAt)}</span>
+                            <span>{timeAgo(typeof postCreatedAt === 'string' ? parseInt(postCreatedAt) : postCreatedAt)}</span>
                           )}
                         </div>
                       </div>
@@ -1438,23 +1599,18 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
               )}
             </video>
           ) : (
-            <img
-              ref={imageRef}
+            <ProgressiveImage
               src={currentItem.url}
               alt=""
-              loading="lazy"
-              decoding="async"
-              className="w-full h-full object-cover"
-              draggable={false}
-              ref={imageRef}
-              onLoad={handleImageLoad}
-              onError={handleImageError}
-              onLoadStart={() => {
-                // Only set loading if image isn't already loaded
-                if (!imageRef.current?.complete) {
-                  setIsLoading(true);
+              priority={priority}
+              className="w-full h-full"
+              onLoad={(e) => {
+                // ProgressiveImage passes the event, use it directly
+                if (e) {
+                  handleImageLoad(e);
                 }
               }}
+              onError={handleImageError}
             />
           );
 
@@ -1642,7 +1798,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                 }}
                 className="absolute top-1/2 left-4 w-10 h-10 rounded-full flex items-center justify-center transition-all z-50 pointer-events-auto bg-black/50 hover:bg-black/70 backdrop-blur-sm cursor-pointer"
                 aria-label="Previous image"
-                style={{ 
+                style={{
                   filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.5))',
                   transform: 'translateY(-50%)',
                   pointerEvents: 'auto',
@@ -1678,7 +1834,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                 }}
                 className="absolute top-1/2 right-4 w-10 h-10 rounded-full flex items-center justify-center transition-all z-50 pointer-events-auto bg-black/50 hover:bg-black/70 backdrop-blur-sm cursor-pointer"
                 aria-label="Next image"
-                style={{ 
+                style={{
                   filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.5))',
                   transform: 'translateY(-50%)',
                   pointerEvents: 'auto',
@@ -2009,12 +2165,23 @@ function EngagementBar({
     window.addEventListener(`viewAdded-${post.id}`, handleViewAdded);
     window.addEventListener(`likeToggled-${post.id}`, handleLikeToggled as EventListener);
 
+    // Listen for post updates (text/location edits)
+    const handlePostUpdated = ((e: CustomEvent) => {
+      const { text, location } = e.detail;
+      // Update the post in the feed
+      window.dispatchEvent(new CustomEvent(`updatePostInFeed-${post.id}`, {
+        detail: { text, location }
+      }));
+    }) as EventListener;
+    window.addEventListener(`postUpdated-${post.id}`, handlePostUpdated);
+
     return () => {
       window.removeEventListener(`commentAdded-${post.id}`, handleCommentAdded);
       window.removeEventListener(`shareAdded-${post.id}`, handleShareAdded);
       window.removeEventListener(`reclipAdded-${post.id}`, handleReclipAdded);
       window.removeEventListener(`viewAdded-${post.id}`, handleViewAdded);
       window.removeEventListener(`likeToggled-${post.id}`, handleLikeToggled as EventListener);
+      window.removeEventListener(`postUpdated-${post.id}`, handlePostUpdated);
     };
   }, [post.id]);
 
@@ -2140,17 +2307,6 @@ function EngagementBar({
             </button>
           )}
 
-          {/* Save */}
-          {onSave && (
-            <button
-              className="transition-opacity hover:opacity-70 active:opacity-50"
-              onClick={onSave}
-              aria-label={isSaved ? 'Unsave post' : 'Save post'}
-              title={isSaved ? 'Unsave post' : 'Save post'}
-            >
-              <FiBookmark className={`w-5 h-5 ${isSaved ? 'text-white fill-white' : 'text-gray-600 dark:text-gray-400'}`} />
-            </button>
-          )}
         </div>
       </div>
     </div>
@@ -2276,7 +2432,7 @@ function BoostMetrics({ post, isOpen }: { post: Post; isOpen: boolean }) {
   );
 }
 
-export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare, onOpenComments, onView, onReclip, onOpenScenes, showBoostIcon, onBoost, onNotificationsPress, unreadCount, hasInbox }: {
+export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare, onOpenComments, onView, onReclip, onOpenScenes, showBoostIcon, onBoost, onNotificationsPress, unreadCount, hasInbox, priority = false }: {
   post: Post;
   onLike: () => Promise<void>;
   onFollow?: () => Promise<void>;
@@ -2290,13 +2446,18 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   onNotificationsPress?: () => void;
   unreadCount?: number;
   hasInbox?: boolean;
+  priority?: boolean;
 }) {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const titleId = `post-title-${post.id}`;
   const [hasBeenViewed, setHasBeenViewed] = React.useState(false);
   const [isMetricsOpen, setIsMetricsOpen] = React.useState(false);
   const [isBoosted, setIsBoosted] = React.useState(false);
   const [saveModalOpen, setSaveModalOpen] = React.useState(false);
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const [editModalOpen, setEditModalOpen] = React.useState(false);
+  const [isSaved, setIsSaved] = React.useState(false);
   const [carouselIndex, setCarouselIndex] = React.useState(0);
   const [showTaggedUsersModal, setShowTaggedUsersModal] = React.useState(false);
   const [heartAnimation, setHeartAnimation] = React.useState<{ startX: number; startY: number } | null>(null);
@@ -2324,6 +2485,37 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
       return () => clearInterval(interval);
     }
   }, [post.id, showBoostIcon]);
+
+  // Check if post is saved
+  React.useEffect(() => {
+    async function checkIfSaved() {
+      if (user?.id) {
+        try {
+          const collections = await getCollectionsForPost(user.id, post.id);
+          setIsSaved(collections.length > 0);
+        } catch (error) {
+          console.error('Error checking if post is saved:', error);
+        }
+      }
+    }
+    checkIfSaved();
+  }, [user?.id, post.id]);
+
+  // Listen for save events
+  React.useEffect(() => {
+    if (!user?.id) return;
+
+    const handlePostSaved = () => {
+      getCollectionsForPost(user.id, post.id)
+        .then(collections => setIsSaved(collections.length > 0))
+        .catch(console.error);
+    };
+
+    window.addEventListener(`postSaved-${post.id}`, handlePostSaved);
+    return () => {
+      window.removeEventListener(`postSaved-${post.id}`, handlePostSaved);
+    };
+  }, [post.id, user?.id]);
 
   // Track views when post comes into viewport
   React.useEffect(() => {
@@ -2356,24 +2548,26 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   return (
     <article ref={articleRef} aria-labelledby={titleId} className="mx-0 mb-6 overflow-hidden border-0 border-b border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out]" style={{ backgroundColor: '#030712' }}>
       {/* Show PostHeader normally for text-only posts */}
-      {isTextOnly && <PostHeader post={post} onFollow={onFollow} showBoostIcon={showBoostIcon} onBoost={onBoost} isOverlaid={false} />}
+      {isTextOnly && <PostHeader post={post} onFollow={onFollow} isOverlaid={false} onMenuClick={() => setMenuOpen(true)} />}
       <TagRow tags={post.tags} />
       <div className="relative w-full overflow-hidden" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
         {/* PostHeader overlaid on media for posts with media */}
         {hasMedia && (
-          <div className="absolute top-0 left-0 right-0 z-20">
-            <PostHeader post={post} onFollow={onFollow} showBoostIcon={showBoostIcon} onBoost={onBoost} isOverlaid={true} />
+          <div className="absolute top-0 left-0 right-0 z-20 pointer-events-none">
+            <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+              <PostHeader post={post} onFollow={onFollow} isOverlaid={true} onMenuClick={() => setMenuOpen(true)} />
+            </div>
           </div>
         )}
         {isTextOnly ? (
-          <TextCard 
-            text={post.text} 
-            onDoubleLike={onLike} 
-            textStyle={post.textStyle} 
+          <TextCard
+            text={post.text || ''}
+            onDoubleLike={onLike}
+            textStyle={post.textStyle}
             stickers={post.stickers}
             userHandle={post.userHandle}
             locationLabel={post.locationLabel}
-            createdAt={post.createdAt}
+            createdAt={post.createdAt?.toString()}
           />
         ) : (
           <Media
@@ -2401,7 +2595,8 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             subtitleText={post.subtitleText}
             postUserHandle={post.userHandle}
             postLocationLabel={post.locationLabel}
-            postCreatedAt={post.createdAt}
+            postCreatedAt={post.createdAt?.toString()}
+            priority={priority}
           />
         )}
         {/* Carousel Indicator - Overlaid on media with scrim */}
@@ -2410,7 +2605,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
           <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none">
             {/* Scrim effect - gradient overlay for better readability */}
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/60 to-transparent pointer-events-none z-0" />
-            
+
             {/* Content layer - above scrim */}
             <div className="relative z-10 px-4 py-3 pointer-events-auto">
               <div className="flex items-center justify-center">
@@ -2450,7 +2645,6 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         onShare={onShare}
         onOpenComments={onOpenComments}
         onReclip={onReclip}
-        onSave={user ? () => setSaveModalOpen(true) : undefined}
         currentUserHandle={user?.handle}
         currentUserId={user?.id}
         showMetricsIcon={showBoostIcon && isBoosted}
@@ -2483,12 +2677,107 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
       )}
       {showBoostIcon && <BoostMetrics post={post} isOpen={isMetricsOpen} />}
       {user && (
-        <SavePostModal
-          post={post}
-          userId={user.id}
-          isOpen={saveModalOpen}
-          onClose={() => setSaveModalOpen(false)}
-        />
+        <>
+          <PostMenuModal
+            post={post}
+            userId={user.id}
+            isOpen={menuOpen}
+            onClose={() => setMenuOpen(false)}
+            onCopyLink={() => { }}
+            onShare={onShare}
+            onReport={() => {
+              // TODO: Implement report
+              console.log('Report post:', post.id);
+            }}
+            onUnfollow={onFollow ? async () => { await onFollow(); } : undefined}
+            onMute={async () => {
+              // TODO: Implement mute
+              console.log('Mute user:', post.userHandle);
+            }}
+            onBlock={async () => {
+              // TODO: Implement block
+              console.log('Block user:', post.userHandle);
+            }}
+            onHide={() => {
+              // TODO: Implement hide
+              console.log('Hide post:', post.id);
+            }}
+            onNotInterested={() => {
+              // TODO: Implement not interested
+              console.log('Not interested in post:', post.id);
+            }}
+            onDelete={async () => {
+              // TODO: Implement delete
+              console.log('Delete post:', post.id);
+            }}
+            onEdit={() => {
+              setMenuOpen(false);
+              setEditModalOpen(true);
+            }}
+            onArchive={async () => {
+              // TODO: Implement archive
+              console.log('Archive post:', post.id);
+            }}
+            onBoost={onBoost}
+            onReclip={onReclip}
+            onTurnOnNotifications={() => {
+              // TODO: Implement notifications
+              console.log('Turn on notifications for post:', post.id);
+            }}
+            onTurnOffNotifications={() => {
+              // TODO: Implement notifications
+              console.log('Turn off notifications for post:', post.id);
+            }}
+            isCurrentUser={user.handle === post.userHandle}
+            isFollowing={post.isFollowing === true}
+            isSaved={isSaved}
+            isMuted={false} // TODO: Check if muted
+            isBlocked={false} // TODO: Check if blocked
+            hasNotifications={false} // TODO: Check notifications
+          />
+          <SavePostModal
+            post={post}
+            userId={user.id}
+            isOpen={saveModalOpen}
+            onClose={() => setSaveModalOpen(false)}
+          />
+          <EditPostModal
+            post={post}
+            isOpen={editModalOpen}
+            onClose={() => setEditModalOpen(false)}
+            onSave={async (text: string, location: string) => {
+              try {
+                // Try to update post via API
+                await updatePost(post.id, { text, location });
+              } catch (err: any) {
+                // Check if it's a connection error (backend not running)
+                const isConnectionError =
+                  err?.message === 'CONNECTION_REFUSED' ||
+                  err?.name === 'ConnectionRefused' ||
+                  err?.message?.includes('Failed to fetch') ||
+                  err?.message?.includes('ERR_CONNECTION_REFUSED') ||
+                  err?.message?.includes('NetworkError');
+
+                if (isConnectionError) {
+                  // If backend isn't running, update locally as fallback
+                  console.warn('Backend not available, updating post locally');
+                  // Update the post in the feed directly
+                  window.dispatchEvent(new CustomEvent(`updatePostInFeed-${post.id}`, {
+                    detail: { text, location }
+                  }));
+                  // Don't throw - allow the modal to close
+                  return;
+                }
+                // Re-throw other errors
+                throw err;
+              }
+              // Notify parent to update the post in the feed
+              window.dispatchEvent(new CustomEvent(`postUpdated-${post.id}`, {
+                detail: { text, location }
+              }));
+            }}
+          />
+        </>
       )}
       {/* Tagged Users Bottom Sheet */}
       {post.taggedUsers && post.taggedUsers.length > 0 && (
@@ -2590,11 +2879,11 @@ function FeedPageWrapper() {
   const routerLocation = useLocation();
   const navigate = useNavigate();
   const requestTokenRef = React.useRef(0);
-  
+
   // Initialize active tab based on user's national location, with fallback
   const defaultNational = user?.national || 'Ireland';
   const [active, setActive] = React.useState<Tab>(defaultNational);
-  
+
   // Update active tab when user location changes
   React.useEffect(() => {
     if (user?.national) {
@@ -2605,7 +2894,7 @@ function FeedPageWrapper() {
       }
     }
   }, [user?.national, user?.regional, user?.local]);
-  
+
   // Listen for location updates from profile page
   React.useEffect(() => {
     const handleLocationUpdate = (event: CustomEvent) => {
@@ -2632,6 +2921,8 @@ function FeedPageWrapper() {
   const [selectedPostForShare, setSelectedPostForShare] = React.useState<Post | null>(null);
   const [scenesOpen, setScenesOpen] = React.useState(false);
   const [selectedPostForScenes, setSelectedPostForScenes] = React.useState<Post | null>(null);
+  const [boostModalOpen, setBoostModalOpen] = React.useState(false);
+  const [selectedPostForBoost, setSelectedPostForBoost] = React.useState<Post | null>(null);
   const [unreadCount, setUnreadCount] = React.useState(0);
   const [hasInbox, setHasInbox] = React.useState(false);
 
@@ -2970,6 +3261,44 @@ function FeedPageWrapper() {
     }
   }, [cursor, currentFilter, routerLocation.search, customLocation]);
 
+  // Listen for post updates from EditPostModal
+  React.useEffect(() => {
+    const listeners: Array<{ postId: string; handler: EventListener }> = [];
+
+    // Create a listener for each post in the feed
+    const setupListeners = () => {
+      // Clean up old listeners
+      listeners.forEach(({ postId, handler }) => {
+        window.removeEventListener(`updatePostInFeed-${postId}`, handler);
+      });
+      listeners.length = 0;
+
+      // Add listeners for all posts in the feed
+      pages.flat().forEach(post => {
+        const handler = ((e: CustomEvent) => {
+          const { text, location } = e.detail;
+          updateOne(post.id, p => ({
+            ...p,
+            text: text || p.text,
+            text_content: text || p.text_content,
+            locationLabel: location || p.locationLabel
+          }));
+        }) as EventListener;
+
+        window.addEventListener(`updatePostInFeed-${post.id}`, handler);
+        listeners.push({ postId: post.id, handler });
+      });
+    };
+
+    setupListeners();
+
+    return () => {
+      listeners.forEach(({ postId, handler }) => {
+        window.removeEventListener(`updatePostInFeed-${postId}`, handler);
+      });
+    };
+  }, [pages]);
+
   function updateOne(id: string, updater: (p: Post) => Post) {
     console.log('updateOne called for post:', id);
     setPages(cur => {
@@ -3067,9 +3396,9 @@ function FeedPageWrapper() {
 
       {/* Show location tabs only when not viewing a custom location */}
       {!customLocation ? (
-        <PillTabs 
-          active={active} 
-          onChange={setActive} 
+        <PillTabs
+          active={active}
+          onChange={setActive}
           onClearCustom={() => setCustomLocation(null)}
           userLocal={user?.local}
           userRegional={user?.regional}
@@ -3113,7 +3442,7 @@ function FeedPageWrapper() {
         </div>
       )}
 
-      {flat.map((feedItem) => {
+      {flat.map((feedItem, index) => {
         if (feedItem.type === 'ad') {
           const ad = feedItem.item as Ad;
           return (
@@ -3139,10 +3468,20 @@ function FeedPageWrapper() {
         }
 
         const p = feedItem.item as Post;
+        // Priority loading: first 1-3 posts with media get priority
+        const hasMedia = !!(p.mediaUrl || (p.mediaItems && p.mediaItems.length > 0));
+        const priorityPostsCount = flat.slice(0, index + 1).filter(item => {
+          if (item.type === 'ad') return false;
+          const post = item.item as Post;
+          return !!(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0));
+        }).length;
+        const isPriority = hasMedia && priorityPostsCount <= 3;
+
         return (
           <FeedCard
             key={p.id}
             post={p}
+            priority={isPriority}
             onLike={async () => {
               console.log('Like button clicked for post:', p.id, 'userLiked:', p.userLiked);
               if (!online) {
@@ -3173,10 +3512,10 @@ function FeedPageWrapper() {
                 }
                 return;
               }
-              
+
               const updated = await toggleFollowForPost(userId, p.id);
               updateOne(p.id, _post => ({ ...updated }));
-              
+
               // Refresh feed if viewing following feed
               if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
                 setPages([]);
@@ -3259,6 +3598,11 @@ function FeedPageWrapper() {
               setSelectedPostForScenes(p);
               setScenesOpen(true);
             }}
+            showBoostIcon={user?.handle === p.userHandle}
+            onBoost={async () => {
+              setSelectedPostForBoost(p);
+              setBoostModalOpen(true);
+            }}
             onNotificationsPress={() => navigate('/inbox')}
             unreadCount={unreadCount}
             hasInbox={hasInbox}
@@ -3316,6 +3660,30 @@ function FeedPageWrapper() {
           onClose={() => {
             setShareModalOpen(false);
             setSelectedPostForShare(null);
+          }}
+        />
+      )}
+
+      {/* Boost Selection Modal */}
+      {boostModalOpen && selectedPostForBoost && (
+        <BoostSelectionModal
+          post={selectedPostForBoost}
+          isOpen={boostModalOpen}
+          onClose={() => {
+            setBoostModalOpen(false);
+            setSelectedPostForBoost(null);
+          }}
+          onSelect={(feedType, price) => {
+            // Navigate to payment page with boost details
+            navigate('/boost-payment', {
+              state: {
+                postId: selectedPostForBoost.id,
+                feedType,
+                price
+              }
+            });
+            setBoostModalOpen(false);
+            setSelectedPostForBoost(null);
           }}
         />
       )}
@@ -3467,6 +3835,8 @@ function BoostPageWrapper() {
   const [selectedPostForScenes, setSelectedPostForScenes] = React.useState<Post | null>(null);
   const [boostModalOpen, setBoostModalOpen] = React.useState(false);
   const [selectedPostForBoost, setSelectedPostForBoost] = React.useState<Post | null>(null);
+  const [unreadCount, setUnreadCount] = React.useState(0);
+  const [hasInbox, setHasInbox] = React.useState(false);
 
   // Load user's posts
   React.useEffect(() => {

@@ -170,6 +170,26 @@ video {
   }
 }
 
+@keyframes progressBar {
+  0% {
+    width: 0%;
+  }
+
+  100% {
+    width: 100%;
+  }
+}
+
+@keyframes progressBarReverse {
+  0% {
+    width: 0%;
+  }
+
+  100% {
+    width: 100%;
+  }
+}
+
 /* Shimmer animation for tab gradient */
 @keyframes shimmerGradient {
   0% {

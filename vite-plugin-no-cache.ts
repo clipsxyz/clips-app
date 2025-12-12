@@ -9,11 +9,15 @@ export function noCache(): Plugin {
     name: 'no-cache',
     configureServer(server) {
       // Apply to all requests - but only set headers, don't block
-      server.middlewares.use((_req, res, next) => {
+      server.middlewares.use((req, res, next) => {
         // Set aggressive no-cache headers for all responses
-        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0')
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0')
         res.setHeader('Pragma', 'no-cache')
         res.setHeader('Expires', '0')
+        res.setHeader('X-Content-Type-Options', 'nosniff')
+        // Add timestamp to prevent caching
+        res.setHeader('Last-Modified', new Date().toUTCString())
+        res.setHeader('ETag', `"${Date.now()}"`)
         next()
       })
     },

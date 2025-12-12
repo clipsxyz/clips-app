@@ -48,7 +48,7 @@ export default defineConfig({
   // Exclude React Native files from being scanned
   server: {
     port: 5173,
-    host: 'localhost',
+    host: '0.0.0.0', // Allow external connections (accessible from other devices on network)
     strictPort: false,
     fs: {
       allow: ['.', './src', './public'],
@@ -58,6 +58,11 @@ export default defineConfig({
       'Pragma': 'no-cache',
       'Expires': '0',
       'Last-Modified': new Date().toUTCString(),
+      'ETag': '', // Disable ETag caching
+    },
+    hmr: {
+      protocol: 'ws',
+      host: '0.0.0.0', // Allow HMR from network devices
     },
   },
 })

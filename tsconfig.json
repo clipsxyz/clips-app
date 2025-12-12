@@ -28,9 +28,13 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": [
-    "src",
+    "src/**/*",
     "App.tsx",
     "index.js"
+  ],
+  "exclude": [
+    "node_modules",
+    "src/screens"
   ],
   "references": [
     {

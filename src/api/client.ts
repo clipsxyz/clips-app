@@ -1,5 +1,22 @@
+/// <reference types="vite/client" />
 // Updated API client for Laravel backend
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+// Use IP address if accessing from network, otherwise localhost
+const getApiBaseUrl = () => {
+    if (import.meta.env.VITE_API_URL) {
+        return import.meta.env.VITE_API_URL;
+    }
+    // If accessing from a different host (like phone on network), use IP address
+    const hostname = window.location.hostname;
+    if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+        // Extract IP from current URL (e.g., 192.168.1.3:5173 -> 192.168.1.3:8000)
+        const port = window.location.port || '5173';
+        const ip = hostname;
+        return `http://${ip}:8000/api`;
+    }
+    return 'http://localhost:8000/api';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 // Helper function to make API requests
 async function apiRequest(endpoint: string, options: RequestInit = {}) {
@@ -26,12 +43,12 @@ async function apiRequest(endpoint: string, options: RequestInit = {}) {
     } catch (error: any) {
         // Suppress connection refused errors when backend isn't running
         // Check for various connection error patterns
-        const isConnectionError = 
-            error?.message?.includes('Failed to fetch') || 
+        const isConnectionError =
+            error?.message?.includes('Failed to fetch') ||
             error?.message?.includes('ERR_CONNECTION_REFUSED') ||
             error?.message?.includes('NetworkError') ||
             error?.name === 'TypeError' && error?.message?.includes('fetch');
-            
+
         if (isConnectionError) {
             // Re-throw with a specific error type that can be caught and handled gracefully
             const connectionError = new Error('CONNECTION_REFUSED');
@@ -118,6 +135,16 @@ export async function createPost(postData: {
 export async function toggleLike(postId: string) {
     return apiRequest(`/posts/${postId}/like`, {
         method: 'POST',
+    });
+}
+
+export async function updatePost(postId: string, postData: {
+    text?: string;
+    location?: string;
+}) {
+    return apiRequest(`/posts/${postId}`, {
+        method: 'PUT',
+        body: JSON.stringify(postData),
     });
 }
 
@@ -266,8 +293,8 @@ export async function processQueue() {
 
     if (queue.length === 0) return;
 
-    const processed = [];
-    const failed = [];
+    const processed: string[] = [];
+    const failed: string[] = [];
 
     for (const action of queue) {
         try {
@@ -314,7 +341,7 @@ export async function processQueue() {
     }
 
     // Remove processed actions from queue
-    const remainingQueue = queue.filter(action => !processed.includes(action.id));
+    const remainingQueue = queue.filter((action: any) => !processed.includes(action.id));
     await set('mutationQueue', remainingQueue);
 
     return { processed: processed.length, failed: failed.length };

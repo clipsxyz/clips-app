@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-native",
+    "lib": ["ES2020", "ES2021"],
+    "types": ["react-native", "@types/react-native"]
+  },
+  "include": [
+    "src/screens/**/*"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}
+

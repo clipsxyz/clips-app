@@ -1,0 +1,27 @@
+{
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enable": true,
+  "typescript.validate.enable": true,
+  "typescript.preferences.includePackageJsonAutoImports": "off",
+  "typescript.preferences.importModuleSpecifier": "relative",
+  "css.lint.unknownAtRules": "ignore",
+  "typescript.tsserver.experimental.enableProjectDiagnostics": false,
+  "typescript.disableAutomaticTypeAcquisition": false,
+  "typescript.preferences.includePackageJsonAutoImports": "off",
+  "typescript.validate.enable": true,
+  "files.associations": {
+    "src/screens/**/*.tsx": "typescriptreact",
+    "src/screens/**/*.ts": "typescript"
+  },
+  "files.exclude": {
+    "**/src/screens/tsconfig.json": true
+  },
+  "search.exclude": {
+    "**/src/screens": false
+  },
+  "typescript.preferences.includePackageJsonAutoImports": "off",
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  }
+}
+

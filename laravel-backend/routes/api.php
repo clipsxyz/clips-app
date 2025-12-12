@@ -78,6 +78,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Posts routes (protected - require auth for actions)
     Route::prefix('posts')->group(function () {
         Route::post('/', [PostController::class, 'store']);
+        Route::put('/{id}', [PostController::class, 'update']);
         Route::post('/{id}/like', [PostController::class, 'toggleLike']);
         Route::post('/{id}/share', [PostController::class, 'share']);
         Route::post('/{id}/reclip', [PostController::class, 'reclip']);
