@@ -1030,40 +1030,86 @@ export default function ScenesModal({
                                     animation: 'heartPopUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards'
                                 }}
                             >
-                                {/* Enhanced heart burst animation */}
+                                {/* Enhanced heart burst animation with Gazetteer gradient */}
                                 <div className={`relative transition-all duration-300 ${heartBurst ? 'opacity-100 scale-100' : 'opacity-0 scale-50'}`}>
                                     {/* Main heart */}
-                                    <svg className="w-20 h-20 text-red-500 drop-shadow-lg animate-pulse" viewBox="0 0 24 24" fill="currentColor">
-                                        <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+                                    <svg className="w-20 h-20 drop-shadow-lg animate-pulse" viewBox="0 0 24 24">
+                                        <defs>
+                                            <linearGradient id="scenesHeartGradientMain" x1="0%" y1="0%" x2="100%" y2="100%">
+                                                <stop offset="0%" stopColor="#ff4ecb" />
+                                                <stop offset="50%" stopColor="#8f5bff" />
+                                                <stop offset="100%" stopColor="#ff4ecb" />
+                                            </linearGradient>
+                                        </defs>
+                                        <path
+                                            d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z"
+                                            fill="url(#scenesHeartGradientMain)"
+                                        />
                                     </svg>
 
                                     {/* Floating hearts */}
                                     <div className="absolute inset-0">
-                                        <div className={`absolute top-2 left-2 w-4 h-4 text-red-400 transition-all duration-500 ${heartBurst ? 'opacity-100 translate-y-[-20px]' : 'opacity-0 translate-y-0'}`}>
-                                            <svg viewBox="0 0 24 24" fill="currentColor">
-                                                <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+                                        <div className={`absolute top-2 left-2 w-4 h-4 transition-all duration-500 ${heartBurst ? 'opacity-100 translate-y-[-20px]' : 'opacity-0 translate-y-0'}`}>
+                                            <svg viewBox="0 0 24 24">
+                                                <defs>
+                                                    <linearGradient id="scenesHeartGradientSmall1" x1="0%" y1="0%" x2="100%" y2="100%">
+                                                        <stop offset="0%" stopColor="#ff4ecb" stopOpacity="0.9" />
+                                                        <stop offset="100%" stopColor="#8f5bff" stopOpacity="0.9" />
+                                                    </linearGradient>
+                                                </defs>
+                                                <path
+                                                    d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z"
+                                                    fill="url(#scenesHeartGradientSmall1)"
+                                                />
                                             </svg>
                                         </div>
-                                        <div className={`absolute top-4 right-2 w-3 h-3 text-red-300 transition-all duration-700 delay-100 ${heartBurst ? 'opacity-100 translate-y-[-25px] translate-x-[10px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
-                                            <svg viewBox="0 0 24 24" fill="currentColor">
-                                                <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+                                        <div className={`absolute top-4 right-2 w-3 h-3 transition-all duration-700 delay-100 ${heartBurst ? 'opacity-100 translate-y-[-25px] translate-x-[10px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
+                                            <svg viewBox="0 0 24 24">
+                                                <defs>
+                                                    <linearGradient id="scenesHeartGradientSmall2" x1="0%" y1="0%" x2="100%" y2="100%">
+                                                        <stop offset="0%" stopColor="#ff4ecb" stopOpacity="0.8" />
+                                                        <stop offset="100%" stopColor="#8f5bff" stopOpacity="0.8" />
+                                                    </linearGradient>
+                                                </defs>
+                                                <path
+                                                    d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z"
+                                                    fill="url(#scenesHeartGradientSmall2)"
+                                                />
                                             </svg>
                                         </div>
-                                        <div className={`absolute bottom-2 left-4 w-2 h-2 text-red-200 transition-all duration-600 delay-200 ${heartBurst ? 'opacity-100 translate-y-[-15px] translate-x-[-8px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
-                                            <svg viewBox="0 0 24 24" fill="currentColor">
-                                                <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+                                        <div className={`absolute bottom-2 left-4 w-2 h-2 transition-all duration-600 delay-200 ${heartBurst ? 'opacity-100 translate-y-[-15px] translate-x-[-8px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
+                                            <svg viewBox="0 0 24 24">
+                                                <defs>
+                                                    <linearGradient id="scenesHeartGradientSmall3" x1="0%" y1="0%" x2="100%" y2="100%">
+                                                        <stop offset="0%" stopColor="#ff4ecb" stopOpacity="0.7" />
+                                                        <stop offset="100%" stopColor="#8f5bff" stopOpacity="0.7" />
+                                                    </linearGradient>
+                                                </defs>
+                                                <path
+                                                    d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z"
+                                                    fill="url(#scenesHeartGradientSmall3)"
+                                                />
                                             </svg>
                                         </div>
-                                        <div className={`absolute bottom-4 right-4 w-3 h-3 text-red-400 transition-all duration-500 delay-150 ${heartBurst ? 'opacity-100 translate-y-[-20px] translate-x-[5px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
-                                            <svg viewBox="0 0 24 24" fill="currentColor">
-                                                <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+                                        <div className={`absolute bottom-4 right-4 w-3 h-3 transition-all duration-500 delay-150 ${heartBurst ? 'opacity-100 translate-y-[-20px] translate-x-[5px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
+                                            <svg viewBox="0 0 24 24">
+                                                <defs>
+                                                    <linearGradient id="scenesHeartGradientSmall4" x1="0%" y1="0%" x2="100%" y2="100%">
+                                                        <stop offset="0%" stopColor="#ff4ecb" stopOpacity="0.85" />
+                                                        <stop offset="100%" stopColor="#8f5bff" stopOpacity="0.85" />
+                                                    </linearGradient>
+                                                </defs>
+                                                <path
+                                                    d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z"
+                                                    fill="url(#scenesHeartGradientSmall4)"
+                                                />
                                             </svg>
                                         </div>
                                     </div>
 
                                     {/* Pulse rings */}
-                                    <div className={`absolute inset-0 border-2 border-red-400 rounded-full transition-all duration-1000 ${heartBurst ? 'opacity-100 scale-150' : 'opacity-0 scale-100'}`}></div>
-                                    <div className={`absolute inset-0 border border-red-300 rounded-full transition-all duration-1200 delay-100 ${heartBurst ? 'opacity-100 scale-200' : 'opacity-0 scale-100'}`}></div>
+                                    <div className={`absolute inset-0 rounded-full transition-all duration-1000 border-2 ${heartBurst ? 'opacity-100 scale-150 border-pink-400/80' : 'opacity-0 scale-100 border-pink-400/40'}`}></div>
+                                    <div className={`absolute inset-0 rounded-full transition-all duration-1200 delay-100 border ${heartBurst ? 'opacity-100 scale-200 border-purple-300/80' : 'opacity-0 scale-100 border-purple-300/40'}`}></div>
                                 </div>
                             </div>
                         )}

@@ -5,7 +5,7 @@ import { VideoTemplate, StickerOverlay, Sticker } from '../types';
 import { incrementTemplateUsage } from '../api/templates';
 import { createPost } from '../api/posts';
 import { useAuth } from '../context/Auth';
-import { TEMPLATE_IDS, TEMPLATE_GRADIENTS, MAX_CLIPS, MIN_CLIPS, DEFAULT_CLIP_DURATION, ANIMATION_DURATIONS } from '../constants';
+import { TEMPLATE_IDS, TEMPLATE_GRADIENTS, MAX_CLIPS, MAX_CLIPS_CAROUSEL, MIN_CLIPS, DEFAULT_CLIP_DURATION, ANIMATION_DURATIONS } from '../constants';
 import StickerPicker from '../components/StickerPicker';
 import { transcribeVideo } from '../utils/transcription';
 import StickerOverlayComponent from '../components/StickerOverlay';
@@ -164,8 +164,11 @@ export default function TemplateEditorPage() {
         }
     }, [currentStep]);
 
-    // For top templates (Gazetteer, Instagram, TikTok, YouTube Shorts), support dynamic clips (1-20)
+    // For top templates (Gazetteer, Instagram, TikTok, YouTube Shorts), support dynamic clips
     const isTopTemplate = template?.id === TEMPLATE_IDS.INSTAGRAM || template?.id === TEMPLATE_IDS.TIKTOK || template?.id === TEMPLATE_IDS.GAZETTEER || template?.id === TEMPLATE_IDS.YOUTUBE_SHORTS;
+    const isCarouselTemplate = template?.id === TEMPLATE_IDS.GAZETTEER;
+    // Get max clips based on template: Gazetteer = 10, others = 1
+    const getMaxClips = () => isCarouselTemplate ? MAX_CLIPS_CAROUSEL : MAX_CLIPS;
     const [dynamicClips, setDynamicClips] = React.useState<Array<{ id: string; mediaType: 'image' | 'video' | 'text'; duration: number }>>(
         isTopTemplate ? [{ id: 'clip-1', mediaType: 'video', duration: DEFAULT_CLIP_DURATION }] : []
     );
@@ -492,8 +495,8 @@ export default function TemplateEditorPage() {
                 if (files.length === 0) {
                     Swal.fire({
                         icon: 'info',
-                        title: 'No matching files',
-                        text: `No ${platformType === 'tiktok' ? 'TikTok' : platformType === 'instagram' ? 'Instagram' : 'YouTube Shorts'} videos found. Please select files that match the platform.`,
+                        title: 'No files selected',
+                        text: 'Please select a video or image file.',
                         timer: 3000,
                         showConfirmButton: false
                     });
@@ -512,8 +515,8 @@ export default function TemplateEditorPage() {
                 if (results.length === 0) {
                     Swal.fire({
                         icon: 'info',
-                        title: 'No matching files',
-                        text: `No ${platformType === 'tiktok' ? 'TikTok' : platformType === 'instagram' ? 'Instagram' : 'YouTube Shorts'} videos found.`,
+                        title: 'No files selected',
+                        text: 'Please select a video or image file.',
                         timer: 3000,
                         showConfirmButton: false
                     });
@@ -586,19 +589,23 @@ export default function TemplateEditorPage() {
         const file = event.target.files?.[0];
         if (!file) return;
 
-        // For platform templates, check if file matches platform
+        // For platform templates, check if file matches platform (but allow all videos/images as fallback)
         const platformType = getPlatformType();
         if (platformType && isWeb()) {
-            if (!filterFilesByPlatform([file], platformType).length) {
+            const filtered = filterFilesByPlatform([file], platformType);
+            // Only warn if it's not a video/image at all, otherwise allow it
+            const isVideoOrImage = file.type.startsWith('video/') || file.type.startsWith('image/');
+            if (!isVideoOrImage) {
                 Swal.fire({
                     icon: 'warning',
-                    title: 'File doesn\'t match platform',
-                    text: `This file doesn't appear to be a ${platformType === 'tiktok' ? 'TikTok' : platformType === 'instagram' ? 'Instagram' : 'YouTube Shorts'} video. Please select a matching file.`,
+                    title: 'Invalid file type',
+                    text: 'Please select a video or image file.',
                     timer: 3000,
                     showConfirmButton: false
                 });
                 return;
             }
+            // Allow the file even if it doesn't match platform patterns (filtering is now lenient)
         }
 
         // Validate MP4 for video templates (but top templates accept both images and videos)
@@ -707,15 +714,16 @@ export default function TemplateEditorPage() {
     function handleAddClip() {
         if (!isTopTemplate || isAddingClipRef.current) return;
         
+        const maxClips = getMaxClips();
         // Check if we're at max clips
-        if (dynamicClips.length >= MAX_CLIPS) return;
+        if (dynamicClips.length >= maxClips) return;
         
         // Set flag to prevent multiple rapid clicks
         isAddingClipRef.current = true;
         
         // Use functional update to prevent race conditions
         setDynamicClips(prev => {
-            if (prev.length >= MAX_CLIPS) {
+            if (prev.length >= maxClips) {
                 isAddingClipRef.current = false;
                 return prev; // Don't add if at max
             }
@@ -1029,7 +1037,7 @@ export default function TemplateEditorPage() {
                         {currentStep === 'media' ? (
                             <>
                                 <div className="text-sm text-gray-400 mb-1">
-                                    Clip {currentClipIndex + 1} of {filledClipsCount} {isTopTemplate && `(Max ${MAX_CLIPS})`}
+                                    Clip {currentClipIndex + 1} of {filledClipsCount} {isTopTemplate && `(Max ${getMaxClips()})`}
                                 </div>
                                 <div className="w-full h-1 bg-gray-800 rounded-full overflow-hidden">
                                     <div
@@ -1055,20 +1063,21 @@ export default function TemplateEditorPage() {
                         <div className="rounded-xl bg-black/85 backdrop-blur border border-white/10 p-2 shadow-lg">
                             <div className="flex items-center gap-2">
                                 {/* Add Another Clip Button - Left */}
-                                {isTopTemplate && activeClips.length < MAX_CLIPS && (
+                                {isTopTemplate && activeClips.length < getMaxClips() && (
                                     <button
                                         onClick={(e) => {
                                             e.preventDefault();
                                             e.stopPropagation();
-                                            if (activeClips.length < MAX_CLIPS && !isAddingClipRef.current) {
+                                            const maxClips = getMaxClips();
+                                            if (activeClips.length < maxClips && !isAddingClipRef.current) {
                                                 handleAddClip();
                                             }
                                         }}
-                                        disabled={activeClips.length >= MAX_CLIPS || isAddingClipRef.current}
+                                        disabled={activeClips.length >= getMaxClips() || isAddingClipRef.current}
                                         className="flex-1 py-2.5 bg-black text-white border border-white/40 rounded-lg text-sm font-semibold hover:bg-black/80 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         <FiPlus className="w-1.5 h-1.5" />
-                                        <span style={buttonTextStyle} className="text-sm">Add Another Clip ({filledClipsCount}/{MAX_CLIPS})</span>
+                                        <span style={buttonTextStyle} className="text-sm">Add Another Clip ({filledClipsCount}/{getMaxClips()})</span>
                                     </button>
                                 )}
 
@@ -1077,7 +1086,7 @@ export default function TemplateEditorPage() {
                                     onClick={() => {
                                         setCurrentStep('details');
                                     }}
-                                    className={`py-2.5 bg-black text-white border border-white/40 rounded-lg text-sm font-semibold hover:bg-black/80 transition-colors flex items-center justify-center gap-1.5 ${isTopTemplate && activeClips.length < MAX_CLIPS ? 'px-4' : 'w-full'}`}
+                                    className={`py-2.5 bg-black text-white border border-white/40 rounded-lg text-sm font-semibold hover:bg-black/80 transition-colors flex items-center justify-center gap-1.5 ${isTopTemplate && activeClips.length < getMaxClips() ? 'px-4' : 'w-full'}`}
                                 >
                                     <span style={buttonTextStyle} className="text-sm">Next</span>
                                     <svg className="w-1.5 h-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1397,7 +1406,7 @@ export default function TemplateEditorPage() {
                                                             }
                                                         </div>
                                                         <div className="text-gray-500 text-xs mt-2">
-                                                            {activeClips.length === 1 ? `Add ${MIN_CLIPS}-${MAX_CLIPS} items` : `Add up to ${MAX_CLIPS - activeClips.length} more`}
+                                                            {activeClips.length === 1 ? `Add ${MIN_CLIPS}-${getMaxClips()} items` : `Add up to ${getMaxClips() - activeClips.length} more`}
                                                         </div>
                                                     </>
                                                 ) : (

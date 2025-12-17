@@ -69,7 +69,7 @@ function BottomNav({ onCreateClick }: { onCreateClick: () => void }) {
         {item('/boost', 'Boost', <FiZap size={22} />)}
         {item('/create', 'Create', <FiPlusSquare size={22} />, onCreateClick)}
         {item('/search', 'Search', <FiSearch size={22} />)}
-        {item('/profile', 'Profile', <FiUser size={22} />)}
+        {item('/profile', 'Passport', <FiUser size={22} />)}
       </div>
     </nav>
   );
@@ -88,10 +88,10 @@ export default function App() {
   return (
     <>
       <main id="main" className="mx-auto max-w-md min-h-screen pb-[calc(64px+theme(spacing.safe))] md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800" style={{ backgroundColor: '#030712' }}>
-        {loc.pathname !== '/login' && loc.pathname !== '/feed' && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
+        {loc.pathname !== '/login' && loc.pathname !== '/feed' && loc.pathname !== '/profile' && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
         <Outlet context={{ activeTab, setActiveTab, customLocation, setCustomLocation }} />
         {loc.pathname !== '/discover' && loc.pathname !== '/create/filters' && loc.pathname !== '/create/instant' && loc.pathname !== '/payment' && loc.pathname !== '/clip' && loc.pathname !== '/create' && loc.pathname !== '/template-editor' && loc.pathname !== '/login' && (
-          <BottomNav onCreateClick={() => setShowCreateModal(true)} />
+          <BottomNav onCreateClick={() => navigate('/create/instant')} />
         )}
       </main>
 
@@ -118,7 +118,8 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
   const national = props.userNational || user?.national || 'Ireland';
   const clipsCount = props.clipsCount || 0;
 
-  const tabs: Tab[] = [regional, national, 'Clips', 'Discover', 'Following'];
+  // Main location / feed tabs (Clips and Discover are rendered beside the header)
+  const tabs: Tab[] = [regional, national, 'Following'];
 
   // Show progress bars on initial mount and when active tab changes
   React.useEffect(() => {
@@ -173,7 +174,74 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
         />
       )}
 
-      <div className="grid grid-cols-5 gap-2 px-3 relative z-10">
+      {/* Top header row with Clips on the left, centered Gazetteer logo, and Discover on the right */}
+      <div className="relative z-10 mb-2 flex items-center px-3">
+        {/* Left: Clips pill */}
+        <div className="flex items-center">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate('/stories');
+            }}
+            className="rounded-full px-3 py-1 bg-black text-gray-200 text-xs font-medium flex items-center gap-1 hover:text-white active:scale-[.98] transition-transform"
+          >
+            <span>Stories</span>
+            {clipsCount > 0 && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-600 text-white">
+                {clipsCount}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* Center: Gazetteer logo with wave */}
+        <div className="flex-1 flex items-center justify-center">
+          <div className="relative px-4 py-1">
+            <span className="relative z-10 text-sm font-semibold tracking-[0.2em] uppercase text-white">
+              GAZETTEER
+            </span>
+            <svg
+              className="absolute inset-0 w-full h-full pointer-events-none gazetteer-wave-svg"
+              viewBox="0 0 200 40"
+              aria-hidden="true"
+            >
+              <defs>
+                <linearGradient id="gazetteerWaveGradient" x1="0%" y1="50%" x2="100%" y2="50%">
+                  <stop offset="0%" stopColor="transparent" stopOpacity="0" />
+                  <stop offset="30%" stopColor="#ff4ecb" stopOpacity="0.4" />
+                  <stop offset="70%" stopColor="#8f5bff" stopOpacity="0.4" />
+                  <stop offset="100%" stopColor="transparent" stopOpacity="0" />
+                </linearGradient>
+              </defs>
+              <path
+                d="M-20 26 C 20 4, 80 48, 140 8 S 240 42, 280 16"
+                fill="none"
+                stroke="url(#gazetteerWaveGradient)"
+                strokeWidth="24"
+                strokeLinecap="round"
+                className="gazetteer-wave-path"
+              />
+            </svg>
+          </div>
+        </div>
+
+        {/* Right: Discover pill */}
+        <div className="flex items-center">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate('/discover');
+            }}
+            className="rounded-full px-3 py-1 text-xs font-medium transition-transform active:scale-[.98] bg-black text-gray-200 hover:text-white"
+          >
+            Discover
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 px-3 relative z-10">
         {tabs.map(t => {
           const active = props.active === t;
           const id = `tab-${t}`;
@@ -198,9 +266,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
           };
 
           // Format tab label
-          const tabLabel = t === 'Clips' && (props.clipsCount ?? 0) > 0
-            ? `Clips ${props.clipsCount}`
-            : t;
+          const tabLabel = t;
 
           if (active) {
             // Check if this tab should have shimmer animation (regional, national, or Following)
@@ -482,6 +548,27 @@ function PostHeader({ post, onFollow, isOverlaid = false, onMenuClick }: {
   // Check if this is a reclipped post
   const isReclippedPost = post.isReclipped && post.originalUserHandle;
 
+  // Control visibility of follow checkmark so it disappears after a short time
+  const [showFollowCheck, setShowFollowCheck] = React.useState(post.isFollowing === true);
+
+  React.useEffect(() => {
+    let timer: number | undefined;
+    if (!isCurrentUser && onFollow && post.isFollowing) {
+      setShowFollowCheck(true);
+      timer = window.setTimeout(() => {
+        setShowFollowCheck(false);
+      }, 2500);
+    } else {
+      setShowFollowCheck(false);
+    }
+
+    return () => {
+      if (timer) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [post.isFollowing, isCurrentUser, onFollow]);
+
   // Text colors based on whether header is overlaid on media
   const textColorClass = isOverlaid
     ? "text-white drop-shadow-md"
@@ -530,7 +617,7 @@ function PostHeader({ post, onFollow, isOverlaid = false, onMenuClick }: {
               </button>
             )}
             {/* Checkmark icon when following (replaces + icon) */}
-            {!isCurrentUser && onFollow && post.isFollowing === true && (
+            {!isCurrentUser && onFollow && post.isFollowing === true && showFollowCheck && (
               <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-green-500 border-2 border-white dark:border-gray-900 flex items-center justify-center shadow-lg z-30">
                 <FiCheck className="w-3 h-3 text-white" strokeWidth={3} />
               </div>
@@ -559,11 +646,6 @@ function PostHeader({ post, onFollow, isOverlaid = false, onMenuClick }: {
                   size={16}
                 />
               </h3>
-              {post.createdAt && (
-                <div className={`text-xs flex items-center gap-2 mt-0.5 ${subtextColorClass}`}>
-                  <span>{timeAgo(post.createdAt)}</span>
-                </div>
-              )}
             </button>
           </div>
         </div>
@@ -615,22 +697,6 @@ function PostHeader({ post, onFollow, isOverlaid = false, onMenuClick }: {
               </button>
             )}
           </div>
-          {/* Gazetteer logo overlay with shimmer */}
-          <span
-            className="text-xs font-light tracking-tight text-white"
-            style={{
-              background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
-              backgroundSize: '200% 100%',
-              WebkitBackgroundClip: 'text',
-              backgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              color: 'transparent',
-              animation: 'shimmer 3s linear infinite',
-              display: 'inline-block'
-            }}
-          >
-            Gazetteer
-          </span>
         </div>
       </div>
     </div>
@@ -863,31 +929,77 @@ function TextCard({ text, onDoubleLike, textStyle, stickers }: { text: string; o
         {/* Enhanced heart burst animation */}
         <div className={`absolute inset-0 flex items-center justify-center pointer-events-none transition-all duration-300 ${burst ? 'opacity-100 scale-100' : 'opacity-0 scale-50'}`}>
           <div className="relative">
-            {/* Main heart */}
-            <svg className="w-20 h-20 text-red-500 drop-shadow-lg animate-pulse" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+            {/* Main heart with Gazetteer gradient */}
+            <svg className="w-20 h-20 drop-shadow-lg animate-pulse" viewBox="0 0 24 24">
+              <defs>
+                <linearGradient id="heartGradientMain" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#ff4ecb" />
+                  <stop offset="50%" stopColor="#8f5bff" />
+                  <stop offset="100%" stopColor="#ff4ecb" />
+                </linearGradient>
+              </defs>
+              <path
+                d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z"
+                fill="url(#heartGradientMain)"
+              />
             </svg>
 
-            {/* Floating hearts */}
+            {/* Floating hearts with softer gradient */}
             <div className="absolute inset-0">
-              <div className={`absolute top-2 left-2 w-4 h-4 text-red-400 transition-all duration-500 ${burst ? 'opacity-100 translate-y-[-20px]' : 'opacity-0 translate-y-0'}`}>
-                <svg viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+              <div className={`absolute top-2 left-2 w-4 h-4 transition-all duration-500 ${burst ? 'opacity-100 translate-y-[-20px]' : 'opacity-0 translate-y-0'}`}>
+                <svg viewBox="0 0 24 24">
+                  <defs>
+                    <linearGradient id="heartGradientSmall1" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#ff4ecb" stopOpacity="0.9" />
+                      <stop offset="100%" stopColor="#8f5bff" stopOpacity="0.9" />
+                    </linearGradient>
+                  </defs>
+                  <path
+                    d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z"
+                    fill="url(#heartGradientSmall1)"
+                  />
                 </svg>
               </div>
-              <div className={`absolute top-4 right-2 w-3 h-3 text-red-300 transition-all duration-700 delay-100 ${burst ? 'opacity-100 translate-y-[-25px] translate-x-[10px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
-                <svg viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+              <div className={`absolute top-4 right-2 w-3 h-3 transition-all duration-700 delay-100 ${burst ? 'opacity-100 translate-y-[-25px] translate-x-[10px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
+                <svg viewBox="0 0 24 24">
+                  <defs>
+                    <linearGradient id="heartGradientSmall2" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#ff4ecb" stopOpacity="0.8" />
+                      <stop offset="100%" stopColor="#8f5bff" stopOpacity="0.8" />
+                    </linearGradient>
+                  </defs>
+                  <path
+                    d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z"
+                    fill="url(#heartGradientSmall2)"
+                  />
                 </svg>
               </div>
-              <div className={`absolute bottom-2 left-4 w-2 h-2 text-red-200 transition-all duration-600 delay-200 ${burst ? 'opacity-100 translate-y-[-15px] translate-x-[-8px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
-                <svg viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+              <div className={`absolute bottom-2 left-4 w-2 h-2 transition-all duration-600 delay-200 ${burst ? 'opacity-100 translate-y-[-15px] translate-x-[-8px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
+                <svg viewBox="0 0 24 24">
+                  <defs>
+                    <linearGradient id="heartGradientSmall3" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#ff4ecb" stopOpacity="0.7" />
+                      <stop offset="100%" stopColor="#8f5bff" stopOpacity="0.7" />
+                    </linearGradient>
+                  </defs>
+                  <path
+                    d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z"
+                    fill="url(#heartGradientSmall3)"
+                  />
                 </svg>
               </div>
-              <div className={`absolute bottom-4 right-4 w-3 h-3 text-red-400 transition-all duration-500 delay-150 ${burst ? 'opacity-100 translate-y-[-20px] translate-x-[5px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
-                <svg viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+              <div className={`absolute bottom-4 right-4 w-3 h-3 transition-all duration-500 delay-150 ${burst ? 'opacity-100 translate-y-[-20px] translate-x-[5px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
+                <svg viewBox="0 0 24 24">
+                  <defs>
+                    <linearGradient id="heartGradientSmall4" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#ff4ecb" stopOpacity="0.85" />
+                      <stop offset="100%" stopColor="#8f5bff" stopOpacity="0.85" />
+                    </linearGradient>
+                  </defs>
+                  <path
+                    d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z"
+                    fill="url(#heartGradientSmall4)"
+                  />
                 </svg>
               </div>
             </div>
@@ -1264,18 +1376,9 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       singleTapTimer.current = setTimeout(() => {
         // Only process single tap if no second tap came within threshold
         if (!isProcessingDoubleTap.current) {
-          // For videos, single tap toggles play/pause
-          if (currentItem?.type === 'video' && videoRef.current) {
-            if (videoRef.current.paused) {
-              videoRef.current.play().catch((error) => {
-                console.error('Error playing video:', error);
-              });
-              setIsPaused(false);
-            } else {
-              videoRef.current.pause();
-              setIsPaused(true);
-            }
-          } else if (onOpenScenes) {
+          // For feed videos, single tap should NOT control play/pause anymore.
+          // Only double-tap likes and the dedicated mute button affect video.
+          if (currentItem?.type !== 'video' && onOpenScenes) {
             // For non-videos, single tap opens scenes
             // Check if the click was on an interactive element (button, link, etc.)
             // We want to open scenes unless clicking on a real button/link
@@ -1644,9 +1747,9 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                 </div>
               )}
 
-              {/* View in Scenes Button - Bottom right of video */}
+              {/* View in Scenes Button - Bottom right of video (kept below bottom nav z-index) */}
               {!isLoading && !hasError && currentItem.type === 'video' && onOpenScenes && (
-                <div className="absolute bottom-4 right-4 z-50 pointer-events-auto">
+                <div className="absolute bottom-4 right-4 z-20 pointer-events-auto">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1686,11 +1789,11 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                         setIsViewInScenesExpanded(false);
                       }, 2000);
                     }}
-                    className={`${isViewInScenesExpanded ? 'px-3' : 'px-2'} py-1.5 bg-black/70 rounded text-white text-xs font-semibold hover:bg-black/90 active:bg-black transition-all duration-300 shadow-lg pointer-events-auto flex items-center gap-1.5`}
+                    className={`${isViewInScenesExpanded ? 'px-2' : 'px-1.5'} py-1 bg-black/70 rounded text-white text-[10px] font-semibold hover:bg-black/90 active:bg-black transition-all duration-300 shadow-lg pointer-events-auto flex items-center gap-1`}
                     aria-label="View in Scenes"
                     title="View in Scenes"
                   >
-                    <FiEye className="w-3.5 h-3.5 flex-shrink-0" />
+                    <FiEye className="w-3 h-3 flex-shrink-0" />
                     {isViewInScenesExpanded ? (
                       <span className="whitespace-nowrap">View in Scenes</span>
                     ) : (
@@ -1700,27 +1803,11 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                 </div>
               )}
 
-              {/* Paused Overlay - Scenes Logo with Mute Button */}
+              {/* Paused Overlay - Mute Button Only (no play/pause control) */}
               {isPaused && currentItem.type === 'video' && (
                 <div className="absolute inset-0 flex items-center justify-center z-40 pointer-events-none">
                   <div className="flex flex-col items-center gap-3">
-                    {/* Scenes Logo */}
-                    <div className="p-3 rounded-lg border-2 border-white/80 bg-black/50 backdrop-blur-sm">
-                      <svg
-                        width="48"
-                        height="48"
-                        viewBox="0 0 24 24"
-                        className="text-white"
-                        fill="none"
-                        xmlns="http://www.w3.org/2000/svg"
-                      >
-                        {/* Square border */}
-                        <rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" strokeWidth="2" fill="none" />
-                        {/* Play button triangle */}
-                        <path d="M9 7 L9 17 L17 12 Z" fill="currentColor" />
-                      </svg>
-                    </div>
-                    {/* Mute Button over logo */}
+                    {/* Centered Mute Button */}
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1955,8 +2042,18 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
               animation: 'heartPopUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards'
             }}
           >
-            <svg className="w-20 h-20 text-red-500 drop-shadow-2xl" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+            <svg className="w-20 h-20 drop-shadow-2xl" viewBox="0 0 24 24">
+              <defs>
+                <linearGradient id="heartGradientTap" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#ff4ecb" />
+                  <stop offset="50%" stopColor="#8f5bff" />
+                  <stop offset="100%" stopColor="#ff4ecb" />
+                </linearGradient>
+              </defs>
+              <path
+                d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z"
+                fill="url(#heartGradientTap)"
+              />
             </svg>
           </div>
         )}
@@ -2038,11 +2135,20 @@ function HeartDropAnimation({ startX, startY, targetElement, onComplete }: { sta
       }}
     >
       <svg
-        className="w-20 h-20 text-red-500 drop-shadow-lg"
+        className="w-20 h-20 drop-shadow-lg"
         viewBox="0 0 24 24"
-        fill="currentColor"
       >
-        <path d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
+        <defs>
+          <linearGradient id="heartGradientDrop" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#ff4ecb" />
+            <stop offset="50%" stopColor="#8f5bff" />
+            <stop offset="100%" stopColor="#ff4ecb" />
+          </linearGradient>
+        </defs>
+        <path
+          d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z"
+          fill="url(#heartGradientDrop)"
+        />
       </svg>
     </div>
   );
@@ -2229,7 +2335,7 @@ function EngagementBar({
             title={liked ? 'Unlike' : 'Like'}
           >
             {liked ? (
-              <AiFillHeart className="text-red-500 w-5 h-5" />
+              <AiFillHeart className="w-5 h-5 text-purple-500" />
             ) : (
               <FiHeart className="w-5 h-5 text-gray-600 dark:text-gray-400" />
             )}
@@ -2633,10 +2739,17 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
           </div>
         ) : null}
       </div>
-      {/* Caption for image/video posts */}
-      {((post.caption || post.text) && (post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0))) && (
+      {/* Caption and time for image/video posts */}
+      {(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0)) && (
         <div className="px-4 py-3">
-          <CaptionText caption={post.caption || post.text || ''} />
+          {(post.caption || post.text) && (
+            <CaptionText caption={post.caption || post.text || ''} />
+          )}
+          {post.createdAt && (
+            <div className="mt-1 text-[10px] text-gray-500">
+              {timeAgo(post.createdAt)}
+            </div>
+          )}
         </div>
       )}
       <EngagementBar

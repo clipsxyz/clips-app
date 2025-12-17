@@ -20,7 +20,6 @@ import {
     Alert,
     Share,
     Linking,
-    Animated,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -169,24 +168,7 @@ function PostHeader({
     onStoryPress?: () => void;
 }) {
     const [hasStory, setHasStory] = useState(false);
-    const shimmerAnim = useRef(new Animated.Value(0)).current;
-
-    useEffect(() => {
-        Animated.loop(
-            Animated.sequence([
-                Animated.timing(shimmerAnim, {
-                    toValue: 1,
-                    duration: 3000,
-                    useNativeDriver: true,
-                }),
-                Animated.timing(shimmerAnim, {
-                    toValue: 0,
-                    duration: 3000,
-                    useNativeDriver: true,
-                }),
-            ])
-        ).start();
-    }, [shimmerAnim]);
+    const [showFollowCheck, setShowFollowCheck] = useState(post.isFollowing === true);
 
     useEffect(() => {
         async function checkStory() {
@@ -204,6 +186,23 @@ function PostHeader({
         }
         checkStory();
     }, [post.userHandle, isCurrentUser]);
+
+    // Show the follow checkmark briefly after following, then hide it
+    useEffect(() => {
+        let timer: any;
+        if (!isCurrentUser && onFollow && post.isFollowing) {
+            setShowFollowCheck(true);
+            timer = setTimeout(() => {
+                setShowFollowCheck(false);
+            }, 2500);
+        } else {
+            setShowFollowCheck(false);
+        }
+
+        return () => {
+            if (timer) clearTimeout(timer);
+        };
+    }, [post.isFollowing, isCurrentUser, onFollow]);
 
     return (
         <View style={styles.postHeader}>
@@ -228,7 +227,7 @@ function PostHeader({
                         </TouchableOpacity>
                     )}
                     {/* Checkmark when following */}
-                    {!isCurrentUser && onFollow && post.isFollowing === true && (
+                    {!isCurrentUser && onFollow && post.isFollowing === true && showFollowCheck && (
                         <View style={styles.followCheckButton}>
                             <Icon name="checkmark" size={12} color="#FFFFFF" />
                         </View>
@@ -252,19 +251,6 @@ function PostHeader({
                         <Icon name="location" size={12} color="#8B5CF6" />
                     </TouchableOpacity>
                 )}
-                {/* Gazetteer logo overlay with shimmer */}
-                <Animated.View 
-                    style={[
-                        {
-                            opacity: shimmerAnim.interpolate({
-                                inputRange: [0, 0.5, 1],
-                                outputRange: [0.7, 1, 0.7],
-                            }),
-                        },
-                    ]}
-                >
-                    <Text style={styles.gazetteerOverlayText}>Gazetteer</Text>
-                </Animated.View>
             </View>
         </View>
     );
@@ -879,6 +865,9 @@ const FeedScreen: React.FC = ({ navigation }: any) => {
         <View style={styles.container}>
             <View style={styles.stickyTabsContainer}>
                 <View style={styles.scrim} />
+                <View style={styles.feedHeaderTopRow}>
+                    <Text style={styles.gazetteerText}>Gazetteer</Text>
+                </View>
                 <PillTabs
                     active={showFollowingFeed ? 'Following' : active}
                     onChange={handleTabChange}
@@ -895,7 +884,6 @@ const FeedScreen: React.FC = ({ navigation }: any) => {
 
             <FlatList
                 data={flat}
-                contentContainerStyle={{ paddingTop: 60 }}
                 renderItem={renderItem}
                 keyExtractor={(item) => item.id}
                 // Performance optimizations - Instagram-style
@@ -972,6 +960,13 @@ const styles = StyleSheet.create({
         backgroundColor: '#030712',
         elevation: 10,
         width: '100%',
+    },
+    feedHeaderTopRow: {
+        paddingTop: 12,
+        paddingBottom: 4,
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1,
     },
     scrim: {
         position: 'absolute',
@@ -1054,6 +1049,7 @@ const styles = StyleSheet.create({
     },
     feedContent: {
         paddingBottom: 20,
+        paddingTop: 96,
     },
     feedCard: {
         backgroundColor: '#030712',

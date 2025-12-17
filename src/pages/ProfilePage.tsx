@@ -11,6 +11,7 @@ import Swal from 'sweetalert2';
 import { setProfilePrivacy } from '../api/privacy';
 import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMaps';
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
+import { getUnreadTotal } from '../api/messages';
 
 export default function ProfilePage() {
   const { user, logout, login } = useAuth();
@@ -32,6 +33,9 @@ export default function ProfilePage() {
   const [isPrivate, setIsPrivate] = React.useState(user?.is_private || false);
   const [isTogglingPrivacy, setIsTogglingPrivacy] = React.useState(false);
   const [selectedCard, setSelectedCard] = React.useState<'bio' | 'social' | 'personal' | 'location' | 'interests' | 'flag' | null>(null);
+  const [unreadCount, setUnreadCount] = React.useState(0);
+  const [placesTraveled, setPlacesTraveled] = React.useState<string>(user?.placesTraveled?.join(', ') || '');
+  const [showProfilePictureModal, setShowProfilePictureModal] = React.useState(false);
   
   // Location state for cascading dropdowns
   const [national, setNational] = React.useState(user?.national || '');
@@ -81,6 +85,14 @@ export default function ProfilePage() {
       setBio(user.bio);
     }
   }, [user?.bio]);
+
+  React.useEffect(() => {
+    if (user?.placesTraveled) {
+      setPlacesTraveled(user.placesTraveled.join(', '));
+    } else {
+      setPlacesTraveled('');
+    }
+  }, [user?.placesTraveled]);
 
   React.useEffect(() => {
     if (user?.socialLinks) {
@@ -168,6 +180,42 @@ export default function ProfilePage() {
   React.useEffect(() => {
     loadDrafts();
   }, []);
+
+  // Listen for unread messages count
+  React.useEffect(() => {
+    if (!user?.handle) return;
+
+    const updateUnreadCount = async () => {
+      try {
+        const count = await getUnreadTotal(user.handle!);
+        setUnreadCount(count);
+      } catch (error) {
+        console.error('Error fetching unread count:', error);
+      }
+    };
+
+    // Initialize unread count
+    updateUnreadCount();
+
+    // Poll for updates every 10 seconds
+    const interval = setInterval(updateUnreadCount, 10000);
+
+    // Listen for unread changes
+    const handleUnreadChanged = (event: CustomEvent) => {
+      const handle = event.detail?.handle;
+      const unread = event.detail?.unread ?? 0;
+      if (handle === user.handle) {
+        setUnreadCount(unread);
+      }
+    };
+
+    window.addEventListener('inboxUnreadChanged', handleUnreadChanged as EventListener);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('inboxUnreadChanged', handleUnreadChanged as EventListener);
+    };
+  }, [user?.handle]);
 
   async function loadCollections() {
     if (!user?.id) return;
@@ -358,18 +406,25 @@ export default function ProfilePage() {
       <div className="max-w-2xl mx-auto p-6">
         {/* Header */}
         <div className="text-center mb-8 relative">
+          {/* Passport Title */}
+          <h1 className="text-2xl font-bold mb-4 passport-shimmer">Passport</h1>
+          
           {/* Top Bar - Messages, Drafts, Collections, Settings */}
           <div className="flex items-center justify-between mb-6 px-2">
             {/* Messages */}
             <div className="relative flex-1 flex justify-center">
               <button
                 onClick={() => nav('/inbox')}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white dark:bg-gray-800 shadow-lg hover:shadow-xl transition-shadow"
+                className="relative flex items-center justify-center p-2.5 rounded-full bg-white dark:bg-gray-800 shadow-lg hover:shadow-xl transition-shadow"
                 aria-label="Messages"
                 title="Messages"
               >
-                <FiMessageCircle className="w-4 h-4 text-gray-700 dark:text-gray-300" />
-                <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Messages</span>
+                <FiMessageCircle className="w-5 h-5 text-gray-700 dark:text-gray-300" />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-pink-500 text-white text-[10px] leading-[18px] rounded-full text-center">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
               </button>
             </div>
             
@@ -377,12 +432,11 @@ export default function ProfilePage() {
             <div className="relative flex-1 flex justify-center">
               <button
                 onClick={() => setDraftsOpen(!draftsOpen)}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white dark:bg-gray-800 shadow-lg hover:shadow-xl transition-shadow"
+                className="flex items-center justify-center p-2.5 rounded-full bg-white dark:bg-gray-800 shadow-lg hover:shadow-xl transition-shadow"
                 aria-label="Drafts"
                 title="Drafts"
               >
-                <FiFileText className="w-4 h-4 text-gray-700 dark:text-gray-300" />
-                <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Drafts</span>
+                <FiFileText className="w-5 h-5 text-gray-700 dark:text-gray-300" />
               </button>
               
               {/* Drafts Dropdown */}
@@ -451,12 +505,11 @@ export default function ProfilePage() {
             <div className="relative flex-1 flex justify-center">
               <button
                 onClick={() => setCollectionsOpen(!collectionsOpen)}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white dark:bg-gray-800 shadow-lg hover:shadow-xl transition-shadow"
+                className="flex items-center justify-center p-2.5 rounded-full bg-white dark:bg-gray-800 shadow-lg hover:shadow-xl transition-shadow"
                 aria-label="Collections"
                 title="Collections"
               >
-                <FiBookmark className="w-4 h-4 text-gray-700 dark:text-gray-300" />
-                <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Collection</span>
+                <FiBookmark className="w-5 h-5 text-gray-700 dark:text-gray-300" />
               </button>
 
               {/* Collections Dropdown */}
@@ -539,12 +592,11 @@ export default function ProfilePage() {
             <div className="relative flex-1 flex justify-center">
               <button
                 onClick={() => setSettingsOpen(!settingsOpen)}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white dark:bg-gray-800 shadow-lg hover:shadow-xl transition-shadow"
+                className="flex items-center justify-center p-2.5 rounded-full bg-white dark:bg-gray-800 shadow-lg hover:shadow-xl transition-shadow"
                 aria-label="Settings"
                 title="Settings"
               >
-                <FiSettings className="w-4 h-4 text-gray-700 dark:text-gray-300" />
-                <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Settings</span>
+                <FiSettings className="w-5 h-5 text-gray-700 dark:text-gray-300" />
               </button>
 
               {/* Settings Dropdown */}
@@ -578,7 +630,10 @@ export default function ProfilePage() {
           
           {/* Profile Picture and Info - Centered */}
           <div className="relative inline-block mb-4 mx-auto">
-            <label className="cursor-pointer group">
+            <button
+              onClick={() => setShowProfilePictureModal(true)}
+              className="cursor-pointer group relative"
+            >
               <Avatar
                 src={user.avatarUrl}
                 name={user.name}
@@ -588,15 +643,75 @@ export default function ProfilePage() {
               <div className="absolute inset-0 rounded-full bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-200 flex items-center justify-center">
                 <FiCamera className="w-6 h-6 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
               </div>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleProfilePictureSelect}
-                className="hidden"
-                disabled={isUpdatingProfile}
-              />
-            </label>
+            </button>
+            {/* Animated "Tap to change" message */}
+            <div className="absolute top-1/2 -translate-y-1/2 left-full ml-4 whitespace-nowrap">
+              <div className="profile-picture-tooltip bg-gray-900 dark:bg-gray-800 text-white text-xs px-3 py-1.5 rounded-full shadow-lg">
+                Tap to change
+              </div>
+            </div>
           </div>
+          
+          {/* Profile Picture Modal */}
+          {showProfilePictureModal && (
+            <>
+              <div
+                className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center"
+                onClick={() => setShowProfilePictureModal(false)}
+              >
+                <div
+                  className="relative flex flex-col items-center gap-6"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Enlarged Profile Picture */}
+                  <div className="relative">
+                    <div className="w-48 h-48 rounded-full overflow-hidden border-4 border-white dark:border-gray-800 shadow-2xl">
+                      {user.avatarUrl ? (
+                        <img
+                          src={user.avatarUrl}
+                          alt={`${user.name}'s profile picture`}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-gray-800 flex items-center justify-center">
+                          <span className="text-6xl font-bold text-white">
+                            {user.name?.charAt(0).toUpperCase() || 'U'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {/* Change Button */}
+                  <label className="cursor-pointer">
+                    <div className="flex flex-col items-center gap-2 px-6 py-3 bg-white dark:bg-gray-800 rounded-full shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105">
+                      <FiCamera className="w-6 h-6 text-gray-700 dark:text-gray-300" />
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Change</span>
+                    </div>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        handleProfilePictureSelect(e);
+                        setShowProfilePictureModal(false);
+                      }}
+                      className="hidden"
+                      disabled={isUpdatingProfile}
+                    />
+                  </label>
+                  
+                  {/* Close Button */}
+                  <button
+                    onClick={() => setShowProfilePictureModal(false)}
+                    className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-sm transition-colors"
+                    aria-label="Close"
+                  >
+                    <FiX className="w-6 h-6 text-white" />
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
           <div className="flex items-center justify-center gap-3 mb-2">
             <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">{user.name}</h1>
             <button
@@ -614,9 +729,6 @@ export default function ProfilePage() {
             </button>
           </div>
           <p className="text-brand-600 dark:text-brand-400 font-medium">@{user.handle}</p>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
-            Tap your profile picture to change it
-          </p>
           {isPrivate && (
             <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 flex items-center justify-center gap-1">
               <FiLock className="w-3 h-3" />
@@ -658,7 +770,7 @@ export default function ProfilePage() {
               </div>
             </button>
 
-            {/* Personal Info Card - Orange */}
+            {/* Travel Info Card - Orange */}
             <button
               onClick={() => setSelectedCard('personal')}
               className="flex flex-col items-center gap-2 p-4 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-all duration-200 group border-2 border-dashed border-orange-400 dark:border-orange-500 hover:border-orange-500 dark:hover:border-orange-400"
@@ -667,7 +779,7 @@ export default function ProfilePage() {
                 <FiUser className="w-6 h-6 text-gray-600 dark:text-gray-400 group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors" />
               </div>
               <div className="text-center">
-                <div className="font-semibold text-sm text-gray-900 dark:text-gray-100">Personal Info</div>
+                <div className="font-semibold text-sm text-gray-900 dark:text-gray-100">Travel Info</div>
                 <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Edit details</div>
               </div>
             </button>
@@ -740,7 +852,7 @@ export default function ProfilePage() {
                 <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
                   {selectedCard === 'bio' && 'Edit Bio'}
                   {selectedCard === 'social' && 'Social Links'}
-                  {selectedCard === 'personal' && 'Personal Information'}
+                  {selectedCard === 'personal' && 'Travel Information'}
                   {selectedCard === 'location' && 'Location Settings'}
                   {selectedCard === 'interests' && 'Interests'}
                   {selectedCard === 'flag' && 'Country Flag'}
@@ -773,6 +885,43 @@ export default function ProfilePage() {
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
                         This will be visible on your profile
                       </p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Email
+                      </label>
+                      <input
+                        type="email"
+                        value={user.email || ''}
+                        disabled
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 cursor-not-allowed"
+                      />
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        Email cannot be changed
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Age
+                      </label>
+                      <input
+                        type="number"
+                        value={user.age || ''}
+                        onChange={(e) => {
+                          const age = parseInt(e.target.value) || undefined;
+                          login({ ...user, age });
+                        }}
+                        placeholder="Enter your age"
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Status
+                      </label>
+                      <div className="inline-flex items-center px-3 py-1.5 rounded-full text-sm font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                        Active
+                      </div>
                     </div>
                     <button
                       onClick={() => {
@@ -851,51 +1000,51 @@ export default function ProfilePage() {
                   </div>
                 )}
 
-                {/* Personal Info Form */}
+                {/* Travel Info Form */}
                 {selectedCard === 'personal' && (
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Email
+                        Places You've Traveled To
                       </label>
                       <input
-                        type="email"
-                        value={user.email || ''}
-                        disabled
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 cursor-not-allowed"
-                      />
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                        Email cannot be changed
-                      </p>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Age
-                      </label>
-                      <input
-                        type="number"
-                        value={user.age || ''}
-                        onChange={(e) => {
-                          const age = parseInt(e.target.value) || undefined;
-                          login({ ...user, age });
-                        }}
-                        placeholder="Enter your age"
+                        type="text"
+                        value={placesTraveled}
+                        onChange={(e) => setPlacesTraveled(e.target.value)}
+                        placeholder="e.g., Paris, London, Tokyo, New York"
                         className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
                       />
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                        Separate multiple places with commas
+                      </p>
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Status
-                      </label>
-                      <div className="inline-flex items-center px-3 py-1.5 rounded-full text-sm font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                        Active
+                    {user.placesTraveled && user.placesTraveled.length > 0 && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Current Places
+                        </label>
+                        <div className="flex flex-wrap gap-2">
+                          {user.placesTraveled.map((place, index) => (
+                            <span
+                              key={index}
+                              className="px-3 py-1.5 bg-gradient-to-r from-orange-500 to-orange-600 text-white text-sm font-medium rounded-full"
+                            >
+                              {place}
+                            </span>
+                          ))}
+                        </div>
                       </div>
-                    </div>
+                    )}
                     <button
-                      onClick={() => setSelectedCard(null)}
+                      onClick={() => {
+                        const places = placesTraveled.split(',').map(p => p.trim()).filter(p => p);
+                        const updatedUser = { ...user, placesTraveled: places };
+                        login(updatedUser);
+                        setSelectedCard(null);
+                      }}
                       className="w-full py-3 bg-gradient-to-r from-brand-500 to-brand-600 text-white font-semibold rounded-xl shadow-lg hover:from-brand-600 hover:to-brand-700 transition-all duration-200"
                     >
-                      Done
+                      Save Travel Info
                     </button>
                   </div>
                 )}

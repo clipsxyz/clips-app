@@ -403,6 +403,26 @@ video {
   z-index: 1;
 }
 
+/* SVG wave under Gazetteer header text */
+.gazetteer-wave-svg {
+  top: 2px;
+}
+
+.gazetteer-wave-path {
+  stroke-dasharray: 300 420;
+  stroke-dashoffset: 420;
+  animation: gazetteerWave 10s linear infinite alternate;
+}
+
+@keyframes gazetteerWave {
+  0% {
+    stroke-dashoffset: 420;
+  }
+  100% {
+    stroke-dashoffset: -420;
+  }
+}
+
 /* Rotate gradient colors while border stays static */
 @keyframes rotateGradientColors {
   from {
@@ -620,4 +640,41 @@ video {
 .instagram-style-modal .swal2-actions {
   margin: 0 !important;
   padding: 0 !important;
+}
+
+/* Passport shimmer effect - same as news feed tabs */
+.passport-shimmer {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: shimmer 3s linear infinite;
+  display: inline-block;
+}
+
+/* Profile picture tooltip animation */
+.profile-picture-tooltip {
+  animation: tooltipExtend 3s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes tooltipExtend {
+  0%, 100% {
+    opacity: 0;
+    transform: translateX(-10px) translateY(-50%) scale(0.8);
+  }
+  10%, 40% {
+    opacity: 1;
+    transform: translateX(0) translateY(-50%) scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: translateX(0) translateY(-50%) scale(1);
+  }
+  60%, 90% {
+    opacity: 0;
+    transform: translateX(-10px) translateY(-50%) scale(0.8);
+  }
 }

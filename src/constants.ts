@@ -21,7 +21,8 @@ export const TEMPLATE_IDS = {
 } as const;
 
 // Maximum clips for top templates
-export const MAX_CLIPS = 20;
+export const MAX_CLIPS = 1; // For TikTok, Instagram, YouTube Shorts
+export const MAX_CLIPS_CAROUSEL = 10; // For Gazetteer carousel
 export const MIN_CLIPS = 1;
 
 // Default clip duration (in milliseconds)

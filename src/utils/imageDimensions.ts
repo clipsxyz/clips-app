@@ -83,3 +83,6 @@ export const needsClamping = (aspectRatio: number): boolean => {
   return aspectRatio < MIN_ASPECT || aspectRatio > MAX_ASPECT;
 };
 
+
+
+

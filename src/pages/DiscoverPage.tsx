@@ -64,16 +64,32 @@ export default function DiscoverPage() {
             {/* Capital city preset pills with location icon */}
             <div className="flex flex-col items-center gap-3">
                 <div className="flex flex-wrap justify-center gap-3">
-                    {['Paris', 'London', 'Rome', 'Madrid', 'Berlin', 'Tokyo', 'Dublin', 'New York', 'Sydney', 'Toronto', 'Singapore', 'Amsterdam'].map(city => (
-                        <button
-                            key={city}
-                            onClick={() => selectLocation(city)}
-                            className="px-5 py-2 rounded-full bg-gray-900 text-gray-100 hover:bg-gray-800 transition-colors text-sm flex items-center gap-2 shadow-sm"
-                        >
-                            <FiMapPin className="w-4 h-4" />
-                            <span>{city}</span>
-                        </button>
-                    ))}
+                    {['Paris', 'London', 'Rome', 'Madrid', 'Berlin', 'Tokyo', 'Dublin', 'New York', 'Sydney', 'Toronto', 'Singapore', 'Amsterdam'].map((city, index) => {
+                        const colors = [
+                            'text-pink-500',
+                            'text-blue-500',
+                            'text-purple-500',
+                            'text-red-500',
+                            'text-yellow-500',
+                            'text-green-500',
+                            'text-cyan-500',
+                            'text-orange-500',
+                            'text-indigo-500',
+                            'text-emerald-500',
+                            'text-violet-500',
+                            'text-rose-500'
+                        ];
+                        return (
+                            <button
+                                key={city}
+                                onClick={() => selectLocation(city)}
+                                className="px-5 py-2 rounded-full bg-gray-900 text-gray-100 hover:bg-gray-800 transition-colors text-sm flex items-center gap-2 shadow-sm"
+                            >
+                                <FiMapPin className={`w-4 h-4 ${colors[index % colors.length]}`} />
+                                <span>{city}</span>
+                            </button>
+                        );
+                    })}
                 </div>
             </div>
 
@@ -92,6 +108,7 @@ export default function DiscoverPage() {
                 >
                     {`Hello, ${firstName}`}
                 </h1>
+                <p className="text-sm md:text-base text-gray-400 dark:text-gray-500 mt-2">WHERE TO</p>
             </div>
 
             {/* Spacer */}

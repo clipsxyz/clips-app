@@ -271,10 +271,22 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
     const handleAddComment = async (text: string) => {
         if (!user) return;
 
+        // Always show an optimistic comment immediately in the UI
+        const optimisticComment: Comment = {
+            id: `temp-${Date.now()}`,
+            postId,
+            userHandle: user.handle || 'Anonymous',
+            text,
+            createdAt: Date.now(),
+            likes: 0,
+            userLiked: false,
+        };
+        setComments(prev => [...prev, optimisticComment]);
+
         setSubmitting(true);
         try {
             if (!online) {
-                // Queue for offline
+                // Queue for offline sync only
                 await enqueue({
                     type: 'comment',
                     postId,
@@ -285,12 +297,15 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
             }
 
             const newComment = await addComment(postId, user.handle || 'darraghdublin', text);
-            setComments(prev => [...prev, newComment]);
+
+            // Replace optimistic comment with real one from API/mock store
+            setComments(prev => prev.map(c => c.id === optimisticComment.id ? newComment : c));
 
             // Notify EngagementBar to update comment count
             window.dispatchEvent(new CustomEvent(`commentAdded-${postId}`));
         } catch (error) {
             console.error('Failed to add comment:', error);
+            // If API fails, keep the optimistic comment in UI
         } finally {
             setSubmitting(false);
         }
@@ -298,6 +313,15 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
 
     const handleLikeComment = async (commentId: string) => {
         if (!user) return;
+
+        // Optimistically update like state in UI
+        setComments(prev => prev.map(comment => {
+            if (comment.id !== commentId) return comment;
+            const currentlyLiked = comment.userLiked;
+            const newLiked = !currentlyLiked;
+            const newLikes = (comment.likes || 0) + (newLiked ? 1 : -1);
+            return { ...comment, userLiked: newLiked, likes: newLikes };
+        }));
 
         try {
             if (!online) {
@@ -346,9 +370,34 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
     const handleReplyToComment = async (parentId: string, text: string) => {
         if (!user) return;
 
+        // Always show an optimistic reply immediately
+        const optimisticReply: Comment = {
+            id: `temp-reply-${Date.now()}`,
+            postId,
+            userHandle: user.handle || 'Anonymous',
+            text,
+            createdAt: Date.now(),
+            likes: 0,
+            userLiked: false,
+            parentId,
+        };
+
+        setComments(prevComments =>
+            prevComments.map(comment => {
+                if (comment.id === parentId) {
+                    return {
+                        ...comment,
+                        replies: [...(comment.replies || []), optimisticReply],
+                        replyCount: (comment.replyCount || 0) + 1
+                    };
+                }
+                return comment;
+            })
+        );
+
         try {
             if (!online) {
-                // Queue for offline
+                // Queue for offline sync only
                 await enqueue({
                     type: 'reply',
                     postId,
@@ -361,19 +410,14 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
 
             const newReply = await addReply(postId, parentId, user.handle || 'darraghdublin', text);
 
-            // Update local state by adding the reply to the parent comment
+            // Replace optimistic reply with real one from API/mock store
             setComments(prevComments =>
                 prevComments.map(comment => {
                     if (comment.id === parentId) {
-                        // Check if reply already exists to avoid duplicates
-                        const existingReply = comment.replies?.find(r => r.id === newReply.id);
-                        if (existingReply) {
-                            return comment; // Reply already exists, don't add again
-                        }
                         return {
                             ...comment,
-                            replies: [...(comment.replies || []), newReply],
-                            replyCount: (comment.replyCount || 0) + 1
+                            replies: (comment.replies || []).map(r => r.id === optimisticReply.id ? newReply : r),
+                            replyCount: (comment.replyCount || 0) + 0 // already incremented optimistically
                         };
                     }
                     return comment;
@@ -384,6 +428,7 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
             window.dispatchEvent(new CustomEvent(`commentAdded-${postId}`));
         } catch (error) {
             console.error('Failed to add reply:', error);
+            // If API fails, keep optimistic reply in UI
         }
     };
 

@@ -1223,7 +1223,7 @@ export default function InstantCreatePage() {
                             className={`p-2 rounded-lg ${greenEnabled ? 'bg-green-600 shadow-lg shadow-green-500/50' : 'bg-black/60'} text-white hover:bg-green-600/80 active:scale-95 transition-all duration-200`}
                             onClick={() => setShowGreenScreenMenu(!showGreenScreenMenu)}
                         >
-                            <GreenScreenIcon className="w-4 h-4" />
+                            <span className="text-xs font-semibold">GS</span>
                         </button>
                         
                         {/* Hidden file input for green screen background */}
@@ -1505,7 +1505,7 @@ export default function InstantCreatePage() {
 
             {/* Record Button */}
             {!previewUrl && (
-                <div className="absolute bottom-24 left-0 right-0 z-50 flex items-center justify-center">
+                <div className="absolute bottom-24 left-0 right-0 z-50 flex flex-col items-center justify-center gap-4">
                     {!recording && countdown === null ? (
                         <button
                             onClick={() => {
@@ -1539,12 +1539,23 @@ export default function InstantCreatePage() {
                             )}
                         </button>
                     )}
+                    
+                    {/* Text Icon - Underneath Record Button */}
+                    <button
+                        onClick={() => {
+                            navigate('/create/text-only');
+                        }}
+                        className="w-10 h-10 rounded-lg bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/20 hover:bg-black/80 active:scale-95 transition-all cursor-pointer"
+                        aria-label="Create text post"
+                    >
+                        <FiType className="w-6 h-6 text-white" />
+                    </button>
                 </div>
             )}
 
-            {/* Platform Icons Footer */}
+            {/* Platform Icons - Left Side Vertical */}
             {!previewUrl && (
-                <div className="absolute bottom-0 left-0 right-0 z-50 flex items-center justify-center gap-4 pb-4 bg-gradient-to-t from-black/80 via-black/60 to-transparent pt-6">
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 z-50 flex flex-col gap-3">
                     {/* TikTok Icon */}
                     <button
                         onClick={async () => {
@@ -1619,28 +1630,6 @@ export default function InstantCreatePage() {
                         </svg>
                     </button>
                     
-                    {/* Gazetteer Icon */}
-                    <button
-                        onClick={() => {
-                            setShowGazetteerMenu(true);
-                        }}
-                        className="px-3 h-10 rounded-lg bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/20 hover:bg-black/80 active:scale-95 transition-all cursor-pointer"
-                        aria-label="Open Gazetteer menu"
-                    >
-                        <span 
-                            className="text-xs font-bold"
-                            style={{
-                                background: 'linear-gradient(90deg, #22c55e, #ffffff)',
-                                WebkitBackgroundClip: 'text',
-                                backgroundClip: 'text',
-                                WebkitTextFillColor: 'transparent',
-                                color: 'transparent'
-                            }}
-                        >
-                            +Gazetteer+
-                        </span>
-                    </button>
-                    
                     {/* YouTube Shorts Icon */}
                     <button
                         onClick={async () => {
@@ -1677,16 +1666,67 @@ export default function InstantCreatePage() {
                             <path d="M17.77 10.32c-.77-.32-1.2-.5-1.2-.5L18 9.06c1.84-.96 2.53-3.23 1.56-5.06s-3.24-2.53-5.07-1.56L6 6.94c-1.29.68-2.07 2.04-2 3.49.07 1.42.93 2.67 2.22 3.25.03.01 1.2.5 1.2.5L6 14.94c-1.84.96-2.53 3.23-1.56 5.06.97 1.83 3.24 2.53 5.07 1.56l8.5-4.5c1.29-.68 2.06-2.04 1.99-3.49-.06-1.42-.92-2.67-2.21-3.25zM10 14.65v-5.3L15 12l-5 2.65z"/>
                         </svg>
                     </button>
+                </div>
+            )}
+
+            {/* Platform Icons Footer - Centered 3 Options */}
+            {!previewUrl && (
+                <div className="absolute bottom-0 left-0 right-0 z-50 flex items-center justify-center gap-6 pb-4 bg-gradient-to-t from-black/80 via-black/60 to-transparent pt-6">
+                    {/* Gazetteer Options - Carousel */}
+                    <button
+                        onClick={async () => {
+                            try {
+                                const gazetteerTemplate = await getTemplate(TEMPLATE_IDS.GAZETTEER);
+                                if (gazetteerTemplate) {
+                                    navigate('/template-editor', {
+                                        state: { template: gazetteerTemplate }
+                                    });
+                                } else {
+                                    Swal.fire({
+                                        icon: 'error',
+                                        title: 'Error',
+                                        text: 'Could not load Gazetteer template',
+                                        timer: 2000,
+                                        showConfirmButton: false
+                                    });
+                                }
+                            } catch (error) {
+                                console.error('Error loading Gazetteer template:', error);
+                                Swal.fire({
+                                    icon: 'error',
+                                    title: 'Error',
+                                    text: 'Failed to load Gazetteer template',
+                                    timer: 2000,
+                                    showConfirmButton: false
+                                });
+                            }
+                        }}
+                        className="text-white text-sm font-medium hover:opacity-70 transition-opacity cursor-pointer"
+                        aria-label="Create a carousel"
+                    >
+                        Carousel
+                    </button>
                     
-                    {/* Text Icon */}
+                    {/* Gazetteer Options - Scenes */}
                     <button
                         onClick={() => {
-                            navigate('/create/text-only');
+                            gazetteerCameraRollInputRef.current?.click();
                         }}
-                        className="w-10 h-10 rounded-lg bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/20 hover:bg-black/80 active:scale-95 transition-all cursor-pointer"
-                        aria-label="Create text post"
+                        className="text-white text-sm font-medium hover:opacity-70 transition-opacity cursor-pointer"
+                        aria-label="Create a scenes"
                     >
-                        <FiType className="w-6 h-6 text-white" />
+                        Scenes
+                    </button>
+                    
+                    {/* Gazetteer Options - Stories */}
+                    <button
+                        onClick={() => {
+                            navigate('/clip');
+                        }}
+                        className="text-white text-sm font-medium hover:opacity-70 transition-opacity cursor-pointer"
+                        aria-label="Create stories"
+                    >
+                        Stories
                     </button>
                 </div>
             )}

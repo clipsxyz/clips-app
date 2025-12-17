@@ -126,30 +126,23 @@ export default function PostMenuModal({
 
     const menuItems: MenuItem[] = isCurrentUser
         ? [
-            // Own posts
+            // Own posts (removed Share and Boost - already in top row)
             { icon: FiTrash2, label: 'Delete', action: onDelete, danger: true },
             { icon: FiEdit3, label: 'Edit', action: onEdit },
             { icon: FiCopy, label: 'Copy Link', action: handleCopyLink },
-            { icon: FiShare2, label: 'Share to...', action: onShare },
-            { icon: FiZap, label: 'Boost', action: onBoost },
             { icon: FiArchive, label: 'Archive', action: onArchive },
             { icon: hasNotifications ? FiBellOff : FiBell, label: hasNotifications ? 'Turn off post notifications' : 'Turn on post notifications', action: hasNotifications ? onTurnOffNotifications : onTurnOnNotifications },
         ]
         : [
-            // Other users' posts
-            { icon: FiBookmark, label: isSaved ? 'Saved' : 'Save', action: handleSave, highlight: isSaved },
+            // Other users' posts (removed Save, Share, QR code - already in top row)
             { icon: FiRepeat, label: 'Reclip', action: onReclip },
-            { icon: FiMaximize, label: 'QR code', action: () => { setShowQRCodeModal(true); } },
             { icon: FiCopy, label: 'Copy Link', action: handleCopyLink },
-            { icon: FiShare2, label: 'Share to...', action: onShare },
             { icon: FiFlag, label: 'Report post', action: onReport, danger: true },
             ...(isFollowing ? [{ icon: FiUserMinus, label: `Unfollow ${post.userHandle.split('@')[0]}`, action: onUnfollow }] : []),
             { icon: FiVolumeX, label: isMuted ? `Unmute ${post.userHandle.split('@')[0]}` : `Mute ${post.userHandle.split('@')[0]}`, action: onMute },
             { icon: FiUserX, label: `Block ${post.userHandle.split('@')[0]}`, action: onBlock, danger: true },
             { icon: FiEyeOff, label: 'Hide', action: onHide },
             { icon: FiInfo, label: 'Not interested', action: onNotInterested },
-            { icon: FiInfo, label: 'About this account', action: () => { } }, // TODO: Navigate to account info
-            { icon: FiFlag, label: 'Request a community note', action: () => { } }, // TODO: Implement community notes
         ];
 
     return (
@@ -233,26 +226,49 @@ export default function PostMenuModal({
                         )}
                     </div>
 
-                    {/* Menu Items List */}
-                    <div className="flex-1 overflow-y-auto py-2">
-                        {menuItems.map((item, index) => {
-                            const Icon = item.icon;
-                            const isDanger = item.danger;
-                            const isHighlight = item.highlight;
+                    {/* Menu Items Grid */}
+                    <div className="flex-1 overflow-y-auto py-4 px-4">
+                        <div className="grid grid-cols-3 gap-4">
+                            {menuItems.map((item, index) => {
+                                const Icon = item.icon;
+                                const isDanger = item.danger;
+                                const isHighlight = item.highlight;
 
-                            return (
-                                <button
-                                    key={index}
-                                    onClick={() => item.action && handleAction(item.action)}
-                                    disabled={isProcessing}
-                                    className={`w-full px-4 py-3 flex items-center gap-4 hover:bg-gray-700/50 dark:hover:bg-gray-600/50 transition-colors disabled:opacity-50 ${isDanger ? 'text-red-500' : isHighlight ? 'text-yellow-400' : 'text-white'
-                                        }`}
-                                >
-                                    <Icon className="w-5 h-5" />
-                                    <span className="flex-1 text-left text-sm font-normal">{item.label}</span>
-                                </button>
-                            );
-                        })}
+                                return (
+                                    <button
+                                        key={index}
+                                        onClick={() => item.action && handleAction(item.action)}
+                                        disabled={isProcessing}
+                                        className="flex flex-col items-center gap-2 py-2 px-2 rounded-lg hover:bg-gray-700/50 dark:hover:bg-gray-600/50 transition-colors disabled:opacity-50"
+                                    >
+                                        <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
+                                            isDanger 
+                                                ? 'bg-red-500/20' 
+                                                : isHighlight 
+                                                    ? 'bg-yellow-500/20' 
+                                                    : 'bg-gray-700 dark:bg-gray-600'
+                                        }`}>
+                                            <Icon className={`w-6 h-6 ${
+                                                isDanger 
+                                                    ? 'text-red-400' 
+                                                    : isHighlight 
+                                                        ? 'text-yellow-400' 
+                                                        : 'text-white'
+                                            }`} />
+                                        </div>
+                                        <span className={`text-xs font-medium text-center leading-tight ${
+                                            isDanger 
+                                                ? 'text-red-400' 
+                                                : isHighlight 
+                                                    ? 'text-yellow-400' 
+                                                    : 'text-white'
+                                        }`}>
+                                            {item.label}
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
                     </div>
 
                 </div>

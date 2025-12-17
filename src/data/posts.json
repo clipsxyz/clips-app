@@ -3,13 +3,7 @@
     "id": "1",
     "userHandle": "Username@Dublin",
     "locationLabel": "Story location",
-    "tags": [
-      "Text",
-      "text",
-      "text",
-      "text",
-      "text"
-    ],
+    "tags": [],
     "mediaUrl": "https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?q=80&w=800",
     "stats": {
       "likes": 14,
@@ -26,13 +20,7 @@
     "id": "2",
     "userHandle": "Alice@Finglas",
     "locationLabel": "Near Phoenix Park",
-    "tags": [
-      "Food",
-      "cafe",
-      "brunch",
-      "city",
-      "friends"
-    ],
+    "tags": [],
     "mediaUrl": "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=800",
     "stats": {
       "likes": 87,
@@ -49,13 +37,7 @@
     "id": "3",
     "userHandle": "Bob@Ireland",
     "locationLabel": "Seaside",
-    "tags": [
-      "Travel",
-      "sea",
-      "wind",
-      "walk",
-      "sun"
-    ],
+    "tags": [],
     "mediaUrl": "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?q=80&w=800",
     "stats": {
       "likes": 12,
@@ -72,13 +54,7 @@
     "id": "4",
     "userHandle": "Sarah@NewYork",
     "locationLabel": "Central Park",
-    "tags": [
-      "City",
-      "park",
-      "nature",
-      "urban",
-      "green"
-    ],
+    "tags": [],
     "mediaUrl": "https://images.unsplash.com/photo-1494522358652-f30e61a0b1b0?q=80&w=800",
     "stats": {
       "likes": 45,
@@ -95,13 +71,7 @@
     "id": "5",
     "userHandle": "Mike@London",
     "locationLabel": "Thames River",
-    "tags": [
-      "River",
-      "bridge",
-      "architecture",
-      "history",
-      "water"
-    ],
+    "tags": [],
     "mediaUrl": "https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?q=80&w=800",
     "stats": {
       "likes": 67,
@@ -118,13 +88,7 @@
     "id": "6",
     "userHandle": "Emma@Paris",
     "locationLabel": "Eiffel Tower",
-    "tags": [
-      "Landmark",
-      "tower",
-      "architecture",
-      "france",
-      "city"
-    ],
+    "tags": [],
     "mediaUrl": "https://images.unsplash.com/photo-1511739001486-6bfe10ce785f?q=80&w=800",
     "stats": {
       "likes": 89,
@@ -141,13 +105,7 @@
     "id": "7",
     "userHandle": "John@Tokyo",
     "locationLabel": "Shibuya Crossing",
-    "tags": [
-      "City",
-      "crossing",
-      "neon",
-      "busy",
-      "urban"
-    ],
+    "tags": [],
     "mediaUrl": "https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?q=80&w=800",
     "stats": {
       "likes": 34,
@@ -164,13 +122,7 @@
     "id": "8",
     "userHandle": "Lisa@Sydney",
     "locationLabel": "Opera House",
-    "tags": [
-      "Architecture",
-      "opera",
-      "harbor",
-      "australia",
-      "landmark"
-    ],
+    "tags": [],
     "mediaUrl": "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?q=80&w=800",
     "stats": {
       "likes": 56,
