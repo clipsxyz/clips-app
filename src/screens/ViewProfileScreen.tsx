@@ -9,6 +9,7 @@ import {
     FlatList,
     ActivityIndicator,
     Alert,
+    Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -34,6 +35,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     const [hasPendingRequest, setHasPendingRequest] = useState(false);
     const [profileIsPrivate, setProfileIsPrivate] = useState(false);
     const [stats, setStats] = useState({ following: 0, followers: 0, posts: 0 });
+    const [showTraveledModal, setShowTraveledModal] = useState(false);
 
     useEffect(() => {
         loadProfile();
@@ -273,6 +275,16 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                         <TouchableOpacity style={styles.messageButton}>
                             <Text style={styles.messageButtonText}>Message</Text>
                         </TouchableOpacity>
+                        <TouchableOpacity
+                            onPress={() => setShowTraveledModal(true)}
+                            style={[
+                                styles.traveledButton,
+                                (!profileUser?.placesTraveled || !Array.isArray(profileUser.placesTraveled) || profileUser.placesTraveled.length === 0) && styles.traveledButtonDisabled,
+                            ]}
+                            disabled={!profileUser?.placesTraveled || !Array.isArray(profileUser.placesTraveled) || profileUser.placesTraveled.length === 0}
+                        >
+                            <Icon name="location" size={20} color="#FFFFFF" />
+                        </TouchableOpacity>
                     </View>
                 )}
 
@@ -303,6 +315,54 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     />
                 </View>
             </ScrollView>
+
+            {/* Traveled Modal */}
+            <Modal
+                visible={showTraveledModal}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => setShowTraveledModal(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Places Traveled</Text>
+                            <TouchableOpacity onPress={() => setShowTraveledModal(false)}>
+                                <Icon name="close" size={24} color="#FFFFFF" />
+                            </TouchableOpacity>
+                        </View>
+                        <ScrollView style={styles.modalBody}>
+                            {profileUser?.placesTraveled && Array.isArray(profileUser.placesTraveled) && profileUser.placesTraveled.length > 0 ? (
+                                profileUser.placesTraveled.map((place: string, index: number) => (
+                                    <TouchableOpacity
+                                        key={index}
+                                        style={styles.placeItem}
+                                        onPress={() => {
+                                            setShowTraveledModal(false);
+                                            navigation.navigate('Feed', { location: place });
+                                        }}
+                                    >
+                                        <View style={styles.placeIcon}>
+                                            <Icon name="location" size={20} color="#FFFFFF" />
+                                        </View>
+                                        <Text style={styles.placeName}>{place}</Text>
+                                        <TouchableOpacity
+                                            onPress={() => {
+                                                setShowTraveledModal(false);
+                                                navigation.navigate('Feed', { location: place });
+                                            }}
+                                        >
+                                            <Icon name="eye" size={20} color="#9CA3AF" />
+                                        </TouchableOpacity>
+                                    </TouchableOpacity>
+                                ))
+                            ) : (
+                                <Text style={styles.emptyText}>No places traveled yet.</Text>
+                            )}
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
         </SafeAreaView>
     );
 }
@@ -445,7 +505,73 @@ const styles = StyleSheet.create({
         color: '#9CA3AF',
         marginBottom: 24,
     },
+    traveledButton: {
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        backgroundColor: '#1F2937',
+        borderRadius: 8,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    traveledButtonDisabled: {
+        opacity: 0.5,
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.75)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 16,
+    },
+    modalContent: {
+        backgroundColor: '#111827',
+        borderRadius: 16,
+        maxWidth: 400,
+        width: '100%',
+        maxHeight: '80%',
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#1F2937',
+    },
+    modalTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        color: '#FFFFFF',
+    },
+    modalBody: {
+        padding: 16,
+    },
+    placeItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+        backgroundColor: '#1F2937',
+        borderRadius: 8,
+        marginBottom: 12,
+    },
+    placeIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: '#F97316',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+    },
+    placeName: {
+        flex: 1,
+        fontSize: 16,
+        fontWeight: '500',
+        color: '#FFFFFF',
+    },
 });
+
+
 
 
 

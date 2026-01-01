@@ -1035,8 +1035,8 @@ const styles = StyleSheet.create({
         backgroundColor: '#000000',
     },
     tabText: {
-        fontSize: 14,
-        fontWeight: '500',
+        fontSize: 16,
+        fontWeight: '600',
     },
     activeTabText: {
         color: '#FFFFFF',

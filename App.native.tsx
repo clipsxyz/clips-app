@@ -26,6 +26,7 @@ import ViewProfileScreen from './src/screens/ViewProfileScreen';
 import CreateScreen from './src/screens/CreateScreen';
 import MessagesScreen from './src/screens/MessagesScreen';
 import InboxScreen from './src/screens/InboxScreen';
+import CollectionFeedScreen from './src/screens/CollectionFeedScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -148,6 +149,10 @@ function App(): React.JSX.Element {
           <Stack.Screen 
             name="Inbox" 
             component={InboxScreen}
+          />
+          <Stack.Screen 
+            name="CollectionFeed" 
+            component={CollectionFeedScreen}
           />
         </Stack.Navigator>
       </NavigationContainer>

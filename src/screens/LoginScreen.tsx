@@ -133,7 +133,7 @@ export default function LoginScreen({ navigation }: any) {
             local: local,
             regional: regional,
             national: national,
-            handle: `${name.trim()}@${local}`,
+            handle: `${name.trim()}@${regional}`,
             countryFlag: countryFlag.trim(),
             avatarUrl: profilePicture
         };
@@ -585,6 +585,8 @@ const styles = StyleSheet.create({
         marginTop: 16,
     },
 });
+
+
 
 
 

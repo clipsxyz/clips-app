@@ -253,7 +253,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                     <TouchableOpacity onPress={() => navigation.goBack()}>
                         <Icon name="arrow-back" size={24} color="#FFFFFF" />
                     </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Stories</Text>
+                    <Text style={styles.headerTitle}>Shorts</Text>
                     <View style={{ width: 24 }} />
                 </View>
 
@@ -411,7 +411,7 @@ const styles = StyleSheet.create({
         borderBottomColor: '#1F2937',
     },
     headerTitle: {
-        fontSize: 18,
+        fontSize: 20,
         fontWeight: 'bold',
         color: '#FFFFFF',
     },
@@ -579,6 +579,8 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
 });
+
+
 
 
 
