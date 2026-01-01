@@ -186,7 +186,7 @@ export default function LoginPage() {
       local: local,
       regional: regional,
       national: national,
-      handle: `${name.trim()}@${local}`, // Generate handle like "John@Ballymun"
+      handle: `${name.trim()}@${regional}`, // Generate handle like "Barry@Dublin"
       countryFlag: countryFlag.trim(),
       avatarUrl: profilePicture // Include profile picture
     };

@@ -403,334 +403,186 @@ export default function ProfilePage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-brand-50 to-brand-100 dark:from-gray-900 dark:to-gray-800">
-      <div className="max-w-2xl mx-auto p-6">
-        {/* Header */}
-        <div className="text-center mb-8 relative">
-          {/* Passport Title */}
-          <h1 className="text-2xl font-bold mb-4 passport-shimmer">Passport</h1>
-          
-          {/* Top Bar - Messages, Drafts, Collections, Settings */}
-          <div className="flex items-center justify-between mb-6 px-2">
-            {/* Messages */}
-            <div className="relative flex-1 flex justify-center">
+      {/* Header - Sticky */}
+      <div className="sticky top-0 z-[100] bg-gradient-to-br from-brand-50/95 to-brand-100/95 dark:from-gray-900/95 dark:to-gray-800/95 backdrop-blur-md border-b border-gray-200/50 dark:border-gray-700/50 shadow-sm">
+        <div className="max-w-2xl mx-auto px-4 py-3">
+          <div className="flex items-center justify-between">
+            {/* Left: Profile Picture */}
+            <div className="flex-shrink-0">
+              <Avatar
+                src={user?.avatarUrl}
+                name={user?.name || 'User'}
+                size="sm"
+                className="cursor-pointer"
+                onClick={() => setShowProfilePictureModal(true)}
+              />
+            </div>
+
+            {/* Center: Passport Title */}
+            <div className="flex-1 flex justify-center">
+              <h1 className="text-2xl font-bold passport-shimmer">Passport</h1>
+            </div>
+
+            {/* Right: Private/Public Toggle */}
+            <div className="flex-shrink-0">
               <button
-                onClick={() => nav('/inbox')}
-                className="relative flex items-center justify-center p-2.5 rounded-full bg-white dark:bg-gray-800 shadow-lg hover:shadow-xl transition-shadow"
-                aria-label="Messages"
-                title="Messages"
+                onClick={handleTogglePrivacy}
+                disabled={isTogglingPrivacy}
+                className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                title={isPrivate ? 'Profile is private - Click to make public' : 'Profile is public - Click to make private'}
+                aria-label={isPrivate ? 'Make profile public' : 'Make profile private'}
               >
-                <FiMessageCircle className="w-5 h-5 text-gray-700 dark:text-gray-300" />
-                {unreadCount > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-pink-500 text-white text-[10px] leading-[18px] rounded-full text-center">
-                    {unreadCount > 9 ? '9+' : unreadCount}
-                  </span>
+                {isPrivate ? (
+                  <FiLock className="w-5 h-5 text-gray-700 dark:text-gray-300" />
+                ) : (
+                  <FiUnlock className="w-5 h-5 text-gray-700 dark:text-gray-300" />
                 )}
               </button>
             </div>
-            
-            {/* Drafts */}
-            <div className="relative flex-1 flex justify-center">
-              <button
-                onClick={() => setDraftsOpen(!draftsOpen)}
-                className="flex items-center justify-center p-2.5 rounded-full bg-white dark:bg-gray-800 shadow-lg hover:shadow-xl transition-shadow"
-                aria-label="Drafts"
-                title="Drafts"
-              >
-                <FiFileText className="w-5 h-5 text-gray-700 dark:text-gray-300" />
-              </button>
-              
-              {/* Drafts Dropdown */}
-              {draftsOpen && (
-                <>
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setDraftsOpen(false)}
-                  />
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-72 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 z-50 max-h-96 overflow-y-auto">
-                    <div className="p-2">
-                      {drafts.length === 0 ? (
-                        <div className="p-4 text-center text-gray-500 dark:text-gray-400 text-sm">
-                          No drafts yet
-                        </div>
-                      ) : (
-                        drafts.map(draft => (
-                          <div
-                            key={draft.id}
-                            className="p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 group"
-                          >
-                            <video
-                              src={draft.videoUrl}
-                              className="w-16 h-24 rounded-lg object-cover flex-shrink-0"
-                              muted
-                              playsInline
-                              preload="metadata"
-                            />
-                            <div className="flex-1 min-w-0">
-                              <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-                                {new Date(draft.createdAt).toLocaleDateString()}
-                              </div>
-                              <div className="text-xs text-gray-400 dark:text-gray-500">
-                                {Math.floor(draft.videoDuration)}s
-                              </div>
-                            </div>
-                            <div className="flex gap-1">
-                              <button
-                                onClick={() => {
-                                  setDraftsOpen(false);
-                                  nav('/create/filters', { state: { videoUrl: draft.videoUrl, videoDuration: draft.videoDuration } });
-                                }}
-                                className="p-2 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
-                                title="Continue editing"
-                              >
-                                <FiEdit3 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                              </button>
-                              <button
-                                onClick={() => handleDeleteDraft(draft.id)}
-                                className="p-2 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
-                                title="Delete draft"
-                              >
-                                <FiX className="w-4 h-4 text-red-600 dark:text-red-400" />
-                              </button>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-            
-            {/* Collections */}
-            <div className="relative flex-1 flex justify-center">
-              <button
-                onClick={() => setCollectionsOpen(!collectionsOpen)}
-                className="flex items-center justify-center p-2.5 rounded-full bg-white dark:bg-gray-800 shadow-lg hover:shadow-xl transition-shadow"
-                aria-label="Collections"
-                title="Collections"
-              >
-                <FiBookmark className="w-5 h-5 text-gray-700 dark:text-gray-300" />
-              </button>
-
-              {/* Collections Dropdown */}
-              {collectionsOpen && (
-                <>
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setCollectionsOpen(false)}
-                  />
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-64 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 z-50 max-h-96 overflow-y-auto">
-                    <div className="p-2">
-                      {collections.length === 0 ? (
-                        <div className="p-4 text-center text-gray-500 dark:text-gray-400 text-sm">
-                          No collections yet
-                        </div>
-                      ) : (
-                        collections.map(collection => (
-                          <button
-                            key={collection.id}
-                            onClick={() => {
-                              setCollectionsOpen(false);
-                              nav(`/collection/${collection.id}`, { state: { collectionName: collection.name } });
-                            }}
-                            className="w-full p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left flex items-center gap-3"
-                          >
-                            <div className="w-12 h-12 rounded-lg bg-gray-200 dark:bg-gray-700 flex items-center justify-center overflow-hidden flex-shrink-0">
-                              {collection.thumbnailUrl ? (
-                                (() => {
-                                  // Find the first post to check its mediaType
-                                  const firstPost = collection.postIds.length > 0
-                                    ? posts.find(p => p.id === collection.postIds[0])
-                                    : null;
-                                  const isVideo = firstPost?.mediaType === 'video' ||
-                                    collection.thumbnailUrl.toLowerCase().endsWith('.mp4') ||
-                                    collection.thumbnailUrl.toLowerCase().endsWith('.webm') ||
-                                    collection.thumbnailUrl.toLowerCase().endsWith('.mov');
-                                  return isVideo ? (
-                                    <video
-                                      src={collection.thumbnailUrl}
-                                      className="w-full h-full object-cover"
-                                      muted
-                                      playsInline
-                                      preload="metadata"
-                                      onLoadedMetadata={(e) => {
-                                        // Ensure first frame is shown
-                                        const video = e.currentTarget;
-                                        video.currentTime = 0;
-                                      }}
-                                    />
-                                  ) : (
-                                    <img
-                                      src={collection.thumbnailUrl}
-                                      alt={collection.name}
-                                      className="w-full h-full object-cover"
-                                    />
-                                  );
-                                })()
-                              ) : (
-                                <FiBookmark className="w-6 h-6 text-gray-400" />
-                              )}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="font-semibold text-gray-900 dark:text-gray-100 truncate">
-                                {collection.name}
-                              </div>
-                              <div className="text-sm text-gray-500 dark:text-gray-400">
-                                {collection.postIds.length} {collection.postIds.length === 1 ? 'post' : 'posts'}
-                              </div>
-                            </div>
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-            
-            {/* Settings */}
-            <div className="relative flex-1 flex justify-center">
-              <button
-                onClick={() => setSettingsOpen(!settingsOpen)}
-                className="flex items-center justify-center p-2.5 rounded-full bg-white dark:bg-gray-800 shadow-lg hover:shadow-xl transition-shadow"
-                aria-label="Settings"
-                title="Settings"
-              >
-                <FiSettings className="w-5 h-5 text-gray-700 dark:text-gray-300" />
-              </button>
-
-              {/* Settings Dropdown */}
-              {settingsOpen && (
-                <>
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setSettingsOpen(false)}
-                  />
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-48 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 z-50 overflow-hidden">
-                    <div className="py-1">
-                      <button
-                        onClick={() => {
-                          setSettingsOpen(false);
-                          logout();
-                          nav('/login', { replace: true });
-                        }}
-                        className="w-full px-4 py-3 text-left text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                        </svg>
-                        Sign Out
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
           </div>
-          
-          {/* Profile Picture and Info - Centered */}
-          <div className="relative inline-block mb-4 mx-auto">
+
+          {/* Tabs: Messages, Drafts, Collections, Settings */}
+          <div className="flex items-center justify-around border-t border-gray-200/50 dark:border-gray-700/50 mt-3 pt-3">
             <button
-              onClick={() => setShowProfilePictureModal(true)}
-              className="cursor-pointer group relative"
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                nav('/inbox');
+              }}
+              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors relative pointer-events-auto"
             >
-              <Avatar
-                src={user.avatarUrl}
-                name={user.name}
-                size="xl"
-                className="border-4 border-white dark:border-gray-800 shadow-xl group-hover:shadow-2xl transition-all duration-200"
-              />
-              <div className="absolute inset-0 rounded-full bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-200 flex items-center justify-center">
-                <FiCamera className="w-6 h-6 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
-              </div>
+              <FiMessageCircle className="w-5 h-5 text-gray-700 dark:text-gray-300" />
+              <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Messages</span>
+              {unreadCount > 0 && (
+                <span className="absolute top-0 right-0 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
             </button>
-            {/* Animated "Tap to change" message */}
-            <div className="absolute top-1/2 -translate-y-1/2 left-full ml-4 whitespace-nowrap">
-              <div className="profile-picture-tooltip bg-gray-900 dark:bg-gray-800 text-white text-xs px-3 py-1.5 rounded-full shadow-lg">
-                Tap to change
-              </div>
-            </div>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setDraftsOpen(true);
+              }}
+              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors relative pointer-events-auto"
+            >
+              <FiFileText className="w-5 h-5 text-gray-700 dark:text-gray-300" />
+              <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Drafts</span>
+              {drafts.length > 0 && (
+                <span className="absolute top-0 right-0 w-5 h-5 bg-blue-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                  {drafts.length > 9 ? '9+' : drafts.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                loadCollections(); // Refresh collections before opening
+                setCollectionsOpen(true);
+              }}
+              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors relative pointer-events-auto"
+            >
+              <FiBookmark className="w-5 h-5 text-gray-700 dark:text-gray-300" />
+              <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Collections</span>
+              {collections.length > 0 && (
+                <span className="absolute top-0 right-0 w-5 h-5 bg-purple-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                  {collections.length > 9 ? '9+' : collections.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setSettingsOpen(true);
+              }}
+              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors pointer-events-auto"
+            >
+              <FiSettings className="w-5 h-5 text-gray-700 dark:text-gray-300" />
+              <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Settings</span>
+            </button>
           </div>
-          
-          {/* Profile Picture Modal */}
-          {showProfilePictureModal && (
-            <>
+        </div>
+      </div>
+
+      {/* Scrollable Content */}
+      <div className="max-w-2xl mx-auto px-6 py-4">
+        {/* Profile Picture Modal */}
+        {showProfilePictureModal && (
+          <>
+            <div
+              className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center"
+              onClick={() => setShowProfilePictureModal(false)}
+            >
               <div
-                className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center"
-                onClick={() => setShowProfilePictureModal(false)}
+                className="relative flex flex-col items-center gap-6"
+                onClick={(e) => e.stopPropagation()}
               >
-                <div
-                  className="relative flex flex-col items-center gap-6"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {/* Enlarged Profile Picture */}
-                  <div className="relative">
-                    <div className="w-48 h-48 rounded-full overflow-hidden border-4 border-white dark:border-gray-800 shadow-2xl">
-                      {user.avatarUrl ? (
-                        <img
-                          src={user.avatarUrl}
-                          alt={`${user.name}'s profile picture`}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-full h-full bg-gray-800 flex items-center justify-center">
-                          <span className="text-6xl font-bold text-white">
-                            {user.name?.charAt(0).toUpperCase() || 'U'}
-                          </span>
-                        </div>
-                      )}
-                    </div>
+                {/* Enlarged Profile Picture */}
+                <div className="relative">
+                  <div className="w-48 h-48 rounded-full overflow-hidden border-4 border-white dark:border-gray-800 shadow-2xl">
+                    {user.avatarUrl ? (
+                      <img
+                        src={user.avatarUrl}
+                        alt={`${user.name}'s profile picture`}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gray-800 flex items-center justify-center">
+                        <span className="text-6xl font-bold text-white">
+                          {user.name?.charAt(0).toUpperCase() || 'U'}
+                        </span>
+                      </div>
+                    )}
                   </div>
-                  
-                  {/* Change Button */}
-                  <label className="cursor-pointer">
-                    <div className="flex flex-col items-center gap-2 px-6 py-3 bg-white dark:bg-gray-800 rounded-full shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105">
-                      <FiCamera className="w-6 h-6 text-gray-700 dark:text-gray-300" />
-                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Change</span>
-                    </div>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) => {
-                        handleProfilePictureSelect(e);
-                        setShowProfilePictureModal(false);
-                      }}
-                      className="hidden"
-                      disabled={isUpdatingProfile}
-                    />
-                  </label>
-                  
-                  {/* Close Button */}
-                  <button
-                    onClick={() => setShowProfilePictureModal(false)}
-                    className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-sm transition-colors"
-                    aria-label="Close"
-                  >
-                    <FiX className="w-6 h-6 text-white" />
-                  </button>
                 </div>
+                
+                {/* Change Button */}
+                <label className="cursor-pointer">
+                  <div className="flex flex-col items-center gap-2 px-6 py-3 bg-white dark:bg-gray-800 rounded-full shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105">
+                    <FiCamera className="w-6 h-6 text-gray-700 dark:text-gray-300" />
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Change</span>
+                  </div>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      handleProfilePictureSelect(e);
+                      setShowProfilePictureModal(false);
+                    }}
+                    className="hidden"
+                    disabled={isUpdatingProfile}
+                  />
+                </label>
+                
+                {/* Close Button */}
+                <button
+                  onClick={() => setShowProfilePictureModal(false)}
+                  className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-sm transition-colors"
+                  aria-label="Close"
+                >
+                  <FiX className="w-6 h-6 text-white" />
+                </button>
               </div>
-            </>
-          )}
-          <div className="flex items-center justify-center gap-3 mb-2">
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">{user.name}</h1>
-            <button
-              onClick={handleTogglePrivacy}
-              disabled={isTogglingPrivacy}
-              className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-              title={isPrivate ? 'Profile is private - Click to make public' : 'Profile is public - Click to make private'}
-              aria-label={isPrivate ? 'Make profile public' : 'Make profile private'}
-            >
-              {isPrivate ? (
-                <FiLock className="w-5 h-5 text-gray-700 dark:text-gray-300" />
-              ) : (
-                <FiUnlock className="w-5 h-5 text-gray-700 dark:text-gray-300" />
-              )}
-            </button>
-          </div>
+            </div>
+          </>
+        )}
+
+        {/* User Info */}
+        <div className="text-center mb-6">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-1">{user.name}</h1>
           <p className="text-brand-600 dark:text-brand-400 font-medium">@{user.handle}</p>
           {isPrivate && (
-            <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 flex items-center justify-center gap-1">
+            <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 flex items-center justify-center gap-1">
               <FiLock className="w-3 h-3" />
               Your profile is private
             </p>
@@ -827,9 +679,10 @@ export default function ProfilePage() {
             </button>
           </div>
         </div>
+      </div>
 
-        {/* Bottom Sheet Modal */}
-        {selectedCard && (
+      {/* Bottom Sheet Modal */}
+      {selectedCard && (
           <>
             {/* Backdrop */}
             <div
@@ -1301,7 +1154,129 @@ export default function ProfilePage() {
             </div>
           </>
         )}
-      </div>
+
+        {/* Drafts Modal */}
+        {draftsOpen && (
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setDraftsOpen(false)}>
+            <div className="bg-white dark:bg-gray-900 rounded-2xl max-w-md w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between">
+                <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Drafts</h2>
+                <button onClick={() => setDraftsOpen(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors">
+                  <FiX className="w-6 h-6 text-gray-600 dark:text-gray-400" />
+                </button>
+              </div>
+              <div className="p-6">
+                {drafts.length > 0 ? (
+                  <div className="space-y-3">
+                    {drafts.map((draft) => (
+                      <div key={draft.id} className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1">
+                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">
+                              {new Date(draft.createdAt).toLocaleDateString()}
+                            </p>
+                            <p className="text-gray-900 dark:text-gray-100 line-clamp-2">
+                              {draft.text || 'No text'}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handleDeleteDraft(draft.id)}
+                            className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-full transition-colors"
+                            title="Delete draft"
+                          >
+                            <FiX className="w-5 h-5 text-red-600 dark:text-red-400" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-center text-gray-500 dark:text-gray-400 py-8">No drafts yet</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Collections Modal */}
+        {collectionsOpen && (
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setCollectionsOpen(false)}>
+            <div className="bg-white dark:bg-gray-900 rounded-2xl max-w-md w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between">
+                <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Collections</h2>
+                <button onClick={() => setCollectionsOpen(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors">
+                  <FiX className="w-6 h-6 text-gray-600 dark:text-gray-400" />
+                </button>
+              </div>
+              <div className="p-6">
+                {collections.length > 0 ? (
+                  <div className="space-y-3">
+                    {collections.map((collection) => {
+                      const postCount = collection.postIds?.length || 0;
+                      return (
+                        <button
+                          key={collection.id}
+                          onClick={() => {
+                            setCollectionsOpen(false);
+                            nav(`/collection/${collection.id}`, { state: { collectionName: collection.name } });
+                          }}
+                          className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left"
+                        >
+                          <div className="flex items-center gap-3">
+                            {collection.thumbnailUrl ? (
+                              <img
+                                src={collection.thumbnailUrl}
+                                alt={collection.name}
+                                className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
+                              />
+                            ) : (
+                              <div className="w-16 h-16 rounded-lg bg-gray-200 dark:bg-gray-700 flex items-center justify-center flex-shrink-0">
+                                <FiBookmark className="w-8 h-8 text-gray-400 dark:text-gray-500" />
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-1 truncate">{collection.name}</h3>
+                              <p className="text-sm text-gray-600 dark:text-gray-400">
+                                {postCount} {postCount === 1 ? 'post' : 'posts'}
+                              </p>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-center text-gray-500 dark:text-gray-400 py-8">No collections yet</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Settings Modal */}
+        {settingsOpen && (
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setSettingsOpen(false)}>
+            <div className="bg-white dark:bg-gray-900 rounded-2xl max-w-md w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between">
+                <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Settings</h2>
+                <button onClick={() => setSettingsOpen(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors">
+                  <FiX className="w-6 h-6 text-gray-600 dark:text-gray-400" />
+                </button>
+              </div>
+              <div className="p-6 space-y-4">
+                <button
+                  onClick={() => {
+                    logout();
+                    nav('/login');
+                  }}
+                  className="w-full py-3 bg-red-500 text-white font-semibold rounded-xl hover:bg-red-600 transition-colors"
+                >
+                  Logout
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
     </div>
   );
 }

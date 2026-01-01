@@ -1,8 +1,28 @@
 import { Collection, Post } from '../types';
 import { posts } from './posts';
 
-// Mock storage for collections
-const collections: Collection[] = [];
+// Storage key for collections
+const COLLECTIONS_STORAGE_KEY = 'clips_app_collections';
+
+// Get collections from localStorage
+function getCollectionsFromStorage(): Collection[] {
+    try {
+        const stored = localStorage.getItem(COLLECTIONS_STORAGE_KEY);
+        return stored ? JSON.parse(stored) : [];
+    } catch (error) {
+        console.error('Error reading collections from localStorage:', error);
+        return [];
+    }
+}
+
+// Save collections to localStorage
+function saveCollectionsToStorage(collections: Collection[]): void {
+    try {
+        localStorage.setItem(COLLECTIONS_STORAGE_KEY, JSON.stringify(collections));
+    } catch (error) {
+        console.error('Error saving collections to localStorage:', error);
+    }
+}
 
 // Mock delay function
 function delay(ms: number): Promise<void> {
@@ -36,7 +56,9 @@ export async function createCollection(userId: string, name: string, isPrivate: 
         updatedAt: Date.now()
     };
 
+    const collections = getCollectionsFromStorage();
     collections.push(collection);
+    saveCollectionsToStorage(collections);
     return collection;
 }
 
@@ -46,6 +68,7 @@ export async function createCollection(userId: string, name: string, isPrivate: 
 export async function getUserCollections(userId: string): Promise<Collection[]> {
     await delay(100);
 
+    const collections = getCollectionsFromStorage();
     const userCollections = collections
         .filter(c => c.userId === userId)
         .map(c => {
@@ -75,6 +98,7 @@ export async function getUserCollections(userId: string): Promise<Collection[]> 
 export async function addPostToCollection(collectionId: string, postId: string): Promise<Collection> {
     await delay(150);
 
+    const collections = getCollectionsFromStorage();
     const collection = collections.find(c => c.id === collectionId);
     if (!collection) {
         throw new Error('Collection not found');
@@ -96,6 +120,7 @@ export async function addPostToCollection(collectionId: string, postId: string):
         }
     }
 
+    saveCollectionsToStorage(collections);
     return collection;
 }
 
@@ -105,6 +130,7 @@ export async function addPostToCollection(collectionId: string, postId: string):
 export async function removePostFromCollection(collectionId: string, postId: string): Promise<Collection> {
     await delay(150);
 
+    const collections = getCollectionsFromStorage();
     const collection = collections.find(c => c.id === collectionId);
     if (!collection) {
         throw new Error('Collection not found');
@@ -124,6 +150,7 @@ export async function removePostFromCollection(collectionId: string, postId: str
         }
     }
 
+    saveCollectionsToStorage(collections);
     return collection;
 }
 
@@ -133,6 +160,7 @@ export async function removePostFromCollection(collectionId: string, postId: str
 export async function getCollectionPosts(collectionId: string): Promise<Post[]> {
     await delay(100);
 
+    const collections = getCollectionsFromStorage();
     const collection = collections.find(c => c.id === collectionId);
     if (!collection) {
         throw new Error('Collection not found');
@@ -152,6 +180,7 @@ export async function getCollectionPosts(collectionId: string): Promise<Post[]> 
 export async function isPostInCollection(collectionId: string, postId: string): Promise<boolean> {
     await delay(50);
 
+    const collections = getCollectionsFromStorage();
     const collection = collections.find(c => c.id === collectionId);
     if (!collection) {
         return false;
@@ -166,6 +195,7 @@ export async function isPostInCollection(collectionId: string, postId: string): 
 export async function getCollectionsForPost(userId: string, postId: string): Promise<Collection[]> {
     await delay(100);
 
+    const collections = getCollectionsFromStorage();
     return collections
         .filter(c => c.userId === userId && c.postIds.includes(postId))
         .sort((a, b) => b.updatedAt - a.updatedAt);
@@ -177,11 +207,13 @@ export async function getCollectionsForPost(userId: string, postId: string): Pro
 export async function deleteCollection(collectionId: string): Promise<void> {
     await delay(150);
 
+    const collections = getCollectionsFromStorage();
     const index = collections.findIndex(c => c.id === collectionId);
     if (index === -1) {
         throw new Error('Collection not found');
     }
 
     collections.splice(index, 1);
+    saveCollectionsToStorage(collections);
 }
 

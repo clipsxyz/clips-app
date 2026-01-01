@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { FiChevronLeft, FiBell, FiShare2, FiMessageSquare, FiMoreHorizontal, FiX, FiLock } from 'react-icons/fi';
+import { FiChevronLeft, FiBell, FiShare2, FiMessageSquare, FiMoreHorizontal, FiX, FiLock, FiMapPin, FiEye } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { getFlagForHandle } from '../api/users';
 import Flag from '../components/Flag';
@@ -33,6 +33,7 @@ export default function ViewProfilePage() {
     const [canViewProfileState, setCanViewProfileState] = React.useState(true);
     const [hasPendingRequest, setHasPendingRequest] = React.useState(false);
     const [profileIsPrivate, setProfileIsPrivate] = React.useState(false);
+    const [showTraveledModal, setShowTraveledModal] = React.useState(false);
 
     const handleFollow = async () => {
         if (!user?.id || !handle || !user?.handle) {
@@ -323,9 +324,18 @@ export default function ViewProfilePage() {
                     avatarUrl = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=400&fit=crop';
                 }
 
-                // Get bio and social links if viewing own profile
+                // Get bio, social links, and placesTraveled if viewing own profile
                 let bio = decodedHandle === user?.handle ? user?.bio : undefined;
                 let socialLinks = decodedHandle === user?.handle ? user?.socialLinks : undefined;
+                let placesTraveled = decodedHandle === user?.handle ? user?.placesTraveled : undefined;
+                
+                // Debug: Log placesTraveled from user
+                if (decodedHandle === user?.handle) {
+                    console.log('Viewing own profile - user handle:', user?.handle, 'decodedHandle:', decodedHandle);
+                    console.log('Viewing own profile, placesTraveled from user:', user?.placesTraveled);
+                    console.log('Is array?', Array.isArray(user?.placesTraveled));
+                    console.log('Length:', Array.isArray(user?.placesTraveled) ? user.placesTraveled.length : 'N/A');
+                }
 
                 // Mock data for test user Sarah@Artane
                 if (decodedHandle === 'Sarah@Artane') {
@@ -336,6 +346,7 @@ export default function ViewProfilePage() {
                         instagram: '@sarah.artane',
                         tiktok: '@sarah_artane_dublin'
                     };
+                    placesTraveled = ['Dublin', 'Iceland', 'Japan', 'Egypt', 'Morocco', 'Spain', 'Italy', 'Greece', 'Thailand'];
                 }
 
                 // Calculate total likes and views from all posts
@@ -360,9 +371,23 @@ export default function ViewProfilePage() {
                     if (userProfileData.social_links && !socialLinks) {
                         socialLinks = userProfileData.social_links;
                     }
-                } catch (error) {
-                    console.error('Error fetching user profile data:', error);
-                    // Fallback to 0 if API call fails
+                    // Get placesTraveled from API if available
+                    if ((userProfileData as any).places_traveled) {
+                        placesTraveled = (userProfileData as any).places_traveled;
+                    }
+                } catch (error: any) {
+                    // Check if it's a connection error (backend not running)
+                    const isConnectionError = 
+                        error?.message === 'CONNECTION_REFUSED' ||
+                        error?.name === 'ConnectionRefused' ||
+                        error?.message?.includes('Failed to fetch') ||
+                        error?.message?.includes('ERR_CONNECTION_REFUSED') ||
+                        error?.message?.includes('NetworkError');
+                    
+                    if (!isConnectionError) {
+                        console.error('Error fetching user profile data:', error);
+                    }
+                    // Fallback to 0 if API call fails - local data will be used instead
                 }
 
                 // Always create profile data, even if no posts found
@@ -373,6 +398,7 @@ export default function ViewProfilePage() {
                     avatarUrl: avatarUrl,
                     bio: bio || undefined,
                     socialLinks: socialLinks || undefined,
+                    placesTraveled: placesTraveled || undefined,
                     stats: {
                         following: followingCount,
                         followers: followersCount,
@@ -381,6 +407,10 @@ export default function ViewProfilePage() {
                     }
                 };
 
+                // Debug: Log profileData before setting
+                console.log('Setting profileData with placesTraveled:', profileData.placesTraveled);
+                console.log('Full profileData:', profileData);
+                
                 setProfileUser(profileData);
                 setStats({
                     following: profileData.stats.following,
@@ -399,7 +429,7 @@ export default function ViewProfilePage() {
         };
 
         loadProfile();
-    }, [handle, user?.id]);
+    }, [handle, user?.id, user?.placesTraveled]);
 
     // Check if user has stories (unviewed for others, any for current user)
     React.useEffect(() => {
@@ -505,51 +535,74 @@ export default function ViewProfilePage() {
 
     return (
         <div className="min-h-screen bg-gray-950 text-white">
-            {/* Header */}
-            <div className="sticky top-0 bg-gray-950 z-10 border-b border-gray-800">
-                <div className="flex items-center justify-between px-4 py-3">
-                    <button
-                        onClick={() => navigate(-1)}
-                        className="p-2 hover:bg-gray-900 rounded-full transition-colors"
-                    >
-                        <FiChevronLeft className="w-6 h-6" />
-                    </button>
-                    <div className="flex items-center gap-3">
-                        <button className="p-2 hover:bg-gray-900 rounded-full transition-colors">
-                            <FiShare2 className="w-6 h-6" />
-                        </button>
-                        <button className="p-2 hover:bg-gray-900 rounded-full transition-colors">
-                            <FiMoreHorizontal className="w-6 h-6" />
-                        </button>
+            {/* Passport Title - Instagram Style */}
+            <div className="w-full text-center pt-4 pb-6">
+                <h1 
+                    className="text-4xl font-normal tracking-tight"
+                    style={{ 
+                        fontFamily: '"Brush Script MT", "Lucida Handwriting", "Comic Sans MS", cursive',
+                        color: '#ffffff',
+                        fontWeight: 400,
+                        letterSpacing: '0.5px'
+                    }}
+                >
+                    Passport
+                </h1>
+            </div>
+
+            {/* Profile Info with World Map Background */}
+            <div className="relative w-full overflow-hidden">
+                {/* World Map Background */}
+                <div className="relative w-full h-64 bg-gray-100 dark:bg-gray-800">
+                    <img
+                        src="/placeholders/world-map.jpg"
+                        alt="World Map"
+                        className="w-full h-full object-cover opacity-30 dark:opacity-20"
+                        style={{ 
+                            filter: 'grayscale(100%) brightness(1.2)',
+                        }}
+                        onError={(e) => {
+                            // Fallback to Wikimedia map
+                            const target = e.target as HTMLImageElement;
+                            target.src = 'https://upload.wikimedia.org/wikipedia/commons/8/83/Equirectangular_projection_SW.jpg';
+                        }}
+                    />
+                    {/* Overlay gradient for better text visibility */}
+                    <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-gray-950/50 dark:to-gray-950/70"></div>
+                    
+                    {/* Profile Picture and Name Overlay */}
+                    <div className="absolute inset-0 flex flex-col items-center justify-center z-10">
+                        {/* Profile Picture */}
+                        <div className={`mb-4 ${!hasStory ? 'pointer-events-none' : ''}`}>
+                            <Avatar
+                                src={profileUser.avatarUrl}
+                                name={profileUser.name}
+                                size="xl"
+                                className="!w-32 !h-32 border-4 border-white dark:border-gray-800 shadow-2xl"
+                                hasStory={hasStory}
+                                onClick={hasStory ? () => navigate('/stories', { state: { openUserHandle: handle } }) : undefined}
+                            />
+                        </div>
+
+                        {/* Username */}
+                        <div className="text-center">
+                            <h1 className="text-2xl font-bold mb-1 text-gray-900 dark:text-white uppercase tracking-wide drop-shadow-lg">
+                                {profileUser.name}
+                            </h1>
+                            <p className="text-sm text-gray-700 dark:text-gray-300 flex items-center justify-center gap-1">
+                                <span>{profileUser.handle}</span>
+                                <Flag
+                                    value={profileUser.handle === user?.handle ? (user?.countryFlag || '') : (getFlagForHandle(profileUser.handle) || '')}
+                                    size={16}
+                                />
+                            </p>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            {/* Profile Info */}
+            {/* Profile Info Section (below world map) */}
             <div className="px-4 py-6">
-                {/* Profile Picture */}
-                <div className={`flex justify-center mb-4 ${!hasStory ? 'pointer-events-none' : ''}`}>
-                    <Avatar
-                        src={profileUser.avatarUrl}
-                        name={profileUser.name}
-                        size="xl"
-                        className="!w-24 !h-24"
-                        hasStory={hasStory}
-                        onClick={hasStory ? () => navigate('/stories', { state: { openUserHandle: handle } }) : undefined}
-                    />
-                </div>
-
-                {/* Username and Handle */}
-                <div className="text-center mb-4">
-                    <h1 className="text-xl font-bold mb-1">{profileUser.name}</h1>
-                    <p className="text-sm text-gray-400 flex items-center justify-center gap-1">
-                        <span>{profileUser.handle}</span>
-                        <Flag
-                            value={profileUser.handle === user?.handle ? (user?.countryFlag || '') : (getFlagForHandle(profileUser.handle) || '')}
-                            size={16}
-                        />
-                    </p>
-                </div>
 
                 {/* Statistics */}
                 <div className="flex justify-around mb-6">
@@ -608,6 +661,19 @@ export default function ViewProfilePage() {
                         className="flex-1 py-2 rounded-lg bg-gray-800 text-white font-semibold hover:bg-gray-700 transition-colors relative z-20"
                     >
                         Message
+                    </button>
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            console.log('Traveled button clicked, placesTraveled:', profileUser?.placesTraveled);
+                            setShowTraveledModal(true);
+                        }}
+                        className="px-4 py-2 rounded-lg bg-gray-800 text-white font-semibold hover:bg-gray-700 transition-colors relative z-20 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={!profileUser?.placesTraveled || !Array.isArray(profileUser.placesTraveled) || profileUser.placesTraveled.length === 0}
+                        title="Places Traveled"
+                    >
+                        <FiMapPin className="w-5 h-5" />
                     </button>
                 </div>
 
@@ -680,17 +746,6 @@ export default function ViewProfilePage() {
                     </div>
                 )}
 
-                {/* Content Tabs */}
-                <div className="border-b border-gray-800 mb-4">
-                    <div className="flex justify-center">
-                        <div className="flex items-center gap-1 text-sm text-gray-400">
-                            <div className="w-1 h-1 bg-gray-400 rounded-full" />
-                            <div className="w-1 h-1 bg-gray-400 rounded-full" />
-                            <div className="w-1 h-1 bg-gray-400 rounded-full" />
-                            <div className="w-1 h-1 bg-gray-400 rounded-full" />
-                        </div>
-                    </div>
-                </div>
             </div>
 
             {/* Posts Grid */}
@@ -796,6 +851,68 @@ export default function ViewProfilePage() {
                     )}
                 </div>
             </div>
+
+            {/* Traveled Modal */}
+            {showTraveledModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4" onClick={() => setShowTraveledModal(false)}>
+                    <div className="bg-gray-900 rounded-2xl max-w-md w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                        {/* Header */}
+                        <div className="sticky top-0 bg-gray-900 border-b border-gray-800 px-6 py-4 flex items-center justify-between">
+                            <h2 className="text-xl font-bold text-white">Places Traveled</h2>
+                            <button
+                                onClick={() => setShowTraveledModal(false)}
+                                className="p-2 hover:bg-gray-800 rounded-full transition-colors"
+                            >
+                                <FiX className="w-6 h-6 text-white" />
+                            </button>
+                        </div>
+                        
+                        {/* Places List */}
+                        <div className="p-6">
+                            {profileUser?.placesTraveled && Array.isArray(profileUser.placesTraveled) && profileUser.placesTraveled.length > 0 ? (
+                                <div className="flex flex-col gap-3">
+                                    {profileUser.placesTraveled.map((place, index) => (
+                                        <div
+                                            key={index}
+                                            className="flex items-center gap-3 p-4 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors cursor-pointer"
+                                            onClick={() => {
+                                                // Navigate to feed with this location
+                                                navigate(`/feed?location=${encodeURIComponent(place)}`);
+                                                setShowTraveledModal(false);
+                                            }}
+                                        >
+                                            <div className="w-10 h-10 bg-gradient-to-r from-orange-500 to-orange-600 rounded-full flex items-center justify-center flex-shrink-0">
+                                                <FiMapPin className="w-5 h-5 text-white" />
+                                            </div>
+                                            <div className="flex-1">
+                                                <p className="text-white font-medium">{place}</p>
+                                            </div>
+                                            <button
+                                                className="p-2 hover:bg-gray-600 rounded-full transition-colors flex-shrink-0"
+                                                title="View"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    // Navigate to feed with this location
+                                                    navigate(`/feed?location=${encodeURIComponent(place)}`);
+                                                    setShowTraveledModal(false);
+                                                }}
+                                            >
+                                                <FiEye className="w-5 h-5 text-gray-400 hover:text-white" />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-center py-8">
+                                    <FiMapPin className="w-12 h-12 text-gray-500 mx-auto mb-4" />
+                                    <p className="text-gray-400">No places traveled yet</p>
+                                    <p className="text-sm text-gray-500 mt-2">Add places you've traveled to in your profile settings</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Post Viewer Modal */}
             {selectedPost && (

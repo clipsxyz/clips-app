@@ -52,6 +52,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           handle: `${parsed.name || 'User'}@Unknown`,
           countryFlag: parsed.countryFlag || undefined,
           avatarUrl: parsed.avatarUrl || undefined,
+          placesTraveled: parsed.placesTraveled || undefined,
           is_private: parsed.is_private || false
         };
         setUser(convertedUser);
@@ -87,6 +88,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       avatarUrl: userData.avatarUrl || undefined,
       bio: userData.bio || undefined,
       socialLinks: userData.socialLinks || undefined,
+      placesTraveled: userData.placesTraveled || undefined,
       is_private: userData.is_private || false
     };
     setUser(u);

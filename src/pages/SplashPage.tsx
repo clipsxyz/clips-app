@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FiMapPin } from 'react-icons/fi';
 import { useAuth } from '../context/Auth';
 
 export default function SplashPage() {
@@ -58,7 +57,7 @@ export default function SplashPage() {
         <div className="min-h-screen bg-black flex flex-col items-center justify-center" style={{ perspective: '1000px' }}>
             {/* Logo/Brand */}
             <div className="flex flex-col items-center gap-8" style={{ transformStyle: 'preserve-3d' }}>
-                {/* Location Icon Logo (similar to Scenes logo) */}
+                {/* Logo */}
                 <div
                     className="flex items-center justify-center transition-all duration-700 ease-out"
                     style={{
@@ -67,16 +66,14 @@ export default function SplashPage() {
                         filter: showLogo ? 'blur(0px)' : 'blur(8px)'
                     }}
                 >
-                    {/* Outer square border */}
-                    <div className="relative p-1 rounded-md border-2 border-white shadow-lg">
-                        {/* Inner square border */}
-                        <div className="p-1 rounded-md border-2 border-white">
-                            {/* Location icon in center */}
-                            <div className="w-12 h-12 flex items-center justify-center">
-                                <FiMapPin className="text-white drop-shadow-lg" size={32} />
-                            </div>
-                        </div>
-                    </div>
+                    <img 
+                        src="/gazetteer logo 1/gazetteer logo 1.jpg" 
+                        alt="Gazetteer Logo" 
+                        className="w-24 h-24 object-contain rounded-full"
+                        style={{ 
+                            backgroundColor: 'transparent'
+                        }}
+                    />
                 </div>
 
                 {/* Animated Text */}

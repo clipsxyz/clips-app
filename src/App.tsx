@@ -33,6 +33,7 @@ import StickerOverlayComponent from './components/StickerOverlay';
 import EffectWrapper from './components/EffectWrapper';
 import type { EffectConfig } from './utils/effects';
 import ProgressiveImage from './components/ProgressiveImage';
+import ZoomableMedia from './components/ZoomableMedia';
 import { getInstagramImageDimensions, getImageSize } from './utils/imageDimensions';
 
 type Tab = string; // Dynamic based on user location
@@ -40,6 +41,7 @@ type Tab = string; // Dynamic based on user location
 function BottomNav({ onCreateClick }: { onCreateClick: () => void }) {
   const nav = useNavigate();
   const loc = useLocation();
+  const { user } = useAuth();
 
   const item = (path: string, label: string, icon: React.ReactNode, onClick?: () => void) => {
     const active = loc.pathname === path;
@@ -62,6 +64,41 @@ function BottomNav({ onCreateClick }: { onCreateClick: () => void }) {
     window.dispatchEvent(new CustomEvent('resetFeed'));
   };
 
+  // Get user initials for fallback
+  const getUserInitials = (name: string): string => {
+    const names = name.trim().split(' ');
+    if (names.length === 1) {
+      return names[0].charAt(0).toUpperCase();
+    }
+    return (names[0].charAt(0) + names[names.length - 1].charAt(0)).toUpperCase();
+  };
+
+  const userInitials = user?.name ? getUserInitials(user.name) : 'U';
+
+  // Profile picture icon - square with rounded corners (styled like the "4" icon)
+  const profileIcon = (
+    <div className="w-[22px] h-[22px] rounded-md overflow-hidden bg-gray-700 dark:bg-gray-600 flex items-center justify-center relative">
+      {user?.avatarUrl ? (
+        <img
+          src={user.avatarUrl}
+          alt="Profile"
+          className="w-full h-full object-cover"
+          onError={(e) => {
+            const img = e.target as HTMLImageElement;
+            img.style.display = 'none';
+            const fallback = img.parentElement?.querySelector('.profile-fallback');
+            if (fallback) {
+              (fallback as HTMLElement).style.display = 'flex';
+            }
+          }}
+        />
+      ) : null}
+      <span className="profile-fallback text-white text-xs font-semibold absolute inset-0 flex items-center justify-center" style={{ display: user?.avatarUrl ? 'none' : 'flex' }}>
+        {userInitials}
+      </span>
+    </div>
+  );
+
   return (
     <nav aria-label="Primary navigation" className="fixed bottom-0 inset-x-0 bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 z-40 pb-safe">
       <div className="mx-auto max-w-md flex">
@@ -69,7 +106,7 @@ function BottomNav({ onCreateClick }: { onCreateClick: () => void }) {
         {item('/boost', 'Boost', <FiZap size={22} />)}
         {item('/create', 'Create', <FiPlusSquare size={22} />, onCreateClick)}
         {item('/search', 'Search', <FiSearch size={22} />)}
-        {item('/profile', 'Passport', <FiUser size={22} />)}
+        {item('/profile', 'Passport', profileIcon)}
       </div>
     </nav>
   );
@@ -88,7 +125,7 @@ export default function App() {
   return (
     <>
       <main id="main" className="mx-auto max-w-md min-h-screen pb-[calc(64px+theme(spacing.safe))] md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800" style={{ backgroundColor: '#030712' }}>
-        {loc.pathname !== '/login' && loc.pathname !== '/feed' && loc.pathname !== '/profile' && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
+        {loc.pathname !== '/login' && loc.pathname !== '/feed' && loc.pathname !== '/profile' && !loc.pathname.startsWith('/user/') && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
         <Outlet context={{ activeTab, setActiveTab, customLocation, setCustomLocation }} />
         {loc.pathname !== '/discover' && loc.pathname !== '/create/filters' && loc.pathname !== '/create/instant' && loc.pathname !== '/payment' && loc.pathname !== '/clip' && loc.pathname !== '/create' && loc.pathname !== '/template-editor' && loc.pathname !== '/login' && (
           <BottomNav onCreateClick={() => navigate('/create/instant')} />
@@ -184,9 +221,9 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               e.stopPropagation();
               navigate('/stories');
             }}
-            className="rounded-full px-3 py-1 bg-black text-gray-200 text-xs font-medium flex items-center gap-1 hover:text-white active:scale-[.98] transition-transform"
+            className="px-5 py-3 text-lg font-bold text-gray-300 hover:text-white transition-colors"
           >
-            <span>Stories</span>
+            <span>Shorts</span>
             {clipsCount > 0 && (
               <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-600 text-white">
                 {clipsCount}
@@ -234,7 +271,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               e.stopPropagation();
               navigate('/discover');
             }}
-            className="rounded-full px-3 py-1 text-xs font-medium transition-transform active:scale-[.98] bg-black text-gray-200 hover:text-white"
+            className="px-5 py-3 text-lg font-bold text-gray-300 hover:text-white transition-colors"
           >
             Discover
           </button>
@@ -1593,7 +1630,24 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
           }
         }}
         onClick={handleClick}
-        onTouchEnd={handleTouchEnd}
+        onTouchStart={(e) => {
+          // Don't handle touch start if it's a pinch gesture (2 touches) - let zoom component handle it
+          if (e.touches.length === 2) {
+            return;
+          }
+        }}
+        onTouchMove={(e) => {
+          // Don't handle touch move if it's a pinch gesture (2 touches) - let zoom component handle it
+          if (e.touches.length === 2) {
+            return;
+          }
+        }}
+        onTouchEnd={(e) => {
+          // Only handle touch end if not a pinch gesture (2 touches)
+          if (e.touches.length === 0 || e.changedTouches.length === 1) {
+            handleTouchEnd(e);
+          }
+        }}
         className="relative aspect-[9/16] max-h-[55vh] rounded-2xl overflow-hidden bg-gray-900 mx-auto shadow-lg"
         style={containerStyle}
       >
@@ -1679,7 +1733,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
             <video
               ref={videoRef}
               src={currentItem.url}
-              className="w-full h-full object-cover pointer-events-none"
+              className="w-full h-full object-cover"
               preload="metadata"
               playsInline
               muted={isMuted}
@@ -1728,7 +1782,9 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
 
           return (
             <div className="relative w-full h-full">
-              {mediaElement}
+              <ZoomableMedia>
+                {mediaElement}
+              </ZoomableMedia>
 
               {/* Loading Spinner */}
               {isLoading && (
@@ -1749,7 +1805,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
 
               {/* View in Scenes Button - Bottom right of video (kept below bottom nav z-index) */}
               {!isLoading && !hasError && currentItem.type === 'video' && onOpenScenes && (
-                <div className="absolute bottom-4 right-4 z-20 pointer-events-auto">
+                <div className="absolute bottom-4 right-4 z-20 pointer-events-auto" style={{ touchAction: 'auto' }}>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();

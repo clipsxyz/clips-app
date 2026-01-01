@@ -19,6 +19,7 @@ export type User = {
     instagram?: string;
     tiktok?: string;
   };
+  placesTraveled?: string[]; // Places the user has traveled to
   is_verified?: boolean; // Backend field
   is_private?: boolean; // Backend field - profile privacy setting
   followers_count?: number; // Backend field
