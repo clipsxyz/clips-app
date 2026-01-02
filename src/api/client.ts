@@ -3,20 +3,25 @@
 // Use IP address if accessing from network, otherwise localhost
 const getApiBaseUrl = () => {
     if (import.meta.env.VITE_API_URL) {
+        console.log('Using VITE_API_URL from env:', import.meta.env.VITE_API_URL);
         return import.meta.env.VITE_API_URL;
     }
     // If accessing from a different host (like phone on network), use IP address
     const hostname = window.location.hostname;
     if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
         // Extract IP from current URL (e.g., 192.168.1.3:5173 -> 192.168.1.3:8000)
-        const port = window.location.port || '5173';
         const ip = hostname;
-        return `http://${ip}:8000/api`;
+        const apiUrl = `http://${ip}:8000/api`;
+        console.log('Using network IP for API:', apiUrl, '(from hostname:', hostname, ')');
+        return apiUrl;
     }
-    return 'http://localhost:8000/api';
+    const localhostUrl = 'http://localhost:8000/api';
+    console.log('Using localhost for API:', localhostUrl);
+    return localhostUrl;
 };
 
 const API_BASE_URL = getApiBaseUrl();
+console.log('🌐 API Base URL:', API_BASE_URL);
 
 // Helper function to make API requests
 async function apiRequest(endpoint: string, options: RequestInit = {}) {
@@ -35,8 +40,12 @@ async function apiRequest(endpoint: string, options: RequestInit = {}) {
         const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
 
         if (!response.ok) {
-            const error = await response.json().catch(() => ({ error: 'Network error' }));
-            throw new Error(error.error || `HTTP ${response.status}`);
+            const errorData = await response.json().catch(() => ({ error: 'Network error' }));
+            const errorMessage = errorData.error || errorData.message || (errorData.errors ? JSON.stringify(errorData.errors) : `HTTP ${response.status}`);
+            const error = new Error(errorMessage);
+            (error as any).status = response.status;
+            (error as any).response = errorData;
+            throw error;
         }
 
         return response.json();

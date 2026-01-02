@@ -35,7 +35,32 @@ import { wasEverAStory } from './stories';
 function getUserLocationFromHandle(userHandle: string): { local: string; regional: string; national: string } {
   const handleLower = userHandle.toLowerCase();
 
-  // Extract location from handle
+  // Extract location from handle (check after @ symbol)
+  const afterAt = handleLower.split('@')[1] || '';
+  
+  if (afterAt.includes('finglas')) {
+    return { local: 'Finglas', regional: 'Dublin', national: 'Ireland' };
+  } else if (afterAt.includes('artane')) {
+    return { local: 'Artane', regional: 'Dublin', national: 'Ireland' };
+  } else if (afterAt.includes('dublin')) {
+    return { local: 'Dublin', regional: 'Dublin', national: 'Ireland' };
+  } else if (afterAt.includes('ireland')) {
+    return { local: 'Various', regional: 'Various', national: 'Ireland' };
+  } else if (afterAt.includes('ballymun')) {
+    return { local: 'Ballymun', regional: 'Dublin', national: 'Ireland' };
+  } else if (afterAt.includes('newyork') || afterAt.includes('new york')) {
+    return { local: 'New York', regional: 'New York', national: 'USA' };
+  } else if (afterAt.includes('london')) {
+    return { local: 'London', regional: 'London', national: 'UK' };
+  } else if (afterAt.includes('paris')) {
+    return { local: 'Paris', regional: 'Paris', national: 'France' };
+  } else if (afterAt.includes('tokyo')) {
+    return { local: 'Tokyo', regional: 'Tokyo', national: 'Japan' };
+  } else if (afterAt.includes('sydney')) {
+    return { local: 'Sydney', regional: 'NSW', national: 'Australia' };
+  }
+  
+  // Fallback: check entire handle (for backward compatibility)
   if (handleLower.includes('finglas')) {
     return { local: 'Finglas', regional: 'Dublin', national: 'Ireland' };
   } else if (handleLower.includes('artane')) {
@@ -62,6 +87,33 @@ function getUserLocationFromHandle(userHandle: string): { local: string; regiona
   return { local: '', regional: '', national: '' };
 }
 
+// Storage key for posts
+const POSTS_STORAGE_KEY = 'clips_app_posts';
+
+// Get posts from localStorage
+function getPostsFromStorage(): Post[] {
+  try {
+    const stored = localStorage.getItem(POSTS_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch (error) {
+    console.error('Error reading posts from localStorage:', error);
+    return [];
+  }
+}
+
+// Save posts to localStorage
+function savePostsToStorage(postsToSave: Post[]): void {
+  try {
+    // Only save user-created posts (not the initial mock posts from JSON)
+    // Filter out posts that start with 'post-' prefix (from JSON file)
+    const userCreatedPosts = postsToSave.filter(p => !p.id.startsWith('post-post-') && !p.id.startsWith('artane-post-'));
+    localStorage.setItem(POSTS_STORAGE_KEY, JSON.stringify(userCreatedPosts));
+    console.log('💾 Saved', userCreatedPosts.length, 'user-created posts to localStorage');
+  } catch (error) {
+    console.error('Error saving posts to localStorage:', error);
+  }
+}
+
 // Create a persistent posts array that won't be reset
 export let posts: Post[] = [];
 let postsInitialized = false;
@@ -71,7 +123,7 @@ if (!postsInitialized) {
   console.log('Initializing posts array...');
   const now = Date.now();
   // Generate timestamps spread over the last 7 days for variety
-  posts = (raw as Post[]).map((p, index) => {
+  const jsonPosts = (raw as Post[]).map((p, index) => {
     const location = getUserLocationFromHandle(p.userHandle);
     // Extract timestamp from ID if it exists, otherwise generate one
     const timestampMatch = p.id?.match(/\d{13}/);
@@ -86,6 +138,13 @@ if (!postsInitialized) {
       ...location
     };
   });
+  
+  // Load user-created posts from localStorage
+  const userCreatedPosts = getPostsFromStorage();
+  console.log('📂 Loaded', userCreatedPosts.length, 'user-created posts from localStorage');
+  
+  // Merge: user-created posts first (newest), then JSON posts
+  posts = [...userCreatedPosts, ...jsonPosts];
   postsInitialized = true;
 
   // Debug: Log initial posts
@@ -419,6 +478,18 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
   
   // Mock implementation (fallback)
   try {
+    // Reload posts from localStorage to get latest user-created posts
+    // This ensures posts created in this session are included
+    const userCreatedPosts = getPostsFromStorage();
+    // Get JSON posts (those that start with 'post-post-' or 'artane-post-')
+    const jsonPosts = posts.filter(p => p.id.startsWith('post-post-') || p.id.startsWith('artane-post-'));
+    // Merge: user-created posts first (newest), then existing JSON posts
+    // Only update if we have user-created posts to avoid overwriting with empty array
+    if (userCreatedPosts.length > 0 || posts.length === 0) {
+      posts = [...userCreatedPosts, ...jsonPosts];
+      console.log('📂 Reloaded posts from localStorage:', userCreatedPosts.length, 'user posts +', jsonPosts.length, 'JSON posts =', posts.length, 'total');
+    }
+    
     await delay();
     const t = tab.toLowerCase();
 
@@ -856,6 +927,9 @@ export async function reclipPost(userId: string, originalPostId: string, userHan
 
   // Add to posts array
   posts.push(reclippedPost);
+  
+  // Save to localStorage for persistence
+  savePostsToStorage(posts);
 
   // Return both the updated original post (decorated) and the new reclipped post
   return {
@@ -1123,10 +1197,33 @@ export async function createPost(
     } as Post & { renderJobId?: string };
     
     return transformedPost;
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error creating post via API:', error);
-    // Fallback to mock for now if API fails
-    await delay(500);
+    console.error('Error details:', {
+      name: error?.name,
+      message: error?.message,
+      status: error?.status,
+      response: error?.response
+    });
+    
+    // Check if it's a connection error - if so, use mock fallback
+    const isConnectionError = 
+      error?.name === 'ConnectionRefused' ||
+      error?.message?.includes('CONNECTION_REFUSED') ||
+      error?.message?.includes('Failed to fetch') ||
+      error?.message?.includes('NetworkError') ||
+      (error?.name === 'TypeError' && error?.message?.includes('fetch'));
+    
+    if (isConnectionError) {
+      console.log('⚠️ API connection failed, using mock fallback for post creation');
+      console.log('This is normal when backend is not running or not accessible from your device');
+      // Fallback to mock for now if API fails
+      await delay(500);
+    } else {
+      // For other errors (validation, auth, etc), re-throw so user sees the error
+      console.error('❌ API error (not connection):', error);
+      throw error;
+    }
     
     // Helper function to convert blob URL to data URL for persistence
     async function convertBlobToDataUrl(blobUrl: string): Promise<string> {
@@ -1183,28 +1280,45 @@ export async function createPost(
 
   // Convert blob URLs to data URLs for persistence
   // Only convert if we have a valid blob URL (not empty/undefined)
+  // For videos, keep blob URLs as-is (like stories) to avoid memory issues on mobile
   let persistentImageUrl = imageUrl;
   if (imageUrl && imageUrl.trim() !== '' && imageUrl.startsWith('blob:')) {
-    try {
-      persistentImageUrl = await convertBlobToDataUrl(imageUrl);
-    } catch (error) {
-      console.error('Failed to convert blob URL, using original:', error);
-      persistentImageUrl = imageUrl; // Fallback to original
+    // For videos, skip conversion to avoid memory issues on mobile
+    // Videos can be stored as blob URLs and will work fine
+    if (mediaType === 'video') {
+      console.log('Keeping video as blob URL (skipping conversion for mobile compatibility)');
+      persistentImageUrl = imageUrl; // Keep blob URL for videos
+    } else {
+      // For images, convert to data URL
+      try {
+        persistentImageUrl = await convertBlobToDataUrl(imageUrl);
+      } catch (error) {
+        console.error('Failed to convert blob URL, using original:', error);
+        persistentImageUrl = imageUrl; // Fallback to original
+      }
     }
   }
 
   // Convert blob URLs in mediaItems to data URLs
+  // For videos, keep blob URLs as-is (like stories) to avoid memory issues on mobile
   let persistentMediaItems = mediaItems;
   if (mediaItems && mediaItems.length > 0) {
     persistentMediaItems = await Promise.all(
       mediaItems.map(async (item) => {
         if (item.url && item.url.trim() !== '' && item.url.startsWith('blob:')) {
-          try {
-            const dataUrl = await convertBlobToDataUrl(item.url);
-            return { ...item, url: dataUrl };
-          } catch (error) {
-            console.error('Failed to convert blob URL in mediaItems, using original:', error);
-            return item; // Fallback to original
+          // For videos, skip conversion to avoid memory issues on mobile
+          if (item.type === 'video') {
+            console.log('Keeping video in mediaItems as blob URL (skipping conversion for mobile compatibility)');
+            return item; // Keep blob URL for videos
+          } else {
+            // For images and text, convert to data URL
+            try {
+              const dataUrl = await convertBlobToDataUrl(item.url);
+              return { ...item, url: dataUrl };
+            } catch (error) {
+              console.error('Failed to convert blob URL in mediaItems, using original:', error);
+              return item; // Fallback to original
+            }
           }
         }
         return item;
@@ -1258,6 +1372,9 @@ export async function createPost(
 
   // Add to posts array (at the beginning for newest first)
   posts.unshift(newPost);
+  
+  // Save to localStorage for persistence
+  savePostsToStorage(posts);
 
   console.log('📝 Post created and added to posts array. Total posts:', posts.length);
   console.log('📝 New post mediaUrl:', newPost.mediaUrl?.substring(0, 50) || 'undefined', 'isBlob:', newPost.mediaUrl?.startsWith('blob:'), 'isData:', newPost.mediaUrl?.startsWith('data:'));

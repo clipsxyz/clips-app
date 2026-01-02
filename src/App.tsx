@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiBell } from 'react-icons/fi';
+import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from './constants';
 import TopBar from './components/TopBar';
@@ -16,6 +16,7 @@ import { getFlagForHandle, getAvatarForHandle } from './api/users';
 import Flag from './components/Flag';
 import { useOnline } from './hooks/useOnline';
 import { getUnreadTotal } from './api/messages';
+import { getUnreadNotificationCount } from './api/notifications';
 import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState } from './api/posts';
 import { updatePost } from './api/client';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory } from './api/stories';
@@ -27,6 +28,7 @@ import BoostSelectionModal from './components/BoostSelectionModal';
 import SavePostModal from './components/SavePostModal';
 import PostMenuModal from './components/PostMenuModal';
 import EditPostModal from './components/EditPostModal';
+import ShareToStoriesModal from './components/ShareToStoriesModal';
 import { getCollectionsForPost } from './api/collections';
 import type { Post, Ad, StickerOverlay } from './types';
 import StickerOverlayComponent from './components/StickerOverlay';
@@ -148,12 +150,58 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
   const [showTopProgress, setShowTopProgress] = React.useState(true);
   const [showBottomProgress, setShowBottomProgress] = React.useState(false);
   const isMountedRef = React.useRef(false);
+  const [notificationCount, setNotificationCount] = React.useState(0);
 
   // Use user location from props or context, with fallback to defaults
   const local = props.userLocal || user?.local || 'Finglas';
   const regional = props.userRegional || user?.regional || 'Dublin';
   const national = props.userNational || user?.national || 'Ireland';
   const clipsCount = props.clipsCount || 0;
+
+  // Track notification count
+  React.useEffect(() => {
+    if (!user?.handle) return;
+
+    const updateNotificationCount = async () => {
+      try {
+        const count = await getUnreadNotificationCount(user.handle!);
+        setNotificationCount(count);
+      } catch (error) {
+        console.error('Error fetching notification count:', error);
+      }
+    };
+
+    // Initialize notification count
+    updateNotificationCount();
+
+    // Poll for updates every 10 seconds
+    const interval = setInterval(updateNotificationCount, 10000);
+
+    // Listen for notification updates
+    const handleNotificationUpdate = (event: CustomEvent) => {
+      const handle = event.detail?.handle;
+      if (handle === user.handle) {
+        updateNotificationCount();
+      }
+    };
+
+    // Listen for new notifications being created
+    const handleNotificationCreated = (event: CustomEvent) => {
+      const notif = event.detail as { toHandle?: string };
+      if (notif?.toHandle === user.handle) {
+        updateNotificationCount();
+      }
+    };
+
+    window.addEventListener('notificationsUpdated', handleNotificationUpdate as EventListener);
+    window.addEventListener('notificationCreated', handleNotificationCreated as EventListener);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('notificationsUpdated', handleNotificationUpdate as EventListener);
+      window.removeEventListener('notificationCreated', handleNotificationCreated as EventListener);
+    };
+  }, [user?.handle]);
 
   // Main location / feed tabs (Clips and Discover are rendered beside the header)
   const tabs: Tab[] = [regional, national, 'Following'];
@@ -234,33 +282,48 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
 
         {/* Center: Gazetteer logo with wave */}
         <div className="flex-1 flex items-center justify-center">
-          <div className="relative px-4 py-1">
-            <span className="relative z-10 text-sm font-semibold tracking-[0.2em] uppercase text-white">
-              GAZETTEER
-            </span>
-            <svg
-              className="absolute inset-0 w-full h-full pointer-events-none gazetteer-wave-svg"
-              viewBox="0 0 200 40"
-              aria-hidden="true"
-            >
-              <defs>
-                <linearGradient id="gazetteerWaveGradient" x1="0%" y1="50%" x2="100%" y2="50%">
-                  <stop offset="0%" stopColor="transparent" stopOpacity="0" />
-                  <stop offset="30%" stopColor="#ff4ecb" stopOpacity="0.4" />
-                  <stop offset="70%" stopColor="#8f5bff" stopOpacity="0.4" />
-                  <stop offset="100%" stopColor="transparent" stopOpacity="0" />
-                </linearGradient>
-              </defs>
-              <path
-                d="M-20 26 C 20 4, 80 48, 140 8 S 240 42, 280 16"
-                fill="none"
-                stroke="url(#gazetteerWaveGradient)"
-                strokeWidth="24"
-                strokeLinecap="round"
-                className="gazetteer-wave-path"
-              />
-            </svg>
-          </div>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate('/inbox');
+            }}
+            className="relative px-4 py-1 flex items-center gap-2 hover:opacity-80 transition-opacity"
+            aria-label="Go to notifications"
+          >
+            <div className="relative">
+              <span className="relative z-10 text-sm font-semibold tracking-[0.2em] uppercase text-white">
+                GAZETTEER
+              </span>
+              <svg
+                className="absolute inset-0 w-full h-full pointer-events-none gazetteer-wave-svg"
+                viewBox="0 0 200 40"
+                aria-hidden="true"
+              >
+                <defs>
+                  <linearGradient id="gazetteerWaveGradient" x1="0%" y1="50%" x2="100%" y2="50%">
+                    <stop offset="0%" stopColor="transparent" stopOpacity="0" />
+                    <stop offset="30%" stopColor="#ff4ecb" stopOpacity="0.4" />
+                    <stop offset="70%" stopColor="#8f5bff" stopOpacity="0.4" />
+                    <stop offset="100%" stopColor="transparent" stopOpacity="0" />
+                  </linearGradient>
+                </defs>
+                <path
+                  d="M-20 26 C 20 4, 80 48, 140 8 S 240 42, 280 16"
+                  fill="none"
+                  stroke="url(#gazetteerWaveGradient)"
+                  strokeWidth="24"
+                  strokeLinecap="round"
+                  className="gazetteer-wave-path"
+                />
+              </svg>
+            </div>
+            {notificationCount > 0 && (
+              <span className="min-w-[20px] h-5 px-1.5 bg-blue-500 text-white text-xs font-semibold leading-5 rounded-full text-center flex items-center justify-center">
+                {notificationCount > 9 ? '9+' : notificationCount}
+              </span>
+            )}
+          </button>
         </div>
 
         {/* Right: Discover pill */}
@@ -1850,10 +1913,8 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                     title="View in Scenes"
                   >
                     <FiEye className="w-3 h-3 flex-shrink-0" />
-                    {isViewInScenesExpanded ? (
+                    {isViewInScenesExpanded && (
                       <span className="whitespace-nowrap">View in Scenes</span>
-                    ) : (
-                      <span className="whitespace-nowrap">Scenes</span>
                     )}
                   </button>
                 </div>
@@ -2222,10 +2283,7 @@ function EngagementBar({
   showMetricsIcon,
   onToggleMetrics,
   isMetricsOpen,
-  likeButtonRef,
-  onNotificationsPress,
-  unreadCount,
-  hasInbox
+  likeButtonRef
 }: {
   post: Post;
   onLike: () => Promise<void>;
@@ -2239,11 +2297,9 @@ function EngagementBar({
   onToggleMetrics?: () => void;
   isMetricsOpen?: boolean;
   likeButtonRef?: React.RefObject<HTMLButtonElement>;
-  onNotificationsPress?: () => void;
-  unreadCount?: number;
-  hasInbox?: boolean;
 }) {
   const [isSaved, setIsSaved] = React.useState(false);
+  const [showShareToStoriesModal, setShowShareToStoriesModal] = React.useState(false);
 
   // Check if post is saved
   React.useEffect(() => {
@@ -2369,12 +2425,7 @@ function EngagementBar({
 
   async function shareClick() {
     if (busy) return;
-    setBusy(true);
-    try {
-      await onShare();
-    } finally {
-      setBusy(false);
-    }
+    setShowShareToStoriesModal(true);
   }
 
   return (
@@ -2415,14 +2466,50 @@ function EngagementBar({
             <span className="text-sm text-gray-700 dark:text-gray-300">{comments}</span>
           </button>
 
-          {/* Share */}
+          {/* Share to Stories */}
           <button
             className="flex items-center gap-2 transition-opacity hover:opacity-70 active:opacity-50"
             onClick={shareClick}
-            aria-label="Share post"
-            title="Share post"
+            aria-label="Share post to stories"
+            title="Share post to stories"
           >
-            <FiShare2 className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+            <div className="relative w-5 h-5">
+              <div className="absolute inset-0 rounded-full bg-gray-600 dark:bg-gray-400"></div>
+              <svg
+                className="absolute inset-0 w-full h-full"
+                viewBox="0 0 20 20"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <circle
+                  cx="10"
+                  cy="10"
+                  r="9"
+                  stroke="white"
+                  strokeWidth="1.5"
+                  strokeDasharray="2 2"
+                  fill="none"
+                />
+                <line
+                  x1="10"
+                  y1="6"
+                  x2="10"
+                  y2="14"
+                  stroke="white"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+                <line
+                  x1="6"
+                  y1="10"
+                  x2="14"
+                  y2="10"
+                  stroke="white"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </div>
             <span className="text-sm text-gray-700 dark:text-gray-300">{shares}</span>
           </button>
 
@@ -2452,25 +2539,13 @@ function EngagementBar({
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Notifications */}
-          {onNotificationsPress && (
-            <button
-              className="relative transition-opacity hover:opacity-70 active:opacity-50"
-              onClick={onNotificationsPress}
-              aria-label="Notifications"
-              title={hasInbox ? 'New notifications' : 'Notifications'}
-            >
-              <FiBell className={`w-5 h-5 ${hasInbox ? 'text-blue-500' : 'text-gray-600 dark:text-gray-400'}`} />
-              {hasInbox && unreadCount && unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 bg-blue-500 text-white text-[10px] leading-4 rounded-full text-center">
-                  {unreadCount > 9 ? '9+' : unreadCount}
-                </span>
-              )}
-            </button>
-          )}
-
         </div>
       </div>
+      <ShareToStoriesModal
+        isOpen={showShareToStoriesModal}
+        onClose={() => setShowShareToStoriesModal(false)}
+        post={post}
+      />
     </div>
   );
 }
@@ -2594,7 +2669,7 @@ function BoostMetrics({ post, isOpen }: { post: Post; isOpen: boolean }) {
   );
 }
 
-export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare, onOpenComments, onView, onReclip, onOpenScenes, showBoostIcon, onBoost, onNotificationsPress, unreadCount, hasInbox, priority = false }: {
+export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare, onOpenComments, onView, onReclip, onOpenScenes, showBoostIcon, onBoost, priority = false }: {
   post: Post;
   onLike: () => Promise<void>;
   onFollow?: () => Promise<void>;
@@ -2605,9 +2680,6 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   onOpenScenes: () => void;
   showBoostIcon?: boolean;
   onBoost?: () => Promise<void>;
-  onNotificationsPress?: () => void;
-  unreadCount?: number;
-  hasInbox?: boolean;
   priority?: boolean;
 }) {
   const { user } = useAuth();
@@ -2820,9 +2892,6 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         onToggleMetrics={() => setIsMetricsOpen(!isMetricsOpen)}
         isMetricsOpen={isMetricsOpen}
         likeButtonRef={likeButtonRef}
-        onNotificationsPress={onNotificationsPress}
-        unreadCount={unreadCount}
-        hasInbox={hasInbox}
       />
       {/* Heart animation from tap to like button - rendered after EngagementBar so ref is set */}
       {heartAnimation && likeButtonRef.current && (
@@ -3772,9 +3841,6 @@ function FeedPageWrapper() {
               setSelectedPostForBoost(p);
               setBoostModalOpen(true);
             }}
-            onNotificationsPress={() => navigate('/inbox')}
-            unreadCount={unreadCount}
-            hasInbox={hasInbox}
           />
         );
       })}
@@ -4168,9 +4234,6 @@ function BoostPageWrapper() {
               setSelectedPostForScenes(p);
               setScenesOpen(true);
             }}
-            onNotificationsPress={() => navigate('/inbox')}
-            unreadCount={unreadCount}
-            hasInbox={hasInbox}
           />
         ))
       )}

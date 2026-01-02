@@ -654,28 +654,73 @@ export default function CreatePage() {
                 }
             }
 
-            // Convert blob URL to data URL BEFORE calling createPost (while blob is still valid)
+            // For videos with blob URLs, try to upload to backend first (Laravel validation doesn't accept blob URLs)
+            // If backend is not accessible, fall back to blob URL (mock will handle it)
+            // For images, convert blob URL to data URL BEFORE calling createPost (while blob is still valid)
             let persistentMediaUrl = selectedMedia;
             if (selectedMedia && selectedMedia.startsWith('blob:')) {
-                console.log('Converting blob URL to data URL before upload...');
-                try {
-                    const response = await fetch(selectedMedia);
-                    const blob = await response.blob();
-                    const reader = new FileReader();
-                    const dataUrl = await new Promise<string>((resolve, reject) => {
-                        reader.onloadend = () => resolve(reader.result as string);
-                        reader.onerror = reject;
-                        reader.readAsDataURL(blob);
-                    });
-                    persistentMediaUrl = dataUrl;
-                    console.log('✅ Converted blob URL to data URL', {
-                        originalSize: blob.size,
-                        dataUrlSize: dataUrl.length,
-                        isDataUrl: dataUrl.startsWith('data:')
-                    });
-                } catch (error) {
-                    console.error('❌ Failed to convert blob URL to data URL:', error);
-                    // Continue with blob URL - it might still work if not revoked yet
+                if (mediaType === 'video') {
+                    // Try to upload video blob to backend first
+                    console.log('📤 Attempting to upload video blob to backend...', selectedMedia.substring(0, 50));
+                    try {
+                        const response = await fetch(selectedMedia);
+                        if (!response.ok) {
+                            throw new Error(`Failed to fetch blob: ${response.status} ${response.statusText}`);
+                        }
+                        const blob = await response.blob();
+                        const file = new File([blob], `video-${Date.now()}.webm`, { type: blob.type || 'video/webm' });
+                        const { uploadFile } = await import('../api/client');
+                        const uploadResult = await uploadFile(file);
+                        
+                        if (uploadResult.success && uploadResult.fileUrl) {
+                            persistentMediaUrl = uploadResult.fileUrl;
+                            console.log('✅ Video uploaded to backend:', persistentMediaUrl);
+                        } else {
+                            throw new Error('Upload failed: ' + (uploadResult.error || 'Unknown error'));
+                        }
+                    } catch (error: any) {
+                        // Check if it's a connection error - if so, use blob URL (mock fallback will handle it)
+                        const isConnectionError = 
+                            error?.name === 'ConnectionRefused' ||
+                            error?.message?.includes('CONNECTION_REFUSED') ||
+                            error?.message?.includes('Failed to fetch') ||
+                            error?.message?.includes('NetworkError') ||
+                            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
+                        
+                        if (isConnectionError) {
+                            console.log('⚠️ Backend not accessible, using blob URL (mock fallback will handle it)');
+                            // Keep blob URL - mock fallback will handle it
+                            persistentMediaUrl = selectedMedia;
+                        } else {
+                            // Other error (validation, etc) - show error and return
+                            console.error('❌ Failed to upload video to backend:', error);
+                            showToast('Failed to upload video. Please try again.');
+                            setIsUploading(false);
+                            return;
+                        }
+                    }
+                } else {
+                    // Convert images to data URL
+                    console.log('Converting image blob URL to data URL before upload...');
+                    try {
+                        const response = await fetch(selectedMedia);
+                        const blob = await response.blob();
+                        const reader = new FileReader();
+                        const dataUrl = await new Promise<string>((resolve, reject) => {
+                            reader.onloadend = () => resolve(reader.result as string);
+                            reader.onerror = reject;
+                            reader.readAsDataURL(blob);
+                        });
+                        persistentMediaUrl = dataUrl;
+                        console.log('✅ Converted blob URL to data URL', {
+                            originalSize: blob.size,
+                            dataUrlSize: dataUrl.length,
+                            isDataUrl: dataUrl.startsWith('data:')
+                        });
+                    } catch (error) {
+                        console.error('❌ Failed to convert blob URL to data URL:', error);
+                        // Continue with blob URL - it might still work if not revoked yet
+                    }
                 }
             }
 
@@ -768,9 +813,27 @@ export default function CreatePage() {
                 // Navigate back to feed
                 navigate('/feed');
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error creating post:', error);
-            showToast('Failed to create post. Please try again.');
+            // Show more detailed error message
+            const errorMessage = error?.message || error?.error || 'Failed to create post. Please try again.';
+            console.error('Full error details:', {
+                message: errorMessage,
+                name: error?.name,
+                stack: error?.stack,
+                response: error?.response,
+                status: error?.status
+            });
+            
+            // If it's a connection error, the mock fallback should have worked
+            // If we still get an error, something else went wrong in the mock fallback
+            if (error?.name === 'ConnectionRefused' || error?.message?.includes('CONNECTION_REFUSED')) {
+                // This shouldn't happen - mock fallback should handle connection errors
+                console.error('❌ Mock fallback failed after connection error - this is unexpected');
+                showToast('Backend not accessible. Please check your connection.');
+            } else {
+                showToast(errorMessage);
+            }
         } finally {
             setIsUploading(false);
         }
@@ -987,7 +1050,16 @@ export default function CreatePage() {
                     <div className="px-4 py-4 border-t border-gray-100 dark:border-gray-800 animate-in fade-in duration-300">
                         <div className="grid grid-cols-2 gap-3">
                             {/* Add Photo or Video */}
-                            <label className="flex flex-col items-center gap-2 p-4 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-all duration-200 group border-2 border-dashed border-gray-200 dark:border-gray-700 hover:border-brand-400 dark:hover:border-brand-500">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    // Programmatically trigger file input on mobile
+                                    if (fileInputRef.current) {
+                                        fileInputRef.current.click();
+                                    }
+                                }}
+                                className="flex flex-col items-center gap-2 p-4 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-all duration-200 group border-2 border-dashed border-gray-200 dark:border-gray-700 hover:border-brand-400 dark:hover:border-brand-500"
+                            >
                                 <input
                                     ref={fileInputRef}
                                     type="file"
@@ -1002,7 +1074,7 @@ export default function CreatePage() {
                                     <div className="font-semibold text-sm text-gray-900 dark:text-gray-100">Add Photo or Video</div>
                                     <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Tap to select</div>
                                 </div>
-                            </label>
+                            </button>
 
                             {/* Templates Button */}
                             <button

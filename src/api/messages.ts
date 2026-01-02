@@ -46,7 +46,7 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
     // Recompute unread for receiver across all threads
     unreadByHandle.set(to, await computeUnreadTotal(to));
 
-    // Create notifications for stickers and replies (only if not a system message)
+    // Create notifications for all messages (only if not a system message)
     if (!message.isSystemMessage && message.text) {
         // Dynamically import to avoid circular dependency
         const { createNotification, isStickerMessage, isReplyToPost } = await import('./notifications');
@@ -60,6 +60,14 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
         } else if (isReplyToPost(message.text)) {
             await createNotification({
                 type: 'reply',
+                fromHandle: from,
+                toHandle: to,
+                message: message.text
+            });
+        } else {
+            // Create notification for regular DMs
+            await createNotification({
+                type: 'dm',
                 fromHandle: from,
                 toHandle: to,
                 message: message.text
