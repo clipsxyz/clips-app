@@ -434,7 +434,7 @@ function transformLaravelPost(response: any): Post {
   } as Post;
 }
 
-export async function fetchPostsPage(tab: string, cursor: number | null, limit = 5, userId = 'me', userLocal = '', userRegional = '', userNational = ''): Promise<Page> {
+export async function fetchPostsPage(tab: string, cursor: number | null, limit = 5, userId = 'me', userLocal = '', userRegional = '', userNational = '', currentUserHandle = ''): Promise<Page> {
   // Try Laravel API first, fallback to mock if it fails
   const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
   
@@ -506,21 +506,57 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
     });
 
     const filtered = posts.filter(p => {
+      // Exclude reclipped posts from location-based feeds - they should only appear in Following feed
+      // Reclipped posts should only show in the "discover" (Following) feed for users who follow the reclipper
+      if (p.isReclipped && t !== 'discover') {
+        return false;
+      }
+      
       if (t === 'discover') {
         const userState = getState(userId);
         const isFollowing = userState.follows[p.userHandle] === true;
         
-        // Debug: Log what we're checking
+        // For reclipped posts: show them if you follow the reclipper OR if you are the reclipper
+        // This ensures you can see your own reclipped posts even if nobody follows you
+        if (p.isReclipped) {
+          const isMyReclip = p.userHandle === currentUserHandle;
+          const shouldShow = isFollowing || isMyReclip;
+          
+          // Debug logging for reclipped posts
+          if (p.originalUserHandle?.includes('Sarah') || p.originalUserHandle?.includes('sarah') || p.userHandle === currentUserHandle) {
+            console.log('FOLLOWING FEED - RECLIPPED POST:', {
+              postId: p.id.substring(0, 30),
+              isReclipped: p.isReclipped,
+              userHandle: p.userHandle,
+              originalUserHandle: p.originalUserHandle,
+              currentUserHandle,
+              isMyReclip,
+              isFollowing,
+              shouldShow
+            });
+          }
+          
+          return shouldShow;
+        }
+        
+        // For non-reclipped posts: only show if you follow the author
+        // IMPORTANT: Only show original posts from people you follow
+        // Do NOT show original posts from people you don't follow, even if you reclipped one of their posts
+        
+        // Debug: Log what we're checking for Sarah's posts
         if (p.userHandle.includes('Sarah') || p.userHandle.includes('sarah')) {
-          console.log('CHECKING SARAH POST:', {
-            userId,
+          console.log('FOLLOWING FEED - ORIGINAL POST:', {
+            postId: p.id.substring(0, 30),
+            isReclipped: p.isReclipped,
             userHandle: p.userHandle,
+            currentUserHandle,
             isFollowing,
-            allFollows: Object.keys(userState.follows).filter(h => userState.follows[h] === true),
-            fullState: userState.follows
+            followsState: userState.follows,
+            willShow: isFollowing
           });
         }
         
+        // Only show if you follow the author (for non-reclipped posts)
         return isFollowing;
       }
 

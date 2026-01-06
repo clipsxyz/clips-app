@@ -79,10 +79,51 @@ export default function TemplateEditorPage() {
     
     // Immediately scroll to top on mount (before any rendering)
     React.useLayoutEffect(() => {
+        // Force scroll to top using all methods
         window.scrollTo(0, 0);
+        window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
         document.documentElement.scrollTop = 0;
         document.body.scrollTop = 0;
+        if (document.scrollingElement) {
+            (document.scrollingElement as HTMLElement).scrollTop = 0;
+        }
+        // Also try scrolling the main element if it exists
+        const mainElement = document.getElementById('main');
+        if (mainElement) {
+            mainElement.scrollTop = 0;
+        }
     }, []);
+    
+    // Also scroll to top when location/template changes
+    React.useEffect(() => {
+        const scrollToTop = () => {
+            window.scrollTo(0, 0);
+            window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+            document.documentElement.scrollTop = 0;
+            document.body.scrollTop = 0;
+            if (document.scrollingElement) {
+                (document.scrollingElement as HTMLElement).scrollTop = 0;
+            }
+            const mainElement = document.getElementById('main');
+            if (mainElement) {
+                mainElement.scrollTop = 0;
+            }
+        };
+        
+        // Scroll immediately
+        scrollToTop();
+        
+        // Also try after a short delay to catch any late renders
+        const timeout = setTimeout(scrollToTop, 0);
+        const timeout2 = setTimeout(scrollToTop, 50);
+        const timeout3 = setTimeout(scrollToTop, 100);
+        
+        return () => {
+            clearTimeout(timeout);
+            clearTimeout(timeout2);
+            clearTimeout(timeout3);
+        };
+    }, [location.pathname, template?.id]);
     
     // Force scroll to Post Details when on details step
     React.useEffect(() => {
@@ -183,10 +224,26 @@ export default function TemplateEditorPage() {
             history.scrollRestoration = 'manual';
         }
         
-        // Always scroll to top first when route changes
-        window.scrollTo(0, 0);
-        document.documentElement.scrollTop = 0;
-        document.body.scrollTop = 0;
+        // Always scroll to top first when route changes - use multiple methods
+        const scrollToTop = () => {
+            window.scrollTo(0, 0);
+            window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+            document.documentElement.scrollTop = 0;
+            document.body.scrollTop = 0;
+            if (document.scrollingElement) {
+                (document.scrollingElement as HTMLElement).scrollTop = 0;
+            }
+            const mainElement = document.getElementById('main');
+            if (mainElement) {
+                mainElement.scrollTop = 0;
+            }
+        };
+        
+        // Scroll immediately and with delays
+        scrollToTop();
+        setTimeout(scrollToTop, 0);
+        setTimeout(scrollToTop, 10);
+        setTimeout(scrollToTop, 50);
         
         // If on details step, also scroll to Post Details after a delay
         if (currentStep === 'details') {
@@ -199,7 +256,7 @@ export default function TemplateEditorPage() {
                     window.scrollTo(0, elementTop);
                     element.scrollIntoView({ block: 'start', behavior: 'auto' });
                 }
-            }, 100);
+            }, 200);
         }
     }, [location.pathname, currentStep]);
 
@@ -1019,7 +1076,7 @@ export default function TemplateEditorPage() {
     }
 
     return (
-        <div className="min-h-screen bg-black text-white">
+        <div className="min-h-screen bg-black text-white" style={{ marginTop: '-1rem', paddingTop: 0 }}>
             {/* Header */}
             <div className="sticky top-0 z-50 bg-black/80 backdrop-blur border-b border-gray-800">
                 <div className="max-w-md mx-auto px-4 h-14 flex items-center justify-between">
@@ -1129,7 +1186,7 @@ export default function TemplateEditorPage() {
             )}
 
             {/* Main Content */}
-            <div className={`max-w-md mx-auto px-4 py-4 ${showPinnedNext || currentStep === 'details' ? 'pb-40' : 'pb-24'}`}>
+            <div className={`max-w-md mx-auto px-4 pt-20 pb-4 ${showPinnedNext || currentStep === 'details' ? 'pb-40' : 'pb-24'}`}>
                 {currentStep === 'media' ? (
                     <>
                         {/* Step 1: Add Media */}
@@ -1533,38 +1590,6 @@ export default function TemplateEditorPage() {
                                 </div>
                             </div>
 
-                            {/* Banner Text */}
-                            <div>
-                                <label className="block text-sm font-medium text-gray-300 mb-2">
-                                    News Ticker Banner
-                                </label>
-                                <div className="relative rounded-xl">
-                                    {/* Outer glow animation */}
-                                    <div className="pointer-events-none absolute inset-0 rounded-xl bg-gradient-to-r from-emerald-500 via-blue-500 to-violet-500 opacity-60 blur-sm animate-pulse"></div>
-                                    {/* Shimmer sweep */}
-                                    <div className="pointer-events-none absolute inset-0 rounded-xl overflow-hidden">
-                                        <div
-                                            className="absolute inset-0 rounded-xl"
-                                            style={{
-                                                background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.35), transparent)',
-                                                backgroundSize: '200% 100%',
-                                                animation: 'shimmer 3s linear infinite'
-                                            }}
-                                        ></div>
-                                    </div>
-                                    <input
-                                        type="text"
-                                        value={bannerText}
-                                        onChange={(e) => setBannerText(e.target.value)}
-                                        placeholder="Enter scrolling banner text..."
-                                        maxLength={200}
-                                        className="relative w-full p-3 bg-gray-900 text-white rounded-xl border border-gray-800 focus:outline-none focus:ring-2 focus:ring-white text-sm"
-                                    />
-                                </div>
-                                <div className="text-right text-xs text-gray-500 mt-1">
-                                    {bannerText.length}/200
-                                </div>
-                            </div>
 
                             {/* Tag People */}
                             <div>
@@ -1601,110 +1626,6 @@ export default function TemplateEditorPage() {
                                 </button>
                             </div>
 
-                            {/* Video Captions - Only for Instagram, TikTok, and Gazetteer */}
-                            {(template?.id === TEMPLATE_IDS.INSTAGRAM || template?.id === TEMPLATE_IDS.TIKTOK || template?.id === TEMPLATE_IDS.GAZETTEER) && (
-                                <>
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
-                                            <button
-                                                type="button"
-                                                onClick={() => setCaptionsEnabled(!captionsEnabled)}
-                                                className={`p-1.5 rounded-lg transition-colors ${captionsEnabled
-                                                    ? 'bg-brand-500 text-white'
-                                                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-                                                    }`}
-                                                aria-label="Toggle captions"
-                                            >
-                                                <FiType className="w-4 h-4" />
-                                            </button>
-                                            <span>Video Captions</span>
-                                            <span className={`text-xs ml-auto ${captionsEnabled ? 'text-brand-400' : 'text-gray-500'}`}>
-                                                {captionsEnabled ? 'ON' : 'OFF'}
-                                            </span>
-                                        </label>
-                                        {captionsEnabled && (
-                                            <div className="relative rounded-xl">
-                                                {/* Outer glow animation */}
-                                                <div className="pointer-events-none absolute inset-0 rounded-xl bg-gradient-to-r from-emerald-500 via-blue-500 to-violet-500 opacity-60 blur-sm animate-pulse"></div>
-                                                {/* Shimmer sweep */}
-                                                <div className="pointer-events-none absolute inset-0 rounded-xl overflow-hidden">
-                                                    <div
-                                                        className="absolute inset-0 rounded-xl"
-                                                        style={{
-                                                            background: 'linear-gradient(90deg, transparent, rgba(59,130,246,0.35), transparent)',
-                                                            backgroundSize: '200% 100%',
-                                                            animation: 'shimmer 3s linear infinite'
-                                                        }}
-                                                    ></div>
-                                                </div>
-                                                <textarea
-                                                    value={videoCaptionText}
-                                                    onChange={(e) => setVideoCaptionText(e.target.value)}
-                                                    placeholder="Enter caption text to display on video..."
-                                                    className="relative w-full p-3 bg-gray-900 text-white rounded-xl border border-gray-800 focus:outline-none focus:ring-2 focus:ring-white resize-none text-sm"
-                                                    rows={3}
-                                                    maxLength={500}
-                                                />
-                                            </div>
-                                        )}
-                                        {captionsEnabled && (
-                                            <div className="text-right text-xs text-gray-500 mt-1">
-                                                {videoCaptionText.length}/500
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {/* Video Subtitles - Only for Instagram, TikTok, and Gazetteer */}
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
-                                            <button
-                                                type="button"
-                                                onClick={async () => {
-                                                    const newEnabled = !subtitlesEnabled;
-                                                    setSubtitlesEnabled(newEnabled);
-
-                                                    // Auto-transcribe when enabling subtitles if video exists and no text yet
-                                                    if (newEnabled && !subtitleText) {
-                                                        const currentClip = activeClips[currentClipIndex] || activeClips[0];
-                                                        const media = currentClip ? userMedia.get(currentClip.id) : null;
-
-                                                        if (media && media.mediaType === 'video' && media.url) {
-                                                            setIsTranscribing(true);
-                                                            try {
-                                                                const transcription = await transcribeVideo(media.url);
-                                                                if (transcription) {
-                                                                    setSubtitleText(transcription);
-                                                                }
-                                                            } catch (error) {
-                                                                console.error('Transcription error:', error);
-                                                            } finally {
-                                                                setIsTranscribing(false);
-                                                            }
-                                                        }
-                                                    }
-                                                }}
-                                                className={`p-1.5 rounded-lg transition-colors ${subtitlesEnabled
-                                                    ? 'bg-brand-500 text-white'
-                                                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-                                                    }`}
-                                                aria-label="Toggle subtitles"
-                                            >
-                                                <FiMessageSquare className="w-4 h-4" />
-                                            </button>
-                                            <span>Video Subtitles</span>
-                                            <span className={`text-xs ml-auto ${subtitlesEnabled ? 'text-brand-400' : 'text-gray-500'}`}>
-                                                {subtitlesEnabled ? 'ON' : 'OFF'}
-                                            </span>
-                                        </label>
-                                        {isTranscribing && (
-                                            <div className="mb-2 text-sm text-brand-400 flex items-center gap-2">
-                                                <div className="w-4 h-4 border-2 border-brand-400 border-t-transparent rounded-full animate-spin"></div>
-                                                <span>Generating subtitles...</span>
-                                            </div>
-                                        )}
-                                    </div>
-                                </>
-                            )}
                         </div>
                     </>
                 )}

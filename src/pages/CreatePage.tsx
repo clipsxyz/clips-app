@@ -1094,47 +1094,6 @@ export default function CreatePage() {
                     </div>
                 )}
 
-                {/* Add Banner Section - Under Add Photo or Video */}
-                <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50">
-                    <div>
-                        <label className="block text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1.5">
-                            Add Banner
-                        </label>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                            Add a scrolling news ticker banner to your post
-                        </p>
-                        <input
-                            type="text"
-                            value={bannerText}
-                            onChange={(e) => setBannerText(e.target.value)}
-                            placeholder="Enter banner text (e.g., Breaking news headline...)"
-                            maxLength={200}
-                            className="w-full px-4 py-2.5 text-sm border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all duration-200 shadow-sm"
-                        />
-                        <div className="flex items-center justify-between mt-2.5">
-                            <span className="text-xs text-gray-500 dark:text-gray-400">
-                                News ticker banner
-                            </span>
-                            <div className="flex items-center gap-3">
-                                <span className={`text-xs transition-colors duration-200 ${bannerText.length > 180
-                                    ? 'text-red-500 dark:text-red-400'
-                                    : 'text-gray-400 dark:text-gray-500'
-                                    }`}>
-                                    {bannerText.length}/200
-                                </span>
-                                {bannerText && (
-                                    <button
-                                        type="button"
-                                        onClick={() => setBannerText('')}
-                                        className="text-xs font-medium text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 transition-colors duration-200 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20"
-                                    >
-                                        Clear
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                </div>
 
                 {/* Loading state for media processing */}
                 {isProcessingMedia && (

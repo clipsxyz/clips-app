@@ -812,8 +812,8 @@ export default function StoriesPage() {
 
                     {/* Story Text - Only show if media is not a generated text image (data URL) */}
                     {currentStory?.text && currentStory?.mediaUrl && !currentStory.mediaUrl.startsWith('data:image') && (
-                        <div className="absolute bottom-24 left-0 right-0 px-4 z-50 pointer-events-none">
-                            <div className="backdrop-blur-md bg-black/30 rounded-2xl px-4 py-3 border border-white/10 shadow-lg max-w-md mx-auto">
+                        <div className="absolute bottom-24 left-0 right-0 px-4 z-[60] pointer-events-none">
+                            <div className="backdrop-blur-md bg-black/30 rounded-2xl px-4 py-3 border border-white/10 shadow-lg max-w-md mx-auto pointer-events-auto">
                                 <p
                                     className={`font-semibold text-center ${currentStory?.textSize === 'small' ? 'text-sm' :
                                         currentStory?.textSize === 'large' ? 'text-2xl' :
@@ -824,7 +824,94 @@ export default function StoriesPage() {
                                         textShadow: '1px 1px 2px rgba(0,0,0,0.5)'
                                     }}
                                 >
-                                    {currentStory.text}
+                                    {(() => {
+                                        // Parse mentions (@handle) and make them clickable
+                                        const text = currentStory.text || '';
+                                        const parts: (string | JSX.Element)[] = [];
+                                        // Match @handle (including @ in handle like @Sarah@Artane)
+                                        // Updated regex to match @ followed by word characters, @, and more word characters
+                                        const mentionRegex = /@([\w@]+)/g;
+                                        let lastIndex = 0;
+                                        let match;
+
+                                        while ((match = mentionRegex.exec(text)) !== null) {
+                                            // Add text before the mention
+                                            if (match.index > lastIndex) {
+                                                parts.push(text.substring(lastIndex, match.index));
+                                            }
+                                            
+                                            // Check if this mention is in taggedUsers
+                                            const handle = match[1]; // This will be "Sarah@Artane" from "@Sarah@Artane"
+                                            const isTagged = currentStory.taggedUsers?.includes(handle);
+                                            
+                                            // Debug logging
+                                            if (process.env.NODE_ENV === 'development') {
+                                                console.log('Story mention check:', {
+                                                    text,
+                                                    handle,
+                                                    taggedUsers: currentStory.taggedUsers,
+                                                    isTagged
+                                                });
+                                            }
+                                            
+                                            if (isTagged) {
+                                                // Make it a clickable link
+                                                parts.push(
+                                                    <span
+                                                        key={match.index}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            e.preventDefault();
+                                                            console.log('Clicked mention:', handle);
+                                                            // Close stories first, then navigate
+                                                            setViewingStories(false);
+                                                            setTimeout(() => {
+                                                                navigate(`/user/${encodeURIComponent(handle)}`);
+                                                            }, 100);
+                                                        }}
+                                                        onTouchStart={(e) => {
+                                                            e.stopPropagation();
+                                                        }}
+                                                        onTouchEnd={(e) => {
+                                                            e.stopPropagation();
+                                                            e.preventDefault();
+                                                            console.log('Touched mention:', handle);
+                                                            // Close stories first, then navigate
+                                                            setViewingStories(false);
+                                                            setTimeout(() => {
+                                                                navigate(`/user/${encodeURIComponent(handle)}`);
+                                                            }, 100);
+                                                        }}
+                                                        onMouseDown={(e) => {
+                                                            e.stopPropagation();
+                                                        }}
+                                                        className="underline hover:opacity-80 active:opacity-60 transition-opacity cursor-pointer font-semibold inline-block"
+                                                        style={{
+                                                            color: currentStory?.textColor || 'white',
+                                                            textShadow: '1px 1px 2px rgba(0,0,0,0.5)',
+                                                            pointerEvents: 'auto',
+                                                            zIndex: 1000,
+                                                            position: 'relative'
+                                                        }}
+                                                    >
+                                                        @{handle}
+                                                    </span>
+                                                );
+                                            } else {
+                                                // Just show as text if not tagged
+                                                parts.push(`@${handle}`);
+                                            }
+                                            
+                                            lastIndex = match.index + match[0].length;
+                                        }
+                                        
+                                        // Add remaining text
+                                        if (lastIndex < text.length) {
+                                            parts.push(text.substring(lastIndex));
+                                        }
+                                        
+                                        return parts.length > 0 ? parts : text;
+                                    })()}
                                 </p>
                             </div>
                         </div>
@@ -860,11 +947,12 @@ export default function StoriesPage() {
                     </div>
 
                     {/* Tap Zones for Navigation and Pause */}
-                    <div className="absolute inset-0 z-40">
-                        {/* Center tap zone - Pause/Resume */}
+                    <div className="absolute inset-0 z-40 pointer-events-none">
+                        {/* Center tap zone - Pause/Resume - but exclude bottom area where text is */}
                         <div
                             onClick={() => setPaused(!paused)}
-                            className="absolute left-1/3 right-1/3 top-0 bottom-0"
+                            className="absolute left-1/3 right-1/3 top-0"
+                            style={{ bottom: '200px' }} // Exclude bottom area where story text appears
                         />
 
                         {/* Left zone - Previous Story */}

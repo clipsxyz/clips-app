@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { FiChevronLeft, FiBell, FiShare2, FiMessageSquare, FiMoreHorizontal, FiX, FiLock, FiMapPin, FiEye } from 'react-icons/fi';
+import { FiChevronLeft, FiBell, FiShare2, FiMessageSquare, FiMoreHorizontal, FiX, FiLock, FiMapPin, FiEye, FiUserPlus, FiMaximize, FiPlay } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { getFlagForHandle } from '../api/users';
 import Flag from '../components/Flag';
@@ -18,6 +18,7 @@ import {
   removeFollowRequest
 } from '../api/privacy';
 import Swal from 'sweetalert2';
+import ShareProfileModal from '../components/ShareProfileModal';
 
 export default function ViewProfilePage() {
     const navigate = useNavigate();
@@ -34,6 +35,9 @@ export default function ViewProfilePage() {
     const [hasPendingRequest, setHasPendingRequest] = React.useState(false);
     const [profileIsPrivate, setProfileIsPrivate] = React.useState(false);
     const [showTraveledModal, setShowTraveledModal] = React.useState(false);
+    const [showProfileMenu, setShowProfileMenu] = React.useState(false);
+    const [showQRCodeModal, setShowQRCodeModal] = React.useState(false);
+    const [showShareProfileModal, setShowShareProfileModal] = React.useState(false);
 
     const handleFollow = async () => {
         if (!user?.id || !handle || !user?.handle) {
@@ -101,9 +105,9 @@ export default function ViewProfilePage() {
                     setHasPendingRequest(false);
                     
                     if (newFollowingState) {
-                        setCanViewProfile(true);
+                        setCanViewProfileState(true);
                     } else if (profilePrivate) {
-                        setCanViewProfile(false);
+                        setCanViewProfileState(false);
                     }
                     
                     // Dispatch event to update newsfeed
@@ -134,7 +138,7 @@ export default function ViewProfilePage() {
                 
                 // If profile was private, user can no longer view
                 if (profilePrivate) {
-                    setCanViewProfile(false);
+                    setCanViewProfileState(false);
                 }
             } else if (result.status === 'pending') {
                 // Private profile - follow request sent
@@ -157,7 +161,7 @@ export default function ViewProfilePage() {
                 }
                 setIsFollowing(true);
                 setHasPendingRequest(false);
-                setCanViewProfile(true);
+                setCanViewProfileState(true);
             }
 
             // Dispatch event to update newsfeed
@@ -573,14 +577,14 @@ export default function ViewProfilePage() {
                     {/* Profile Picture and Name Overlay */}
                     <div className="absolute inset-0 flex flex-col items-center justify-center z-10">
                         {/* Profile Picture */}
-                        <div className={`mb-4 ${!hasStory ? 'pointer-events-none' : ''}`}>
+                        <div className="mb-4">
                             <Avatar
                                 src={profileUser.avatarUrl}
                                 name={profileUser.name}
                                 size="xl"
-                                className="!w-32 !h-32 border-4 border-white dark:border-gray-800 shadow-2xl"
+                                className="!w-32 !h-32 border-4 border-white dark:border-gray-800 shadow-2xl cursor-pointer"
                                 hasStory={hasStory}
-                                onClick={hasStory ? () => navigate('/stories', { state: { openUserHandle: handle } }) : undefined}
+                                onClick={() => setShowProfileMenu(true)}
                             />
                         </div>
 
@@ -964,6 +968,226 @@ export default function ViewProfilePage() {
                     </div>
                 </div>
             )}
+
+            {/* Profile Menu Modal */}
+            {showProfileMenu && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center">
+                    {/* Backdrop */}
+                    <div
+                        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                        onClick={() => setShowProfileMenu(false)}
+                    />
+
+                    {/* Menu */}
+                    <div className="relative bg-[#262626] dark:bg-[#1a1a1a] rounded-3xl p-4 sm:p-6 shadow-2xl mx-4 max-w-full">
+                        <div className="flex flex-row flex-wrap gap-3 sm:gap-6 items-center justify-center">
+                            {/* View Stories - only show if user has stories */}
+                            {hasStory && (
+                                <button
+                                    onClick={() => {
+                                        setShowProfileMenu(false);
+                                        navigate('/stories', { state: { openUserHandle: handle } });
+                                    }}
+                                    className="flex flex-col items-center gap-1.5 sm:gap-2 min-w-[60px] sm:min-w-0"
+                                >
+                                    <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-black flex items-center justify-center">
+                                        <FiPlay className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
+                                    </div>
+                                    <span className="text-[10px] sm:text-xs text-white font-medium text-center">View Stories</span>
+                                </button>
+                            )}
+
+                            {/* Follow */}
+                            <button
+                                onClick={async () => {
+                                    setShowProfileMenu(false);
+                                    await handleFollow();
+                                }}
+                                className="flex flex-col items-center gap-1.5 sm:gap-2 min-w-[60px] sm:min-w-0"
+                            >
+                                <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-black flex items-center justify-center">
+                                    <FiUserPlus className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
+                                </div>
+                                <span className="text-[10px] sm:text-xs text-white font-medium text-center">{isFollowing ? 'Unfollow' : 'Follow'}</span>
+                            </button>
+
+                            {/* Share Profile */}
+                            <button
+                                onClick={() => {
+                                    setShowProfileMenu(false);
+                                    setShowShareProfileModal(true);
+                                }}
+                                className="flex flex-col items-center gap-1.5 sm:gap-2 min-w-[60px] sm:min-w-0"
+                            >
+                                <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-black flex items-center justify-center">
+                                    <FiShare2 className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
+                                </div>
+                                <span className="text-[10px] sm:text-xs text-white font-medium text-center">Share profile</span>
+                            </button>
+
+                            {/* QR Code */}
+                            <button
+                                onClick={() => {
+                                    setShowProfileMenu(false);
+                                    setShowQRCodeModal(true);
+                                }}
+                                className="flex flex-col items-center gap-1.5 sm:gap-2 min-w-[60px] sm:min-w-0"
+                            >
+                                <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-black flex items-center justify-center">
+                                    <FiMaximize className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
+                                </div>
+                                <span className="text-[10px] sm:text-xs text-white font-medium text-center">QR code</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* QR Code Modal for Profile */}
+            {showQRCodeModal && profileUser && (
+                <ProfileQRCodeModal
+                    isOpen={showQRCodeModal}
+                    onClose={() => setShowQRCodeModal(false)}
+                    handle={handle || ''}
+                    name={profileUser.name || handle || ''}
+                />
+            )}
+
+            {/* Share Profile Modal */}
+            {showShareProfileModal && profileUser && (
+                <ShareProfileModal
+                    isOpen={showShareProfileModal}
+                    onClose={() => setShowShareProfileModal(false)}
+                    handle={handle || ''}
+                    name={profileUser.name || handle || ''}
+                    avatarUrl={profileUser.avatarUrl}
+                />
+            )}
+        </div>
+    );
+}
+
+// Profile QR Code Modal Component
+function ProfileQRCodeModal({ isOpen, onClose, handle, name }: { isOpen: boolean; onClose: () => void; handle: string; name: string }) {
+    const [qrCodeDataUrl, setQrCodeDataUrl] = React.useState<string>('');
+    const [isGenerating, setIsGenerating] = React.useState(false);
+
+    React.useEffect(() => {
+        if (isOpen && handle) {
+            setQrCodeDataUrl('');
+            setIsGenerating(true);
+            generateQRCode();
+        } else if (!isOpen) {
+            setQrCodeDataUrl('');
+            setIsGenerating(false);
+        }
+    }, [isOpen, handle]);
+
+    async function generateQRCode() {
+        if (!handle) {
+            setIsGenerating(false);
+            return;
+        }
+
+        setIsGenerating(true);
+        try {
+            const QRCode = (await import('qrcode')).default;
+            const profileUrl = `${window.location.origin}/user/${encodeURIComponent(handle)}`;
+            const qrDataUrl = await QRCode.toDataURL(profileUrl, {
+                width: 300,
+                margin: 2,
+                color: {
+                    dark: '#000000',
+                    light: '#FFFFFF'
+                }
+            });
+            setQrCodeDataUrl(qrDataUrl);
+            setIsGenerating(false);
+        } catch (error) {
+            console.error('Error generating QR code:', error);
+            setIsGenerating(false);
+        }
+    }
+
+    if (!isOpen) return null;
+
+    const displayName = name.split('@')[0]?.toUpperCase() || 'PROFILE';
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+            {/* Backdrop */}
+            <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={onClose}
+            />
+
+            {/* Modal */}
+            <div className="relative w-full max-w-sm mx-4 bg-[#262626] dark:bg-[#1a1a1a] rounded-3xl shadow-2xl overflow-hidden">
+                {/* Close button */}
+                <button
+                    onClick={onClose}
+                    className="absolute top-4 right-4 z-10 p-2 rounded-full hover:bg-gray-700/50 transition-colors"
+                    aria-label="Close"
+                >
+                    <FiX className="w-5 h-5 text-white" />
+                </button>
+
+                {/* Content */}
+                <div className="p-6">
+                    {/* QR Code */}
+                    <div className="flex justify-center mb-6">
+                        <div className="relative">
+                            {qrCodeDataUrl ? (
+                                <img
+                                    src={qrCodeDataUrl}
+                                    alt="QR Code"
+                                    className="w-64 h-64 rounded-2xl"
+                                />
+                            ) : (
+                                <div className="w-64 h-64 rounded-2xl bg-white flex flex-col items-center justify-center gap-2">
+                                    {isGenerating ? (
+                                        <>
+                                            <div className="w-8 h-8 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
+                                            <p className="text-xs text-gray-500">Generating QR code...</p>
+                                        </>
+                                    ) : (
+                                        <p className="text-xs text-gray-500">Failed to generate QR code</p>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Profile Info */}
+                    <div className="text-center mb-4">
+                        <div
+                            className="text-sm font-medium mb-4"
+                            style={{
+                                background: 'linear-gradient(90deg, #ec4899 0%, #a855f7 50%, #7c3aed 100%)',
+                                WebkitBackgroundClip: 'text',
+                                backgroundClip: 'text',
+                                WebkitTextFillColor: 'transparent',
+                                color: 'transparent',
+                            }}
+                        >
+                            @{displayName}
+                        </div>
+                        <p className="text-white text-sm text-gray-300 px-4">
+                            People can scan this QR code with their smartphone's camera to view this profile.
+                        </p>
+                    </div>
+
+                    {/* Buttons */}
+                    <div className="space-y-3 mt-6">
+                        <button
+                            onClick={onClose}
+                            className="w-full py-3 rounded-lg bg-gray-700 hover:bg-gray-600 text-white font-medium transition-colors"
+                        >
+                            Done
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 }

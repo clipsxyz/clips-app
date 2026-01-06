@@ -722,7 +722,8 @@ const FeedScreen: React.FC = ({ navigation }: any) => {
                 userId,
                 user?.local || '',
                 user?.regional || '',
-                user?.national || ''
+                user?.national || '',
+                user?.handle || ''
             );
 
             if (token !== requestTokenRef.current) {
@@ -835,10 +836,8 @@ const FeedScreen: React.FC = ({ navigation }: any) => {
                         userReclipped: originalPost.userReclipped,
                         stats: originalPost.stats
                     }));
-                    if (reclippedPost) {
-                        // Add reclipped post to feed
-                        setPages(prev => [[reclippedPost], ...prev]);
-                    }
+                    // Note: Reclipped posts only appear in the Following feed for users who follow the reclipper
+                    // They should NOT be added to the current feed to avoid duplicates
                 } catch (err: any) {
                     Alert.alert('Error', err.message || 'Failed to reclip post');
                 }

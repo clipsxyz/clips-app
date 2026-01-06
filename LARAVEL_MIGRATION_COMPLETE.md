@@ -199,3 +199,4 @@ All frontend API functions are now integrated with Laravel backend. The app will
 
 
 
+

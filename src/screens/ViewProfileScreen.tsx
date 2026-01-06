@@ -10,6 +10,8 @@ import {
     ActivityIndicator,
     Alert,
     Modal,
+    Share,
+    Clipboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -222,7 +224,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
             <ScrollView style={styles.content}>
                 {/* Profile Header */}
                 <View style={styles.profileHeader}>
-                    <TouchableOpacity onPress={hasStory ? handleStoryPress : undefined}>
+                    <TouchableOpacity onPress={() => setShowProfileMenu(true)}>
                         <Avatar
                             src={profileUser?.avatarUrl}
                             name={handle?.split('@')[0] || 'User'}
@@ -362,6 +364,92 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                         </ScrollView>
                     </View>
                 </View>
+            </Modal>
+
+            {/* Profile Menu Modal */}
+            <Modal
+                visible={showProfileMenu}
+                transparent={true}
+                animationType="fade"
+                onRequestClose={() => setShowProfileMenu(false)}
+            >
+                <TouchableOpacity
+                    style={styles.menuOverlay}
+                    activeOpacity={1}
+                    onPress={() => setShowProfileMenu(false)}
+                >
+                    <View style={styles.menuContainer}>
+                        <View style={styles.menuContent}>
+                            {/* View Stories - only show if user has stories */}
+                            {hasStory && (
+                                <TouchableOpacity
+                                    style={styles.menuButton}
+                                    onPress={() => {
+                                        setShowProfileMenu(false);
+                                        handleStoryPress();
+                                    }}
+                                >
+                                    <View style={styles.menuIconContainer}>
+                                        <Icon name="play" size={32} color="#FFFFFF" />
+                                    </View>
+                                    <Text style={styles.menuButtonText}>View Stories</Text>
+                                </TouchableOpacity>
+                            )}
+
+                            {/* Follow */}
+                            <TouchableOpacity
+                                style={styles.menuButton}
+                                onPress={async () => {
+                                    setShowProfileMenu(false);
+                                    await handleFollow();
+                                }}
+                            >
+                                <View style={styles.menuIconContainer}>
+                                    <Icon name={isFollowing ? "person-remove" : "person-add"} size={32} color="#FFFFFF" />
+                                </View>
+                                <Text style={styles.menuButtonText}>{isFollowing ? 'Unfollow' : 'Follow'}</Text>
+                            </TouchableOpacity>
+
+                            {/* Share Profile */}
+                            <TouchableOpacity
+                                style={styles.menuButton}
+                                onPress={async () => {
+                                    setShowProfileMenu(false);
+                                    const profileUrl = `https://gazetteer.app/user/${encodeURIComponent(handle || '')}`;
+                                    try {
+                                        await Share.share({
+                                            message: `Check out ${profileUser?.name || handle}'s profile on Gazetteer: ${profileUrl}`,
+                                            url: profileUrl,
+                                        });
+                                    } catch (err: any) {
+                                        if (err.message !== 'User did not share') {
+                                            console.error('Error sharing:', err);
+                                        }
+                                    }
+                                }}
+                            >
+                                <View style={styles.menuIconContainer}>
+                                    <Icon name="share-social" size={32} color="#FFFFFF" />
+                                </View>
+                                <Text style={styles.menuButtonText}>Share profile</Text>
+                            </TouchableOpacity>
+
+                            {/* QR Code */}
+                            <TouchableOpacity
+                                style={styles.menuButton}
+                                onPress={() => {
+                                    setShowProfileMenu(false);
+                                    Alert.alert('QR Code', 'QR code feature coming soon!');
+                                }}
+                            >
+                                <View style={styles.menuIconContainer}>
+                                    <Icon name="qr-code" size={32} color="#FFFFFF" />
+                                </View>
+                                <Text style={styles.menuButtonText}>QR code</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </TouchableOpacity>
             </Modal>
         </SafeAreaView>
     );
@@ -568,6 +656,41 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '500',
         color: '#FFFFFF',
+    },
+    menuOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    menuContainer: {
+        backgroundColor: '#262626',
+        borderRadius: 24,
+        padding: 24,
+    },
+    menuContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 24,
+    },
+    menuButton: {
+        alignItems: 'center',
+        gap: 8,
+    },
+    menuIconContainer: {
+        width: 64,
+        height: 64,
+        borderRadius: 32,
+        backgroundColor: '#000000',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    menuButtonText: {
+        fontSize: 12,
+        fontWeight: '500',
+        color: '#FFFFFF',
+        textAlign: 'center',
     },
 });
 

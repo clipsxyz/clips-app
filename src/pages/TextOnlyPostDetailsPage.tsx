@@ -16,7 +16,6 @@ export default function TextOnlyPostDetailsPage() {
 
     const [locationText, setLocationText] = useState('');
     const [taggedUsers, setTaggedUsers] = useState<string[]>([]);
-    const [bannerText, setBannerText] = useState('');
     const [showUserTagging, setShowUserTagging] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -124,7 +123,7 @@ export default function TextOnlyPostDetailsPage() {
                 undefined, // stickers
                 undefined, // templateId
                 undefined, // mediaItems
-                bannerText.trim() || undefined, // bannerText
+                undefined, // bannerText
                 { color: '#ffffff', size: 'medium', background: '#000000' }, // textStyle
                 taggedUsers.length > 0 ? taggedUsers : undefined // taggedUsers
             );
@@ -235,31 +234,6 @@ export default function TextOnlyPostDetailsPage() {
                     )}
                 </button>
 
-                {/* News Ticker Banner */}
-                <div className="p-4 rounded-xl bg-gray-900/30 border border-gray-800">
-                    <label className="block text-white font-medium mb-2">
-                        News Ticker Banner
-                    </label>
-                    <input
-                        type="text"
-                        value={bannerText}
-                        onChange={(e) => setBannerText(e.target.value)}
-                        placeholder="Enter banner text (e.g., Breaking news headline...)"
-                        maxLength={200}
-                        className="w-full bg-transparent text-white placeholder-gray-500 text-base border-none outline-none"
-                    />
-                    <div className="flex items-center justify-between mt-2">
-                        <span className="text-xs text-gray-400">
-                            Scrolling news ticker banner
-                        </span>
-                        <span className={`text-xs ${bannerText.length > 180
-                                ? 'text-red-500'
-                                : 'text-gray-500'
-                            }`}>
-                            {bannerText.length}/200
-                        </span>
-                    </div>
-                </div>
             </div>
 
             {/* User Tagging Modal */}

@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck } from 'react-icons/fi';
+import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from './constants';
 import TopBar from './components/TopBar';
@@ -37,6 +37,7 @@ import type { EffectConfig } from './utils/effects';
 import ProgressiveImage from './components/ProgressiveImage';
 import ZoomableMedia from './components/ZoomableMedia';
 import { getInstagramImageDimensions, getImageSize } from './utils/imageDimensions';
+import Swal from 'sweetalert2';
 
 type Tab = string; // Dynamic based on user location
 
@@ -752,7 +753,7 @@ function PostHeader({ post, onFollow, isOverlaid = false, onMenuClick }: {
         <div className="relative z-10 flex flex-col items-end gap-2">
           {/* Location and 3 dots - side by side */}
           <div className="flex items-center gap-2">
-            {/* Location Button - Smaller pill shaped with pin icon */}
+            {/* Location Button - White banner with camera icon */}
             {post.locationLabel && (
               <button
                 onClick={(e) => {
@@ -763,13 +764,14 @@ function PostHeader({ post, onFollow, isOverlaid = false, onMenuClick }: {
                   }));
                   navigate(`/feed?location=${encodeURIComponent(post.locationLabel)}`);
                 }}
-                className={`px-2 py-1 rounded-full text-[10px] font-medium transition-all active:scale-[.98] flex items-center gap-1 ${isOverlaid
-                  ? 'bg-white/20 backdrop-blur-sm text-white border border-white/30 hover:bg-white/30'
-                  : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 hover:bg-gray-200 dark:hover:bg-gray-700'
+                title={post.locationLabel}
+                className={`px-2 py-1 rounded-full text-[10px] font-medium transition-all active:scale-[.98] flex items-center gap-1.5 max-w-[120px] ${isOverlaid
+                  ? 'bg-white/50 backdrop-blur-sm text-gray-800 hover:bg-white/60'
+                  : 'bg-white/50 backdrop-blur-sm text-gray-800 hover:bg-white/60'
                   }`}
               >
-                <FiMapPin className="w-2.5 h-2.5" />
-                <span>{post.locationLabel}</span>
+                <span className="truncate whitespace-nowrap">{post.locationLabel}</span>
+                <FiCamera className="w-2.5 h-2.5 text-gray-800 flex-shrink-0" />
               </button>
             )}
             {/* 3-dot menu button - no background, vertical dots */}
@@ -1763,9 +1765,9 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                         <div className="text-xs text-gray-600 flex items-center gap-2 mt-0.5">
                           {postLocationLabel && (
                             <>
-                              <span className="flex items-center gap-1">
-                                <FiMapPin className="w-3 h-3" />
-                                {postLocationLabel}
+                              <span className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/80 backdrop-blur-sm text-gray-800 font-medium">
+                                <span>{postLocationLabel}</span>
+                                <FiCamera className="w-3.5 h-3.5 text-gray-800" />
                               </span>
                               {postCreatedAt && <span className="text-gray-400">·</span>}
                             </>
@@ -1951,27 +1953,6 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
               )}
 
 
-              {/* Video Captions - Display when enabled */}
-              {!isLoading && !hasError && currentItem.type === 'video' && videoCaptionsEnabled && videoCaptionText && (
-                <div className="absolute bottom-16 left-0 right-0 px-4 z-30 pointer-events-none">
-                  <div className="bg-black/80 backdrop-blur-sm rounded-lg px-4 py-3 max-w-[90%] mx-auto">
-                    <p className="text-white text-base font-medium text-center break-words leading-relaxed">
-                      {videoCaptionText}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* Video Subtitles - Display when enabled */}
-              {!isLoading && !hasError && currentItem.type === 'video' && subtitlesEnabled && subtitleText && (
-                <div className="absolute bottom-24 left-0 right-0 px-4 z-30 pointer-events-none">
-                  <div className="bg-black/80 backdrop-blur-sm rounded-lg px-4 py-3 max-w-[90%] mx-auto">
-                    <p className="text-white text-base font-medium text-center break-words leading-relaxed">
-                      {subtitleText}
-                    </p>
-                  </div>
-                </div>
-              )}
             </div>
           );
         })()}
@@ -2415,6 +2396,42 @@ function EngagementBar({
 
   async function reclipClick() {
     if (busy) return;
+    
+    // Show confirmation modal
+    const result = await Swal.fire({
+      title: 'Reshare this to followers?',
+      html: `
+        <div style="text-align: center; padding: 20px 0;">
+          <p style="color: #ffffff; font-size: 14px; line-height: 20px; margin: 0;">
+            This post will be shared to your followers in their Following feed.
+          </p>
+        </div>
+      `,
+      showCancelButton: true,
+      confirmButtonText: 'OK',
+      cancelButtonText: 'Cancel',
+      confirmButtonColor: '#0095f6',
+      cancelButtonColor: '#8e8e8e',
+      background: '#262626',
+      color: '#ffffff',
+      customClass: {
+        popup: 'instagram-style-modal',
+        title: 'instagram-modal-title',
+        htmlContainer: 'instagram-modal-content',
+        confirmButton: 'instagram-confirm-btn',
+        cancelButton: 'instagram-cancel-btn',
+        actions: 'instagram-modal-actions'
+      },
+      buttonsStyling: true,
+      allowOutsideClick: true,
+      allowEscapeKey: true
+    });
+
+    // Only proceed if user clicked OK
+    if (!result.isConfirmed) {
+      return;
+    }
+
     setBusy(true);
     try {
       await onReclip();
@@ -2425,6 +2442,7 @@ function EngagementBar({
 
   async function shareClick() {
     if (busy) return;
+    // ShareToStoriesModal already has OK/Cancel buttons, so no need for additional confirmation
     setShowShareToStoriesModal(true);
   }
 
@@ -3357,7 +3375,7 @@ function FeedPageWrapper() {
     try {
       requestTokenRef.current++;
       const filterForRequest = currentFilter;
-      const page = await fetchPostsPage(filterForRequest, cursor, 5, userId, user?.local || '', user?.regional || '', user?.national || '');
+      const page = await fetchPostsPage(filterForRequest, cursor, 5, userId, user?.local || '', user?.regional || '', user?.national || '', user?.handle || '');
       // Drop stale results if currentFilter changed since we started (i.e., user changed location)
       if (filterForRequest !== currentFilter) {
         console.warn('Dropping stale page for filter', filterForRequest, 'current filter is now:', currentFilter);
@@ -3443,7 +3461,7 @@ function FeedPageWrapper() {
 
       try {
         // Fetch first page to check for new posts
-        const page = await fetchPostsPage(currentFilter, 0, 5, userId, user?.local || '', user?.regional || '', user?.national || '');
+        const page = await fetchPostsPage(currentFilter, 0, 5, userId, user?.local || '', user?.regional || '', user?.national || '', user?.handle || '');
 
         if (page.items.length > 0) {
           const newestPostId = page.items[0].id;
@@ -3465,7 +3483,7 @@ function FeedPageWrapper() {
 
             // Load fresh data using the same pattern as loadMore
             const filterForRequest = currentFilter;
-            const pageFresh = await fetchPostsPage(filterForRequest, 0, 5, userId, user?.local || '', user?.regional || '', user?.national || '');
+            const pageFresh = await fetchPostsPage(filterForRequest, 0, 5, userId, user?.local || '', user?.regional || '', user?.national || '', user?.handle || '');
             setPages([pageFresh.items]);
             setCursor(pageFresh.nextCursor);
             setEnd(pageFresh.nextCursor === null);
@@ -3796,6 +3814,7 @@ function FeedPageWrapper() {
                 console.log('Post already reclipped by user, ignoring reclip request');
                 return;
               }
+              
               if (!online) {
                 // Optimistically update userReclipped and reclip count
                 updateOne(p.id, post => ({
@@ -3821,14 +3840,14 @@ function FeedPageWrapper() {
                 return;
               }
 
-              // New reclip was created - update the original post and add reclipped post to feed
+              // New reclip was created - update the original post
+              // Note: Reclipped posts only appear in the Following feed for users who follow the reclipper
+              // They should NOT be added to the current feed to avoid duplicates
               updateOne(p.id, post => ({
                 ...post,
                 userReclipped: updatedOriginalPost.userReclipped,
                 stats: updatedOriginalPost.stats
               }));
-              // Add the reclipped post to the current feed
-              setPages(prev => [[reclippedPost], ...prev]);
               // Notify EngagementBar to update reclip count
               window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`));
             }}
@@ -3993,6 +4012,10 @@ function FeedPageWrapper() {
                 console.log('Post already reclipped by user, ignoring reclip request');
                 return;
               }
+              
+              // Note: Confirmation modal is already shown in EngagementBar's reclipClick function
+              // No need to show it again here
+              
               const newReclipsCount = p.stats.reclips + 1;
               if (!online) {
                 // Optimistically update userReclipped and reclip count
@@ -4030,7 +4053,9 @@ function FeedPageWrapper() {
                 return;
               }
 
-              // New reclip was created - update the original post and add reclipped post to feed
+              // New reclip was created - update the original post
+              // Note: Reclipped posts only appear in the Following feed for users who follow the reclipper
+              // They should NOT be added to the current feed to avoid duplicates
               updateOne(p.id, post => ({
                 ...post,
                 userReclipped: updatedOriginalPost.userReclipped,
@@ -4040,8 +4065,6 @@ function FeedPageWrapper() {
               if (selectedPostForScenes?.id === p.id) {
                 setSelectedPostForScenes(updatedOriginalPost);
               }
-              // Add the reclipped post to the feed
-              setPages(prev => [[reclippedPost], ...prev]);
               // Notify UI to update reclip count with the new value
               window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`, {
                 detail: { reclips: updatedOriginalPost.stats.reclips }
