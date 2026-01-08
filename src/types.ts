@@ -155,6 +155,14 @@ export type Story = {
   userReaction?: string; // Current user's reaction emoji
   sharedFromPost?: string; // Original post ID if this story is shared from a post
   sharedFromUser?: string; // Original post author if this story is shared from a post
+  poll?: {
+    question: string;
+    option1: string;
+    option2: string;
+    votes1?: number; // Number of votes for option 1
+    votes2?: number; // Number of votes for option 2
+    userVote?: 'option1' | 'option2'; // Current user's vote
+  };
 };
 
 export type StoryGroup = {

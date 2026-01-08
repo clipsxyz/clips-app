@@ -1,10 +1,10 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiHeart, FiVolume2, FiVolumeX, FiMaximize2, FiMapPin } from 'react-icons/fi';
+import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiHeart, FiVolume2, FiVolumeX, FiMaximize2, FiMapPin, FiSend, FiLink, FiCopy } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
-import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle } from '../api/stories';
+import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle, voteOnPoll } from '../api/stories';
 import { appendMessage } from '../api/messages';
 import Swal from 'sweetalert2';
 import { isProfilePrivate, canSendMessage } from '../api/privacy';
@@ -32,13 +32,22 @@ export default function StoriesPage() {
     const [showEmojiPicker, setShowEmojiPicker] = React.useState(false);
     const [showReplyModal, setShowReplyModal] = React.useState(false);
     const [replyText, setReplyText] = React.useState('');
+    const [showStoryShareModal, setShowStoryShareModal] = React.useState(false);
     const [showControls, setShowControls] = React.useState(true);
     const [showScenesModal, setShowScenesModal] = React.useState(false);
     const [fullPost, setFullPost] = React.useState<Post | null>(null);
     const [originalPost, setOriginalPost] = React.useState<Post | null>(null);
+    const [optimisticVote, setOptimisticVote] = React.useState<'option1' | 'option2' | null>(null);
     const videoRef = React.useRef<HTMLVideoElement>(null);
     const elapsedTimeRef = React.useRef<number>(0);
     const pausedRef = React.useRef<boolean>(false);
+    const isVotingRef = React.useRef<boolean>(false);
+    const nextStoryTimeoutRef = React.useRef<number | null>(null);
+
+    // Swipe gesture tracking for story navigation
+    const swipeStartXRef = React.useRef<number | null>(null);
+    const swipeStartYRef = React.useRef<number | null>(null);
+    const swipeStartedOnPollRef = React.useRef<boolean>(false);
 
     // Keep ref in sync with state
     React.useEffect(() => {
@@ -151,6 +160,11 @@ export default function StoriesPage() {
 
     // Navigate to next story
     function nextStory() {
+        // Don't advance if user is voting
+        if (isVotingRef.current) {
+            return;
+        }
+        
         const currentGroup = storyGroups[currentGroupIndex];
         if (!currentGroup) return;
 
@@ -171,6 +185,74 @@ export default function StoriesPage() {
                 closeStories();
             }
         }
+    }
+
+    // Swipe gesture handlers (horizontal drag to change story)
+    const SWIPE_THRESHOLD_PX = 40; // Minimum horizontal movement
+
+    function handleSwipeStart(e: React.TouchEvent | React.MouseEvent) {
+        if (!viewingStories) return;
+        // Check if touch started on poll area
+        const target = e.target as HTMLElement;
+        const isOnPoll = target.closest('[data-poll-container]');
+        if (isOnPoll) {
+            swipeStartedOnPollRef.current = true;
+            return;
+        }
+        swipeStartedOnPollRef.current = false;
+        const point = 'touches' in e ? e.touches[0] : (e as React.MouseEvent);
+        swipeStartXRef.current = point.clientX;
+        swipeStartYRef.current = point.clientY;
+    }
+
+    function handleSwipeEnd(e: React.TouchEvent | React.MouseEvent) {
+        if (!viewingStories) return;
+        // Don't navigate if user is voting
+        if (isVotingRef.current) {
+            swipeStartXRef.current = null;
+            swipeStartYRef.current = null;
+            swipeStartedOnPollRef.current = false;
+            return;
+        }
+        // Don't navigate if swipe started on poll
+        if (swipeStartedOnPollRef.current) {
+            swipeStartedOnPollRef.current = false;
+            swipeStartXRef.current = null;
+            swipeStartYRef.current = null;
+            return;
+        }
+        if (swipeStartXRef.current === null || swipeStartYRef.current === null) return;
+
+        const point = 'changedTouches' in e ? e.changedTouches[0] : (e as React.MouseEvent);
+        const dx = point.clientX - swipeStartXRef.current;
+        const dy = point.clientY - swipeStartYRef.current;
+
+        swipeStartXRef.current = null;
+        swipeStartYRef.current = null;
+
+        // Only consider primarily horizontal swipes
+        if (Math.abs(dx) < SWIPE_THRESHOLD_PX || Math.abs(dx) < Math.abs(dy)) {
+            return;
+        }
+
+        // Double check voting state before navigating
+        if (isVotingRef.current) {
+            return;
+        }
+
+        if (dx < 0) {
+            // Swipe left -> next story
+            nextStory();
+        } else if (dx > 0) {
+            // Swipe right -> previous story
+            previousStory();
+        }
+    }
+
+    function handleSwipeCancel() {
+        swipeStartXRef.current = null;
+        swipeStartYRef.current = null;
+        swipeStartedOnPollRef.current = false;
     }
 
     // Navigate to previous story
@@ -273,6 +355,12 @@ export default function StoriesPage() {
         const currentStory = currentGroup.stories[currentStoryIndex];
         if (!currentStory) return;
 
+        // For poll stories, never auto-advance – require a manual swipe instead.
+        if (currentStory.poll) {
+            setProgress(0);
+            return;
+        }
+
         // Reset elapsed time when starting a new story
         elapsedTimeRef.current = 0;
         setProgress(0);
@@ -286,17 +374,36 @@ export default function StoriesPage() {
         const interval = 50;
 
         const timer = setInterval(() => {
-            if (pausedRef.current || showScenesModal) return; // Don't update progress when paused or ScenesModal is open
+            // Don't update progress when paused, voting, or ScenesModal is open
+            if (pausedRef.current || showScenesModal || isVotingRef.current) {
+                return;
+            }
 
             elapsedTimeRef.current += interval;
             const newProgress = Math.min((elapsedTimeRef.current / duration) * 100, 100);
             setProgress(newProgress);
 
+            // Only advance if not voting and progress is complete
             if (newProgress >= 100) {
+                // Double check voting state before scheduling navigation
+                if (isVotingRef.current || pausedRef.current) {
+                    return; // Don't advance if voting or paused
+                }
                 clearInterval(timer);
                 elapsedTimeRef.current = 0; // Reset for next story
-                setTimeout(() => {
-                    nextStory();
+
+                // Clear any existing scheduled navigation
+                if (nextStoryTimeoutRef.current !== null) {
+                    clearTimeout(nextStoryTimeoutRef.current);
+                }
+
+                // Schedule a small delay before moving to the next story
+                nextStoryTimeoutRef.current = window.setTimeout(() => {
+                    // Triple check before actually calling nextStory
+                    if (!isVotingRef.current && !pausedRef.current) {
+                        nextStory();
+                    }
+                    nextStoryTimeoutRef.current = null;
                 }, 300);
             }
         }, interval);
@@ -381,6 +488,11 @@ export default function StoriesPage() {
         }
     }, [paused, viewingStories, currentGroupIndex, currentStoryIndex, storyGroups]);
 
+    // Reset optimistic vote when story changes - MUST be before conditional returns
+    React.useEffect(() => {
+        setOptimisticVote(null);
+    }, [currentStoryIndex, currentGroupIndex]);
+
     // Sort story groups by latest story (most recent first) - MUST be before conditional returns
     const sortedGroups = React.useMemo(() => {
         return [...storyGroups].filter(group => group.stories && group.stories.length > 0).sort((a, b) => {
@@ -399,6 +511,19 @@ export default function StoriesPage() {
         if (seconds < 86400) return `Active ${Math.floor(seconds / 3600)}h ago`;
         if (seconds < 604800) return `Active ${Math.floor(seconds / 86400)}d ago`;
         return `Active ${Math.floor(seconds / 604800)}w ago`;
+    };
+
+    // Build a shareable URL for the current story
+    const getCurrentStoryShareUrl = () => {
+        if (!currentGroup || !currentStory) return window.location.href;
+        try {
+            const base = window.location.origin;
+            const handle = encodeURIComponent(currentGroup.userHandle);
+            const storyId = encodeURIComponent(currentStory.id);
+            return `${base}/stories?user=${handle}&story=${storyId}`;
+        } catch {
+            return window.location.href;
+        }
     };
 
     if (loading) {
@@ -437,7 +562,9 @@ export default function StoriesPage() {
     if (viewingStories && currentStory && currentGroup && currentGroup.stories) {
         return (
             <>
-                <div className="fixed inset-0 bg-gradient-to-br from-gray-950 via-black to-gray-950 z-50">
+                <div className="fixed inset-0 z-50" style={{
+                    background: 'linear-gradient(to bottom right, rgba(255, 78, 203, 0.15), rgba(0, 0, 0, 0.95), rgba(143, 91, 255, 0.15))'
+                }}>
                     {/* Progress bars for each story */}
                     <div className="absolute top-0 left-0 right-0 z-50 px-4 pt-3 pb-2">
                         <div className="flex gap-1.5">
@@ -471,7 +598,15 @@ export default function StoriesPage() {
                     </div>
 
                     {/* Story Media - Full screen with elegant container */}
-                    <div className="absolute inset-0 flex items-center justify-center">
+                    <div
+                        className="absolute inset-0 flex items-center justify-center"
+                        onMouseDown={handleSwipeStart}
+                        onMouseUp={handleSwipeEnd}
+                        onMouseLeave={handleSwipeCancel}
+                        onTouchStart={handleSwipeStart}
+                        onTouchEnd={handleSwipeEnd}
+                        onTouchCancel={handleSwipeCancel}
+                    >
                         <div className="relative w-full h-full max-w-[420px] max-h-[90vh] aspect-[9/16] flex items-center justify-center">
                             <div className="relative w-full h-full rounded-2xl overflow-hidden shadow-2xl bg-black">
                                 {(() => {
@@ -621,6 +756,7 @@ export default function StoriesPage() {
                                     }
                                     
                                     // Not a shared post - show regular story content
+                                    // Poll story with media - show media (poll overlay will be shown separately)
                                     if (currentStory?.mediaUrl) {
                                         return currentStory.mediaType === 'video' ? (
                                             <video
@@ -642,24 +778,52 @@ export default function StoriesPage() {
                                         );
                                     }
                                     
+                                    // Poll story without media - show poll background with Gazetteer gradient (poll overlay will show the content)
+                                    if (currentStory?.poll && !currentStory.mediaUrl) {
+                                        return (
+                                            <div
+                                                className="w-full h-full flex items-center justify-center p-4"
+                                                style={{
+                                                    background: 'linear-gradient(to bottom right, rgba(255, 78, 203, 0.2), rgba(0, 0, 0, 0.9), rgba(143, 91, 255, 0.2))'
+                                                }}
+                                            >
+                                                {/* Poll overlay will render the question and options below */}
+                                            </div>
+                                        );
+                                    }
+
                                     // Text-only story display (directly created, not shared) - keep original style with gradient/textStyle
+                                    if (currentStory?.text) {
+                                        return (
+                                            <div
+                                                className="w-full h-full flex items-center justify-center p-4"
+                                                style={{
+                                                    background: currentStory?.textStyle?.background || '#1a1a1a'
+                                                }}
+                                            >
+                                                <div className="w-full max-w-md">
+                                                    <div
+                                                        className="text-base leading-relaxed whitespace-pre-wrap font-normal px-6 py-8"
+                                                        style={{
+                                                            color: currentStory?.textStyle?.color || '#ffffff'
+                                                        }}
+                                                    >
+                                                        {currentStory?.text}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    }
+
+                                    // Fallback - should never reach here, but ensures something always renders
                                     return (
                                         <div
                                             className="w-full h-full flex items-center justify-center p-4"
                                             style={{
-                                                background: currentStory?.textStyle?.background || '#1a1a1a'
+                                                background: '#1a1a1a'
                                             }}
                                         >
-                                            <div className="w-full max-w-md">
-                                                <div
-                                                    className="text-base leading-relaxed whitespace-pre-wrap font-normal px-6 py-8"
-                                                    style={{
-                                                        color: currentStory?.textStyle?.color || '#ffffff'
-                                                    }}
-                                                >
-                                                    {currentStory?.text}
-                                                </div>
-                                            </div>
+                                            <p className="text-white">Story</p>
                                         </div>
                                     );
                                 })()}
@@ -695,6 +859,322 @@ export default function StoriesPage() {
                                         ))}
                                     </>
                                 )}
+
+                                {/* Poll Overlay */}
+                                {(() => {
+                                    try {
+                                        if (!currentStory?.poll) return null;
+                                        if (!currentStory.poll.question || !currentStory.poll.option1 || !currentStory.poll.option2) {
+                                            console.warn('Poll data incomplete:', currentStory.poll);
+                                            return null;
+                                        }
+                                        console.log('Rendering poll:', {
+                                            question: currentStory.poll.question,
+                                            option1: currentStory.poll.option1,
+                                            option2: currentStory.poll.option2,
+                                            hasMedia: !!currentStory.mediaUrl
+                                        });
+                                        return (
+                                    <div 
+                                        data-poll-container
+                                        className="absolute bottom-32 left-0 right-0 px-4 z-[80] pointer-events-auto" 
+                                        style={{ maxWidth: '100%' }}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            e.preventDefault();
+                                        }}
+                                        onTouchStart={(e) => {
+                                            e.stopPropagation();
+                                            swipeStartedOnPollRef.current = true;
+                                        }}
+                                        onTouchEnd={(e) => {
+                                            e.stopPropagation();
+                                        }}
+                                        onTouchMove={(e) => {
+                                            e.stopPropagation();
+                                        }}
+                                        onMouseDown={(e) => {
+                                            e.stopPropagation();
+                                            e.preventDefault();
+                                            swipeStartedOnPollRef.current = true;
+                                        }}
+                                        onMouseUp={(e) => {
+                                            e.stopPropagation();
+                                            e.preventDefault();
+                                        }}
+                                        onMouseMove={(e) => {
+                                            e.stopPropagation();
+                                            e.preventDefault();
+                                        }}
+                                    >
+                                        <div 
+                                            className="rounded-2xl p-[2px] max-w-sm mx-auto"
+                                            style={{
+                                                background: 'linear-gradient(to right, rgba(255, 78, 203, 0.8), rgba(143, 91, 255, 0.8))'
+                                            }}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                e.preventDefault();
+                                            }}
+                                            onTouchStart={(e) => {
+                                                e.stopPropagation();
+                                                e.preventDefault();
+                                            }}
+                                        >
+                                            <div 
+                                                className="backdrop-blur-md bg-white/90 rounded-2xl p-4 shadow-xl"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    e.preventDefault();
+                                                }}
+                                                onTouchStart={(e) => {
+                                                    e.stopPropagation();
+                                                    e.preventDefault();
+                                                }}
+                                            >
+                                            {/* Poll Question */}
+                                            <p className="text-gray-900 font-semibold text-base mb-4 text-center">
+                                                {currentStory.poll.question || 'Poll Question'}
+                                            </p>
+
+                                            {/* Poll Options */}
+                                            <div className="space-y-2">
+                                                {/* Option 1 */}
+                                                <button
+                                                    onClick={async (e) => {
+                                                        e.stopPropagation();
+                                                        e.preventDefault();
+                                                        e.nativeEvent?.stopImmediatePropagation();
+                                                        if (!user?.id || currentStory.poll?.userVote === 'option1') return false;
+                                                        
+                                                        // IMMEDIATE visual feedback - turn blue right away
+                                                        setOptimisticVote('option1');
+                                                        
+                                                        // Immediately pause and prevent ALL navigation - set ref FIRST
+                                                        isVotingRef.current = true;
+                                                        pausedRef.current = true;
+                                                        setPaused(true);
+                                                        elapsedTimeRef.current = 0;
+                                                        setProgress(0);
+                                                        // Clear any pending nextStory calls
+                                                        if (nextStoryTimeoutRef.current !== null) {
+                                                            clearTimeout(nextStoryTimeoutRef.current);
+                                                            nextStoryTimeoutRef.current = null;
+                                                        }
+                                                        // Reset swipe tracking to prevent navigation
+                                                        swipeStartXRef.current = null;
+                                                        swipeStartYRef.current = null;
+                                                        swipeStartedOnPollRef.current = true;
+                                                        
+                                                        // Use requestAnimationFrame to ensure state is set before async call
+                                                        requestAnimationFrame(async () => {
+                                                            try {
+                                                                await voteOnPoll(currentStory.id, user.id, 'option1');
+                                                                // Refresh story data
+                                                                const groups = await fetchStoryGroups(user.id);
+                                                                setStoryGroups(groups);
+                                                                // Clear optimistic vote after data is refreshed
+                                                                setOptimisticVote(null);
+                                                                
+                                                                // Resume after 5 seconds so user can see the results
+                                                                setTimeout(() => {
+                                                                    isVotingRef.current = false;
+                                                                    setPaused(false);
+                                                                    pausedRef.current = false;
+                                                                }, 5000);
+                                                            } catch (error) {
+                                                                console.error('Error voting on poll:', error);
+                                                                setOptimisticVote(null);
+                                                                isVotingRef.current = false;
+                                                                setPaused(false);
+                                                                pausedRef.current = false;
+                                                            }
+                                                        });
+                                                        
+                                                        return false;
+                                                    }}
+                                                    onMouseDown={(e) => {
+                                                        e.stopPropagation();
+                                                        e.preventDefault();
+                                                    }}
+                                                    onTouchStart={(e) => {
+                                                        e.stopPropagation();
+                                                    }}
+                                                    disabled={currentStory?.poll?.userVote !== undefined || optimisticVote !== null}
+                                                    className={`w-full px-4 py-3 rounded-xl font-semibold text-sm transition-all ${
+                                                        optimisticVote === 'option1' || currentStory?.poll?.userVote === 'option1'
+                                                            ? 'bg-blue-500 text-white'
+                                                            : optimisticVote === 'option2' || currentStory?.poll?.userVote === 'option2'
+                                                            ? 'bg-gray-200 text-gray-600'
+                                                            : 'bg-gray-100 text-gray-900 hover:bg-gray-200'
+                                                    } ${(currentStory?.poll?.userVote !== undefined || optimisticVote !== null) ? 'cursor-default' : 'cursor-pointer'}`}
+                                                >
+                                                    <div className="flex items-center justify-between">
+                                                        <span>{currentStory.poll.option1 || 'Option 1'}</span>
+                                                        {currentStory.poll?.userVote !== undefined && (
+                                                            <span className="text-xs">
+                                                                {(() => {
+                                                                    try {
+                                                                        const votes1 = currentStory.poll?.votes1 || 0;
+                                                                        const votes2 = currentStory.poll?.votes2 || 0;
+                                                                        const totalVotes = votes1 + votes2;
+                                                                        if (totalVotes === 0) return '0%';
+                                                                        const percentage = Math.round((votes1 / totalVotes) * 100);
+                                                                        return `${percentage}%`;
+                                                                    } catch (e) {
+                                                                        return '0%';
+                                                                    }
+                                                                })()}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {/* Progress bar */}
+                                                    {currentStory.poll.userVote !== undefined && (
+                                                        <div className="mt-2 h-1 bg-gray-300 rounded-full overflow-hidden">
+                                                            <div
+                                                                className="h-full bg-blue-500 transition-all"
+                                                                style={{
+                                                                    width: `${(() => {
+                                                                        const totalVotes = (currentStory.poll?.votes1 || 0) + (currentStory.poll?.votes2 || 0);
+                                                                        if (totalVotes === 0) return 0;
+                                                                        return ((currentStory.poll?.votes1 || 0) / totalVotes) * 100;
+                                                                    })()}%`
+                                                                }}
+                                                            />
+                                                        </div>
+                                                    )}
+                                                </button>
+
+                                                {/* Option 2 */}
+                                                <button
+                                                    onClick={async (e) => {
+                                                        e.stopPropagation();
+                                                        e.preventDefault();
+                                                        e.nativeEvent?.stopImmediatePropagation();
+                                                        if (!user?.id || currentStory.poll?.userVote === 'option2') return false;
+                                                        
+                                                        // IMMEDIATE visual feedback - turn blue right away
+                                                        setOptimisticVote('option2');
+                                                        
+                                                        // Immediately pause and prevent ALL navigation - set ref FIRST
+                                                        isVotingRef.current = true;
+                                                        pausedRef.current = true;
+                                                        setPaused(true);
+                                                        elapsedTimeRef.current = 0;
+                                                        setProgress(0);
+                                                        // Clear any pending nextStory calls
+                                                        if (nextStoryTimeoutRef.current !== null) {
+                                                            clearTimeout(nextStoryTimeoutRef.current);
+                                                            nextStoryTimeoutRef.current = null;
+                                                        }
+                                                        // Reset swipe tracking to prevent navigation
+                                                        swipeStartXRef.current = null;
+                                                        swipeStartYRef.current = null;
+                                                        swipeStartedOnPollRef.current = true;
+                                                        
+                                                        // Use requestAnimationFrame to ensure state is set before async call
+                                                        requestAnimationFrame(async () => {
+                                                            try {
+                                                                await voteOnPoll(currentStory.id, user.id, 'option2');
+                                                                // Refresh story data
+                                                                const groups = await fetchStoryGroups(user.id);
+                                                                setStoryGroups(groups);
+                                                                // Clear optimistic vote after data is refreshed
+                                                                setOptimisticVote(null);
+                                                                
+                                                                // Resume after 5 seconds so user can see the results
+                                                                setTimeout(() => {
+                                                                    isVotingRef.current = false;
+                                                                    setPaused(false);
+                                                                    pausedRef.current = false;
+                                                                }, 5000);
+                                                            } catch (error) {
+                                                                console.error('Error voting on poll:', error);
+                                                                setOptimisticVote(null);
+                                                                isVotingRef.current = false;
+                                                                setPaused(false);
+                                                                pausedRef.current = false;
+                                                            }
+                                                        });
+                                                        
+                                                        return false;
+                                                    }}
+                                                    onMouseDown={(e) => {
+                                                        e.stopPropagation();
+                                                        e.preventDefault();
+                                                    }}
+                                                    onTouchStart={(e) => {
+                                                        e.stopPropagation();
+                                                    }}
+                                                    disabled={currentStory?.poll?.userVote !== undefined || optimisticVote !== null}
+                                                    className={`w-full px-4 py-3 rounded-xl font-semibold text-sm transition-all ${
+                                                        optimisticVote === 'option2' || currentStory?.poll?.userVote === 'option2'
+                                                            ? 'bg-blue-500 text-white'
+                                                            : optimisticVote === 'option1' || currentStory?.poll?.userVote === 'option1'
+                                                            ? 'bg-gray-200 text-gray-600'
+                                                            : 'bg-gray-100 text-gray-900 hover:bg-gray-200'
+                                                    } ${(currentStory?.poll?.userVote !== undefined || optimisticVote !== null) ? 'cursor-default' : 'cursor-pointer'}`}
+                                                >
+                                                    <div className="flex items-center justify-between">
+                                                        <span>{currentStory.poll.option2 || 'Option 2'}</span>
+                                                        {currentStory.poll?.userVote !== undefined && (
+                                                            <span className="text-xs">
+                                                                {(() => {
+                                                                    try {
+                                                                        const votes1 = currentStory.poll?.votes1 || 0;
+                                                                        const votes2 = currentStory.poll?.votes2 || 0;
+                                                                        const totalVotes = votes1 + votes2;
+                                                                        if (totalVotes === 0) return '0%';
+                                                                        const percentage = Math.round((votes2 / totalVotes) * 100);
+                                                                        return `${percentage}%`;
+                                                                    } catch (e) {
+                                                                        return '0%';
+                                                                    }
+                                                                })()}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {/* Progress bar */}
+                                                    {currentStory.poll.userVote !== undefined && (
+                                                        <div className="mt-2 h-1 bg-gray-300 rounded-full overflow-hidden">
+                                                            <div
+                                                                className="h-full bg-blue-500 transition-all"
+                                                                style={{
+                                                                    width: `${(() => {
+                                                                        const totalVotes = (currentStory.poll?.votes1 || 0) + (currentStory.poll?.votes2 || 0);
+                                                                        if (totalVotes === 0) return 0;
+                                                                        return ((currentStory.poll?.votes2 || 0) / totalVotes) * 100;
+                                                                    })()}%`
+                                                                }}
+                                                            />
+                                                        </div>
+                                                    )}
+                                                </button>
+                                            </div>
+
+                                            {/* Vote count */}
+                                            {currentStory.poll?.userVote !== undefined && (
+                                                <p className="text-gray-600 text-xs text-center mt-3">
+                                                    {(() => {
+                                                        try {
+                                                            const votes1 = currentStory.poll?.votes1 || 0;
+                                                            const votes2 = currentStory.poll?.votes2 || 0;
+                                                            return `${votes1 + votes2} votes`;
+                                                        } catch (e) {
+                                                            return '0 votes';
+                                                        }
+                                                    })()}
+                                                </p>
+                                            )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                        );
+                                    } catch (error) {
+                                        console.error('Error rendering poll:', error);
+                                        return null;
+                                    }
+                                })()}
                             </div>
                         </div>
                     </div>
@@ -917,62 +1397,58 @@ export default function StoriesPage() {
                         </div>
                     )}
 
-                    {/* Action Buttons - vertical right side (auto-hide) */}
-                    <div className={`absolute right-4 bottom-16 z-[70] flex flex-col items-center gap-3 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-                        {/* Reaction Button (single like) */}
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                handleReaction('❤️');
-                            }}
-                            className="pointer-events-auto w-14 h-14 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center hover:bg-black/70 transition-all active:scale-95 border border-white/20 shadow-xl"
-                        >
-                            {currentStory?.userReaction ? (
-                                <span className="text-2xl">{currentStory.userReaction}</span>
-                            ) : (
-                                <FiHeart className="w-6 h-6 text-white" />
-                            )}
-                        </button>
+                    {/* Bottom Action Bar - Instagram Style */}
+                    <div className="absolute bottom-0 left-0 right-0 z-[60] px-4 pb-4">
+                        <div className="flex items-center gap-2 bg-black/50 backdrop-blur-sm rounded-full px-4 py-2.5 border border-white/20 max-w-md mx-auto">
+                            {/* Send Message Input */}
+                            <input
+                                type="text"
+                                value={replyText}
+                                onChange={(e) => setReplyText(e.target.value)}
+                                onFocus={(e) => {
+                                    e.stopPropagation();
+                                    setShowReplyModal(true);
+                                }}
+                                placeholder="Send message"
+                                className="flex-1 bg-transparent text-white placeholder-white/70 text-sm outline-none py-1"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setShowReplyModal(true);
+                                }}
+                                readOnly
+                            />
+                            
+                            {/* Like Button */}
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    handleReaction('❤️');
+                                }}
+                                className="p-1.5 rounded-full hover:bg-white/10 transition-colors flex-shrink-0"
+                            >
+                                {currentStory?.userReaction ? (
+                                    <span className="text-lg">{currentStory.userReaction}</span>
+                                ) : (
+                                    <FiHeart className="w-5 h-5 text-white" />
+                                )}
+                            </button>
 
-                        {/* Reply Button */}
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                setShowReplyModal(true);
-                            }}
-                            className="pointer-events-auto w-14 h-14 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center hover:bg-black/70 transition-all active:scale-95 border border-white/20 shadow-xl"
-                        >
-                            <FiMessageCircle className="w-6 h-6 text-white" />
-                        </button>
+                            {/* Share Button */}
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    setShowStoryShareModal(true);
+                                }}
+                                className="p-1.5 rounded-full hover:bg-white/10 transition-colors flex-shrink-0"
+                            >
+                                <FiSend className="w-5 h-5 text-white" />
+                            </button>
+                        </div>
                     </div>
 
-                    {/* Tap Zones for Navigation and Pause */}
-                    <div className="absolute inset-0 z-40 pointer-events-none">
-                        {/* Center tap zone - Pause/Resume - but exclude bottom area where text is */}
-                        <div
-                            onClick={() => setPaused(!paused)}
-                            className="absolute left-1/3 right-1/3 top-0"
-                            style={{ bottom: '200px' }} // Exclude bottom area where story text appears
-                        />
-
-                        {/* Left zone - Previous Story */}
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                previousStory();
-                            }}
-                            className="absolute left-0 top-0 bottom-0 w-1/4 pointer-events-auto"
-                        />
-
-                        {/* Right zone - Next Story */}
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                nextStory();
-                            }}
-                            className="absolute right-0 top-0 bottom-0 w-1/4 pointer-events-auto"
-                        />
-                    </div>
+                    {/* Swipe navigation is handled on the main media container - no tap zones to avoid conflicts with polls */}
                 </div>
 
                 {/* Reply Modal - Inside story viewer */}
@@ -1048,6 +1524,150 @@ export default function StoriesPage() {
                                         View in chat
                                     </button>
                                 )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Story Share Sheet - for WhatsApp, Copy Link, etc. */}
+                {showStoryShareModal && currentStory && (
+                    <div
+                        className="fixed inset-0 z-[85] bg-black/60 backdrop-blur-sm flex items-end"
+                        onClick={() => setShowStoryShareModal(false)}
+                    >
+                        <div
+                            className="w-full bg-gray-900 text-white rounded-t-3xl p-4 pb-6 animate-in slide-in-from-bottom duration-300"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <div className="flex items-center justify-between mb-3">
+                                <h3 className="text-base font-semibold">Share story</h3>
+                                <button
+                                    onClick={() => setShowStoryShareModal(false)}
+                                    className="p-2 rounded-full hover:bg-gray-800 transition-colors"
+                                >
+                                    <FiX className="w-5 h-5 text-gray-300" />
+                                </button>
+                            </div>
+
+                            <div className="space-y-3">
+                                {/* Copy Link */}
+                                <button
+                                    onClick={async () => {
+                                        try {
+                                            const url = getCurrentStoryShareUrl();
+                                            await navigator.clipboard.writeText(url);
+                                            showToast?.('Story link copied');
+                                            setShowStoryShareModal(false);
+                                        } catch (err) {
+                                            console.error('Failed to copy story link:', err);
+                                        }
+                                    }}
+                                    className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl bg-gray-800 hover:bg-gray-700 transition-colors"
+                                >
+                                    <span className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-sm font-semibold">
+                                        <FiLink className="w-4 h-4" />
+                                    </span>
+                                    <div className="flex-1 text-left">
+                                        <div className="text-sm font-semibold">Copy link</div>
+                                        <div className="text-xs text-gray-400">Share story link</div>
+                                    </div>
+                                </button>
+
+                                {/* WhatsApp */}
+                                <button
+                                    onClick={() => {
+                                        try {
+                                            const url = encodeURIComponent(getCurrentStoryShareUrl());
+                                            const text = encodeURIComponent(`Check out this story by @${currentGroup?.userHandle || ''}`);
+                                            const shareUrl = `https://wa.me/?text=${text}%20${url}`;
+                                            window.open(shareUrl, '_blank', 'width=600,height=400');
+                                            setShowStoryShareModal(false);
+                                        } catch (err) {
+                                            console.error('Failed to open WhatsApp share:', err);
+                                        }
+                                    }}
+                                    className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl bg-gray-800 hover:bg-gray-700 transition-colors"
+                                >
+                                    <span className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center text-sm font-bold">
+                                        W
+                                    </span>
+                                    <div className="flex-1 text-left">
+                                        <div className="text-sm font-semibold">WhatsApp</div>
+                                        <div className="text-xs text-gray-400">Share via WhatsApp</div>
+                                    </div>
+                                </button>
+
+                                {/* Facebook */}
+                                <button
+                                    onClick={() => {
+                                        try {
+                                            const url = encodeURIComponent(getCurrentStoryShareUrl());
+                                            const shareUrl = `https://www.facebook.com/sharer/sharer.php?u=${url}`;
+                                            window.open(shareUrl, '_blank', 'width=600,height=400');
+                                            setShowStoryShareModal(false);
+                                        } catch (err) {
+                                            console.error('Failed to open Facebook share:', err);
+                                        }
+                                    }}
+                                    className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl bg-gray-800 hover:bg-gray-700 transition-colors"
+                                >
+                                    <span className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-sm font-bold">
+                                        f
+                                    </span>
+                                    <div className="flex-1 text-left">
+                                        <div className="text-sm font-semibold">Facebook</div>
+                                        <div className="text-xs text-gray-400">Share to Facebook</div>
+                                    </div>
+                                </button>
+
+                                {/* X (Twitter) */}
+                                <button
+                                    onClick={() => {
+                                        try {
+                                            const url = encodeURIComponent(getCurrentStoryShareUrl());
+                                            const text = encodeURIComponent(`Check out this story by @${currentGroup?.userHandle || ''}`);
+                                            const shareUrl = `https://twitter.com/intent/tweet?text=${text}&url=${url}`;
+                                            window.open(shareUrl, '_blank', 'width=600,height=400');
+                                            setShowStoryShareModal(false);
+                                        } catch (err) {
+                                            console.error('Failed to open Twitter share:', err);
+                                        }
+                                    }}
+                                    className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl bg-gray-800 hover:bg-gray-700 transition-colors"
+                                >
+                                    <span className="w-8 h-8 rounded-full bg-black flex items-center justify-center text-sm font-bold">
+                                        X
+                                    </span>
+                                    <div className="flex-1 text-left">
+                                        <div className="text-sm font-semibold">X (Twitter)</div>
+                                        <div className="text-xs text-gray-400">Share to X</div>
+                                    </div>
+                                </button>
+
+                                {/* Email */}
+                                <button
+                                    onClick={() => {
+                                        try {
+                                            const url = encodeURIComponent(getCurrentStoryShareUrl());
+                                            const subject = encodeURIComponent('Check out this story');
+                                            const body = encodeURIComponent(`Have a look at this story by @${currentGroup?.userHandle || ''}:\n\n${getCurrentStoryShareUrl()}`);
+                                            const shareUrl = `mailto:?subject=${subject}&body=${body}`;
+                                            window.location.href = shareUrl;
+                                            setShowStoryShareModal(false);
+                                        } catch (err) {
+                                            console.error('Failed to open email share:', err);
+                                        }
+                                    }}
+                                    className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl bg-gray-800 hover:bg-gray-700 transition-colors"
+                                >
+                                    <span className="w-8 h-8 rounded-full bg-red-500 flex items-center justify-center text-sm font-bold">
+                                        @
+                                    </span>
+                                    <div className="flex-1 text-left">
+                                        <div className="text-sm font-semibold">Email</div>
+                                        <div className="text-xs text-gray-400">Share via email</div>
+                                    </div>
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -1266,8 +1886,26 @@ export default function StoriesPage() {
                                         loading="lazy"
                                         onError={(e) => {
                                             const target = e.target as HTMLImageElement;
-                                            if (!target.src.includes('via.placeholder')) {
-                                                target.src = 'https://via.placeholder.com/400x600/1a1a1a/ffffff?text=' + encodeURIComponent(displayName);
+                                            // Use a simple data URI as fallback instead of external service
+                                            if (!target.src.startsWith('data:')) {
+                                                // Create a simple gray placeholder using data URI
+                                                const canvas = document.createElement('canvas');
+                                                canvas.width = 400;
+                                                canvas.height = 600;
+                                                const ctx = canvas.getContext('2d');
+                                                if (ctx) {
+                                                    ctx.fillStyle = '#1a1a1a';
+                                                    ctx.fillRect(0, 0, 400, 600);
+                                                    ctx.fillStyle = '#ffffff';
+                                                    ctx.font = '24px Arial';
+                                                    ctx.textAlign = 'center';
+                                                    ctx.textBaseline = 'middle';
+                                                    ctx.fillText(displayName || 'Story', 200, 300);
+                                                    target.src = canvas.toDataURL();
+                                                } else {
+                                                    // If canvas not available, just hide the image
+                                                    target.style.display = 'none';
+                                                }
                                             }
                                         }}
                                     />

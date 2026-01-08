@@ -10,18 +10,18 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
-import { listConversations, type ConversationSummary } from '../api/messages';
 import { getNotifications, type Notification, markNotificationRead } from '../api/notifications';
+import { getStoryInsightsForUser, type StoryInsight } from '../api/stories';
 import { getAvatarForHandle } from '../api/users';
 import { timeAgo } from '../utils/timeAgo';
 import Avatar from '../components/Avatar';
 
 export default function InboxScreen({ navigation }: any) {
     const { user } = useAuth();
-    const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+    const [insights, setInsights] = useState<StoryInsight[]>([]);
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState<'conversations' | 'notifications'>('notifications');
+    const [activeTab, setActiveTab] = useState<'insights' | 'notifications'>('notifications');
 
     useEffect(() => {
         loadData();
@@ -31,12 +31,12 @@ export default function InboxScreen({ navigation }: any) {
         if (!user?.handle) return;
         setLoading(true);
         try {
-            const [convos, notifs] = await Promise.all([
-                listConversations(user.handle),
+            const [notifs, storyInsights] = await Promise.all([
                 getNotifications(user.handle),
+                getStoryInsightsForUser(user.handle),
             ]);
-            setConversations(convos);
             setNotifications(notifs);
+            setInsights(storyInsights);
         } catch (error) {
             console.error('Error loading inbox:', error);
         } finally {
@@ -53,10 +53,6 @@ export default function InboxScreen({ navigation }: any) {
         if (notif.type === 'sticker' || notif.type === 'reply' || notif.type === 'dm') {
             navigation.navigate('Messages', { handle: notif.fromHandle });
         }
-    };
-
-    const handleConversationPress = (handle: string) => {
-        navigation.navigate('Messages', { handle });
     };
 
     const formatNotificationMessage = (notif: Notification): string => {
@@ -90,7 +86,6 @@ export default function InboxScreen({ navigation }: any) {
     };
 
     const unreadNotifications = notifications.filter(n => !n.read).length;
-    const unreadConversations = conversations.reduce((sum, item) => sum + item.unread, 0);
 
     if (loading) {
         return (
@@ -122,17 +117,12 @@ export default function InboxScreen({ navigation }: any) {
                     )}
                 </TouchableOpacity>
                 <TouchableOpacity
-                    onPress={() => setActiveTab('conversations')}
-                    style={[styles.tab, activeTab === 'conversations' && styles.tabActive]}
+                    onPress={() => setActiveTab('insights')}
+                    style={[styles.tab, activeTab === 'insights' && styles.tabActive]}
                 >
-                    <Text style={[styles.tabText, activeTab === 'conversations' && styles.tabTextActive]}>
-                        Messages
+                    <Text style={[styles.tabText, activeTab === 'insights' && styles.tabTextActive]}>
+                        Insights
                     </Text>
-                    {unreadConversations > 0 && (
-                        <View style={styles.badge}>
-                            <Text style={styles.badgeText}>{unreadConversations}</Text>
-                        </View>
-                    )}
                 </TouchableOpacity>
             </View>
 
@@ -169,37 +159,42 @@ export default function InboxScreen({ navigation }: any) {
                 />
             ) : (
                 <FlatList
-                    data={conversations}
-                    keyExtractor={(item) => item.otherHandle}
+                    data={insights}
+                    keyExtractor={(item) => item.storyId}
                     renderItem={({ item }) => (
                         <TouchableOpacity
-                            onPress={() => handleConversationPress(item.otherHandle)}
+                            onPress={() => {}}
                             style={styles.item}
                         >
-                            <Avatar
-                                src={getAvatarForHandle(item.otherHandle)}
-                                name={item.otherHandle.split('@')[0]}
-                                size={48}
-                            />
+                            {item.likes > 0 && item.likers && item.likers.length > 0 ? (
+                                <Avatar
+                                    src={getAvatarForHandle(item.likers[0])}
+                                    name={item.likers[0]}
+                                    size={48}
+                                />
+                            ) : (
+                                <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: '#374151' }} />
+                            )}
                             <View style={styles.itemContent}>
                                 <View style={styles.itemHeader}>
-                                    <Text style={styles.itemTitle}>{item.otherHandle}</Text>
-                                    <Text style={styles.itemTime}>{timeAgo(item.lastMessageTimestamp)}</Text>
+                                    <Text style={styles.itemTitle}>
+                                        {item.text ? (item.text.length > 40 ? item.text.slice(0, 40) + '…' : item.text) : 'Story'}
+                                    </Text>
+                                    <Text style={styles.itemTime}>{timeAgo(item.createdAt)}</Text>
                                 </View>
                                 <Text style={styles.itemMessage} numberOfLines={1}>
-                                    {item.lastMessage}
+                                    {item.likes === 0
+                                        ? 'No likes yet'
+                                        : item.likes === 1
+                                        ? `Liked by ${item.likers[0]}`
+                                        : `Liked by ${item.likers.slice(0, 2).join(', ')} and ${item.likes - 2} others`}
                                 </Text>
                             </View>
-                            {item.unread > 0 && (
-                                <View style={styles.unreadBadge}>
-                                    <Text style={styles.unreadBadgeText}>{item.unread}</Text>
-                                </View>
-                            )}
                         </TouchableOpacity>
                     )}
                     ListEmptyComponent={
                         <View style={styles.emptyContainer}>
-                            <Text style={styles.emptyText}>No messages</Text>
+                            <Text style={styles.emptyText}>No story insights yet</Text>
                         </View>
                     }
                 />
@@ -336,6 +331,7 @@ const styles = StyleSheet.create({
         color: '#6B7280',
     },
 });
+
 
 
 

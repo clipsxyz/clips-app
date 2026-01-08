@@ -3,9 +3,11 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile, FiUserPlus } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
-import { listConversations, seedMockDMs, type ConversationSummary } from '../api/messages';
 import { getAvatarForHandle } from '../api/users';
 import { getNotifications, type Notification, markNotificationRead, markAllNotificationsRead, getUnreadNotificationCount, deleteNotification } from '../api/notifications';
+import { getStoryInsightsForUser, type StoryInsight } from '../api/stories';
+import { listConversations, seedMockDMs, type ConversationSummary } from '../api/messages';
+import { timeAgo } from '../utils/timeAgo';
 import Swal from 'sweetalert2';
 import { acceptFollowRequest, denyFollowRequest, removeFollowRequest } from '../api/privacy';
 import { getFollowedUsers } from '../api/posts';
@@ -14,19 +16,22 @@ export default function InboxPage() {
     const navigate = useNavigate();
     const location = useLocation();
     const { user } = useAuth();
-    const [items, setItems] = React.useState<ConversationSummary[]>([]);
     const [notifications, setNotifications] = React.useState<Notification[]>([]);
+    const [insights, setInsights] = React.useState<StoryInsight[]>([]);
+    const [items, setItems] = React.useState<ConversationSummary[]>([]);
     const [loading, setLoading] = React.useState(true);
-    const [activeTab, setActiveTab] = React.useState<'conversations' | 'notifications'>('notifications');
+    const [activeTab, setActiveTab] = React.useState<'insights' | 'notifications'>('notifications');
 
     const loadData = React.useCallback(async () => {
         if (!user?.handle) return;
-        const [conversations, notifs] = await Promise.all([
-            listConversations(user.handle),
-            getNotifications(user.handle)
+        const [notifs, storyInsights, conversations] = await Promise.all([
+            getNotifications(user.handle),
+            getStoryInsightsForUser(user.handle),
+            listConversations(user.handle)
         ]);
-        setItems(conversations);
         setNotifications(notifs);
+        setInsights(storyInsights);
+        setItems(conversations);
         setLoading(false);
     }, [user?.handle]);
 
@@ -34,19 +39,19 @@ export default function InboxPage() {
         if (!user?.handle) return;
         loadData();
 
-        const onConversationUpdate = () => {
-            listConversations(user!.handle!).then(setItems);
-        };
         const onNotificationUpdate = () => {
             getNotifications(user!.handle!).then(setNotifications);
         };
+        const onConversationUpdate = () => {
+            listConversations(user!.handle!).then(setItems);
+        };
 
-        window.addEventListener('conversationUpdated', onConversationUpdate as any);
         window.addEventListener('notificationsUpdated', onNotificationUpdate as any);
+        window.addEventListener('conversationUpdated', onConversationUpdate as any);
 
         return () => {
-            window.removeEventListener('conversationUpdated', onConversationUpdate as any);
             window.removeEventListener('notificationsUpdated', onNotificationUpdate as any);
+            window.removeEventListener('conversationUpdated', onConversationUpdate as any);
         };
     }, [user?.handle, loadData]);
 
@@ -55,7 +60,6 @@ export default function InboxPage() {
     }
 
     const unreadNotifications = notifications.filter(n => !n.read).length;
-    const unreadConversations = items.reduce((sum, item) => sum + item.unread, 0);
 
     const handleNotificationClick = async (notif: Notification) => {
         if (!notif.read && user?.handle) {
@@ -167,14 +171,15 @@ export default function InboxPage() {
                 </button>
                 <h1 className="text-xl font-semibold">Notifications</h1>
                 <div className="flex-1" />
-                {/* Dev-only: seed mock DMs */}
                 <button
                     onClick={async () => {
                         if (!user?.handle) return;
                         await seedMockDMs(user.handle);
-                        await loadData();
+                        // Reload conversations
+                        const conversations = await listConversations(user.handle);
+                        setItems(conversations);
                     }}
-                    className="px-3 py-1 text-xs rounded-full bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700"
+                    className="px-3 py-1.5 text-sm rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-medium transition-colors"
                 >
                     Add mock DMs
                 </button>
@@ -197,18 +202,13 @@ export default function InboxPage() {
                     )}
                 </button>
                 <button
-                    onClick={() => setActiveTab('conversations')}
-                    className={`px-4 py-2 font-medium transition-colors relative ${activeTab === 'conversations'
+                    onClick={() => setActiveTab('insights')}
+                    className={`px-4 py-2 font-medium transition-colors relative ${activeTab === 'insights'
                             ? 'text-purple-600 border-b-2 border-purple-600'
                             : 'text-gray-500 hover:text-gray-300'
                         }`}
                 >
-                    Messages
-                    {unreadConversations > 0 && (
-                        <span className="ml-2 px-2 py-0.5 bg-pink-500 text-white text-xs rounded-full">
-                            {unreadConversations > 9 ? '9+' : unreadConversations}
-                        </span>
-                    )}
+                    Insights
                 </button>
             </div>
             {loading ? (
@@ -288,47 +288,44 @@ export default function InboxPage() {
                         ))}
                     </div>
                 )
-            ) : items.length === 0 ? (
-                <div className="text-gray-500">No conversations yet.</div>
+            ) : !insights || insights.length === 0 ? (
+                <div className="text-gray-500">No story insights yet.</div>
             ) : (
-                <div className="divide-y divide-gray-800/40">
-                    {items.map(it => (
-                        <button
-                            key={it.otherHandle}
-                            onClick={() => {
-                                const state = location.state as any;
-                                navigate(`/messages/${encodeURIComponent(it.otherHandle)}`, {
-                                    state: state?.sharePostUrl ? { 
-                                        sharePostUrl: state.sharePostUrl,
-                                        sharePostId: state.sharePostId 
-                                    } : undefined
-                                });
-                            }}
-                            className="w-full text-left flex items-center gap-3 py-3 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg px-2"
+                <div className="space-y-2">
+                    {insights.map(insight => (
+                        <div
+                            key={insight.storyId}
+                            className="w-full text-left flex items-center gap-3 py-3 px-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
                         >
-                            <Avatar name={it.otherHandle} src={getAvatarForHandle(it.otherHandle)} size="sm" />
+                            {insight.likes > 0 && insight.likers && insight.likers.length > 0 ? (
+                                <Avatar
+                                    name={insight.likers[0]}
+                                    src={getAvatarForHandle(insight.likers[0])}
+                                    size="sm"
+                                />
+                            ) : (
+                                <div className="w-10 h-10 rounded-full bg-gray-700 flex-shrink-0" />
+                            )}
                             <div className="flex-1 min-w-0">
-                                <div className="font-medium truncate">{it.otherHandle}</div>
-                                {it.lastMessage && (
-                                    <div className="text-xs text-gray-500 truncate">
-                                        {it.lastMessage.senderHandle === user.handle ? 'You: ' : ''}
-                                        {it.lastMessage.text || (it.lastMessage.imageUrl ? 'Photo' : 'Message')}
-                                    </div>
-                                )}
+                                <div className="font-medium truncate">
+                                    {insight.text ? (insight.text.length > 40 ? insight.text.slice(0, 40) + '…' : insight.text) : 'Story'}
+                                </div>
+                                <div className="text-xs text-gray-500 truncate">
+                                    {insight.likes === 0
+                                        ? 'No likes yet'
+                                        : !insight.likers || insight.likers.length === 0
+                                        ? 'No likes yet'
+                                        : insight.likes === 1
+                                        ? `Liked by ${insight.likers[0]}`
+                                        : insight.likes === 2
+                                        ? `Liked by ${insight.likers.join(' and ')}`
+                                        : `Liked by ${insight.likers.slice(0, 2).join(', ')} and ${insight.likes - 2} others`}
+                                </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                                {it.lastMessage && (
-                                    <div className="text-[10px] text-gray-400">
-                                        {new Date(it.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                    </div>
-                                )}
-                                {it.unread > 0 && (
-                                    <span className="min-w-[18px] h-[18px] px-1 bg-pink-500 text-white text-[10px] leading-[18px] rounded-full text-center">
-                                        {it.unread > 9 ? '9+' : it.unread}
-                                    </span>
-                                )}
+                            <div className="text-[10px] text-gray-400">
+                                {new Date(insight.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </div>
-                        </button>
+                        </div>
                     ))}
                 </div>
             )}

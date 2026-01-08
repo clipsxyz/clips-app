@@ -258,7 +258,8 @@ export async function createStory(
     sharedFromUser?: string,
     textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string }, // Text style for text-only stories
     stickers?: StickerOverlay[], // Stickers/GIFs for stories
-    taggedUsers?: string[] // Tagged users
+    taggedUsers?: string[], // Tagged users
+    poll?: { question: string; option1: string; option2: string } // Poll data
 ): Promise<Story> {
     await delay();
 
@@ -286,7 +287,15 @@ export async function createStory(
         replies: [],
         userReaction: undefined,
         sharedFromPost,
-        sharedFromUser
+        sharedFromUser,
+        poll: poll ? {
+            question: poll.question,
+            option1: poll.option1,
+            option2: poll.option2,
+            votes1: 0,
+            votes2: 0,
+            userVote: undefined
+        } : undefined
     };
 
     stories.push(newStory);
@@ -351,6 +360,65 @@ export async function addStoryReply(storyId: string, userId: string, userHandle:
             createdAt: Date.now()
         });
     }
+}
+
+// Vote on a poll in a story
+export async function voteOnPoll(storyId: string, userId: string, option: 'option1' | 'option2'): Promise<void> {
+    await delay();
+
+    const story = stories.find(s => s.id === storyId);
+    if (story && story.poll) {
+        // If user already voted, remove their previous vote
+        if (story.poll.userVote === 'option1') {
+            story.poll.votes1 = (story.poll.votes1 || 0) - 1;
+        } else if (story.poll.userVote === 'option2') {
+            story.poll.votes2 = (story.poll.votes2 || 0) - 1;
+        }
+
+        // Add new vote
+        if (option === 'option1') {
+            story.poll.votes1 = (story.poll.votes1 || 0) + 1;
+        } else {
+            story.poll.votes2 = (story.poll.votes2 || 0) + 1;
+        }
+
+        story.poll.userVote = option;
+    }
+}
+
+// Story insights for a given user (likes on their stories)
+export interface StoryInsight {
+    storyId: string;
+    mediaUrl?: string;
+    mediaType?: 'image' | 'video';
+    text?: string;
+    createdAt: number;
+    likes: number;
+    likers: string[]; // user handles who reacted with a heart
+}
+
+export async function getStoryInsightsForUser(userHandle: string): Promise<StoryInsight[]> {
+    await delay();
+
+    const now = Date.now();
+    const ownStories = stories.filter(s => s.userHandle === userHandle && s.expiresAt > now);
+
+    return ownStories
+        .map<StoryInsight>(story => {
+            const heartReactions = (story.reactions || []).filter(r => r.emoji === '❤️');
+            const likers = Array.from(new Set(heartReactions.map(r => r.userHandle)));
+            return {
+                storyId: story.id,
+                mediaUrl: story.mediaUrl,
+                mediaType: story.mediaType,
+                text: story.text,
+                createdAt: story.createdAt,
+                likes: likers.length,
+                likers
+            };
+        })
+        // Newest stories first
+        .sort((a, b) => b.createdAt - a.createdAt);
 }
 
 // Check if a user has stories by userId
