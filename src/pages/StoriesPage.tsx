@@ -794,14 +794,17 @@ export default function StoriesPage() {
 
                                     // Text-only story display (directly created, not shared) - keep original style with gradient/textStyle
                                     if (currentStory?.text) {
+                                        // Get tagged users positions from story (not from textStyle)
+                                        const taggedUsersPositions = currentStory?.taggedUsersPositions as Array<{ handle: string; x: number; y: number }> | undefined;
+                                        
                                         return (
                                             <div
-                                                className="w-full h-full flex items-center justify-center p-4"
+                                                className="w-full h-full flex items-center justify-center p-4 relative"
                                                 style={{
                                                     background: currentStory?.textStyle?.background || '#1a1a1a'
                                                 }}
                                             >
-                                                <div className="w-full max-w-md">
+                                                <div className="w-full max-w-md relative">
                                                     <div
                                                         className="text-base leading-relaxed whitespace-pre-wrap font-normal px-6 py-8"
                                                         style={{
@@ -810,6 +813,66 @@ export default function StoriesPage() {
                                                     >
                                                         {currentStory?.text}
                                                     </div>
+                                                    {/* Tagged Users Display at their positions */}
+                                                    {taggedUsersPositions && taggedUsersPositions.length > 0 && (
+                                                        <>
+                                                            {taggedUsersPositions.map((taggedUser) => (
+                                                                <div
+                                                                    key={taggedUser.id || taggedUser.handle}
+                                                                    className="absolute"
+                                                                    style={{
+                                                                        left: `${taggedUser.x}%`,
+                                                                        top: `${taggedUser.y}%`,
+                                                                        transform: 'translate(-50%, -50%)',
+                                                                        zIndex: 20,
+                                                                        pointerEvents: 'auto'
+                                                                    }}
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        e.preventDefault();
+                                                                        setViewingStories(false);
+                                                                        setTimeout(() => {
+                                                                            navigate(`/user/${encodeURIComponent(taggedUser.handle)}`);
+                                                                        }, 100);
+                                                                    }}
+                                                                >
+                                                                    <div className="px-3 py-1.5 bg-white/20 backdrop-blur-sm rounded-full text-white text-sm font-medium hover:bg-white/30 transition-colors cursor-pointer"
+                                                                        style={{
+                                                                            color: currentStory?.textStyle?.color || '#ffffff',
+                                                                            textShadow: '1px 1px 2px rgba(0,0,0,0.5)'
+                                                                        }}
+                                                                    >
+                                                                        @{taggedUser.handle}
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </>
+                                                    )}
+                                                    {/* Fallback: If no positions, show at bottom */}
+                                                    {currentStory?.taggedUsers && currentStory.taggedUsers.length > 0 && !taggedUsersPositions && (
+                                                        <div className="mt-4 flex flex-wrap items-center justify-center gap-2 px-6">
+                                                            {currentStory.taggedUsers.map((handle) => (
+                                                                <button
+                                                                    key={handle}
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        e.preventDefault();
+                                                                        setViewingStories(false);
+                                                                        setTimeout(() => {
+                                                                            navigate(`/user/${encodeURIComponent(handle)}`);
+                                                                        }, 100);
+                                                                    }}
+                                                                    className="px-3 py-1.5 bg-white/20 backdrop-blur-sm rounded-full text-white text-sm font-medium hover:bg-white/30 transition-colors cursor-pointer"
+                                                                    style={{
+                                                                        color: currentStory?.textStyle?.color || '#ffffff',
+                                                                        textShadow: '1px 1px 2px rgba(0,0,0,0.5)'
+                                                                    }}
+                                                                >
+                                                                    @{handle}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
                                         );

@@ -258,49 +258,115 @@ export async function createStory(
     sharedFromUser?: string,
     textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string }, // Text style for text-only stories
     stickers?: StickerOverlay[], // Stickers/GIFs for stories
-    taggedUsers?: string[], // Tagged users
-    poll?: { question: string; option1: string; option2: string } // Poll data
+    taggedUsers?: string[], // Tagged users (handles only)
+    poll?: { question: string; option1: string; option2: string }, // Poll data
+    taggedUsersPositions?: Array<{ handle: string; x: number; y: number }> // Tagged users with positions
 ): Promise<Story> {
-    await delay();
+    // Use real Laravel API
+    const { apiRequest } = await import('./client');
+    
+    try {
+        const response = await apiRequest('/stories', {
+            method: 'POST',
+            body: JSON.stringify({
+                media_url: mediaUrl || undefined,
+                media_type: mediaType || undefined,
+                text: text || undefined,
+                location: location || undefined,
+                text_color: textColor || undefined,
+                text_size: textSize || undefined,
+                shared_from_post_id: sharedFromPost || undefined,
+                textStyle: textStyle || undefined, // Only color, size, background - no taggedUsersPositions
+                stickers: stickers || undefined,
+                taggedUsers: taggedUsers || undefined, // Send tagged users to backend
+                taggedUsersPositions: taggedUsersPositions || undefined, // Send tagged users with positions
+                poll: poll || undefined
+            }),
+        });
 
-    const now = Date.now();
-    const expiresAt = now + (24 * 60 * 60 * 1000); // 24 hours from now
+        // Transform Laravel response to frontend Story format
+        const now = Date.now();
+        const newStory: Story = {
+            id: response.id,
+            userId: response.user_id || userId,
+            userHandle: response.user_handle || userHandle,
+            mediaUrl: response.media_url || undefined,
+            mediaType: response.media_type || undefined,
+            text: response.text || undefined,
+            textColor: response.text_color || undefined,
+            textSize: response.text_size || undefined,
+            textStyle: response.text_style || textStyle || undefined,
+            stickers: response.stickers || stickers || undefined,
+            taggedUsers: response.tagged_users || taggedUsers || undefined, // Get tagged users from backend
+            taggedUsersPositions: response.tagged_users_positions || taggedUsersPositions || undefined, // Get tagged users with positions
+            createdAt: new Date(response.created_at).getTime() || now,
+            expiresAt: new Date(response.expires_at).getTime() || (now + 24 * 60 * 60 * 1000),
+            location: response.location || undefined,
+            views: response.views_count || 0,
+            hasViewed: response.has_viewed || false,
+            reactions: response.reactions || [],
+            replies: response.replies || [],
+            userReaction: response.user_reaction || undefined,
+            sharedFromPost: response.shared_from_post_id || sharedFromPost || undefined,
+            sharedFromUser: response.shared_from_user_handle || sharedFromUser || undefined,
+            poll: response.poll || (poll ? {
+                question: poll.question,
+                option1: poll.option1,
+                option2: poll.option2,
+                votes1: 0,
+                votes2: 0,
+                userVote: undefined
+            } : undefined)
+        };
 
-    const newStory: Story = {
-        id: `story-${Date.now()}`,
-        userId,
-        userHandle,
-        mediaUrl: mediaUrl || undefined,
-        mediaType: mediaType || undefined,
-        text,
-        textColor,
-        textSize,
-        textStyle: textStyle || undefined,
-        stickers: stickers || undefined,
-        taggedUsers: taggedUsers || undefined,
-        createdAt: now,
-        expiresAt,
-        location,
-        views: 0,
-        hasViewed: false,
-        reactions: [],
-        replies: [],
-        userReaction: undefined,
-        sharedFromPost,
-        sharedFromUser,
-        poll: poll ? {
-            question: poll.question,
-            option1: poll.option1,
-            option2: poll.option2,
-            votes1: 0,
-            votes2: 0,
-            userVote: undefined
-        } : undefined
-    };
+        // Also add to local stories array for immediate UI update
+        stories.push(newStory);
 
-    stories.push(newStory);
+        return newStory;
+    } catch (error) {
+        console.error('Error creating story via API, falling back to mock:', error);
+        // Fallback to mock implementation if API fails
+        await delay();
 
-    return newStory;
+        const now = Date.now();
+        const expiresAt = now + (24 * 60 * 60 * 1000); // 24 hours from now
+
+        const newStory: Story = {
+            id: `story-${Date.now()}`,
+            userId,
+            userHandle,
+            mediaUrl: mediaUrl || undefined,
+            mediaType: mediaType || undefined,
+            text,
+            textColor,
+            textSize,
+            textStyle: textStyle || undefined,
+            stickers: stickers || undefined,
+            taggedUsers: taggedUsers || undefined,
+            createdAt: now,
+            expiresAt,
+            location,
+            views: 0,
+            hasViewed: false,
+            reactions: [],
+            replies: [],
+            userReaction: undefined,
+            sharedFromPost,
+            sharedFromUser,
+            poll: poll ? {
+                question: poll.question,
+                option1: poll.option1,
+                option2: poll.option2,
+                votes1: 0,
+                votes2: 0,
+                userVote: undefined
+            } : undefined
+        };
+
+        stories.push(newStory);
+
+        return newStory;
+    }
 }
 
 // Mark story as viewed

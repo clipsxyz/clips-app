@@ -254,27 +254,37 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
           className="absolute top-0 left-0 h-0.5 z-20"
           style={{
             width: '100%',
-            background: 'linear-gradient(90deg, #ec4899 0%, #a855f7 50%, #7c3aed 100%)',
+            background: 'linear-gradient(90deg, #ec4899 0%, #ffffff 50%, #ffffff 100%)',
             animation: 'progressBar 1.5s ease-out forwards'
           }}
         />
       )}
 
       {/* Top header row with Clips on the left, centered Gazetteer logo, and Discover on the right */}
-      <div className="relative z-10 mb-2 flex items-center px-3">
+      <div className="relative z-10 mb-2 flex items-center px-2 sm:px-3 gap-1 sm:gap-2 min-w-0">
         {/* Left: Clips pill */}
-        <div className="flex items-center">
+        <div className="flex items-center flex-shrink-0">
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               navigate('/stories');
             }}
-            className="px-5 py-3 text-lg font-bold text-gray-300 hover:text-white transition-colors"
+            className="relative px-3 sm:px-5 py-3 text-base sm:text-lg font-bold text-gray-300 hover:text-white transition-colors"
           >
-            <span>Shorts</span>
+            {/* Gradient border wrapper */}
+            <div
+              className="absolute inset-0 rounded-lg p-0.5"
+              style={{
+                background: 'conic-gradient(from 0deg, rgb(255, 140, 0), rgb(248, 0, 50), rgb(255, 0, 160), rgb(140, 40, 255), rgb(0, 35, 255), rgb(25, 160, 255), rgb(255, 140, 0))',
+              }}
+            >
+              <div className="w-full h-full rounded-lg bg-[#030712]" />
+            </div>
+            {/* Content */}
+            <span className="relative z-10">Clips</span>
             {clipsCount > 0 && (
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-600 text-white">
+              <span className="relative z-10 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-600 text-white ml-2">
                 {clipsCount}
               </span>
             )}
@@ -282,18 +292,18 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
         </div>
 
         {/* Center: Gazetteer logo with wave */}
-        <div className="flex-1 flex items-center justify-center">
+        <div className="flex-1 flex items-center justify-center min-w-0">
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               navigate('/inbox');
             }}
-            className="relative px-4 py-1 flex items-center gap-2 hover:opacity-80 transition-opacity"
+            className="relative px-2 sm:px-4 py-1 flex items-center gap-1 sm:gap-2 hover:opacity-80 transition-opacity flex-shrink-0"
             aria-label="Go to notifications"
           >
-            <div className="relative">
-              <span className="relative z-10 text-sm font-semibold tracking-[0.2em] uppercase text-white">
+            <div className="relative flex-shrink-0">
+              <span className="relative z-10 text-xs sm:text-sm font-semibold tracking-[0.2em] uppercase text-white whitespace-nowrap">
                 GAZETTEER
               </span>
               <svg
@@ -304,8 +314,11 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                 <defs>
                   <linearGradient id="gazetteerWaveGradient" x1="0%" y1="50%" x2="100%" y2="50%">
                     <stop offset="0%" stopColor="transparent" stopOpacity="0" />
-                    <stop offset="30%" stopColor="#ff4ecb" stopOpacity="0.4" />
-                    <stop offset="70%" stopColor="#8f5bff" stopOpacity="0.4" />
+                    <stop offset="15%" stopColor="rgb(255, 140, 0)" stopOpacity="0.6" />
+                    <stop offset="30%" stopColor="rgb(248, 0, 50)" stopOpacity="0.6" />
+                    <stop offset="50%" stopColor="rgb(255, 0, 160)" stopOpacity="0.6" />
+                    <stop offset="70%" stopColor="rgb(140, 40, 255)" stopOpacity="0.6" />
+                    <stop offset="85%" stopColor="rgb(0, 35, 255)" stopOpacity="0.6" />
                     <stop offset="100%" stopColor="transparent" stopOpacity="0" />
                   </linearGradient>
                 </defs>
@@ -320,7 +333,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               </svg>
             </div>
             {notificationCount > 0 && (
-              <span className="min-w-[20px] h-5 px-1.5 bg-blue-500 text-white text-xs font-semibold leading-5 rounded-full text-center flex items-center justify-center">
+              <span className="min-w-[18px] sm:min-w-[20px] h-4 sm:h-5 px-1 sm:px-1.5 bg-blue-500 text-white text-[10px] sm:text-xs font-semibold leading-4 sm:leading-5 rounded-full text-center flex items-center justify-center flex-shrink-0">
                 {notificationCount > 9 ? '9+' : notificationCount}
               </span>
             )}
@@ -328,16 +341,26 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
         </div>
 
         {/* Right: Discover pill */}
-        <div className="flex items-center">
+        <div className="flex items-center flex-shrink-0">
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               navigate('/discover');
             }}
-            className="px-5 py-3 text-lg font-bold text-gray-300 hover:text-white transition-colors"
+            className="relative px-3 sm:px-5 py-3 text-base sm:text-lg font-bold text-gray-300 hover:text-white transition-colors"
           >
-            Discover
+            {/* Gradient border wrapper */}
+            <div
+              className="absolute inset-0 rounded-lg p-0.5"
+              style={{
+                background: 'conic-gradient(from 0deg, rgb(255, 140, 0), rgb(248, 0, 50), rgb(255, 0, 160), rgb(140, 40, 255), rgb(0, 35, 255), rgb(25, 160, 255), rgb(255, 140, 0))',
+              }}
+            >
+              <div className="w-full h-full rounded-lg bg-[#030712]" />
+            </div>
+            {/* Content */}
+            <span className="relative z-10">Discover</span>
           </button>
         </div>
       </div>
@@ -382,7 +405,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                 aria-controls={panelId}
                 tabIndex={active ? 0 : -1}
                 onClick={handleClick}
-                className="rounded-full px-3 py-1.5 bg-black text-white text-sm font-medium transition-transform active:scale-[.98] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 flex items-center justify-center gap-1"
+                className="rounded-full px-3 py-1.5 bg-black text-white text-sm font-medium transition-transform active:scale-[.98] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 flex items-center justify-center gap-1 border-b-2 border-white"
                 style={{
                   outline: 'none',
                   boxShadow: 'none'
@@ -445,7 +468,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
         <div
           className="absolute bottom-0 right-0 h-0.5 z-20"
           style={{
-            background: 'linear-gradient(90deg, #ec4899 0%, #a855f7 50%, #7c3aed 100%)',
+            background: 'linear-gradient(90deg, #ec4899 0%, #ffffff 50%, #ffffff 100%)',
             animation: 'progressBarReverse 1.5s ease-out forwards',
             transformOrigin: 'right'
           }}

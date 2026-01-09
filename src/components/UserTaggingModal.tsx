@@ -15,10 +15,20 @@ export default function UserTaggingModal({ isOpen, onClose, onSelectUser, tagged
     const [users, setUsers] = useState<Array<{ handle: string; display_name?: string; avatar_url?: string }>>([]);
     const [isLoading, setIsLoading] = useState(false);
 
+    const inputRef = React.useRef<HTMLInputElement>(null);
+
     useEffect(() => {
         if (isOpen) {
             setSearchQuery('');
             setUsers([]);
+            // Focus input on mobile - use setTimeout to ensure modal is rendered
+            setTimeout(() => {
+                inputRef.current?.focus();
+                // On mobile, we need to trigger the virtual keyboard
+                if (inputRef.current) {
+                    inputRef.current.click();
+                }
+            }, 100);
         }
     }, [isOpen]);
 
@@ -31,14 +41,47 @@ export default function UserTaggingModal({ isOpen, onClose, onSelectUser, tagged
 
             setIsLoading(true);
             try {
+                // Normalize search query - remove @ if user types it
+                const normalizedQuery = searchQuery.trim().replace(/^@/, '');
+                
                 const result = await unifiedSearch({
-                    q: searchQuery,
+                    q: normalizedQuery,
                     types: 'users',
                     usersLimit: 20
                 });
 
                 if (result.sections?.users?.items) {
-                    setUsers(result.sections.users.items);
+                    // Filter and sort results - prioritize exact matches
+                    const queryLower = normalizedQuery.toLowerCase();
+                    const filtered = result.sections.users.items.filter((user: any) => {
+                        const handleLower = (user.handle || '').toLowerCase();
+                        const nameLower = (user.display_name || user.handle || '').toLowerCase();
+                        return handleLower.includes(queryLower) || nameLower.includes(queryLower);
+                    });
+                    
+                    // Sort: exact handle match first, then handle starts with, then name match
+                    const sorted = filtered.sort((a: any, b: any) => {
+                        const aHandle = (a.handle || '').toLowerCase();
+                        const bHandle = (b.handle || '').toLowerCase();
+                        const aName = (a.display_name || a.handle || '').toLowerCase();
+                        const bName = (b.display_name || b.handle || '').toLowerCase();
+                        
+                        // Exact handle match
+                        if (aHandle === queryLower && bHandle !== queryLower) return -1;
+                        if (bHandle === queryLower && aHandle !== queryLower) return 1;
+                        
+                        // Handle starts with query
+                        if (aHandle.startsWith(queryLower) && !bHandle.startsWith(queryLower)) return -1;
+                        if (bHandle.startsWith(queryLower) && !aHandle.startsWith(queryLower)) return 1;
+                        
+                        // Name starts with query
+                        if (aName.startsWith(queryLower) && !bName.startsWith(queryLower)) return -1;
+                        if (bName.startsWith(queryLower) && !aName.startsWith(queryLower)) return 1;
+                        
+                        return 0;
+                    });
+                    
+                    setUsers(sorted);
                 } else {
                     setUsers([]);
                 }
@@ -51,14 +94,15 @@ export default function UserTaggingModal({ isOpen, onClose, onSelectUser, tagged
             }
         };
 
-        const timeoutId = setTimeout(searchUsers, 300);
+        // Reduced debounce for better mobile responsiveness
+        const timeoutId = setTimeout(searchUsers, 200);
         return () => clearTimeout(timeoutId);
     }, [searchQuery]);
 
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center animate-in fade-in duration-200">
             <div className="w-full max-w-md max-h-[80vh] bg-gray-900 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
                 {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
@@ -77,12 +121,19 @@ export default function UserTaggingModal({ isOpen, onClose, onSelectUser, tagged
                     <div className="relative">
                         <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                         <input
+                            ref={inputRef}
                             type="text"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            placeholder="Search by handle (e.g., Sarah@Artane)..."
-                            className="w-full pl-10 pr-4 py-2.5 bg-gray-800 text-white rounded-xl border border-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                            placeholder="Search by handle (e.g., sarah or sarah@artane)..."
+                            className="w-full pl-10 pr-4 py-2.5 bg-gray-800 text-white rounded-xl border border-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent text-base"
                             autoFocus
+                            autoComplete="off"
+                            autoCorrect="off"
+                            autoCapitalize="off"
+                            spellCheck="false"
+                            inputMode="search"
+                            enterKeyHint="search"
                         />
                     </div>
                 </div>

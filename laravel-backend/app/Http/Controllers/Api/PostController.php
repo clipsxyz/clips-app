@@ -408,13 +408,23 @@ class PostController extends Controller
                 DB::transaction(function () use ($user, $post) {
                     // Insert view (will be ignored if duplicate due to unique constraint)
                     try {
-                        $user->views()->firstOrCreate(['post_id' => $post->id]);
+                        // Use attach with duplicate check - attach will ignore if already exists
+                        if (!$user->views()->where('post_id', $post->id)->exists()) {
+                            $user->views()->attach($post->id, [], false); // false = don't touch timestamps
+                        }
+                    } catch (\Illuminate\Database\QueryException $e) {
+                        // Ignore duplicate entry errors (unique constraint violation)
+                        if ($e->getCode() !== '23000') {
+                            throw $e; // Re-throw if it's not a duplicate key error
+                        }
                     } catch (\Exception $e) {
-                        // Ignore duplicate entry errors
+                        // Ignore other errors in view tracking
+                        \Log::debug('View tracking error: ' . $e->getMessage());
                     }
                 });
             } catch (\Exception $e) {
-                // Ignore any errors in view tracking
+                // Ignore any errors in view tracking - don't fail the request
+                \Log::debug('View tracking transaction error: ' . $e->getMessage());
             }
         }
         

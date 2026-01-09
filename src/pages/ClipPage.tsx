@@ -12,6 +12,301 @@ import UserTaggingModal from '../components/UserTaggingModal';
 import StickerOverlayComponent from '../components/StickerOverlay';
 import type { Post, StickerOverlay, Sticker } from '../types';
 
+// Tagged User Overlay Component (draggable)
+interface TaggedUserOverlayProps {
+    taggedUser: { handle: string; x: number; y: number; id: string };
+    onUpdate: (taggedUser: { handle: string; x: number; y: number; id: string }) => void;
+    onRemove: () => void;
+    isSelected: boolean;
+    onSelect: () => void;
+    containerWidth: number;
+    containerHeight: number;
+    isModalOpen?: boolean; // Whether any modal is open
+    containerRef?: React.RefObject<HTMLDivElement>; // Container ref for accurate positioning
+}
+
+function TaggedUserOverlay({
+    taggedUser,
+    onUpdate,
+    onRemove,
+    isSelected,
+    onSelect,
+    containerWidth,
+    containerHeight,
+    isModalOpen = false,
+    containerRef
+}: TaggedUserOverlayProps) {
+    const [isDragging, setIsDragging] = React.useState(false);
+    const [isResizing, setIsResizing] = React.useState(false);
+    const [isRotating, setIsRotating] = React.useState(false);
+    const [dragStart, setDragStart] = React.useState({ x: 0, y: 0 });
+    const [initialState, setInitialState] = React.useState<{ handle: string; x: number; y: number; id: string } | null>(null);
+    const taggedUserRef = React.useRef<HTMLDivElement>(null);
+
+    // Calculate pixel positions from percentages
+    const pixelX = (taggedUser.x / 100) * containerWidth;
+    const pixelY = (taggedUser.y / 100) * containerHeight;
+
+    function startDrag(clientX: number, clientY: number) {
+        const target = document.elementFromPoint(clientX, clientY) as HTMLElement;
+        if (target?.closest('button')) {
+            return; // Let controls handle their own clicks
+        }
+        
+        onSelect();
+        setIsDragging(true);
+        setDragStart({ x: clientX - pixelX, y: clientY - pixelY });
+        setInitialState({ ...taggedUser });
+    }
+
+    function handleMouseDown(e: React.MouseEvent) {
+        e.stopPropagation();
+        // Don't start dragging if clicking on controls (remove button, etc.)
+        const target = e.target as HTMLElement;
+        if (target.closest('button')) {
+            return; // Let controls handle their own clicks
+        }
+        
+        startDrag(e.clientX, e.clientY);
+    }
+
+    function handleMouseMove(e: React.MouseEvent) {
+        if (isDragging && initialState) {
+            const newX = ((e.clientX - dragStart.x) / containerWidth) * 100;
+            const newY = ((e.clientY - dragStart.y) / containerHeight) * 100;
+
+            onUpdate({
+                ...taggedUser,
+                x: Math.max(0, Math.min(100, newX)),
+                y: Math.max(0, Math.min(100, newY))
+            });
+        }
+    }
+
+    function handleMouseUp() {
+        setIsDragging(false);
+        setIsResizing(false);
+        setIsRotating(false);
+        setInitialState(null);
+    }
+
+    // Use native event listeners for better mobile support - CRITICAL for mobile
+    // Same approach as StickerOverlay - EXACT COPY
+    React.useEffect(() => {
+        const element = taggedUserRef.current;
+        if (!element) return;
+
+        // Use local variables to avoid stale closures
+        let isDraggingTouch = false;
+        let currentDragStart = { x: 0, y: 0 };
+        let currentInitialState: { handle: string; x: number; y: number; id: string } | null = null;
+        let currentTaggedUser = taggedUser; // Capture current tagged user
+        let touchStartElement: HTMLElement | null = null;
+
+        const handleNativeTouchStart = (e: TouchEvent) => {
+            const target = e.target as HTMLElement;
+            // Check if touch started on this tagged user or its children
+            if (!element.contains(target)) return;
+            
+            // Don't handle if clicking on button
+            if (target.closest('button')) {
+                return;
+            }
+            
+            // Stop propagation FIRST to prevent container from handling it
+            e.stopPropagation();
+            e.preventDefault();
+            
+            const touch = e.touches[0];
+            if (touch) {
+                touchStartElement = target;
+                onSelect();
+                isDraggingTouch = true;
+                setIsDragging(true);
+                
+                // Get the actual container element (parent of parent)
+                const containerElement = element.parentElement?.parentElement || document.body;
+                const containerRect = containerElement.getBoundingClientRect();
+                const touchX = touch.clientX - containerRect.left;
+                const touchY = touch.clientY - containerRect.top;
+                
+                // Calculate current tagged user position in pixels
+                const currentPixelX = (currentTaggedUser.x / 100) * containerWidth;
+                const currentPixelY = (currentTaggedUser.y / 100) * containerHeight;
+                
+                // Store offset from touch point to tagged user center
+                currentDragStart = { 
+                    x: touchX - currentPixelX, 
+                    y: touchY - currentPixelY 
+                };
+                currentInitialState = { ...currentTaggedUser };
+                setDragStart(currentDragStart);
+                setInitialState(currentInitialState);
+                
+                // Add document-level listeners for touchmove/touchend to ensure we capture all events
+                document.addEventListener('touchmove', handleDocumentTouchMove, { passive: false, capture: true });
+                document.addEventListener('touchend', handleDocumentTouchEnd, { passive: false, capture: true });
+                document.addEventListener('touchcancel', handleDocumentTouchEnd, { passive: false, capture: true });
+            }
+        };
+
+        const handleDocumentTouchMove = (e: TouchEvent) => {
+            if (isDraggingTouch && currentInitialState && touchStartElement) {
+                // Only handle if this touch is related to our tagged user
+                const touch = e.touches[0];
+                if (!touch) return;
+                
+                e.preventDefault();
+                e.stopPropagation();
+                
+                // Get container - find the parent container element
+                const containerElement = element.parentElement?.parentElement || document.body;
+                const containerRect = containerElement.getBoundingClientRect();
+                const touchX = touch.clientX - containerRect.left;
+                const touchY = touch.clientY - containerRect.top;
+                // Calculate new position using the drag offset
+                const newPixelX = touchX - currentDragStart.x;
+                const newPixelY = touchY - currentDragStart.y;
+                // Convert to percentage
+                const newX = (newPixelX / containerWidth) * 100;
+                const newY = (newPixelY / containerHeight) * 100;
+                onUpdate({
+                    ...currentInitialState,
+                    x: Math.max(0, Math.min(100, newX)),
+                    y: Math.max(0, Math.min(100, newY))
+                });
+            }
+        };
+
+        const handleDocumentTouchEnd = () => {
+            if (isDraggingTouch) {
+                isDraggingTouch = false;
+                currentInitialState = null;
+                touchStartElement = null;
+                setIsDragging(false);
+                setIsResizing(false);
+                setIsRotating(false);
+                setInitialState(null);
+                
+                // Remove document-level listeners
+                document.removeEventListener('touchmove', handleDocumentTouchMove, { capture: true } as any);
+                document.removeEventListener('touchend', handleDocumentTouchEnd, { capture: true } as any);
+                document.removeEventListener('touchcancel', handleDocumentTouchEnd, { capture: true } as any);
+            }
+        };
+
+        // Update currentTaggedUser when taggedUser changes
+        currentTaggedUser = taggedUser;
+
+        // Add native touch listeners with capture phase for better mobile support
+        // Capture phase ensures we handle events before React synthetic events and container handlers
+        const options = { passive: false, capture: true };
+        element.addEventListener('touchstart', handleNativeTouchStart, options);
+
+        return () => {
+            element.removeEventListener('touchstart', handleNativeTouchStart, options as any);
+            document.removeEventListener('touchmove', handleDocumentTouchMove, { capture: true } as any);
+            document.removeEventListener('touchend', handleDocumentTouchEnd, { capture: true } as any);
+            document.removeEventListener('touchcancel', handleDocumentTouchEnd, { capture: true } as any);
+        };
+    }, [taggedUser, onSelect, onUpdate, containerWidth, containerHeight]);
+
+    React.useEffect(() => {
+        if (isDragging || isResizing || isRotating) {
+            const handleMouseMoveGlobal = (e: MouseEvent) => {
+                if (isDragging && initialState) {
+                    const newX = ((e.clientX - dragStart.x) / containerWidth) * 100;
+                    const newY = ((e.clientY - dragStart.y) / containerHeight) * 100;
+
+                    onUpdate({
+                        ...taggedUser,
+                        x: Math.max(0, Math.min(100, newX)),
+                        y: Math.max(0, Math.min(100, newY))
+                    });
+                }
+            };
+
+            const handleTouchMoveGlobal = (e: TouchEvent) => {
+                if (isDragging || isResizing || isRotating) {
+                    e.preventDefault(); // Prevent scrolling while dragging
+                    const touch = e.touches[0];
+                    if (touch && isDragging && initialState) {
+                        const newX = ((touch.clientX - dragStart.x) / containerWidth) * 100;
+                        const newY = ((touch.clientY - dragStart.y) / containerHeight) * 100;
+
+                        onUpdate({
+                            ...taggedUser,
+                            x: Math.max(0, Math.min(100, newX)),
+                            y: Math.max(0, Math.min(100, newY))
+                        });
+                    }
+                }
+            };
+
+            document.addEventListener('mousemove', handleMouseMoveGlobal);
+            document.addEventListener('mouseup', handleMouseUp);
+            document.addEventListener('touchmove', handleTouchMoveGlobal, { passive: false });
+            document.addEventListener('touchend', handleMouseUp);
+            return () => {
+                document.removeEventListener('mousemove', handleMouseMoveGlobal);
+                document.removeEventListener('mouseup', handleMouseUp);
+                document.removeEventListener('touchmove', handleTouchMoveGlobal);
+                document.removeEventListener('touchend', handleMouseUp);
+            };
+        }
+    }, [isDragging, isResizing, isRotating, initialState, dragStart, taggedUser, onUpdate, containerWidth, containerHeight]);
+
+    return (
+        <div
+            ref={taggedUserRef}
+            data-tagged-user="true"
+            data-tagged-user-id={taggedUser.id}
+            className={`absolute cursor-move ${isSelected ? 'ring-2 ring-purple-500' : ''}`}
+            style={{
+                left: `${taggedUser.x}%`,
+                top: `${taggedUser.y}%`,
+                transform: 'translate(-50%, -50%)',
+                zIndex: isModalOpen 
+                    ? 1  // Lower z-index when modals are open (modals are z-[200])
+                    : (isSelected ? 100 : 50), // Higher z-index to be above textarea when no modals
+                pointerEvents: 'auto',
+                touchAction: 'none', // Disable default touch behaviors to allow dragging
+                userSelect: 'none', // Prevent text selection
+                WebkitTouchCallout: 'none', // Disable iOS callout menu
+                WebkitUserSelect: 'none', // Disable iOS text selection
+                WebkitUserDrag: 'none' // Prevent dragging on WebKit
+            }}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            // Pointer events are handled by native listeners - just stop propagation
+            onPointerDown={(e) => {
+                e.stopPropagation();
+            }}
+        >
+            {/* Tagged User Content - EXACT same structure as sticker */}
+            <div className="tagged-user-content w-full h-full flex items-center justify-center" style={{ pointerEvents: 'none' }}>
+                <div className="px-3 py-1.5 bg-white/20 backdrop-blur-sm rounded-full text-white text-sm font-medium whitespace-nowrap">
+                    @{taggedUser.handle}
+                </div>
+            </div>
+            
+            {/* Remove Button (shown when selected) */}
+            {isSelected && (
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onRemove();
+                    }}
+                    className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors z-20"
+                >
+                    <FiX className="w-3 h-3" />
+                </button>
+            )}
+        </div>
+    );
+}
+
 export default function ClipPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -21,8 +316,8 @@ export default function ClipPage() {
   const [mediaType, setMediaType] = React.useState<'image' | 'video' | null>(null);
   const [text, setText] = React.useState('');
   const [textColor, setTextColor] = React.useState('#FFFFFF');
-  const [textSize, setTextSize] = React.useState<'small' | 'medium' | 'large'>('medium');
-  const [background, setBackground] = React.useState<string>('linear-gradient(to bottom right, #ef4444, #f97316, #fbbf24)');
+  const [textSize, setTextSize] = React.useState<'small' | 'medium' | 'large'>('small');
+  const [background, setBackground] = React.useState<string>('linear-gradient(to bottom right, #ec4899, #a855f7, #9333ea)');
   const [showBackgroundPicker, setShowBackgroundPicker] = React.useState(false);
   const [showTextColorPicker, setShowTextColorPicker] = React.useState(false);
   const [showGifPicker, setShowGifPicker] = React.useState(false);
@@ -30,7 +325,8 @@ export default function ClipPage() {
   const [showUserTagging, setShowUserTagging] = React.useState(false);
   const [gifOverlays, setGifOverlays] = React.useState<StickerOverlay[]>([]);
   const [selectedGifOverlay, setSelectedGifOverlay] = React.useState<string | null>(null);
-  const [taggedUsers, setTaggedUsers] = React.useState<string[]>([]);
+  const [taggedUsers, setTaggedUsers] = React.useState<Array<{ handle: string; x: number; y: number; id: string }>>([]);
+  const [selectedTaggedUser, setSelectedTaggedUser] = React.useState<string | null>(null);
   const [storyLocation, setStoryLocation] = React.useState('');
   const [isUploading, setIsUploading] = React.useState(false);
   const [showTextEditor, setShowTextEditor] = React.useState(false);
@@ -187,9 +483,11 @@ export default function ClipPage() {
         textSize,
         sharedPostInfo?.postId,
         sharedPostInfo?.userId,
-        text.trim() ? { color: textColor, size: textSize, background: background } : undefined, // textStyle
+        text.trim() ? { color: textColor, size: textSize, background: background } : undefined, // textStyle (only color, size, background)
         gifOverlays.length > 0 ? gifOverlays : undefined, // stickers
-        taggedUsers.length > 0 ? taggedUsers : undefined // taggedUsers
+        taggedUsers.length > 0 ? taggedUsers.map(tu => tu.handle) : undefined, // taggedUsers (send handles for API compatibility)
+        undefined, // poll
+        taggedUsers.length > 0 ? taggedUsers.map(tu => ({ handle: tu.handle, x: tu.x, y: tu.y })) : undefined // taggedUsersPositions
       );
 
       // Dispatch event to refresh story indicators
@@ -523,7 +821,7 @@ export default function ClipPage() {
     if (textOnlyMode) {
       // Text-only mode
       return (
-        <div className="fixed inset-0 z-50 flex flex-col bg-gradient-to-br from-red-500 via-orange-500 to-yellow-400">
+        <div className="fixed inset-0 z-50 flex flex-col bg-gradient-to-br from-pink-500 via-purple-600 to-purple-700">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 bg-black/20 backdrop-blur-sm">
             <button
@@ -567,14 +865,53 @@ export default function ClipPage() {
                 : undefined
             }}
             onClick={(e) => {
-              // Deselect GIF overlay when clicking on background
+              // Deselect GIF overlay and tagged users when clicking on background
               if (e.target === e.currentTarget || (e.target as HTMLElement).tagName === 'DIV') {
                 setSelectedGifOverlay(null);
+                setSelectedTaggedUser(null);
               }
             }}
+            onTouchStart={(e) => {
+              // Only deselect if touching the background, not a sticker/tagged user
+              const target = e.target as HTMLElement;
+              // Check if touch is on a sticker or tagged user
+              const isSticker = target.closest('[data-sticker]') || target.closest('.sticker-content');
+              const isTaggedUser = target.closest('[data-tagged-user]') || target.closest('.tagged-user-content');
+              
+              // Don't interfere with sticker/tagged user touches - let them handle it
+              if (isSticker || isTaggedUser) {
+                e.stopPropagation(); // Stop container from handling it
+                return; // Let the sticker/tagged user handle the touch
+              }
+              
+              // Only deselect if touching the actual background
+              if (target === e.currentTarget || (target.tagName === 'DIV' && !isSticker && !isTaggedUser)) {
+                setSelectedGifOverlay(null);
+                setSelectedTaggedUser(null);
+              }
+            }}
+            style={{ touchAction: 'pan-y' }} // Allow vertical scrolling but prevent horizontal interference
           >
             {/* Text Display Area */}
-            <div className="w-full h-full flex flex-col items-center justify-center px-4 pointer-events-none max-w-full overflow-hidden">
+            <div 
+              className="w-full h-full flex flex-col items-center justify-center px-4 pointer-events-none max-w-full overflow-hidden"
+              onTouchStart={(e) => {
+                // Focus textarea when tapping on text area (but not on stickers/tagged users)
+                const target = e.target as HTMLElement;
+                if (!target.closest('[data-sticker]') && !target.closest('.sticker-content') && !target.closest('[data-tagged-user]') && !target.closest('.tagged-user-content')) {
+                  // Native listeners on stickers/tagged users will have already handled their touches
+                  // So we can safely focus the textarea
+                  textAreaRef.current?.focus();
+                }
+              }}
+              onClick={(e) => {
+                // Focus textarea when clicking on text area (but not on stickers/tagged users)
+                const target = e.target as HTMLElement;
+                if (!target.closest('[data-sticker]') && !target.closest('.sticker-content') && !target.closest('[data-tagged-user]') && !target.closest('.tagged-user-content')) {
+                  textAreaRef.current?.focus();
+                }
+              }}
+            >
               {!text.trim() ? (
                 <div className="text-white/60 text-lg font-medium">
                   Tap to type
@@ -589,20 +926,34 @@ export default function ClipPage() {
                   </div>
                 </div>
               )}
-              {/* Tagged Users Display */}
-              {taggedUsers.length > 0 && (
-                <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                  {taggedUsers.map((handle) => (
-                    <div
-                      key={handle}
-                      className="px-3 py-1.5 bg-white/20 backdrop-blur-sm rounded-full text-white text-sm font-medium"
-                    >
-                      @{handle}
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
+
+            {/* Tagged Users Display - Draggable - OUTSIDE text display area so pointer events work */}
+            {taggedUsers.length > 0 && containerSize.width > 0 && (
+              <>
+                {taggedUsers.map((taggedUser) => (
+                  <TaggedUserOverlay
+                    key={taggedUser.id}
+                    taggedUser={taggedUser}
+                    onUpdate={(updated) => {
+                      setTaggedUsers(taggedUsers.map(tu => tu.id === taggedUser.id ? updated : tu));
+                    }}
+                    onRemove={() => {
+                      setTaggedUsers(taggedUsers.filter(tu => tu.id !== taggedUser.id));
+                      if (selectedTaggedUser === taggedUser.id) {
+                        setSelectedTaggedUser(null);
+                      }
+                    }}
+                    isSelected={selectedTaggedUser === taggedUser.id}
+                    onSelect={() => setSelectedTaggedUser(taggedUser.id)}
+                    containerWidth={containerSize.width || 400}
+                    containerHeight={containerSize.height || 400}
+                    isModalOpen={showGifPicker || showStickerPicker || showUserTagging || showBackgroundPicker || showTextColorPicker}
+                    containerRef={containerRef}
+                  />
+                ))}
+              </>
+            )}
 
             {/* GIF Overlays */}
             {gifOverlays.length > 0 && containerSize.width > 0 && (
@@ -617,6 +968,7 @@ export default function ClipPage() {
                     onSelect={() => setSelectedGifOverlay(overlay.id)}
                     containerWidth={containerSize.width || 400}
                     containerHeight={containerSize.height || 400}
+                    isModalOpen={showGifPicker || showStickerPicker || showUserTagging || showBackgroundPicker || showTextColorPicker}
                   />
                 ))}
               </>
@@ -626,11 +978,33 @@ export default function ClipPage() {
             <textarea
               ref={textAreaRef}
               value={text}
-              onChange={(e) => setText(e.target.value)}
-              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                if (e.target.value.length <= 300) {
+                  setText(e.target.value);
+                }
+              }}
+              onClick={(e) => {
+                // Don't block if clicking on a sticker or tagged user
+                const target = e.target as HTMLElement;
+                if (target.closest('[data-sticker]') || target.closest('.sticker-content') || target.closest('[data-tagged-user]') || target.closest('.tagged-user-content')) {
+                  return; // Let sticker/tagged user handle the click
+                }
+                e.stopPropagation();
+              }}
+              // Touch events are handled by native listeners on stickers/tagged users with capture phase
+              // They handle their touches first, so textarea can have pointerEvents: 'auto' without interfering
               className="absolute inset-0 w-full h-full bg-transparent border-none outline-none text-transparent caret-white resize-none cursor-text"
               placeholder=""
-              style={{ fontSize: '16px' }}
+              style={{ 
+                fontSize: '16px',
+                pointerEvents: 'auto', // Allow text input - native touch listeners on stickers/tagged users handle their touches first
+                zIndex: 1, // Lower than stickers (zIndex 50-100)
+                touchAction: 'auto' // Allow normal touch behavior for text input
+              }}
+              maxLength={300}
+              spellCheck={false}
+              autoCorrect="off"
+              autoCapitalize="off"
             />
 
             {/* Left-Side Floating Elements */}
@@ -659,6 +1033,7 @@ export default function ClipPage() {
                   {/* Gradient Options */}
                   <div className="grid grid-cols-2 gap-1 mb-2">
                     {[
+                      'linear-gradient(to bottom right, #ec4899, #a855f7, #9333ea)',
                       'linear-gradient(to bottom right, #ef4444, #f97316, #fbbf24)',
                       'linear-gradient(to bottom right, #3b82f6, #8b5cf6, #ec4899)',
                       'linear-gradient(to bottom right, rgb(255, 140, 0), rgb(255, 0, 160), rgb(140, 40, 255))',
@@ -686,6 +1061,21 @@ export default function ClipPage() {
                 </div>
               )}
             </div>
+
+            {/* Character Counter */}
+            {text.length > 0 && (
+              <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-10">
+                <div className={`px-3 py-1.5 rounded-full text-sm font-medium backdrop-blur-sm ${
+                  text.length > 270 
+                    ? text.length >= 300 
+                      ? 'bg-red-500/80 text-white' 
+                      : 'bg-yellow-500/80 text-white'
+                    : 'bg-black/50 text-white'
+                }`}>
+                  {text.length}/300
+                </div>
+              </div>
+            )}
 
             {/* Bottom Bar */}
             <div className="absolute bottom-0 left-0 right-0 flex items-center justify-center gap-6 p-4 bg-black/20 backdrop-blur-sm z-10">
@@ -760,11 +1150,18 @@ export default function ClipPage() {
               isOpen={showUserTagging}
               onClose={() => setShowUserTagging(false)}
               onSelectUser={(handle, displayName) => {
-                if (!taggedUsers.includes(handle)) {
-                  setTaggedUsers([...taggedUsers, handle]);
+                if (!taggedUsers.some(tu => tu.handle === handle)) {
+                  const newTaggedUser = {
+                    handle,
+                    x: 50, // Default center position
+                    y: 50,
+                    id: `tagged-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+                  };
+                  setTaggedUsers([...taggedUsers, newTaggedUser]);
+                  setSelectedTaggedUser(newTaggedUser.id);
                 }
               }}
-              taggedUsers={taggedUsers}
+              taggedUsers={taggedUsers.map(tu => tu.handle)}
             />
           )}
         </div>

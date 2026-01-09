@@ -63,7 +63,7 @@ export default function DiscoverPage() {
         <div className="p-4 space-y-8 min-h-[70vh] flex flex-col items-center justify-center pb-32">
             {/* Capital city preset pills with location icon */}
             <div className="flex flex-col items-center gap-3">
-                <div className="flex flex-wrap justify-center gap-3">
+                <div className="grid grid-cols-3 gap-2 sm:gap-3 w-full max-w-md">
                     {['Paris', 'London', 'Rome', 'Madrid', 'Berlin', 'Tokyo', 'Dublin', 'New York', 'Sydney', 'Toronto', 'Singapore', 'Amsterdam'].map((city, index) => {
                         const colors = [
                             'text-pink-500',
@@ -83,10 +83,10 @@ export default function DiscoverPage() {
                             <button
                                 key={city}
                                 onClick={() => selectLocation(city)}
-                                className="px-5 py-2 rounded-full bg-gray-900 text-gray-100 hover:bg-gray-800 transition-colors text-sm flex items-center gap-2 shadow-sm"
+                                className="px-2 sm:px-5 py-2 rounded-full bg-gray-900 text-gray-100 hover:bg-gray-800 transition-colors text-xs sm:text-sm flex items-center justify-center gap-1 sm:gap-2 shadow-sm"
                             >
-                                <FiMapPin className={`w-4 h-4 ${colors[index % colors.length]}`} />
-                                <span>{city}</span>
+                                <FiMapPin className={`w-3 h-3 sm:w-4 sm:h-4 ${colors[index % colors.length]}`} />
+                                <span className="truncate">{city}</span>
                             </button>
                         );
                     })}
@@ -108,7 +108,10 @@ export default function DiscoverPage() {
                 >
                     {`Hello, ${firstName}`}
                 </h1>
-                <p className="text-sm md:text-base text-gray-400 dark:text-gray-500 mt-2">WHERE TO</p>
+                <p className="text-sm md:text-base text-gray-400 dark:text-gray-500 mt-2 flex items-center justify-center gap-2">
+                    where to for you news?
+                    <FiMapPin className="w-4 h-4" />
+                </p>
             </div>
 
             {/* Spacer */}

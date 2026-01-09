@@ -145,6 +145,7 @@ export type Story = {
   };
   stickers?: StickerOverlay[]; // Stickers/GIFs applied to the story
   taggedUsers?: string[]; // Array of user handles tagged in the story
+  taggedUsersPositions?: Array<{ handle: string; x: number; y: number }>; // Positions of tagged users
   createdAt: number;
   expiresAt: number; // Timestamp when story expires (24 hours from creation)
   location?: string;

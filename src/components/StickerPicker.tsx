@@ -67,7 +67,7 @@ export default function StickerPicker({ isOpen, onClose, onSelectSticker, onAddT
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-end animate-in fade-in duration-200">
             <div className="w-full bg-gray-900 rounded-t-3xl animate-in slide-in-from-bottom duration-300 max-h-[80vh] flex flex-col">
                 {/* Header */}
                 <div className="px-4 pt-4 pb-2 border-b border-gray-800">
