@@ -148,10 +148,10 @@ export default function App() {
 function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCustom?: () => void; userLocal?: string; userRegional?: string; userNational?: string; clipsCount?: number }) {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [showTopProgress, setShowTopProgress] = React.useState(true);
-  const [showBottomProgress, setShowBottomProgress] = React.useState(false);
   const isMountedRef = React.useRef(false);
   const [notificationCount, setNotificationCount] = React.useState(0);
+  const borderOverlayRef = React.useRef<HTMLDivElement>(null);
+  const discoverBorderOverlayRef = React.useRef<HTMLDivElement>(null);
 
   // Use user location from props or context, with fallback to defaults
   const local = props.userLocal || user?.local || 'Finglas';
@@ -207,58 +207,73 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
   // Main location / feed tabs (Clips and Discover are rendered beside the header)
   const tabs: Tab[] = [regional, national, 'Following'];
 
-  // Show progress bars on initial mount and when active tab changes
+  // Animate border reveal on mount for Clips24
   React.useEffect(() => {
-    if (!isMountedRef.current) {
-      // First mount - show top progress bar
-      isMountedRef.current = true;
-      setShowTopProgress(true);
-      setShowBottomProgress(false);
+    if (!borderOverlayRef.current) return;
+    
+    const overlay = borderOverlayRef.current;
+    const duration = 1500; // 1.5 seconds
+    const startTime = Date.now();
+    
+    const animate = () => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      const angle = progress * 360;
+      
+      // Create mask that reveals progressively going around
+      const mask = `conic-gradient(from 0deg, transparent 0deg, transparent ${angle}deg, black ${angle}deg, black 360deg)`;
+      overlay.style.maskImage = mask;
+      overlay.style.webkitMaskImage = mask;
+      
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        // Animation complete - make overlay fully transparent so border is fully visible
+        overlay.style.maskImage = 'conic-gradient(from 0deg, transparent 0deg, transparent 360deg)';
+        overlay.style.webkitMaskImage = 'conic-gradient(from 0deg, transparent 0deg, transparent 360deg)';
+      }
+    };
+    
+    // Start animation
+    requestAnimationFrame(animate);
+  }, []);
 
-      // After top progress bar finishes (1.5s), start bottom progress bar
-      const bottomTimer = setTimeout(() => {
-        setShowTopProgress(false);
-        setShowBottomProgress(true);
-        // Hide bottom progress bar after animation
-        setTimeout(() => {
-          setShowBottomProgress(false);
-        }, 1500);
-      }, 1500);
+  // Animate border reveal on mount for Discover
+  React.useEffect(() => {
+    if (!discoverBorderOverlayRef.current) return;
+    
+    const overlay = discoverBorderOverlayRef.current;
+    const duration = 1500; // 1.5 seconds
+    const startTime = Date.now();
+    
+    const animate = () => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      const angle = progress * 360;
+      
+      // Create mask that reveals progressively going around
+      const mask = `conic-gradient(from 0deg, transparent 0deg, transparent ${angle}deg, black ${angle}deg, black 360deg)`;
+      overlay.style.maskImage = mask;
+      overlay.style.webkitMaskImage = mask;
+      
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        // Animation complete - make overlay fully transparent so border is fully visible
+        overlay.style.maskImage = 'conic-gradient(from 0deg, transparent 0deg, transparent 360deg)';
+        overlay.style.webkitMaskImage = 'conic-gradient(from 0deg, transparent 0deg, transparent 360deg)';
+      }
+    };
+    
+    // Start animation
+    requestAnimationFrame(animate);
+  }, []);
 
-      return () => clearTimeout(bottomTimer);
-    } else {
-      // Tab changed - show progress bars again
-      setShowTopProgress(true);
-      setShowBottomProgress(false);
-
-      const bottomTimer = setTimeout(() => {
-        setShowTopProgress(false);
-        setShowBottomProgress(true);
-        setTimeout(() => {
-          setShowBottomProgress(false);
-        }, 1500);
-      }, 1500);
-
-      return () => clearTimeout(bottomTimer);
-    }
-  }, [props.active]);
 
   return (
     <div role="tablist" aria-label="Locations" className="sticky top-0 z-30 bg-[#030712] py-2 relative">
       {/* Scrim effect */}
       <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/50 to-transparent pointer-events-none z-0" />
-
-      {/* Top progress bar - goes left to right */}
-      {showTopProgress && (
-        <div
-          className="absolute top-0 left-0 h-0.5 z-20"
-          style={{
-            width: '100%',
-            background: 'linear-gradient(90deg, #ec4899 0%, #ffffff 50%, #ffffff 100%)',
-            animation: 'progressBar 1.5s ease-out forwards'
-          }}
-        />
-      )}
 
       {/* Top header row with Clips on the left, centered Gazetteer logo, and Discover on the right */}
       <div className="relative z-10 mb-2 flex items-center px-2 sm:px-3 gap-1 sm:gap-2 min-w-0">
@@ -270,24 +285,28 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               e.stopPropagation();
               navigate('/stories');
             }}
-            className="relative px-3 sm:px-5 py-3 text-base sm:text-lg font-bold text-gray-300 hover:text-white transition-colors"
+            className="relative px-2.5 sm:px-4 py-2.5 text-sm sm:text-base font-bold text-gray-300 hover:text-white transition-colors"
           >
             {/* Gradient border wrapper */}
             <div
-              className="absolute inset-0 rounded-lg p-0.5"
+              className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
               style={{
                 background: 'conic-gradient(from 0deg, rgb(255, 140, 0), rgb(248, 0, 50), rgb(255, 0, 160), rgb(140, 40, 255), rgb(0, 35, 255), rgb(25, 160, 255), rgb(255, 140, 0))',
               }}
             >
-              <div className="w-full h-full rounded-lg bg-[#030712]" />
+              {/* Overlay that covers border initially, then rotates to reveal it */}
+              <div
+                ref={borderOverlayRef}
+                className="absolute inset-0 bg-[#030712] rounded-lg"
+                style={{
+                  maskImage: 'conic-gradient(from 0deg, black 360deg)',
+                  WebkitMaskImage: 'conic-gradient(from 0deg, black 360deg)',
+                }}
+              />
+              <div className="w-full h-full rounded-lg bg-[#030712] relative z-10" />
             </div>
             {/* Content */}
-            <span className="relative z-10">Clips</span>
-            {clipsCount > 0 && (
-              <span className="relative z-10 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-600 text-white ml-2">
-                {clipsCount}
-              </span>
-            )}
+            <span className="relative z-10">Clips24</span>
           </button>
         </div>
 
@@ -348,16 +367,25 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               e.stopPropagation();
               navigate('/discover');
             }}
-            className="relative px-3 sm:px-5 py-3 text-base sm:text-lg font-bold text-gray-300 hover:text-white transition-colors"
+            className="relative px-2.5 sm:px-4 py-2.5 text-sm sm:text-base font-bold text-gray-300 hover:text-white transition-colors"
           >
             {/* Gradient border wrapper */}
             <div
-              className="absolute inset-0 rounded-lg p-0.5"
+              className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
               style={{
                 background: 'conic-gradient(from 0deg, rgb(255, 140, 0), rgb(248, 0, 50), rgb(255, 0, 160), rgb(140, 40, 255), rgb(0, 35, 255), rgb(25, 160, 255), rgb(255, 140, 0))',
               }}
             >
-              <div className="w-full h-full rounded-lg bg-[#030712]" />
+              {/* Overlay that covers border initially, then rotates to reveal it */}
+              <div
+                ref={discoverBorderOverlayRef}
+                className="absolute inset-0 bg-[#030712] rounded-lg"
+                style={{
+                  maskImage: 'conic-gradient(from 0deg, black 360deg)',
+                  WebkitMaskImage: 'conic-gradient(from 0deg, black 360deg)',
+                }}
+              />
+              <div className="w-full h-full rounded-lg bg-[#030712] relative z-10" />
             </div>
             {/* Content */}
             <span className="relative z-10">Discover</span>
@@ -446,7 +474,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               aria-controls={panelId}
               tabIndex={active ? 0 : -1}
               onClick={handleClick}
-              className="rounded-full px-3 py-1.5 bg-black text-gray-500 dark:text-gray-400 text-sm font-medium transition-transform active:scale-[.98] hover:text-gray-300 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+              className="rounded-full px-3 py-1.5 bg-black text-gray-600 dark:text-gray-500 text-sm font-medium transition-transform active:scale-[.98] hover:text-gray-400 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 opacity-60"
               style={{
                 outline: 'none',
                 boxShadow: 'none',
@@ -463,17 +491,6 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
         })}
       </div>
 
-      {/* Bottom progress bar - goes right to left, starts after top bar finishes */}
-      {showBottomProgress && (
-        <div
-          className="absolute bottom-0 right-0 h-0.5 z-20"
-          style={{
-            background: 'linear-gradient(90deg, #ec4899 0%, #ffffff 50%, #ffffff 100%)',
-            animation: 'progressBarReverse 1.5s ease-out forwards',
-            transformOrigin: 'right'
-          }}
-        />
-      )}
     </div>
   );
 }

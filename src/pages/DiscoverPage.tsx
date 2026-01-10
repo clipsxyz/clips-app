@@ -98,7 +98,7 @@ export default function DiscoverPage() {
                 <h1
                     className="text-4xl md:text-5xl font-extrabold tracking-tight text-sky-400"
                     style={{
-                        background: 'linear-gradient(90deg, #87ceeb, #ffb6c1, #87cefa, #c084fc, #34d399, #f59e0b, #ef4444, #dc2626, #fca5a5, #60a5fa, #fb7185, #87ceeb)',
+                        background: 'linear-gradient(90deg, rgb(255, 140, 0), rgb(248, 0, 50), rgb(255, 0, 160), rgb(140, 40, 255), rgb(0, 35, 255), rgb(25, 160, 255), rgb(255, 140, 0))',
                         backgroundSize: '200% 100%',
                         backgroundClip: 'text',
                         WebkitBackgroundClip: 'text',
@@ -108,8 +108,8 @@ export default function DiscoverPage() {
                 >
                     {`Hello, ${firstName}`}
                 </h1>
-                <p className="text-sm md:text-base text-gray-400 dark:text-gray-500 mt-2 flex items-center justify-center gap-2">
-                    where to for you news?
+                <p className="text-sm md:text-base text-white mt-2 flex items-center justify-center gap-2">
+                    Where to for your news?
                     <FiMapPin className="w-4 h-4" />
                 </p>
             </div>

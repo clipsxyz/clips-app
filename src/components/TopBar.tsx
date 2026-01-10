@@ -22,6 +22,7 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
   const [unreadCount, setUnreadCount] = React.useState(0);
   const [lastSender, setLastSender] = React.useState<string | null>(null);
   const [hasNewStories, setHasNewStories] = React.useState(false);
+  const localBorderOverlayRef = React.useRef<HTMLDivElement>(null);
 
   // Check for new stories from followed users
   const checkNewStories = React.useCallback(async () => {
@@ -135,6 +136,37 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
     window.dispatchEvent(new CustomEvent('setFollowingTab'));
   };
 
+  // Animate border reveal on mount for Local button
+  React.useEffect(() => {
+    if (!localBorderOverlayRef.current) return;
+    
+    const overlay = localBorderOverlayRef.current;
+    const duration = 1500; // 1.5 seconds
+    const startTime = Date.now();
+    
+    const animate = () => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      const angle = progress * 360;
+      
+      // Create mask that reveals progressively going around
+      const mask = `conic-gradient(from 0deg, transparent 0deg, transparent ${angle}deg, black ${angle}deg, black 360deg)`;
+      overlay.style.maskImage = mask;
+      overlay.style.webkitMaskImage = mask;
+      
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        // Animation complete - make overlay fully transparent so border is fully visible
+        overlay.style.maskImage = 'conic-gradient(from 0deg, transparent 0deg, transparent 360deg)';
+        overlay.style.webkitMaskImage = 'conic-gradient(from 0deg, transparent 0deg, transparent 360deg)';
+      }
+    };
+    
+    // Start animation
+    requestAnimationFrame(animate);
+  }, []);
+
   return (
     <>
       <div className="sticky top-0 z-40 bg-white/80 dark:bg-gray-950/80 backdrop-blur border-b border-gray-200 dark:border-gray-800">
@@ -163,10 +195,29 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
                   // Navigate to feed with query parameter (same as Discover page does for Paris, London, etc.)
                   navigate(`/feed?location=${encodeURIComponent(local)}`);
                 }}
-                className="px-3 py-1.5 rounded-xl text-xs font-medium transition-all active:scale-[.98] border-2 border-dashed border-blue-400 dark:border-blue-500 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
+                className="relative px-3 py-1.5 text-xs font-medium transition-all active:scale-[.98] text-gray-300 hover:text-white"
                 title={`View ${user?.local || 'Local'} feed`}
               >
-                {user?.local || 'Local'}
+                {/* Gradient border wrapper */}
+                <div
+                  className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
+                  style={{
+                    background: 'conic-gradient(from 0deg, rgb(255, 140, 0), rgb(248, 0, 50), rgb(255, 0, 160), rgb(140, 40, 255), rgb(0, 35, 255), rgb(25, 160, 255), rgb(255, 140, 0))',
+                  }}
+                >
+                  {/* Overlay that covers border initially, then rotates to reveal it */}
+                  <div
+                    ref={localBorderOverlayRef}
+                    className="absolute inset-0 bg-[#030712] rounded-lg"
+                    style={{
+                      maskImage: 'conic-gradient(from 0deg, black 360deg)',
+                      WebkitMaskImage: 'conic-gradient(from 0deg, black 360deg)',
+                    }}
+                  />
+                  <div className="w-full h-full rounded-lg bg-[#030712] relative z-10" />
+                </div>
+                {/* Content */}
+                <span className="relative z-10">{user?.local || 'Local'}</span>
               </button>
               <Avatar src={user?.avatarUrl} name={(user?.handle || 'User').split('@')[0]} size="sm" />
             </div>
