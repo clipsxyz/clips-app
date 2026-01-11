@@ -152,6 +152,8 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
   const [notificationCount, setNotificationCount] = React.useState(0);
   const borderOverlayRef = React.useRef<HTMLDivElement>(null);
   const discoverBorderOverlayRef = React.useRef<HTMLDivElement>(null);
+  const tabBorderOverlayRefs = React.useRef<{ [key: string]: HTMLDivElement | null }>({});
+  const prevActiveTabRef = React.useRef<Tab | null>(null);
 
   // Use user location from props or context, with fallback to defaults
   const local = props.userLocal || user?.local || 'Finglas';
@@ -207,68 +209,56 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
   // Main location / feed tabs (Clips and Discover are rendered beside the header)
   const tabs: Tab[] = [regional, national, 'Following'];
 
-  // Animate border reveal on mount for Clips24
-  React.useEffect(() => {
-    if (!borderOverlayRef.current) return;
-    
-    const overlay = borderOverlayRef.current;
-    const duration = 1500; // 1.5 seconds
-    const startTime = Date.now();
-    
-    const animate = () => {
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      const angle = progress * 360;
-      
-      // Create mask that reveals progressively going around
-      const mask = `conic-gradient(from 0deg, transparent 0deg, transparent ${angle}deg, black ${angle}deg, black 360deg)`;
-      overlay.style.maskImage = mask;
-      overlay.style.webkitMaskImage = mask;
-      
-      if (progress < 1) {
-        requestAnimationFrame(animate);
-      } else {
-        // Animation complete - make overlay fully transparent so border is fully visible
-        overlay.style.maskImage = 'conic-gradient(from 0deg, transparent 0deg, transparent 360deg)';
-        overlay.style.webkitMaskImage = 'conic-gradient(from 0deg, transparent 0deg, transparent 360deg)';
-      }
-    };
-    
-    // Start animation
-    requestAnimationFrame(animate);
-  }, []);
 
-  // Animate border reveal on mount for Discover
-  React.useEffect(() => {
-    if (!discoverBorderOverlayRef.current) return;
-    
-    const overlay = discoverBorderOverlayRef.current;
-    const duration = 1500; // 1.5 seconds
-    const startTime = Date.now();
-    
-    const animate = () => {
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      const angle = progress * 360;
-      
-      // Create mask that reveals progressively going around
-      const mask = `conic-gradient(from 0deg, transparent 0deg, transparent ${angle}deg, black ${angle}deg, black 360deg)`;
-      overlay.style.maskImage = mask;
-      overlay.style.webkitMaskImage = mask;
-      
-      if (progress < 1) {
-        requestAnimationFrame(animate);
-      } else {
-        // Animation complete - make overlay fully transparent so border is fully visible
-        overlay.style.maskImage = 'conic-gradient(from 0deg, transparent 0deg, transparent 360deg)';
-        overlay.style.webkitMaskImage = 'conic-gradient(from 0deg, transparent 0deg, transparent 360deg)';
-      }
-    };
-    
-    // Start animation
-    requestAnimationFrame(animate);
-  }, []);
+  // Easing function for smooth animation (ease-out cubic)
+  const easeOutCubic = (t: number): number => {
+    return 1 - Math.pow(1 - t, 3);
+  };
 
+  // Animate border reveal when active tab changes
+  React.useEffect(() => {
+    const currentTab = props.active;
+    const prevTab = prevActiveTabRef.current;
+    
+    // Only animate if tab actually changed
+    if (currentTab !== prevTab && currentTab) {
+      const overlay = tabBorderOverlayRefs.current[currentTab];
+      if (overlay) {
+        // Reset overlay to start position
+        overlay.style.maskImage = 'conic-gradient(from 0deg, black 360deg)';
+        overlay.style.webkitMaskImage = 'conic-gradient(from 0deg, black 360deg)';
+        
+        // Start animation
+        const duration = 1800; // 1.8 seconds for smoother feel
+        const startTime = Date.now();
+        
+        const animate = () => {
+          const elapsed = Date.now() - startTime;
+          const rawProgress = Math.min(elapsed / duration, 1);
+          // Apply easing for smoother animation
+          const easedProgress = easeOutCubic(rawProgress);
+          const angle = easedProgress * 360;
+          
+          // Create mask that reveals progressively going around
+          const mask = `conic-gradient(from 0deg, transparent 0deg, transparent ${angle}deg, black ${angle}deg, black 360deg)`;
+          overlay.style.maskImage = mask;
+          overlay.style.webkitMaskImage = mask;
+          
+          if (rawProgress < 1) {
+            requestAnimationFrame(animate);
+          } else {
+            // Animation complete - make overlay fully transparent so border is fully visible
+            overlay.style.maskImage = 'conic-gradient(from 0deg, transparent 0deg, transparent 360deg)';
+            overlay.style.webkitMaskImage = 'conic-gradient(from 0deg, transparent 0deg, transparent 360deg)';
+          }
+        };
+        
+        requestAnimationFrame(animate);
+      }
+    }
+    
+    prevActiveTabRef.current = currentTab;
+  }, [props.active]);
 
   return (
     <div role="tablist" aria-label="Locations" className="sticky top-0 z-30 bg-[#030712] py-2 relative">
@@ -285,27 +275,8 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               e.stopPropagation();
               navigate('/stories');
             }}
-            className="relative px-2.5 sm:px-4 py-2.5 text-sm sm:text-base font-bold text-gray-300 hover:text-white transition-colors"
+            className="relative px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-bold text-gray-300 hover:text-white transition-colors rounded-lg border-2 border-white"
           >
-            {/* Gradient border wrapper */}
-            <div
-              className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
-              style={{
-                background: 'conic-gradient(from 0deg, rgb(255, 140, 0), rgb(248, 0, 50), rgb(255, 0, 160), rgb(140, 40, 255), rgb(0, 35, 255), rgb(25, 160, 255), rgb(255, 140, 0))',
-              }}
-            >
-              {/* Overlay that covers border initially, then rotates to reveal it */}
-              <div
-                ref={borderOverlayRef}
-                className="absolute inset-0 bg-[#030712] rounded-lg"
-                style={{
-                  maskImage: 'conic-gradient(from 0deg, black 360deg)',
-                  WebkitMaskImage: 'conic-gradient(from 0deg, black 360deg)',
-                }}
-              />
-              <div className="w-full h-full rounded-lg bg-[#030712] relative z-10" />
-            </div>
-            {/* Content */}
             <span className="relative z-10">Clips24</span>
           </button>
         </div>
@@ -367,27 +338,8 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               e.stopPropagation();
               navigate('/discover');
             }}
-            className="relative px-2.5 sm:px-4 py-2.5 text-sm sm:text-base font-bold text-gray-300 hover:text-white transition-colors"
+            className="relative px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-bold text-gray-300 hover:text-white transition-colors rounded-lg border-2 border-white"
           >
-            {/* Gradient border wrapper */}
-            <div
-              className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
-              style={{
-                background: 'conic-gradient(from 0deg, rgb(255, 140, 0), rgb(248, 0, 50), rgb(255, 0, 160), rgb(140, 40, 255), rgb(0, 35, 255), rgb(25, 160, 255), rgb(255, 140, 0))',
-              }}
-            >
-              {/* Overlay that covers border initially, then rotates to reveal it */}
-              <div
-                ref={discoverBorderOverlayRef}
-                className="absolute inset-0 bg-[#030712] rounded-lg"
-                style={{
-                  maskImage: 'conic-gradient(from 0deg, black 360deg)',
-                  WebkitMaskImage: 'conic-gradient(from 0deg, black 360deg)',
-                }}
-              />
-              <div className="w-full h-full rounded-lg bg-[#030712] relative z-10" />
-            </div>
-            {/* Content */}
             <span className="relative z-10">Discover</span>
           </button>
         </div>
@@ -433,7 +385,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                 aria-controls={panelId}
                 tabIndex={active ? 0 : -1}
                 onClick={handleClick}
-                className="rounded-full px-3 py-1.5 bg-black text-white text-sm font-medium transition-transform active:scale-[.98] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 flex items-center justify-center gap-1 border-b-2 border-white"
+                className="relative rounded-lg px-3 py-1.5 text-white text-sm font-medium transition-transform active:scale-[.98] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 flex items-center justify-center gap-1 max-w-[120px]"
                 style={{
                   outline: 'none',
                   boxShadow: 'none'
@@ -443,24 +395,46 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                   e.currentTarget.style.boxShadow = 'none';
                 }}
               >
-                {shouldShimmer ? (
-                  <span
+                {/* Gradient border wrapper */}
+                <div
+                  className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
+                  style={{
+                    background: 'conic-gradient(from 0deg, rgb(255, 140, 0), rgb(248, 0, 50), rgb(255, 0, 160), rgb(140, 40, 255), rgb(0, 35, 255), rgb(25, 160, 255), rgb(255, 140, 0))',
+                  }}
+                >
+                  {/* Overlay that covers border initially, then rotates to reveal it */}
+                  <div
+                    ref={(el) => { tabBorderOverlayRefs.current[t] = el; }}
+                    className="absolute inset-0 bg-black rounded-lg"
                     style={{
-                      background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
-                      backgroundSize: '200% 100%',
-                      WebkitBackgroundClip: 'text',
-                      backgroundClip: 'text',
-                      WebkitTextFillColor: 'transparent',
-                      color: 'transparent',
-                      animation: 'shimmer 3s linear infinite',
-                      display: 'inline-block'
+                      maskImage: 'conic-gradient(from 0deg, black 360deg)',
+                      WebkitMaskImage: 'conic-gradient(from 0deg, black 360deg)',
                     }}
-                  >
-                    {tabLabel}
-                  </span>
-                ) : (
-                  tabLabel
-                )}
+                  />
+                  <div className="w-full h-full rounded-lg bg-black relative z-10" />
+                </div>
+                {/* Content */}
+                <span className="relative z-10 truncate whitespace-nowrap">
+                  {shouldShimmer ? (
+                    <span
+                      className="truncate"
+                      style={{
+                        background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
+                        backgroundSize: '200% 100%',
+                        WebkitBackgroundClip: 'text',
+                        backgroundClip: 'text',
+                        WebkitTextFillColor: 'transparent',
+                        color: 'transparent',
+                        animation: 'shimmer 3s linear infinite',
+                        display: 'inline-block'
+                      }}
+                    >
+                      {tabLabel}
+                    </span>
+                  ) : (
+                    <span className="truncate">{tabLabel}</span>
+                  )}
+                </span>
               </button>
             );
           }
@@ -474,7 +448,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               aria-controls={panelId}
               tabIndex={active ? 0 : -1}
               onClick={handleClick}
-              className="rounded-full px-3 py-1.5 bg-black text-gray-600 dark:text-gray-500 text-sm font-medium transition-transform active:scale-[.98] hover:text-gray-400 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 opacity-60"
+              className="rounded-lg px-3 py-1.5 bg-black text-gray-600 dark:text-gray-500 text-sm font-medium transition-transform active:scale-[.98] hover:text-gray-400 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 opacity-60 max-w-[120px]"
               style={{
                 outline: 'none',
                 boxShadow: 'none',
@@ -485,7 +459,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                 e.currentTarget.style.boxShadow = 'none';
               }}
             >
-              {tabLabel}
+              <span className="truncate whitespace-nowrap">{tabLabel}</span>
             </button>
           );
         })}
@@ -3211,6 +3185,8 @@ function FeedPageWrapper() {
   const [loading, setLoading] = React.useState(false);
   const [end, setEnd] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const locationBorderOverlayRef = React.useRef<HTMLDivElement>(null);
+  const prevCustomLocationRef = React.useRef<string | null>(null);
   const [commentsModalOpen, setCommentsModalOpen] = React.useState(false);
   const [selectedPostId, setSelectedPostId] = React.useState<string | null>(null);
   const [shareModalOpen, setShareModalOpen] = React.useState(false);
@@ -3557,6 +3533,56 @@ function FeedPageWrapper() {
     }
   }, [cursor, currentFilter, routerLocation.search, customLocation]);
 
+  // Easing function for smooth animation (ease-out cubic)
+  const easeOutCubic = (t: number): number => {
+    return 1 - Math.pow(1 - t, 3);
+  };
+
+  // Animate border reveal when customLocation changes
+  React.useEffect(() => {
+    const currentLocation = customLocation;
+    const prevLocation = prevCustomLocationRef.current;
+    
+    // Only animate if location actually changed and is not null
+    if (currentLocation !== prevLocation && currentLocation) {
+      const overlay = locationBorderOverlayRef.current;
+      if (overlay) {
+        // Reset overlay to start position
+        overlay.style.maskImage = 'conic-gradient(from 0deg, black 360deg)';
+        overlay.style.webkitMaskImage = 'conic-gradient(from 0deg, black 360deg)';
+        
+        // Start animation
+        const duration = 1800; // 1.8 seconds for smoother feel
+        const startTime = Date.now();
+        
+        const animate = () => {
+          const elapsed = Date.now() - startTime;
+          const rawProgress = Math.min(elapsed / duration, 1);
+          // Apply easing for smoother animation
+          const easedProgress = easeOutCubic(rawProgress);
+          const angle = easedProgress * 360;
+          
+          // Create mask that reveals progressively going around
+          const mask = `conic-gradient(from 0deg, transparent 0deg, transparent ${angle}deg, black ${angle}deg, black 360deg)`;
+          overlay.style.maskImage = mask;
+          overlay.style.webkitMaskImage = mask;
+          
+          if (rawProgress < 1) {
+            requestAnimationFrame(animate);
+          } else {
+            // Animation complete - make overlay fully transparent so border is fully visible
+            overlay.style.maskImage = 'conic-gradient(from 0deg, transparent 0deg, transparent 360deg)';
+            overlay.style.webkitMaskImage = 'conic-gradient(from 0deg, transparent 0deg, transparent 360deg)';
+          }
+        };
+        
+        requestAnimationFrame(animate);
+      }
+    }
+    
+    prevCustomLocationRef.current = currentLocation;
+  }, [customLocation]);
+
   // Listen for post updates from EditPostModal
   React.useEffect(() => {
     const listeners: Array<{ postId: string; handler: EventListener }> = [];
@@ -3713,11 +3739,35 @@ function FeedPageWrapper() {
       ) : (
         /* Show location header only when viewing custom location */
         <div className="px-3 py-2">
-          <div className="flex items-center gap-2">
-            <FiMapPin className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-              {customLocation} Feed
-            </span>
+          <div className="relative inline-flex items-center">
+            <button
+              className="relative px-3 py-1.5 text-sm font-medium text-white rounded-lg"
+              onClick={() => setCustomLocation(null)}
+            >
+              {/* Gradient border wrapper */}
+              <div
+                className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
+                style={{
+                  background: 'conic-gradient(from 0deg, rgb(255, 140, 0), rgb(248, 0, 50), rgb(255, 0, 160), rgb(140, 40, 255), rgb(0, 35, 255), rgb(25, 160, 255), rgb(255, 140, 0))',
+                }}
+              >
+                {/* Overlay that covers border initially, then rotates to reveal it */}
+                <div
+                  ref={locationBorderOverlayRef}
+                  className="absolute inset-0 bg-[#030712] rounded-lg"
+                  style={{
+                    maskImage: 'conic-gradient(from 0deg, black 360deg)',
+                    WebkitMaskImage: 'conic-gradient(from 0deg, black 360deg)',
+                  }}
+                />
+                <div className="w-full h-full rounded-lg bg-[#030712] relative z-10" />
+              </div>
+              {/* Content */}
+              <span className="relative z-10 flex items-center gap-2">
+                <FiMapPin className="w-4 h-4" />
+                {customLocation} Feed
+              </span>
+            </button>
           </div>
         </div>
       )}
@@ -3922,7 +3972,7 @@ function FeedPageWrapper() {
           ) : customLocation ? (
             <>
               <div className="text-lg font-semibold mb-1">No posts from {customLocation} yet</div>
-              <div className="text-gray-600 text-sm">Be the first to share something from {customLocation}!</div>
+              <div className="text-gray-600 text-sm">Try this feed soon to see when people from {customLocation} start posting</div>
             </>
           ) : (
             <>
@@ -4125,6 +4175,8 @@ function BoostPageWrapper() {
   const [posts, setPosts] = React.useState<Post[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  const locationBorderOverlayRef = React.useRef<HTMLDivElement>(null);
+  const prevCustomLocationRef = React.useRef<string | null>(null);
   const [commentsModalOpen, setCommentsModalOpen] = React.useState(false);
   const [selectedPostId, setSelectedPostId] = React.useState<string | null>(null);
   const [shareModalOpen, setShareModalOpen] = React.useState(false);

@@ -112,64 +112,110 @@ export async function fetchCitiesForRegion(regionName: string, countryName: stri
   const fallbackLocalAreas = getFallbackCities(regionName); // This function actually returns local areas
   console.log(`[fetchCitiesForRegion] Fallback local areas found: ${fallbackLocalAreas.length} for region: "${regionName}"`);
   
-  if (fallbackLocalAreas.length > 0) {
-    console.log(`[fetchCitiesForRegion] ✅ SUCCESS: Using ${fallbackLocalAreas.length} fallback local areas:`, fallbackLocalAreas.slice(0, 5).map(a => a.name));
-    return fallbackLocalAreas;
-  } else {
-    console.warn(`[fetchCitiesForRegion] ⚠️ WARNING: No fallback data found for region: "${regionName}"`);
-  }
-
-  // If no fallback data exists and we have API key, try Google Maps API
+  // Always try Google Maps API to get comprehensive results, then merge with fallback
   if (!GOOGLE_MAPS_API_KEY) {
-    console.warn(`No fallback data and no API key for region: ${regionName}, ${countryName}`);
-    return [];
+    console.warn(`No API key for region: ${regionName}, ${countryName}. Using fallback data only.`);
+    return fallbackLocalAreas;
   }
 
   try {
     // Use Places API (New) Text Search to find local areas/neighborhoods in the region
-    // Try to find neighborhoods, districts, or sub-localities
-    const response = await fetch(
-      `https://places.googleapis.com/v1/places:searchText`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
-          'X-Goog-FieldMask': 'places.displayName,places.id,places.types,places.formattedAddress'
-        },
-        body: JSON.stringify({
-          textQuery: `local areas neighborhoods districts in ${regionName}, ${countryName}`,
-          maxResultCount: 50,
-          includedType: 'sublocality',
-          languageCode: 'en'
-        })
+    // Try multiple queries to get comprehensive results
+    const queries = [
+      `neighborhoods in ${regionName}, ${countryName}`,
+      `districts in ${regionName}, ${countryName}`,
+      `areas in ${regionName}, ${countryName}`,
+      `localities in ${regionName}, ${countryName}`
+    ];
+
+    const allResults: LocationResult[] = [];
+    const seenNames = new Set<string>();
+
+    // Add fallback results first
+    fallbackLocalAreas.forEach(area => {
+      const normalizedName = area.name.toLowerCase().trim();
+      if (!seenNames.has(normalizedName)) {
+        seenNames.add(normalizedName);
+        allResults.push(area);
       }
-    );
+    });
 
-    if (!response.ok) {
-      console.warn(`Google Maps API error for ${regionName}, ${countryName}: ${response.status}`);
-      // Fall back to old Places API or try with different types
-      return await fetchLocalAreasFallback(regionName, countryName);
+    // Try each query to get more results
+    for (const query of queries) {
+      try {
+        const response = await fetch(
+          `https://places.googleapis.com/v1/places:searchText`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
+              'X-Goog-FieldMask': 'places.displayName,places.id,places.types,places.formattedAddress'
+            },
+            body: JSON.stringify({
+              textQuery: query,
+              maxResultCount: 60, // Increased from 50
+              languageCode: 'en'
+            })
+          }
+        );
+
+        if (response.ok) {
+          const data = await response.json();
+          
+          if (data.places && Array.isArray(data.places)) {
+            data.places.forEach((place: any) => {
+              const name = place.displayName?.text || place.formattedAddress || '';
+              if (name) {
+                // Extract just the area name (remove city/region suffix if present)
+                const cleanName = name.split(',')[0].trim();
+                const normalizedName = cleanName.toLowerCase();
+                
+                // Only add if not already seen and seems like a local area
+                if (!seenNames.has(normalizedName) && cleanName.length > 0) {
+                  seenNames.add(normalizedName);
+                  allResults.push({
+                    name: cleanName,
+                    placeId: place.id,
+                    types: place.types
+                  });
+                }
+              }
+            });
+          }
+        }
+      } catch (queryError) {
+        console.warn(`Error with query "${query}":`, queryError);
+        // Continue with next query
+      }
     }
 
-    const data = await response.json();
+    // If we still don't have many results, try the old API as fallback
+    if (allResults.length < 20) {
+      try {
+        const fallbackResults = await fetchLocalAreasFallback(regionName, countryName);
+        fallbackResults.forEach(area => {
+          const normalizedName = area.name.toLowerCase().trim();
+          if (!seenNames.has(normalizedName)) {
+            seenNames.add(normalizedName);
+            allResults.push(area);
+          }
+        });
+      } catch (fallbackError) {
+        console.warn('Fallback API also failed:', fallbackError);
+      }
+    }
+
+    console.log(`[fetchCitiesForRegion] ✅ Total local areas found: ${allResults.length} (${fallbackLocalAreas.length} from fallback, ${allResults.length - fallbackLocalAreas.length} from API)`);
     
-    if (data.places && Array.isArray(data.places)) {
-      const localAreas = data.places
-        .map((place: any) => ({
-          name: place.displayName?.text || place.formattedAddress || '',
-          placeId: place.id,
-          types: place.types
-        }))
-        .filter((loc: LocationResult) => loc.name);
-      
-      return localAreas.length > 0 ? localAreas : await fetchLocalAreasFallback(regionName, countryName);
-    }
-
-    return await fetchLocalAreasFallback(regionName, countryName);
+    // Sort alphabetically
+    allResults.sort((a, b) => a.name.localeCompare(b.name));
+    
+    return allResults.length > 0 ? allResults : fallbackLocalAreas;
   } catch (error) {
     console.error(`Error fetching local areas from Google Maps API for ${regionName}, ${countryName}:`, error);
-    return await fetchLocalAreasFallback(regionName, countryName);
+    // Return fallback data if API fails
+    return fallbackLocalAreas;
   }
 }
 
