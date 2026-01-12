@@ -24,6 +24,17 @@ export default function StoriesPage() {
     const [storyGroups, setStoryGroups] = React.useState<StoryGroup[]>([]);
     const [currentGroupIndex, setCurrentGroupIndex] = React.useState(0);
     const [currentStoryIndex, setCurrentStoryIndex] = React.useState(0);
+    const currentGroupIndexRef = React.useRef(0);
+    const currentStoryIndexRef = React.useRef(0);
+    
+    // Keep refs in sync with state
+    React.useEffect(() => {
+        currentGroupIndexRef.current = currentGroupIndex;
+    }, [currentGroupIndex]);
+    
+    React.useEffect(() => {
+        currentStoryIndexRef.current = currentStoryIndex;
+    }, [currentStoryIndex]);
     const [loading, setLoading] = React.useState(true);
     const [viewingStories, setViewingStories] = React.useState(false);
     const [progress, setProgress] = React.useState(0);
@@ -43,6 +54,8 @@ export default function StoriesPage() {
     const pausedRef = React.useRef<boolean>(false);
     const isVotingRef = React.useRef<boolean>(false);
     const nextStoryTimeoutRef = React.useRef<number | null>(null);
+    const voteStartTimeRef = React.useRef<number | null>(null); // Track when voting started
+    const lastStoryIdRef = React.useRef<string | null>(null); // Track last story ID to preserve timer
 
     // Swipe gesture tracking for story navigation
     const swipeStartXRef = React.useRef<number | null>(null);
@@ -81,13 +94,38 @@ export default function StoriesPage() {
                 }
             }
 
-            // Add current user's avatar to their story groups
-            const groupsWithAvatars = groups.map(group => {
+            // Add avatar URLs to all story groups
+            const groupsWithAvatars = await Promise.all(groups.map(async (group) => {
+                // If it's the current user, use their avatar from context
                 if (group.userId === user.id && user.avatarUrl) {
                     return { ...group, avatarUrl: user.avatarUrl };
                 }
-                return group;
-            });
+                
+                // Try to get avatar from getAvatarForHandle first (for mock data)
+                let avatarUrl = getAvatarForHandle(group.userHandle);
+                
+                // If not found in mock data, try fetching from backend API
+                if (!avatarUrl) {
+                    try {
+                        const { fetchUserProfile } = await import('../api/client');
+                        const profile = await fetchUserProfile(group.userHandle, user.id);
+                        // Check both avatar_url (snake_case from API) and avatarUrl (camelCase)
+                        if (profile && (profile.avatar_url || profile.avatarUrl)) {
+                            avatarUrl = profile.avatar_url || profile.avatarUrl;
+                        }
+                    } catch (error) {
+                        // If API call fails, fall back to undefined (will show initial letter)
+                        console.warn(`Failed to fetch avatar for ${group.userHandle}:`, error);
+                    }
+                }
+                
+                // Log for debugging
+                if (!avatarUrl) {
+                    console.log(`No avatar found for ${group.userHandle}`);
+                }
+                
+                return { ...group, avatarUrl };
+            }));
 
             setStoryGroups(groupsWithAvatars);
         } catch (error) {
@@ -158,33 +196,119 @@ export default function StoriesPage() {
         }
     }
 
-    // Navigate to next story
-    function nextStory() {
-        // Don't advance if user is voting
-        if (isVotingRef.current) {
-            return;
-        }
+    // Handle moving to next user's stories
+    function handleNextUserStories(currentGroups: StoryGroup[], currentIdx: number) {
+        console.log('handleNextUserStories called. Current group index:', currentIdx, 'Total groups:', currentGroups.length, 'Condition check:', currentIdx < currentGroups.length - 1);
+        console.log('All groups:', currentGroups.map((g, idx) => ({ index: idx, userHandle: g.userHandle, storiesCount: g.stories?.length || 0 })));
         
-        const currentGroup = storyGroups[currentGroupIndex];
-        if (!currentGroup) return;
-
-        if (currentStoryIndex < currentGroup.stories.length - 1) {
-            setCurrentStoryIndex(currentStoryIndex + 1);
+        if (currentIdx < currentGroups.length - 1) {
+            const nextGroupIndex = currentIdx + 1;
+            const nextGroup = currentGroups[nextGroupIndex];
+            
+            console.log('Next group found:', {
+                index: nextGroupIndex,
+                userHandle: nextGroup?.userHandle,
+                userId: nextGroup?.userId,
+                hasStories: !!(nextGroup?.stories),
+                storiesLength: nextGroup?.stories?.length || 0
+            });
+            
+            // Always fetch stories for next user to ensure they're loaded
+            if (nextGroup && user?.id && nextGroup.userId) {
+                console.log('Fetching stories for next user:', nextGroup.userHandle);
+                fetchUserStories(user.id, nextGroup.userId)
+                    .then((stories) => {
+                        console.log('Fetched stories for next user:', stories?.length || 0);
+                        if (stories && stories.length > 0) {
+                            // Update the group with fetched stories
+                            setStoryGroups(prev => {
+                                const updated = [...prev];
+                                updated[nextGroupIndex] = { ...nextGroup, stories, avatarUrl: nextGroup.avatarUrl };
+                                return updated;
+                            });
+                            
+                            // Navigate to the next user's first story
+                            console.log('Navigating to next user stories');
+                            setCurrentGroupIndex(nextGroupIndex);
+                            currentGroupIndexRef.current = nextGroupIndex;
+                            setCurrentStoryIndex(0);
+                            currentStoryIndexRef.current = 0;
             setProgress(0);
             setIsMuted(true);
             elapsedTimeRef.current = 0;
+                            setPaused(false);
+                            pausedRef.current = false;
         } else {
-            // Move to next user's stories
-            if (currentGroupIndex < storyGroups.length - 1) {
-                setCurrentGroupIndex(currentGroupIndex + 1);
+                            console.warn('Next user group has no stories after fetching, trying next group or closing');
+                            // Try to find next group with stories, or close
+                            const nextGroupWithStories = currentGroups.find((g, idx) => idx > nextGroupIndex && g.stories && g.stories.length > 0);
+                            if (nextGroupWithStories) {
+                                const foundIndex = currentGroups.findIndex(g => g.userId === nextGroupWithStories.userId);
+                                setCurrentGroupIndex(foundIndex);
+                                currentGroupIndexRef.current = foundIndex;
                 setCurrentStoryIndex(0);
+                                currentStoryIndexRef.current = 0;
                 setProgress(0);
                 setIsMuted(true);
                 elapsedTimeRef.current = 0;
+                                setPaused(false);
+                                pausedRef.current = false;
             } else {
                 closeStories();
             }
         }
+                    })
+                    .catch((error) => {
+                        console.error('Error fetching next user stories:', error);
+                        closeStories();
+                    });
+            } else {
+                console.warn('Next user group is invalid:', { nextGroup: !!nextGroup, userId: user?.id, nextGroupUserId: nextGroup?.userId });
+                closeStories();
+            }
+        } else {
+            // At the end of all stories, close
+            console.log('Reached end of all stories. Current index:', currentGroupIndex, 'Total groups:', currentGroups.length);
+            closeStories();
+        }
+    }
+
+    // Navigate to next story
+    function nextStory() {
+        // Don't advance if user is voting
+        if (isVotingRef.current) {
+            console.log('nextStory blocked: user is voting');
+            return;
+        }
+        
+        // Use refs to get latest values (avoid stale closures)
+        const currentIdx = currentGroupIndexRef.current;
+        const currentStoryIdx = currentStoryIndexRef.current;
+        
+        setStoryGroups(currentGroups => {
+            const currentGroup = currentGroups[currentIdx];
+            if (!currentGroup || !currentGroup.stories || currentGroup.stories.length === 0) {
+                console.warn('Cannot navigate: currentGroup or stories is invalid', { currentGroupIndex: currentIdx, storyGroupsLength: currentGroups.length });
+                return currentGroups;
+            }
+
+            if (currentStoryIdx < currentGroup.stories.length - 1) {
+                // Move to next story within same user
+                const nextStoryIdx = currentStoryIdx + 1;
+                setCurrentStoryIndex(nextStoryIdx);
+                currentStoryIndexRef.current = nextStoryIdx;
+                setProgress(0);
+                setIsMuted(true);
+                elapsedTimeRef.current = 0;
+                setPaused(false);
+                pausedRef.current = false;
+                return currentGroups;
+            } else {
+                // Move to next user's stories - call handler with latest groups and indices
+                handleNextUserStories(currentGroups, currentIdx);
+                return currentGroups;
+            }
+        });
     }
 
     // Swipe gesture handlers (horizontal drag to change story)
@@ -241,10 +365,10 @@ export default function StoriesPage() {
         }
 
         if (dx < 0) {
-            // Swipe left -> next story
+            // Swipe left -> next story (within same user, or next user if at end)
             nextStory();
         } else if (dx > 0) {
-            // Swipe right -> previous story
+            // Swipe right -> previous story (within same user, or previous user if at start)
             previousStory();
         }
     }
@@ -255,13 +379,16 @@ export default function StoriesPage() {
         swipeStartedOnPollRef.current = false;
     }
 
-    // Navigate to previous story
+    // Navigate to previous story (within same user)
     function previousStory() {
         if (currentStoryIndex > 0) {
             setCurrentStoryIndex(currentStoryIndex - 1);
             setProgress(0);
             setIsMuted(true);
             elapsedTimeRef.current = 0;
+            // Reset paused state for new story (poll check will handle pausing if needed)
+            setPaused(false);
+            pausedRef.current = false;
         } else {
             // Move to previous user's stories
             if (currentGroupIndex > 0) {
@@ -271,7 +398,44 @@ export default function StoriesPage() {
                 setProgress(0);
                 setIsMuted(true);
                 elapsedTimeRef.current = 0;
+                // Reset paused state for new story (poll check will handle pausing if needed)
+                setPaused(false);
+                pausedRef.current = false;
             }
+        }
+    }
+
+    // Navigate to next user's stories (Instagram style - skip remaining stories from current user)
+    function nextUserStories() {
+        if (isVotingRef.current) {
+            return;
+        }
+        
+        if (currentGroupIndex < storyGroups.length - 1) {
+            setCurrentGroupIndex(currentGroupIndex + 1);
+            setCurrentStoryIndex(0);
+            setProgress(0);
+            setIsMuted(true);
+            elapsedTimeRef.current = 0;
+            setPaused(false);
+            pausedRef.current = false;
+        } else {
+            // At the end of all stories, close
+            closeStories();
+        }
+    }
+
+    // Navigate to previous user's stories (Instagram style)
+    function previousUserStories() {
+        if (currentGroupIndex > 0) {
+            setCurrentGroupIndex(currentGroupIndex - 1);
+            const prevGroup = storyGroups[currentGroupIndex - 1];
+            setCurrentStoryIndex(prevGroup?.stories.length - 1 || 0);
+            setProgress(0);
+            setIsMuted(true);
+            elapsedTimeRef.current = 0;
+            setPaused(false);
+            pausedRef.current = false;
         }
     }
 
@@ -279,11 +443,54 @@ export default function StoriesPage() {
     async function handleReaction(emoji: string) {
         if (!currentStory || !user?.id || !user?.handle) return;
         try {
+            // Preserve current position before refreshing
+            const currentUserId = currentGroup?.userId;
+            const currentStoryIdx = currentStoryIndex;
+            
             await addStoryReaction(currentStory.id, user.id, user.handle, emoji);
             setShowEmojiPicker(false);
-            // Refresh story data
-            const groups = await fetchStoryGroups(user.id);
+            
+            // Refresh story data but preserve current position
+            // Use the same function that loaded initial stories
+            const followedUserHandles = await getFollowedUsers(user.id);
+            let groups = await fetchFollowedUsersStoryGroups(user.id, followedUserHandles);
+            
+            // Load avatars for refreshed groups
+            groups = await Promise.all(groups.map(async (group) => {
+                if (group.userId === user.id && user.avatarUrl) {
+                    return { ...group, avatarUrl: user.avatarUrl };
+                }
+                let avatarUrl = getAvatarForHandle(group.userHandle);
+                if (!avatarUrl) {
+                    try {
+                        const { fetchUserProfile } = await import('../api/client');
+                        const profile = await fetchUserProfile(group.userHandle, user.id);
+                        if (profile && (profile.avatar_url || profile.avatarUrl)) {
+                            avatarUrl = profile.avatar_url || profile.avatarUrl;
+                        }
+                    } catch (error) {
+                        console.warn(`Failed to fetch avatar for ${group.userHandle}:`, error);
+                    }
+                }
+                return { ...group, avatarUrl };
+            }));
+            
+            // Find the same user's group to maintain position
+            const sameUserGroupIndex = groups.findIndex(g => g.userId === currentUserId);
+            if (sameUserGroupIndex !== -1) {
+                const sameUserGroup = groups[sameUserGroupIndex];
+                // Make sure we don't go beyond the available stories
+                const safeStoryIndex = Math.min(currentStoryIdx, sameUserGroup.stories.length - 1);
+                
+                // Update story groups
             setStoryGroups(groups);
+                // Restore position to same user and same story
+                setCurrentGroupIndex(sameUserGroupIndex);
+                setCurrentStoryIndex(safeStoryIndex);
+            } else {
+                // If user not found, just update groups
+                setStoryGroups(groups);
+            }
         } catch (error) {
             console.error('Error adding reaction:', error);
         }
@@ -355,15 +562,17 @@ export default function StoriesPage() {
         const currentStory = currentGroup.stories[currentStoryIndex];
         if (!currentStory) return;
 
-        // For poll stories, never auto-advance – require a manual swipe instead.
-        if (currentStory.poll) {
-            setProgress(0);
-            return;
-        }
-
-        // Reset elapsed time when starting a new story
+        // For poll stories, allow timer to run but it will pause when voting
+        // Only reset elapsed time if this is a new story (not resuming after vote)
+        const storyId = currentStory.id;
+        
+        if (lastStoryIdRef.current !== storyId) {
+            // New story - reset timer
         elapsedTimeRef.current = 0;
         setProgress(0);
+            lastStoryIdRef.current = storyId;
+        }
+        // If same story, preserve elapsedTimeRef (for resuming after vote)
 
         // Mark story as viewed
         markStoryViewed(currentStory.id, user.id).catch(console.error);
@@ -562,32 +771,27 @@ export default function StoriesPage() {
     if (viewingStories && currentStory && currentGroup && currentGroup.stories) {
         return (
             <>
-                <div className="fixed inset-0 z-50" style={{
-                    background: 'linear-gradient(to bottom right, rgba(255, 78, 203, 0.15), rgba(0, 0, 0, 0.95), rgba(143, 91, 255, 0.15))'
-                }}>
-                    {/* Progress bars for each story */}
-                    <div className="absolute top-0 left-0 right-0 z-50 px-4 pt-3 pb-2">
-                        <div className="flex gap-1.5">
+                <div className="fixed inset-0 z-50 bg-black">
+                    {/* Progress bars for each story - Instagram style */}
+                    <div className="absolute top-0 left-0 right-0 z-50 px-2 pt-2 pb-1">
+                        <div className="flex gap-1">
                             {currentGroup.stories.map((story, idx) => (
-                                <div key={story.id} className="flex-1 h-1 bg-white/20 rounded-full overflow-hidden backdrop-blur-sm">
+                                <div key={story.id} className="flex-1 h-0.5 bg-white/30 rounded-full overflow-hidden">
                                     <div
-                                        className="h-full rounded-full transition-all ease-linear"
+                                        className="h-full bg-white rounded-full transition-all ease-linear"
                                         style={
                                             idx < currentStoryIndex
                                                 ? {
                                                     width: '100%',
-                                                    background: 'linear-gradient(to right, rgb(255, 140, 0) 5%, rgb(248, 0, 50) 25%, rgb(255, 0, 160) 45%, rgb(140, 40, 255) 65%, rgb(0, 35, 255) 82%, rgb(25, 160, 255) 96%)',
                                                     transitionDuration: '100ms'
                                                 }
                                                 : idx === currentStoryIndex && !paused && progress > 0
                                                     ? {
                                                         width: `${progress}%`,
-                                                        background: 'linear-gradient(to right, rgb(255, 140, 0) 5%, rgb(248, 0, 50) 25%, rgb(255, 0, 160) 45%, rgb(140, 40, 255) 65%, rgb(0, 35, 255) 82%, rgb(25, 160, 255) 96%)',
                                                         transitionDuration: '50ms'
                                                     }
                                                     : {
                                                         width: idx === currentStoryIndex ? `${progress}%` : '0%',
-                                                        background: idx === currentStoryIndex ? 'rgba(255,255,255,0.6)' : 'transparent',
                                                         transitionDuration: '100ms'
                                                     }
                                         }
@@ -597,7 +801,7 @@ export default function StoriesPage() {
                         </div>
                     </div>
 
-                    {/* Story Media - Full screen with elegant container */}
+                    {/* Story Media - Full screen Instagram style */}
                     <div
                         className="absolute inset-0 flex items-center justify-center"
                         onMouseDown={handleSwipeStart}
@@ -607,8 +811,8 @@ export default function StoriesPage() {
                         onTouchEnd={handleSwipeEnd}
                         onTouchCancel={handleSwipeCancel}
                     >
-                        <div className="relative w-full h-full max-w-[420px] max-h-[90vh] aspect-[9/16] flex items-center justify-center">
-                            <div className="relative w-full h-full rounded-2xl overflow-hidden shadow-2xl bg-black">
+                        <div className="relative w-full h-full flex items-center justify-center">
+                            <div className="relative w-full h-full overflow-hidden bg-black">
                                 {(() => {
                                     // Debug logging
                                     if (currentStory?.sharedFromPost) {
@@ -894,7 +1098,47 @@ export default function StoriesPage() {
                                 {/* Sticker Overlays for all stories */}
                                 {currentStory?.stickers && currentStory.stickers.length > 0 && (
                                     <>
-                                        {currentStory.stickers.map((overlay) => (
+                                        {currentStory.stickers.map((overlay) => {
+                                            // Render text stickers (text and location)
+                                            if (overlay.textContent) {
+                                                const fontSize = overlay.fontSize === 'small' ? 'text-sm' :
+                                                    overlay.fontSize === 'large' ? 'text-3xl' : 'text-xl';
+                                                const scale = overlay.scale || 1;
+                                                const isLocation = overlay.sticker.category === 'Location';
+                                                return (
+                                                    <div
+                                                        key={overlay.id}
+                                                        className="absolute pointer-events-none"
+                                                        style={{
+                                                            left: `${overlay.x}%`,
+                                                            top: `${overlay.y}%`,
+                                                            transform: `translate(-50%, -50%) scale(${scale}) rotate(${overlay.rotation}deg)`,
+                                                            opacity: overlay.opacity,
+                                                            zIndex: 20
+                                                        }}
+                                                    >
+                                                        <div
+                                                            className={`font-bold text-center ${fontSize} flex items-center gap-1.5 justify-center`}
+                                                            style={{
+                                                                color: overlay.textColor || '#FFFFFF',
+                                                                textShadow: '2px 2px 8px rgba(0,0,0,0.9), -1px -1px 0 rgba(0,0,0,0.9), 1px -1px 0 rgba(0,0,0,0.9), -1px 1px 0 rgba(0,0,0,0.9), 1px 1px 0 rgba(0,0,0,0.9)',
+                                                                whiteSpace: 'nowrap'
+                                                            }}
+                                                        >
+                                                            {isLocation && (
+                                                                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                                                    <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+                                                                </svg>
+                                                            )}
+                                                            {overlay.textContent}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            }
+                                            
+                                            // Render emoji stickers
+                                            if (overlay.sticker.emoji) {
+                                                return (
                                             <div
                                                 key={overlay.id}
                                                 className="absolute"
@@ -906,20 +1150,39 @@ export default function StoriesPage() {
                                                     zIndex: 20
                                                 }}
                                             >
-                                                {overlay.sticker.emoji ? (
                                                     <span className="text-4xl" style={{ fontSize: `${50 * overlay.scale}px` }}>
                                                         {overlay.sticker.emoji}
                                                     </span>
-                                                ) : overlay.sticker.url ? (
+                                                    </div>
+                                                );
+                                            }
+                                            
+                                            // Render image/GIF stickers
+                                            if (overlay.sticker.url) {
+                                                return (
+                                                    <div
+                                                        key={overlay.id}
+                                                        className="absolute"
+                                                        style={{
+                                                            left: `${overlay.x}%`,
+                                                            top: `${overlay.y}%`,
+                                                            transform: `translate(-50%, -50%) scale(${overlay.scale}) rotate(${overlay.rotation}deg)`,
+                                                            opacity: overlay.opacity,
+                                                            zIndex: 20
+                                                        }}
+                                                    >
                                                     <img
                                                         src={overlay.sticker.url}
                                                         alt=""
                                                         className="max-w-[100px] max-h-[100px]"
                                                         style={{ pointerEvents: 'none' }}
                                                     />
-                                                ) : null}
                                             </div>
-                                        ))}
+                                                );
+                                            }
+                                            
+                                            return null;
+                                        })}
                                     </>
                                 )}
 
@@ -940,7 +1203,7 @@ export default function StoriesPage() {
                                         return (
                                     <div 
                                         data-poll-container
-                                        className="absolute bottom-32 left-0 right-0 px-4 z-[80] pointer-events-auto" 
+                                        className="absolute top-1/2 left-0 right-0 px-4 z-[80] pointer-events-auto transform -translate-y-1/2" 
                                         style={{ maxWidth: '100%' }}
                                         onClick={(e) => {
                                             e.stopPropagation();
@@ -985,7 +1248,7 @@ export default function StoriesPage() {
                                             }}
                                         >
                                             <div 
-                                                className="backdrop-blur-md bg-white/90 rounded-2xl p-4 shadow-xl"
+                                                className="backdrop-blur-md bg-white/95 rounded-2xl p-5 shadow-xl"
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     e.preventDefault();
@@ -1001,7 +1264,7 @@ export default function StoriesPage() {
                                             </p>
 
                                             {/* Poll Options */}
-                                            <div className="space-y-2">
+                                            <div className="space-y-3">
                                                 {/* Option 1 */}
                                                 <button
                                                     onClick={async (e) => {
@@ -1013,12 +1276,15 @@ export default function StoriesPage() {
                                                         // IMMEDIATE visual feedback - turn blue right away
                                                         setOptimisticVote('option1');
                                                         
+                                                        // Track when voting started to calculate remaining time
+                                                        voteStartTimeRef.current = Date.now();
+                                                        
                                                         // Immediately pause and prevent ALL navigation - set ref FIRST
+                                                        // IMPORTANT: Don't reset elapsedTimeRef - we need to preserve it to calculate remaining time
                                                         isVotingRef.current = true;
                                                         pausedRef.current = true;
                                                         setPaused(true);
-                                                        elapsedTimeRef.current = 0;
-                                                        setProgress(0);
+                                                        // Don't reset elapsedTimeRef or progress - preserve current progress
                                                         // Clear any pending nextStory calls
                                                         if (nextStoryTimeoutRef.current !== null) {
                                                             clearTimeout(nextStoryTimeoutRef.current);
@@ -1032,19 +1298,75 @@ export default function StoriesPage() {
                                                         // Use requestAnimationFrame to ensure state is set before async call
                                                         requestAnimationFrame(async () => {
                                                             try {
+                                                                // Preserve current position before refreshing
+                                                                const currentUserId = currentGroup?.userId;
+                                                                const currentStoryIdx = currentStoryIndex;
+                                                                
                                                                 await voteOnPoll(currentStory.id, user.id, 'option1');
-                                                                // Refresh story data
-                                                                const groups = await fetchStoryGroups(user.id);
+                                                                
+                                                                // Refresh story data but preserve current position
+                                                                // Use the same function that loaded initial stories
+                                                                const followedUserHandles = await getFollowedUsers(user.id);
+                                                                let groups = await fetchFollowedUsersStoryGroups(user.id, followedUserHandles);
+                                                                
+                                                                // Load avatars for refreshed groups
+                                                                groups = await Promise.all(groups.map(async (group) => {
+                                                                    if (group.userId === user.id && user.avatarUrl) {
+                                                                        return { ...group, avatarUrl: user.avatarUrl };
+                                                                    }
+                                                                    let avatarUrl = getAvatarForHandle(group.userHandle);
+                                                                    if (!avatarUrl) {
+                                                                        try {
+                                                                            const { fetchUserProfile } = await import('../api/client');
+                                                                            const profile = await fetchUserProfile(group.userHandle, user.id);
+                                                                            if (profile && (profile.avatar_url || profile.avatarUrl)) {
+                                                                                avatarUrl = profile.avatar_url || profile.avatarUrl;
+                                                                            }
+                                                                        } catch (error) {
+                                                                            console.warn(`Failed to fetch avatar for ${group.userHandle}:`, error);
+                                                                        }
+                                                                    }
+                                                                    return { ...group, avatarUrl };
+                                                                }));
+                                                                
+                                                                // Find the same user's group to maintain position
+                                                                const sameUserGroupIndex = groups.findIndex(g => g.userId === currentUserId);
+                                                                if (sameUserGroupIndex !== -1) {
+                                                                    const sameUserGroup = groups[sameUserGroupIndex];
+                                                                    // Make sure we don't go beyond the available stories
+                                                                    const safeStoryIndex = Math.min(currentStoryIdx, sameUserGroup.stories.length - 1);
+                                                                    
+                                                                    // Update story groups
                                                                 setStoryGroups(groups);
+                                                                    // Restore position to same user and same story
+                                                                    setCurrentGroupIndex(sameUserGroupIndex);
+                                                                    setCurrentStoryIndex(safeStoryIndex);
+                                                                } else {
+                                                                    // If user not found, just update groups
+                                                                    setStoryGroups(groups);
+                                                                }
+                                                                
                                                                 // Clear optimistic vote after data is refreshed
                                                                 setOptimisticVote(null);
                                                                 
-                                                                // Resume after 5 seconds so user can see the results
-                                                                setTimeout(() => {
+                                                                // Calculate remaining time based on when voting started
+                                                                const STORY_DURATION = 15000; // 15 seconds
+                                                                const timeVotingStarted = voteStartTimeRef.current || Date.now();
+                                                                const timeSpentBeforeVoting = elapsedTimeRef.current;
+                                                                const remainingTime = STORY_DURATION - timeSpentBeforeVoting;
+                                                                
+                                                                // Resume timer with remaining time - Instagram style
                                                                     isVotingRef.current = false;
+                                                                // Reset swipe tracking to allow navigation
+                                                                swipeStartXRef.current = null;
+                                                                swipeStartYRef.current = null;
+                                                                swipeStartedOnPollRef.current = false;
+                                                                
+                                                                // Resume the timer - it will continue from where it was
                                                                     setPaused(false);
                                                                     pausedRef.current = false;
-                                                                }, 5000);
+                                                                // The progress timer will continue from elapsedTimeRef.current
+                                                                voteStartTimeRef.current = null;
                                                             } catch (error) {
                                                                 console.error('Error voting on poll:', error);
                                                                 setOptimisticVote(null);
@@ -1075,7 +1397,7 @@ export default function StoriesPage() {
                                                     <div className="flex items-center justify-between">
                                                         <span>{currentStory.poll.option1 || 'Option 1'}</span>
                                                         {currentStory.poll?.userVote !== undefined && (
-                                                            <span className="text-xs">
+                                                            <span className="text-xs font-medium">
                                                                 {(() => {
                                                                     try {
                                                                         const votes1 = currentStory.poll?.votes1 || 0;
@@ -1093,7 +1415,7 @@ export default function StoriesPage() {
                                                     </div>
                                                     {/* Progress bar */}
                                                     {currentStory.poll.userVote !== undefined && (
-                                                        <div className="mt-2 h-1 bg-gray-300 rounded-full overflow-hidden">
+                                                        <div className="mt-2 h-1.5 bg-gray-300 rounded-full overflow-hidden">
                                                             <div
                                                                 className="h-full bg-blue-500 transition-all"
                                                                 style={{
@@ -1138,19 +1460,75 @@ export default function StoriesPage() {
                                                         // Use requestAnimationFrame to ensure state is set before async call
                                                         requestAnimationFrame(async () => {
                                                             try {
+                                                                // Preserve current position before refreshing
+                                                                const currentUserId = currentGroup?.userId;
+                                                                const currentStoryIdx = currentStoryIndex;
+                                                                
                                                                 await voteOnPoll(currentStory.id, user.id, 'option2');
-                                                                // Refresh story data
-                                                                const groups = await fetchStoryGroups(user.id);
+                                                                
+                                                                // Refresh story data but preserve current position
+                                                                // Use the same function that loaded initial stories
+                                                                const followedUserHandles = await getFollowedUsers(user.id);
+                                                                let groups = await fetchFollowedUsersStoryGroups(user.id, followedUserHandles);
+                                                                
+                                                                // Load avatars for refreshed groups
+                                                                groups = await Promise.all(groups.map(async (group) => {
+                                                                    if (group.userId === user.id && user.avatarUrl) {
+                                                                        return { ...group, avatarUrl: user.avatarUrl };
+                                                                    }
+                                                                    let avatarUrl = getAvatarForHandle(group.userHandle);
+                                                                    if (!avatarUrl) {
+                                                                        try {
+                                                                            const { fetchUserProfile } = await import('../api/client');
+                                                                            const profile = await fetchUserProfile(group.userHandle, user.id);
+                                                                            if (profile && (profile.avatar_url || profile.avatarUrl)) {
+                                                                                avatarUrl = profile.avatar_url || profile.avatarUrl;
+                                                                            }
+                                                                        } catch (error) {
+                                                                            console.warn(`Failed to fetch avatar for ${group.userHandle}:`, error);
+                                                                        }
+                                                                    }
+                                                                    return { ...group, avatarUrl };
+                                                                }));
+                                                                
+                                                                // Find the same user's group to maintain position
+                                                                const sameUserGroupIndex = groups.findIndex(g => g.userId === currentUserId);
+                                                                if (sameUserGroupIndex !== -1) {
+                                                                    const sameUserGroup = groups[sameUserGroupIndex];
+                                                                    // Make sure we don't go beyond the available stories
+                                                                    const safeStoryIndex = Math.min(currentStoryIdx, sameUserGroup.stories.length - 1);
+                                                                    
+                                                                    // Update story groups
                                                                 setStoryGroups(groups);
+                                                                    // Restore position to same user and same story
+                                                                    setCurrentGroupIndex(sameUserGroupIndex);
+                                                                    setCurrentStoryIndex(safeStoryIndex);
+                                                                } else {
+                                                                    // If user not found, just update groups
+                                                                    setStoryGroups(groups);
+                                                                }
+                                                                
                                                                 // Clear optimistic vote after data is refreshed
                                                                 setOptimisticVote(null);
                                                                 
-                                                                // Resume after 5 seconds so user can see the results
-                                                                setTimeout(() => {
+                                                                // Calculate remaining time based on when voting started
+                                                                const STORY_DURATION = 15000; // 15 seconds
+                                                                const timeVotingStarted = voteStartTimeRef.current || Date.now();
+                                                                const timeSpentBeforeVoting = elapsedTimeRef.current;
+                                                                const remainingTime = STORY_DURATION - timeSpentBeforeVoting;
+                                                                
+                                                                // Resume timer with remaining time - Instagram style
                                                                     isVotingRef.current = false;
+                                                                // Reset swipe tracking to allow navigation
+                                                                swipeStartXRef.current = null;
+                                                                swipeStartYRef.current = null;
+                                                                swipeStartedOnPollRef.current = false;
+                                                                
+                                                                // Resume the timer - it will continue from where it was
                                                                     setPaused(false);
                                                                     pausedRef.current = false;
-                                                                }, 5000);
+                                                                // The progress timer will continue from elapsedTimeRef.current
+                                                                voteStartTimeRef.current = null;
                                                             } catch (error) {
                                                                 console.error('Error voting on poll:', error);
                                                                 setOptimisticVote(null);
@@ -1179,9 +1557,9 @@ export default function StoriesPage() {
                                                     } ${(currentStory?.poll?.userVote !== undefined || optimisticVote !== null) ? 'cursor-default' : 'cursor-pointer'}`}
                                                 >
                                                     <div className="flex items-center justify-between">
-                                                        <span>{currentStory.poll.option2 || 'Option 2'}</span>
+                                                        <span className={currentStory?.poll?.userVote !== undefined ? 'text-white' : 'text-gray-900'}>{currentStory.poll.option2 || 'Option 2'}</span>
                                                         {currentStory.poll?.userVote !== undefined && (
-                                                            <span className="text-xs">
+                                                            <span className="text-[10px] text-white/80">
                                                                 {(() => {
                                                                     try {
                                                                         const votes1 = currentStory.poll?.votes1 || 0;
@@ -1199,7 +1577,7 @@ export default function StoriesPage() {
                                                     </div>
                                                     {/* Progress bar */}
                                                     {currentStory.poll.userVote !== undefined && (
-                                                        <div className="mt-2 h-1 bg-gray-300 rounded-full overflow-hidden">
+                                                        <div className="mt-2 h-1.5 bg-gray-300 rounded-full overflow-hidden">
                                                             <div
                                                                 className="h-full bg-blue-500 transition-all"
                                                                 style={{
@@ -1242,114 +1620,29 @@ export default function StoriesPage() {
                         </div>
                     </div>
 
-                    {/* Subtle gradient overlay for text readability - only show for media stories */}
-                    {currentStory?.mediaUrl && (
-                        <div className="absolute inset-0 pointer-events-none z-10">
-                            <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/50" />
-                        </div>
-                    )}
 
-                    {/* Header with user info - Refined with backdrop blur */}
-                    <div className="absolute top-12 left-0 right-0 px-4 z-50">
-                        <div className="flex items-center justify-between backdrop-blur-md bg-black/30 rounded-2xl px-4 py-3 border border-white/10 shadow-lg">
+                    {/* Header with user info - Instagram style */}
+                    <div className="absolute top-3 left-0 right-0 px-4 z-50">
+                        <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
-                                <div className="relative">
                                     <Avatar
                                         src={currentGroup?.avatarUrl}
                                         name={currentGroup?.name || 'User'}
                                         size="sm"
                                     />
-                                    <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 border-2 border-black rounded-full"></div>
-                                </div>
                                 <div>
                                     <p className="text-white font-semibold text-sm">{currentGroup?.userHandle}</p>
-                                    {currentStory?.sharedFromUser && (
-                                        <p className="text-white/80 text-xs flex items-center gap-1">
-                                            <span>shared from</span>
-                                            <span className="font-semibold">{currentStory.sharedFromUser}</span>
-                                        </p>
-                                    )}
-                                    {!currentStory?.sharedFromUser && currentStory?.location && (
-                                        <p className="text-white/70 text-xs">{currentStory.location}</p>
+                                    {currentStory?.createdAt && (
+                                        <p className="text-white/70 text-xs">{getTimeAgo(currentStory.createdAt)}</p>
                                     )}
                                 </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                                {/* Full Scenes Button - Always visible in header */}
-                                {currentStory && (
-                                    <button
-                                        onClick={async (e) => {
-                                            e.stopPropagation();
-                                            // If story was shared from a post, fetch the full post
-                                            if (currentStory.sharedFromPost) {
-                                                try {
-                                                    const post = await getPostById(currentStory.sharedFromPost);
-                                                    if (post) {
-                                                        setFullPost(post);
-                                                        setShowScenesModal(true);
-                                                        return;
-                                                    }
-                                                } catch (error) {
-                                                    console.error('Error fetching post:', error);
-                                                }
-                                            }
-
-                                            // Otherwise, convert story to Post-like object for ScenesModal
-                                            const storyAsPost: Post = {
-                                                id: currentStory.id,
-                                                userHandle: currentStory.userHandle,
-                                                locationLabel: currentStory.location || '',
-                                                tags: [],
-                                                mediaUrl: currentStory.mediaUrl,
-                                                mediaType: currentStory.mediaType,
-                                                text: currentStory.text,
-                                                caption: currentStory.text,
-                                                textStyle: currentStory.textStyle,
-                                                stickers: currentStory.stickers,
-                                                taggedUsers: currentStory.taggedUsers,
-                                                createdAt: currentStory.createdAt,
-                                                stats: {
-                                                    likes: 0,
-                                                    views: currentStory.views,
-                                                    comments: currentStory.replies.length,
-                                                    shares: 0,
-                                                    reclips: 0
-                                                },
-                                                isBookmarked: false,
-                                                isFollowing: false,
-                                                userLiked: !!currentStory.userReaction
-                                            };
-                                            setFullPost(storyAsPost);
-                                            setShowScenesModal(true);
-                                        }}
-                                        className="pointer-events-auto px-3 py-1.5 rounded-full bg-gradient-to-r from-purple-600 via-purple-500 to-purple-600 text-white text-xs font-semibold flex items-center gap-1.5 hover:opacity-90 transition-opacity shadow-lg backdrop-blur-sm"
-                                        title="Show Full Scenes"
-                                    >
-                                        <FiMaximize2 className="w-3.5 h-3.5" />
-                                        <span>Scenes</span>
-                                    </button>
-                                )}
-                                {/* Mute/Unmute button - only show for videos */}
-                                {currentStory?.mediaType === 'video' && (
-                                    <button
-                                        onClick={() => setIsMuted(!isMuted)}
-                                        className="pointer-events-auto p-2 rounded-full bg-black/40 backdrop-blur-sm hover:bg-white/20 transition-colors border border-white/10"
-                                        title={isMuted ? 'Unmute' : 'Mute'}
-                                    >
-                                        {isMuted ? (
-                                            <FiVolumeX className="w-5 h-5 text-white" />
-                                        ) : (
-                                            <FiVolume2 className="w-5 h-5 text-white" />
-                                        )}
-                                    </button>
-                                )}
                                 <button
                                     onClick={closeStories}
-                                    className="pointer-events-auto p-2 rounded-full bg-black/40 backdrop-blur-sm hover:bg-white/20 transition-colors border border-white/10"
+                                className="pointer-events-auto p-2"
                                 >
-                                    <FiX className="w-5 h-5 text-white" />
+                                <FiX className="w-6 h-6 text-white" />
                                 </button>
-                            </div>
                         </div>
                     </div>
 
@@ -1462,7 +1755,7 @@ export default function StoriesPage() {
 
                     {/* Bottom Action Bar - Instagram Style */}
                     <div className="absolute bottom-0 left-0 right-0 z-[60] px-4 pb-4">
-                        <div className="flex items-center gap-2 bg-black/50 backdrop-blur-sm rounded-full px-4 py-2.5 border border-white/20 max-w-md mx-auto">
+                        <div className="flex items-center gap-3 max-w-md mx-auto">
                             {/* Send Message Input */}
                             <input
                                 type="text"
@@ -1473,7 +1766,7 @@ export default function StoriesPage() {
                                     setShowReplyModal(true);
                                 }}
                                 placeholder="Send message"
-                                className="flex-1 bg-transparent text-white placeholder-white/70 text-sm outline-none py-1"
+                                className="flex-1 bg-white/10 rounded-full px-4 py-2.5 text-white placeholder-white/60 text-sm outline-none border-0"
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     setShowReplyModal(true);
@@ -1488,12 +1781,12 @@ export default function StoriesPage() {
                                     e.preventDefault();
                                     handleReaction('❤️');
                                 }}
-                                className="p-1.5 rounded-full hover:bg-white/10 transition-colors flex-shrink-0"
+                                className="p-2 flex-shrink-0"
                             >
                                 {currentStory?.userReaction ? (
-                                    <span className="text-lg">{currentStory.userReaction}</span>
+                                    <AiFillHeart className="w-6 h-6 text-red-500" />
                                 ) : (
-                                    <FiHeart className="w-5 h-5 text-white" />
+                                    <FiHeart className="w-6 h-6 text-white" />
                                 )}
                             </button>
 
@@ -1504,9 +1797,9 @@ export default function StoriesPage() {
                                     e.preventDefault();
                                     setShowStoryShareModal(true);
                                 }}
-                                className="p-1.5 rounded-full hover:bg-white/10 transition-colors flex-shrink-0"
+                                className="p-2 flex-shrink-0"
                             >
-                                <FiSend className="w-5 h-5 text-white" />
+                                <FiSend className="w-6 h-6 text-white" />
                             </button>
                         </div>
                     </div>
@@ -1840,6 +2133,40 @@ export default function StoriesPage() {
                         
                         const locationColor = getLocationColor(location || group.userHandle);
                         
+                        // Profile Picture Component with error handling
+                        const ProfilePicture = React.memo(({ group, locationColor }: { group: StoryGroup; locationColor: string }) => {
+                            const [imageError, setImageError] = React.useState(false);
+                            
+                            return (
+                                <div 
+                                    className="relative w-16 h-16 rounded-full overflow-hidden border-4 shadow-lg"
+                                    style={{
+                                        borderColor: locationColor,
+                                        boxShadow: `0 0 0 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.4)`
+                                    }}
+                                >
+                                    {group.avatarUrl && !imageError ? (
+                                        <img
+                                            src={group.avatarUrl}
+                                            alt={group.name}
+                                            className="w-full h-full object-cover"
+                                            onError={() => setImageError(true)}
+                                        />
+                                    ) : (
+                                        <div 
+                                            className="w-full h-full flex items-center justify-center"
+                                            style={{ backgroundColor: locationColor + '40' }}
+                                        >
+                                            <span className="text-xl text-white font-bold">
+                                                {group.name.charAt(0).toUpperCase()}
+                                            </span>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        });
+                        ProfilePicture.displayName = 'ProfilePicture';
+                        
                         // Check if this is a shared post - if so, we need to fetch and show the original post format
                         const StoryThumbnail = React.memo(({ story }: { story: Story }) => {
                             const [originalPost, setOriginalPost] = React.useState<Post | null>(null);
@@ -2033,30 +2360,7 @@ export default function StoriesPage() {
 
                                     {/* Centered Profile Picture with Gazetteer Border */}
                                     <div className="absolute inset-0 flex items-center justify-center z-20">
-                                        <div 
-                                            className="relative w-16 h-16 rounded-full overflow-hidden border-4 shadow-lg"
-                                            style={{
-                                                borderColor: locationColor,
-                                                boxShadow: `0 0 0 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.4)`
-                                            }}
-                                        >
-                                            {group.avatarUrl ? (
-                                                <img
-                                                    src={group.avatarUrl}
-                                                    alt={group.name}
-                                                    className="w-full h-full object-cover"
-                                                />
-                                            ) : (
-                                                <div 
-                                                    className="w-full h-full flex items-center justify-center"
-                                                    style={{ backgroundColor: locationColor + '40' }}
-                                                >
-                                                    <span className="text-xl text-white font-bold">
-                                                        {group.name.charAt(0).toUpperCase()}
-                                                    </span>
-                                                </div>
-                                            )}
-                                        </div>
+                                        <ProfilePicture group={group} locationColor={locationColor} />
                                     </div>
 
                                     {/* Username at bottom */}

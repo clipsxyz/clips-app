@@ -312,6 +312,7 @@ export default function ClipPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const cameraInputRef = React.useRef<HTMLInputElement>(null);
   const [selectedMedia, setSelectedMedia] = React.useState<string | null>(null);
   const [mediaType, setMediaType] = React.useState<'image' | 'video' | null>(null);
   const [text, setText] = React.useState('');
@@ -405,8 +406,20 @@ export default function ClipPage() {
     }
   }, [location.state]);
 
-  const handleCameraClick = () => {
-    fileInputRef.current?.click();
+  const handleCameraClick = async () => {
+    // In poll mode, use file picker (for selecting background images)
+    if (pollMode) {
+      fileInputRef.current?.click();
+    } else {
+      // In regular story mode, use camera input with capture attribute
+      if (cameraInputRef.current) {
+        // Force click on camera input which has capture attribute
+        cameraInputRef.current.click();
+      } else {
+        // Fallback to regular file input
+        fileInputRef.current?.click();
+      }
+    }
   };
 
   const textColors = {
@@ -472,19 +485,77 @@ export default function ClipPage() {
     // Single segment, regular clip, or text-only story
     setIsUploading(true);
     try {
+      // Convert text and location to sticker overlays when media is present
+      let allStickers = [...gifOverlays];
+      
+      // If we have media, convert text and location to stickers
+      if (selectedMedia) {
+        // Add text as a sticker overlay
+        if (text.trim()) {
+          const textSticker: StickerOverlay = {
+            id: `text-sticker-${Date.now()}`,
+            stickerId: `text-sticker-${Date.now()}`,
+            sticker: {
+              id: `text-sticker-${Date.now()}`,
+              name: text.trim(),
+              category: 'Text',
+              emoji: undefined,
+              url: undefined,
+              isTrending: false
+            },
+            x: 50, // Center horizontally
+            y: 75, // Position near bottom (75% from top)
+            scale: textSize === 'small' ? 0.8 : textSize === 'large' ? 1.4 : 1.0,
+            rotation: 0,
+            opacity: 1,
+            textContent: text.trim(),
+            textColor: textColors[textColor as keyof typeof textColors] || textColor,
+            fontSize: textSize
+          };
+          allStickers.push(textSticker);
+        }
+        
+        // Add location as a sticker overlay
+        if (storyLocation.trim()) {
+          const locationSticker: StickerOverlay = {
+            id: `location-sticker-${Date.now()}`,
+            stickerId: `location-sticker-${Date.now()}`,
+            sticker: {
+              id: `location-sticker-${Date.now()}`,
+              name: storyLocation.trim(),
+              category: 'Location',
+              emoji: undefined,
+              url: undefined,
+              isTrending: false
+            },
+            x: 50, // Center horizontally
+            y: 85, // Position at bottom (85% from top)
+            scale: 0.9,
+            rotation: 0,
+            opacity: 1,
+            textContent: storyLocation.trim(),
+            textColor: '#FFFFFF',
+            fontSize: 'small'
+          };
+          allStickers.push(locationSticker);
+        }
+      }
+      
       await createStory(
         user.id,
         user.handle,
         selectedMedia || undefined,
         mediaType || undefined,
-        text.trim() || undefined,
-        storyLocation.trim() || undefined,
+        // Only pass text/location if no media (for text-only stories)
+        selectedMedia ? undefined : (text.trim() || undefined),
+        selectedMedia ? undefined : (storyLocation.trim() || undefined),
         textColor,
         textSize,
         sharedPostInfo?.postId,
         sharedPostInfo?.userId,
-        text.trim() ? { color: textColor, size: textSize, background: background } : undefined, // textStyle (only color, size, background)
-        gifOverlays.length > 0 ? gifOverlays : undefined, // stickers
+        // Only pass textStyle if no media (for text-only stories)
+        selectedMedia ? undefined : (text.trim() ? { color: textColor, size: textSize, background: background } : undefined),
+        allStickers.length > 0 ? allStickers : undefined, // stickers (including text and location)
         taggedUsers.length > 0 ? taggedUsers.map(tu => tu.handle) : undefined, // taggedUsers (send handles for API compatibility)
         undefined, // poll
         taggedUsers.length > 0 ? taggedUsers.map(tu => ({ handle: tu.handle, x: tu.x, y: tu.y })) : undefined // taggedUsersPositions
@@ -509,6 +580,59 @@ export default function ClipPage() {
 
     setIsPostingSegments(true);
     try {
+      // Convert text and location to sticker overlays for all segments
+      let allStickers: StickerOverlay[] = [];
+      
+      // Add text as a sticker overlay (for all segments)
+      if (text.trim()) {
+        const textSticker: StickerOverlay = {
+          id: `text-sticker-${Date.now()}`,
+          stickerId: `text-sticker-${Date.now()}`,
+          sticker: {
+            id: `text-sticker-${Date.now()}`,
+            name: text.trim(),
+            category: 'Text',
+            emoji: undefined,
+            url: undefined,
+            isTrending: false
+          },
+          x: 50, // Center horizontally
+          y: 75, // Position near bottom (75% from top)
+          scale: textSize === 'small' ? 0.8 : textSize === 'large' ? 1.4 : 1.0,
+          rotation: 0,
+          opacity: 1,
+          textContent: text.trim(),
+          textColor: textColors[textColor as keyof typeof textColors] || textColor,
+          fontSize: textSize
+        };
+        allStickers.push(textSticker);
+      }
+      
+      // Add location as a sticker overlay (for all segments)
+      if (storyLocation.trim()) {
+        const locationSticker: StickerOverlay = {
+          id: `location-sticker-${Date.now()}`,
+          stickerId: `location-sticker-${Date.now()}`,
+          sticker: {
+            id: `location-sticker-${Date.now()}`,
+            name: storyLocation.trim(),
+            category: 'Location',
+            emoji: undefined,
+            url: undefined,
+            isTrending: false
+          },
+          x: 50, // Center horizontally
+          y: 85, // Position at bottom (85% from top)
+          scale: 0.9,
+          rotation: 0,
+          opacity: 1,
+          textContent: storyLocation.trim(),
+          textColor: '#FFFFFF',
+          fontSize: 'small'
+        };
+        allStickers.push(locationSticker);
+      }
+      
       // Post each segment sequentially
       for (let i = 0; i < videoSegments.length; i++) {
         setCurrentSegmentIndex(i); // Update UI to show current segment being posted
@@ -519,12 +643,17 @@ export default function ClipPage() {
           user.handle,
           segmentUrl,
           'video',
-          i === 0 ? text.trim() || undefined : undefined, // Only add text to first segment
-          i === 0 ? storyLocation.trim() || undefined : undefined, // Only add location to first segment
+          undefined, // Don't pass text as separate parameter (it's a sticker now)
+          undefined, // Don't pass location as separate parameter (it's a sticker now)
           textColor,
           textSize,
           i === 0 ? sharedPostInfo?.postId : undefined,
-          i === 0 ? sharedPostInfo?.userId : undefined
+          i === 0 ? sharedPostInfo?.userId : undefined,
+          undefined, // textStyle (not needed for video segments with stickers)
+          allStickers.length > 0 ? allStickers : undefined, // stickers (including text and location)
+          undefined, // taggedUsers
+          undefined, // poll
+          undefined // taggedUsersPositions
         );
 
         // Dispatch event to refresh story indicators after each post
@@ -673,6 +802,15 @@ export default function ClipPage() {
             ref={fileInputRef}
             type="file"
             accept="image/*"
+            onChange={handleMediaSelect}
+            className="hidden"
+          />
+          {/* Hidden Camera Input for Poll Mode */}
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="user"
             onChange={handleMediaSelect}
             className="hidden"
           />
@@ -1251,7 +1389,7 @@ export default function ClipPage() {
               Share moments that disappear in 24 hours
             </p>
 
-            {/* Upload Button */}
+            {/* Upload Button - File Picker Only */}
             <label className="block mb-4">
               <div className="relative inline-block overflow-visible">
                 {/* Gradient border wrapper */}
@@ -1270,6 +1408,16 @@ export default function ClipPage() {
                 className="hidden"
               />
             </label>
+            
+            {/* Hidden Camera Input - Camera Only (Photo) */}
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="user"
+              onChange={handleMediaSelect}
+              className="hidden"
+            />
 
             {/* Text Only and Poll Options */}
             <div className="flex flex-col items-center gap-4">
@@ -1368,9 +1516,9 @@ export default function ClipPage() {
             )}
             <button
               onClick={() => setShowControls(!showControls)}
-              className="p-2 bg-black/50 backdrop-blur-sm text-white rounded-full hover:bg-black/70 transition-colors"
+              className="px-4 py-2 bg-transparent text-white rounded-full hover:bg-white/10 transition-colors font-semibold text-sm"
             >
-              <FiImage className="w-6 h-6" />
+              Next
             </button>
           </div>
         </div>
