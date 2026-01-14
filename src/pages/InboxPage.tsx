@@ -1,11 +1,24 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile, FiUserPlus } from 'react-icons/fi';
+import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile, FiUserPlus, FiX } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { getAvatarForHandle } from '../api/users';
 import { getNotifications, type Notification, markNotificationRead, markAllNotificationsRead, getUnreadNotificationCount, deleteNotification } from '../api/notifications';
 import { getStoryInsightsForUser, type StoryInsight } from '../api/stories';
+// Import questions API - using type-only import to avoid runtime issues
+type Question = {
+    id: string;
+    storyId: string;
+    questionPrompt: string;
+    creatorHandle: string;
+    responderUserId: string;
+    responderHandle: string;
+    answer: string;
+    createdAt: number;
+    repliedTo: boolean;
+    replyStoryId?: string;
+};
 import { listConversations, seedMockDMs, type ConversationSummary } from '../api/messages';
 import { timeAgo } from '../utils/timeAgo';
 import Swal from 'sweetalert2';
@@ -20,20 +33,68 @@ export default function InboxPage() {
     const [insights, setInsights] = React.useState<StoryInsight[]>([]);
     const [items, setItems] = React.useState<ConversationSummary[]>([]);
     const [loading, setLoading] = React.useState(true);
-    const [activeTab, setActiveTab] = React.useState<'insights' | 'notifications'>('notifications');
+    const [activeTab, setActiveTab] = React.useState<'insights' | 'notifications' | 'questions'>('notifications');
+    const [selectedQuestionInsight, setSelectedQuestionInsight] = React.useState<StoryInsight | null>(null);
+    const [questions, setQuestions] = React.useState<Question[]>([]);
+    const [questionAvatars, setQuestionAvatars] = React.useState<Record<string, string>>({});
 
     const loadData = React.useCallback(async () => {
         if (!user?.handle) return;
-        const [notifs, storyInsights, conversations] = await Promise.all([
-            getNotifications(user.handle),
-            getStoryInsightsForUser(user.handle),
-            listConversations(user.handle)
-        ]);
-        setNotifications(notifs);
-        setInsights(storyInsights);
-        setItems(conversations);
-        setLoading(false);
-    }, [user?.handle]);
+        try {
+            // Dynamically import to avoid circular dependency issues
+            const { getQuestionsForUser } = await import('../api/questions');
+            const [notifs, storyInsights, conversations, userQuestions] = await Promise.all([
+                getNotifications(user.handle),
+                getStoryInsightsForUser(user.handle),
+                listConversations(user.handle),
+                getQuestionsForUser(user.handle).catch(err => {
+                    console.error('Error loading questions:', err);
+                    return [];
+                })
+            ]);
+            setNotifications(notifs);
+            setInsights(storyInsights);
+            setItems(conversations);
+            setQuestions(userQuestions || []);
+            
+            // Fetch avatar URLs for question responders
+            if (userQuestions && userQuestions.length > 0) {
+                const avatarMap: Record<string, string> = {};
+                await Promise.all(userQuestions.map(async (q) => {
+                    // Try to get avatar from getAvatarForHandle first (for mock data)
+                    let avatarUrl = getAvatarForHandle(q.responderHandle);
+                    
+                    // If not found in mock data, try fetching from backend API
+                    if (!avatarUrl && user?.id) {
+                        try {
+                            const { fetchUserProfile } = await import('../api/client');
+                            const profile = await fetchUserProfile(q.responderHandle, user.id);
+                            if (profile && (profile.avatar_url || profile.avatarUrl)) {
+                                avatarUrl = profile.avatar_url || profile.avatarUrl;
+                            }
+                        } catch (error) {
+                            console.warn(`Failed to fetch avatar for ${q.responderHandle}:`, error);
+                        }
+                    }
+                    
+                    if (avatarUrl) {
+                        avatarMap[q.responderHandle] = avatarUrl;
+                    }
+                }));
+                setQuestionAvatars(avatarMap);
+            }
+            
+            setLoading(false);
+        } catch (error) {
+            console.error('Error loading inbox data:', error);
+            setNotifications([]);
+            setInsights([]);
+            setItems([]);
+            setQuestions([]);
+            setQuestionAvatars({});
+            setLoading(false);
+        }
+    }, [user?.handle, user?.id]);
 
     React.useEffect(() => {
         if (!user?.handle) return;
@@ -186,29 +247,43 @@ export default function InboxPage() {
             </div>
 
             {/* Tabs */}
-            <div className="flex gap-2 mb-4 border-b border-gray-800">
+            <div className="flex mb-4 border-b border-gray-800">
                 <button
                     onClick={() => setActiveTab('notifications')}
-                    className={`px-4 py-2 font-medium transition-colors relative ${activeTab === 'notifications'
+                    className={`flex-1 py-1.5 text-xs font-medium transition-colors relative whitespace-nowrap flex items-center justify-center gap-1 ${activeTab === 'notifications'
                             ? 'text-purple-600 border-b-2 border-purple-600'
                             : 'text-gray-500 hover:text-gray-300'
                         }`}
                 >
-                    Notifications
+                    <span>Notifs</span>
                     {unreadNotifications > 0 && (
-                        <span className="ml-2 px-2 py-0.5 bg-pink-500 text-white text-xs rounded-full">
+                        <span className="px-1 py-0.5 bg-pink-500 text-white text-[9px] rounded-full min-w-[16px] text-center leading-none">
                             {unreadNotifications > 9 ? '9+' : unreadNotifications}
                         </span>
                     )}
                 </button>
                 <button
                     onClick={() => setActiveTab('insights')}
-                    className={`px-4 py-2 font-medium transition-colors relative ${activeTab === 'insights'
+                    className={`flex-1 py-1.5 text-xs font-medium transition-colors relative whitespace-nowrap flex items-center justify-center ${activeTab === 'insights'
                             ? 'text-purple-600 border-b-2 border-purple-600'
                             : 'text-gray-500 hover:text-gray-300'
                         }`}
                 >
                     Insights
+                </button>
+                <button
+                    onClick={() => setActiveTab('questions')}
+                    className={`flex-1 py-1.5 text-xs font-medium transition-colors relative whitespace-nowrap flex items-center justify-center gap-1 ${activeTab === 'questions'
+                            ? 'text-purple-600 border-b-2 border-purple-600'
+                            : 'text-gray-500 hover:text-gray-300'
+                        }`}
+                >
+                    <span>Questions</span>
+                    {questions && questions.length > 0 && (
+                        <span className="px-1 py-0.5 bg-pink-500 text-white text-[9px] rounded-full min-w-[16px] text-center leading-none">
+                            {questions.length > 9 ? '9+' : questions.length}
+                        </span>
+                    )}
                 </button>
             </div>
             {loading ? (
@@ -288,16 +363,83 @@ export default function InboxPage() {
                         ))}
                     </div>
                 )
-            ) : !insights || insights.length === 0 ? (
-                <div className="text-gray-500">No story insights yet.</div>
-            ) : (
+            ) : activeTab === 'questions' ? (
+                !questions || !Array.isArray(questions) || questions.length === 0 ? (
+                    <div className="text-gray-500">No questions yet.</div>
+                ) : (
+                    <div className="space-y-3">
+                        {questions.map(question => (
+                            <div
+                                key={question.id}
+                                className="w-full text-left bg-gray-50 dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700"
+                            >
+                                <div className="flex items-start gap-3 mb-3">
+                                    <Avatar
+                                        name={question.responderHandle}
+                                        src={questionAvatars[question.responderHandle] || getAvatarForHandle(question.responderHandle)}
+                                        size="sm"
+                                    />
+                                    <div className="flex-1">
+                                        <p className="font-semibold text-sm text-gray-900 dark:text-gray-100">
+                                            {question.responderHandle}
+                                        </p>
+                                        <p className="text-xs text-gray-500">
+                                            {timeAgo(question.createdAt)}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="mb-3">
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-semibold uppercase tracking-wide">Question:</p>
+                                    <p className="text-sm text-gray-900 dark:text-gray-100 font-semibold">{question.questionPrompt}</p>
+                                </div>
+                                <div className="mb-4">
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-semibold uppercase tracking-wide">Reply:</p>
+                                    <p className="text-sm text-gray-900 dark:text-gray-100">{question.answer}</p>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        navigate('/reply-question', {
+                                            state: {
+                                                replyToQuestion: {
+                                                    question: question.questionPrompt,
+                                                    response: question.answer,
+                                                    responderHandle: question.responderHandle,
+                                                    questionId: question.id
+                                                }
+                                            }
+                                        });
+                                    }}
+                                    className="w-full py-2 px-4 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold hover:opacity-90 transition-opacity"
+                                >
+                                    Reply in Story
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                )
+            ) : activeTab === 'insights' ? (
+                !insights || insights.length === 0 ? (
+                    <div className="text-gray-500">No story insights yet.</div>
+                ) : (
                 <div className="space-y-2">
                     {insights.map(insight => (
                         <div
                             key={insight.storyId}
-                            className="w-full text-left flex items-center gap-3 py-3 px-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+                            onClick={() => {
+                                if (insight.question && insight.question.responseCount > 0) {
+                                    setSelectedQuestionInsight(insight);
+                                }
+                            }}
+                            className={`w-full text-left flex items-center gap-3 py-3 px-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 ${insight.question && insight.question.responseCount > 0 ? 'cursor-pointer' : ''}`}
                         >
-                            {insight.likes > 0 && insight.likers && insight.likers.length > 0 ? (
+                            {/* Show avatar from first responder if question, otherwise from first liker */}
+                            {insight.question && insight.question.responses && insight.question.responses.length > 0 ? (
+                                <Avatar
+                                    name={insight.question.responses[0].userHandle}
+                                    src={getAvatarForHandle(insight.question.responses[0].userHandle)}
+                                    size="sm"
+                                />
+                            ) : insight.likes > 0 && insight.likers && insight.likers.length > 0 ? (
                                 <Avatar
                                     name={insight.likers[0]}
                                     src={getAvatarForHandle(insight.likers[0])}
@@ -308,10 +450,18 @@ export default function InboxPage() {
                             )}
                             <div className="flex-1 min-w-0">
                                 <div className="font-medium truncate">
-                                    {insight.text ? (insight.text.length > 40 ? insight.text.slice(0, 40) + '…' : insight.text) : 'Story'}
+                                    {insight.question 
+                                        ? `Q: ${insight.question.prompt.length > 30 ? insight.question.prompt.slice(0, 30) + '…' : insight.question.prompt}`
+                                        : insight.text 
+                                        ? (insight.text.length > 40 ? insight.text.slice(0, 40) + '…' : insight.text) 
+                                        : 'Story'}
                                 </div>
                                 <div className="text-xs text-gray-500 truncate">
-                                    {insight.likes === 0
+                                    {insight.question && insight.question.responseCount > 0 ? (
+                                        insight.question.responseCount === 1
+                                            ? `1 answer`
+                                            : `${insight.question.responseCount} answers`
+                                    ) : insight.likes === 0
                                         ? 'No likes yet'
                                         : !insight.likers || insight.likers.length === 0
                                         ? 'No likes yet'
@@ -327,6 +477,72 @@ export default function InboxPage() {
                             </div>
                         </div>
                     ))}
+                </div>
+            )
+            ) : null}
+
+            {/* Question Responses Modal */}
+            {selectedQuestionInsight && selectedQuestionInsight.question && (
+                <div 
+                    className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+                    onClick={() => setSelectedQuestionInsight(null)}
+                >
+                    <div 
+                        className="bg-white dark:bg-gray-900 rounded-2xl p-6 max-w-md w-full max-h-[80vh] overflow-hidden flex flex-col"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                                Question Responses
+                            </h2>
+                            <button
+                                onClick={() => setSelectedQuestionInsight(null)}
+                                className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                            >
+                                <FiX className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                            </button>
+                        </div>
+                        
+                        {/* Question Prompt */}
+                        <div className="bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl p-4 mb-4 text-center">
+                            <p className="text-white font-semibold">{selectedQuestionInsight.question.prompt}</p>
+                        </div>
+
+                        {/* Responses List */}
+                        <div className="flex-1 overflow-y-auto space-y-3">
+                            {selectedQuestionInsight.question.responses && selectedQuestionInsight.question.responses.length > 0 ? (
+                                selectedQuestionInsight.question.responses.map((response) => (
+                                    <div
+                                        key={response.id}
+                                        className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700"
+                                    >
+                                        <div className="flex items-center gap-3 mb-2">
+                                            <Avatar
+                                                name={response.userHandle}
+                                                src={getAvatarForHandle(response.userHandle)}
+                                                size="sm"
+                                            />
+                                            <div className="flex-1">
+                                                <p className="font-semibold text-sm text-gray-900 dark:text-gray-100">
+                                                    {response.userHandle}
+                                                </p>
+                                                <p className="text-xs text-gray-500">
+                                                    {timeAgo(response.createdAt)}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <p className="text-gray-900 dark:text-gray-100 text-sm">
+                                            {response.text}
+                                        </p>
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="text-center text-gray-500 py-8">
+                                    No responses yet
+                                </div>
+                            )}
+                        </div>
+                    </div>
                 </div>
             )}
         </div>

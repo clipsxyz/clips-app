@@ -17,6 +17,7 @@ import Flag from './components/Flag';
 import { useOnline } from './hooks/useOnline';
 import { getUnreadTotal } from './api/messages';
 import { getUnreadNotificationCount } from './api/notifications';
+import { getStoryInsightsForUser } from './api/stories';
 import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState } from './api/posts';
 import { updatePost } from './api/client';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory } from './api/stories';
@@ -128,7 +129,7 @@ export default function App() {
   return (
     <>
       <main id="main" className="mx-auto max-w-md min-h-screen pb-[calc(64px+theme(spacing.safe))] md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800" style={{ backgroundColor: '#030712' }}>
-        {loc.pathname !== '/login' && loc.pathname !== '/feed' && loc.pathname !== '/profile' && !loc.pathname.startsWith('/user/') && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
+        {loc.pathname !== '/login' && loc.pathname !== '/feed' && loc.pathname !== '/profile' && loc.pathname !== '/clip' && !loc.pathname.startsWith('/user/') && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
         <Outlet context={{ activeTab, setActiveTab, customLocation, setCustomLocation }} />
         {loc.pathname !== '/discover' && loc.pathname !== '/create/filters' && loc.pathname !== '/create/instant' && loc.pathname !== '/payment' && loc.pathname !== '/clip' && loc.pathname !== '/create' && loc.pathname !== '/template-editor' && loc.pathname !== '/login' && (
           <BottomNav onCreateClick={() => navigate('/create/instant')} />
@@ -150,6 +151,8 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
   const { user } = useAuth();
   const isMountedRef = React.useRef(false);
   const [notificationCount, setNotificationCount] = React.useState(0);
+  const [insightsCount, setInsightsCount] = React.useState(0);
+  const [questionsCount, setQuestionsCount] = React.useState(0);
   const borderOverlayRef = React.useRef<HTMLDivElement>(null);
   const discoverBorderOverlayRef = React.useRef<HTMLDivElement>(null);
   const tabBorderOverlayRefs = React.useRef<{ [key: string]: HTMLDivElement | null }>({});
@@ -161,30 +164,46 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
   const national = props.userNational || user?.national || 'Ireland';
   const clipsCount = props.clipsCount || 0;
 
-  // Track notification count
+  // Track notification, insights, and questions counts
   React.useEffect(() => {
     if (!user?.handle) return;
 
-    const updateNotificationCount = async () => {
+    const updateCounts = async () => {
       try {
-        const count = await getUnreadNotificationCount(user.handle!);
-        setNotificationCount(count);
+        // Update notification count
+        const notifCount = await getUnreadNotificationCount(user.handle!);
+        setNotificationCount(notifCount);
+
+        // Update insights count
+        const insights = await getStoryInsightsForUser(user.handle!);
+        setInsightsCount(insights.length);
+
+        // Update questions count
+        try {
+          const { getQuestionsForUser } = await import('./api/questions');
+          const questions = await getQuestionsForUser(user.handle!);
+          // Count only unanswered questions
+          const unansweredQuestions = questions.filter(q => !q.repliedTo);
+          setQuestionsCount(unansweredQuestions.length);
+        } catch (error) {
+          console.error('Error fetching questions count:', error);
+        }
       } catch (error) {
-        console.error('Error fetching notification count:', error);
+        console.error('Error fetching counts:', error);
       }
     };
 
-    // Initialize notification count
-    updateNotificationCount();
+    // Initialize counts
+    updateCounts();
 
     // Poll for updates every 10 seconds
-    const interval = setInterval(updateNotificationCount, 10000);
+    const interval = setInterval(updateCounts, 10000);
 
     // Listen for notification updates
     const handleNotificationUpdate = (event: CustomEvent) => {
       const handle = event.detail?.handle;
       if (handle === user.handle) {
-        updateNotificationCount();
+        updateCounts();
       }
     };
 
@@ -192,7 +211,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
     const handleNotificationCreated = (event: CustomEvent) => {
       const notif = event.detail as { toHandle?: string };
       if (notif?.toHandle === user.handle) {
-        updateNotificationCount();
+        updateCounts();
       }
     };
 
@@ -322,11 +341,23 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                 />
               </svg>
             </div>
-            {notificationCount > 0 && (
-              <span className="min-w-[18px] sm:min-w-[20px] h-4 sm:h-5 px-1 sm:px-1.5 bg-blue-500 text-white text-[10px] sm:text-xs font-semibold leading-4 sm:leading-5 rounded-full text-center flex items-center justify-center flex-shrink-0">
-                {notificationCount > 9 ? '9+' : notificationCount}
-              </span>
-            )}
+            <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0">
+              {notificationCount > 0 && (
+                <span className="min-w-[16px] sm:min-w-[18px] h-4 sm:h-5 px-1 bg-blue-500 text-white text-[9px] sm:text-[10px] font-semibold leading-4 sm:leading-5 rounded-full text-center flex items-center justify-center">
+                  {notificationCount > 9 ? '9+' : notificationCount}
+                </span>
+              )}
+              {insightsCount > 0 && (
+                <span className="min-w-[16px] sm:min-w-[18px] h-4 sm:h-5 px-1 bg-purple-500 text-white text-[9px] sm:text-[10px] font-semibold leading-4 sm:leading-5 rounded-full text-center flex items-center justify-center">
+                  {insightsCount > 9 ? '9+' : insightsCount}
+                </span>
+              )}
+              {questionsCount > 0 && (
+                <span className="min-w-[16px] sm:min-w-[18px] h-4 sm:h-5 px-1 bg-pink-500 text-white text-[9px] sm:text-[10px] font-semibold leading-4 sm:leading-5 rounded-full text-center flex items-center justify-center">
+                  {questionsCount > 9 ? '9+' : questionsCount}
+                </span>
+              )}
+            </div>
           </button>
         </div>
 
@@ -3226,9 +3257,16 @@ function FeedPageWrapper() {
   // Listen for resetFeed event from Home button
   React.useEffect(() => {
     const handleResetFeed = () => {
+      console.log('resetFeed event received, clearing customLocation and resetting feed');
       setShowFollowingFeed(false);
       setActive(user?.national || 'Ireland');
       setCustomLocation(null);
+      setPages([]);
+      setCursor(0);
+      setEnd(false);
+      setError(null);
+      // Clear any pending location from sessionStorage
+      sessionStorage.removeItem('pendingLocation');
     };
     window.addEventListener('resetFeed', handleResetFeed);
     return () => window.removeEventListener('resetFeed', handleResetFeed);
@@ -3279,7 +3317,21 @@ function FeedPageWrapper() {
   React.useEffect(() => {
     const params = new URLSearchParams(routerLocation.search);
     const q = params.get('location');
-    console.log('URL params changed, location param:', q, 'current customLocation:', customLocation);
+    console.log('URL params changed, location param:', q, 'current customLocation:', customLocation, 'pathname:', routerLocation.pathname);
+
+    // Only process location changes when we're on the feed page
+    if (routerLocation.pathname !== '/feed') {
+      // If we're not on feed page and have a custom location, clear it
+      if (customLocation) {
+        console.log('Not on feed page, clearing customLocation...');
+        setCustomLocation(null);
+        setPages([]);
+        setCursor(0);
+        setEnd(false);
+        setError(null);
+      }
+      return;
+    }
 
     if (q) {
       console.log('URL provided location:', q, 'setting customLocation...');
@@ -3292,15 +3344,15 @@ function FeedPageWrapper() {
       setEnd(false);
       setError(null);
     } else if (customLocation) {
-      // URL param was cleared, clear customLocation too
-      console.log('URL param cleared, clearing customLocation...');
+      // URL param was cleared AND we're on feed page, clear customLocation too
+      console.log('URL param cleared on feed page, clearing customLocation...');
       setCustomLocation(null);
       setPages([]);
       setCursor(0);
       setEnd(false);
       setError(null);
     }
-  }, [routerLocation.search, customLocation]);
+  }, [routerLocation.search, routerLocation.pathname]); // Don't include customLocation to avoid infinite loops
 
   // Load from cache on mount/tab change
   React.useEffect(() => {

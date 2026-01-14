@@ -408,6 +408,21 @@ export default function StickerOverlayComponent({
                     >
                         {(overlay as any).textContent || overlay.sticker.name}
                     </span>
+                ) : overlay.sticker.category === 'Location' && overlay.sticker.name ? (
+                    <div className="flex items-center gap-1.5 px-2 py-1 bg-white/90 rounded-full" style={{ pointerEvents: 'none' }}>
+                        <svg className="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" style={{ color: '#EF4444' }}>
+                            <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+                        </svg>
+                        <span
+                            className="font-semibold text-gray-900 whitespace-nowrap text-xs"
+                            style={{
+                                fontSize: `${size * 0.4}px`,
+                                pointerEvents: 'none'
+                            }}
+                        >
+                            {(overlay as any).textContent || overlay.sticker.name}
+                        </span>
+                    </div>
                 ) : overlay.sticker.category === 'GIF' ? (
                     // For GIFs, only show image, no fallback text
                     null

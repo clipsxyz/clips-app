@@ -1,14 +1,20 @@
 import type { Story, StoryGroup, StickerOverlay } from '../types';
 
-// Mock stories data
+// Mock stories data – tuned to showcase the new Instagram-style story types
 let stories: Story[] = [
+    // John – mix of text-only and photo stories
     {
         id: 'story-1',
         userId: 'user-1',
         userHandle: 'John@Dublin',
-        mediaUrl: 'https://images.unsplash.com/photo-1516321497487-e288fb19713f?w=800',
-        mediaType: 'image',
-        text: 'Amazing sunset in Dublin! 🌅',
+        // Text-only Instagram-style story using the new textStyle field
+        text: 'Quick coffee before work ☕',
+        textStyle: {
+            color: '#ffffff',
+            size: 'medium',
+            // Soft gradient similar to the text backgrounds in the new viewer
+            background: 'linear-gradient(135deg, #FF4ECB 0%, #8F5BFF 50%, #24C6DC 100%)'
+        },
         createdAt: Date.now() - 5000, // 5 seconds ago
         expiresAt: Date.now() + (24 * 60 * 60 * 1000) - 5000, // 24 hours - 5 seconds
         location: 'Dublin',
@@ -24,15 +30,55 @@ let stories: Story[] = [
         userHandle: 'John@Dublin',
         mediaUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800',
         mediaType: 'image',
-        text: 'Beautiful day for a walk! 🚶',
         createdAt: Date.now() - 3000,
         expiresAt: Date.now() + (24 * 60 * 60 * 1000) - 3000,
-        location: 'Dublin',
         views: 0,
         hasViewed: false,
         reactions: [],
         replies: [],
-        userReaction: undefined
+        userReaction: undefined,
+        stickers: [
+            {
+                id: 'text-sticker-story-2',
+                stickerId: 'text-sticker-story-2',
+                sticker: {
+                    id: 'text-sticker-story-2',
+                    name: 'Beautiful day for a walk! 🚶',
+                    category: 'Text',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false
+                },
+                x: 50,
+                y: 75,
+                scale: 1.0,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'Beautiful day for a walk! 🚶',
+                textColor: '#FFFFFF',
+                fontSize: 'medium'
+            },
+            {
+                id: 'location-sticker-story-2',
+                stickerId: 'location-sticker-story-2',
+                sticker: {
+                    id: 'location-sticker-story-2',
+                    name: 'Dublin',
+                    category: 'Location',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false
+                },
+                x: 50,
+                y: 85,
+                scale: 0.9,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'Dublin',
+                textColor: '#FFFFFF',
+                fontSize: 'small'
+            }
+        ]
     },
     {
         id: 'story-3',
@@ -40,15 +86,55 @@ let stories: Story[] = [
         userHandle: 'Sarah@London',
         mediaUrl: 'https://images.unsplash.com/photo-1517474307977-7c27ca92444a?w=800',
         mediaType: 'image',
-        text: 'Love the architecture here! 🏛️',
         createdAt: Date.now() - 10000,
         expiresAt: Date.now() + (24 * 60 * 60 * 1000) - 10000,
-        location: 'London',
         views: 0,
         hasViewed: false,
         reactions: [],
         replies: [],
-        userReaction: undefined
+        userReaction: undefined,
+        stickers: [
+            {
+                id: 'text-sticker-story-3',
+                stickerId: 'text-sticker-story-3',
+                sticker: {
+                    id: 'text-sticker-story-3',
+                    name: 'Love the architecture here! 🏛️',
+                    category: 'Text',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false
+                },
+                x: 50,
+                y: 75,
+                scale: 1.0,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'Love the architecture here! 🏛️',
+                textColor: '#FFFFFF',
+                fontSize: 'medium'
+            },
+            {
+                id: 'location-sticker-story-3',
+                stickerId: 'location-sticker-story-3',
+                sticker: {
+                    id: 'location-sticker-story-3',
+                    name: 'London',
+                    category: 'Location',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false
+                },
+                x: 50,
+                y: 85,
+                scale: 0.9,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'London',
+                textColor: '#FFFFFF',
+                fontSize: 'small'
+            }
+        ]
     },
     {
         id: 'story-4',
@@ -56,15 +142,55 @@ let stories: Story[] = [
         userHandle: 'Mike@Paris',
         mediaUrl: 'https://images.unsplash.com/photo-1502602898536-47ad22581b52?w=800',
         mediaType: 'image',
-        text: 'Beautiful morning in Paris! ☕',
         createdAt: Date.now() - 8000,
         expiresAt: Date.now() + (24 * 60 * 60 * 1000) - 8000,
-        location: 'Paris',
         views: 0,
         hasViewed: false,
         reactions: [],
         replies: [],
-        userReaction: undefined
+        userReaction: undefined,
+        stickers: [
+            {
+                id: 'text-sticker-story-4',
+                stickerId: 'text-sticker-story-4',
+                sticker: {
+                    id: 'text-sticker-story-4',
+                    name: 'Beautiful morning in Paris! ☕',
+                    category: 'Text',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false
+                },
+                x: 50,
+                y: 75,
+                scale: 1.0,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'Beautiful morning in Paris! ☕',
+                textColor: '#FFFFFF',
+                fontSize: 'medium'
+            },
+            {
+                id: 'location-sticker-story-4',
+                stickerId: 'location-sticker-story-4',
+                sticker: {
+                    id: 'location-sticker-story-4',
+                    name: 'Paris',
+                    category: 'Location',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false
+                },
+                x: 50,
+                y: 85,
+                scale: 0.9,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'Paris',
+                textColor: '#FFFFFF',
+                fontSize: 'small'
+            }
+        ]
     },
     {
         id: 'story-5',
@@ -72,15 +198,55 @@ let stories: Story[] = [
         userHandle: 'Emma@NewYork',
         mediaUrl: 'https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?w=800',
         mediaType: 'image',
-        text: 'City never sleeps! 🌆',
         createdAt: Date.now() - 6000,
         expiresAt: Date.now() + (24 * 60 * 60 * 1000) - 6000,
-        location: 'New York',
         views: 0,
         hasViewed: false,
         reactions: [],
         replies: [],
-        userReaction: undefined
+        userReaction: undefined,
+        stickers: [
+            {
+                id: 'text-sticker-story-5',
+                stickerId: 'text-sticker-story-5',
+                sticker: {
+                    id: 'text-sticker-story-5',
+                    name: 'City never sleeps! 🌆',
+                    category: 'Text',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false
+                },
+                x: 50,
+                y: 75,
+                scale: 1.0,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'City never sleeps! 🌆',
+                textColor: '#FFFFFF',
+                fontSize: 'medium'
+            },
+            {
+                id: 'location-sticker-story-5',
+                stickerId: 'location-sticker-story-5',
+                sticker: {
+                    id: 'location-sticker-story-5',
+                    name: 'New York',
+                    category: 'Location',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false
+                },
+                x: 50,
+                y: 85,
+                scale: 0.9,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'New York',
+                textColor: '#FFFFFF',
+                fontSize: 'small'
+            }
+        ]
     },
     // Stories for feed users
     {
@@ -89,15 +255,55 @@ let stories: Story[] = [
         userHandle: 'Username@Dublin',
         mediaUrl: 'https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?w=800',
         mediaType: 'image',
-        text: 'Beautiful day in Dublin! ☀️',
         createdAt: Date.now() - 4000,
         expiresAt: Date.now() + (24 * 60 * 60 * 1000) - 4000,
-        location: 'Dublin',
         views: 0,
         hasViewed: false,
         reactions: [],
         replies: [],
-        userReaction: undefined
+        userReaction: undefined,
+        stickers: [
+            {
+                id: 'text-sticker-story-6',
+                stickerId: 'text-sticker-story-6',
+                sticker: {
+                    id: 'text-sticker-story-6',
+                    name: 'Beautiful day in Dublin! ☀️',
+                    category: 'Text',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false
+                },
+                x: 50,
+                y: 75,
+                scale: 1.0,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'Beautiful day in Dublin! ☀️',
+                textColor: '#FFFFFF',
+                fontSize: 'medium'
+            },
+            {
+                id: 'location-sticker-story-6',
+                stickerId: 'location-sticker-story-6',
+                sticker: {
+                    id: 'location-sticker-story-6',
+                    name: 'Dublin',
+                    category: 'Location',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false
+                },
+                x: 50,
+                y: 85,
+                scale: 0.9,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'Dublin',
+                textColor: '#FFFFFF',
+                fontSize: 'small'
+            }
+        ]
     },
     {
         id: 'story-7',
@@ -105,15 +311,55 @@ let stories: Story[] = [
         userHandle: 'Alice@Finglas',
         mediaUrl: 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=800',
         mediaType: 'image',
-        text: 'Great spot for coffee! ☕',
         createdAt: Date.now() - 2000,
         expiresAt: Date.now() + (24 * 60 * 60 * 1000) - 2000,
-        location: 'Finglas',
         views: 0,
         hasViewed: false,
         reactions: [],
         replies: [],
-        userReaction: undefined
+        userReaction: undefined,
+        stickers: [
+            {
+                id: 'text-sticker-story-7',
+                stickerId: 'text-sticker-story-7',
+                sticker: {
+                    id: 'text-sticker-story-7',
+                    name: 'Great spot for coffee! ☕',
+                    category: 'Text',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false
+                },
+                x: 50,
+                y: 75,
+                scale: 1.0,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'Great spot for coffee! ☕',
+                textColor: '#FFFFFF',
+                fontSize: 'medium'
+            },
+            {
+                id: 'location-sticker-story-7',
+                stickerId: 'location-sticker-story-7',
+                sticker: {
+                    id: 'location-sticker-story-7',
+                    name: 'Finglas',
+                    category: 'Location',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false
+                },
+                x: 50,
+                y: 85,
+                scale: 0.9,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'Finglas',
+                textColor: '#FFFFFF',
+                fontSize: 'small'
+            }
+        ]
     },
     {
         id: 'story-8',
@@ -121,15 +367,55 @@ let stories: Story[] = [
         userHandle: 'Sarah@NewYork',
         mediaUrl: 'https://images.unsplash.com/photo-1494522358652-f30e61a0b1b0?w=800',
         mediaType: 'image',
-        text: 'Park life! 🌳',
         createdAt: Date.now() - 1000,
         expiresAt: Date.now() + (24 * 60 * 60 * 1000) - 1000,
-        location: 'New York',
         views: 0,
         hasViewed: false,
         reactions: [],
         replies: [],
-        userReaction: undefined
+        userReaction: undefined,
+        stickers: [
+            {
+                id: 'text-sticker-story-8',
+                stickerId: 'text-sticker-story-8',
+                sticker: {
+                    id: 'text-sticker-story-8',
+                    name: 'Park life! 🌳',
+                    category: 'Text',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false
+                },
+                x: 50,
+                y: 75,
+                scale: 1.0,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'Park life! 🌳',
+                textColor: '#FFFFFF',
+                fontSize: 'medium'
+            },
+            {
+                id: 'location-sticker-story-8',
+                stickerId: 'location-sticker-story-8',
+                sticker: {
+                    id: 'location-sticker-story-8',
+                    name: 'New York',
+                    category: 'Location',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false
+                },
+                x: 50,
+                y: 85,
+                scale: 0.9,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'New York',
+                textColor: '#FFFFFF',
+                fontSize: 'small'
+            }
+        ]
     },
     {
         id: 'story-9',
@@ -137,32 +423,99 @@ let stories: Story[] = [
         userHandle: 'Mike@London',
         mediaUrl: 'https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?w=800',
         mediaType: 'image',
-        text: 'Thames vibes! 🌊',
         createdAt: Date.now() - 3000,
         expiresAt: Date.now() + (24 * 60 * 60 * 1000) - 3000,
-        location: 'London',
         views: 0,
         hasViewed: false,
         reactions: [],
         replies: [],
-        userReaction: undefined
+        userReaction: undefined,
+        stickers: [
+            {
+                id: 'text-sticker-story-9',
+                stickerId: 'text-sticker-story-9',
+                sticker: {
+                    id: 'text-sticker-story-9',
+                    name: 'Thames vibes! 🌊',
+                    category: 'Text',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false
+                },
+                x: 50,
+                y: 75,
+                scale: 1.0,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'Thames vibes! 🌊',
+                textColor: '#FFFFFF',
+                fontSize: 'medium'
+            },
+            {
+                id: 'location-sticker-story-9',
+                stickerId: 'location-sticker-story-9',
+                sticker: {
+                    id: 'location-sticker-story-9',
+                    name: 'London',
+                    category: 'Location',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false
+                },
+                x: 50,
+                y: 85,
+                scale: 0.9,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'London',
+                textColor: '#FFFFFF',
+                fontSize: 'small'
+            }
+        ]
     },
-    // Stories for Sarah@Artane
+    // Stories for Sarah@Artane – include a poll story to match the new poll card style
     {
         id: 'story-sarah-1',
         userId: 'sarah-artane-1',
         userHandle: 'Sarah@Artane',
         mediaUrl: 'https://images.unsplash.com/photo-1543007631-283050bb3e8c?w=800',
         mediaType: 'image',
-        text: 'Beautiful morning in Artane! ☀️',
         createdAt: Date.now() - 5000,
         expiresAt: Date.now() + (24 * 60 * 60 * 1000) - 5000,
-        location: 'Artane, Dublin',
         views: 0,
         hasViewed: false,
         reactions: [],
         replies: [],
-        userReaction: undefined
+        userReaction: undefined,
+        stickers: [
+            {
+                id: 'location-sticker-sarah-1',
+                stickerId: 'location-sticker-sarah-1',
+                sticker: {
+                    id: 'location-sticker-sarah-1',
+                    name: 'Artane, Dublin',
+                    category: 'Location',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false
+                },
+                x: 50,
+                y: 85,
+                scale: 0.9,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'Artane, Dublin',
+                textColor: '#FFFFFF',
+                fontSize: 'small'
+            }
+        ],
+        poll: {
+            question: 'Where should I go later?',
+            option1: 'Howth',
+            option2: 'Malahide',
+            votes1: 32,
+            votes2: 21
+        }
     },
     {
         id: 'story-sarah-2',
@@ -170,15 +523,55 @@ let stories: Story[] = [
         userHandle: 'Sarah@Artane',
         mediaUrl: 'https://videos.pexels.com/video-files/5439112/5439112-uhd_3840_2160_30fps.mp4',
         mediaType: 'video',
-        text: 'Exploring the beautiful coast! 🌊',
         createdAt: Date.now() - 7000,
         expiresAt: Date.now() + (24 * 60 * 60 * 1000) - 7000,
-        location: 'Howth, Dublin',
         views: 0,
         hasViewed: false,
         reactions: [],
         replies: [],
-        userReaction: undefined
+        userReaction: undefined,
+        stickers: [
+            {
+                id: 'text-sticker-sarah-2',
+                stickerId: 'text-sticker-sarah-2',
+                sticker: {
+                    id: 'text-sticker-sarah-2',
+                    name: 'Exploring the beautiful coast! 🌊',
+                    category: 'Text',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false
+                },
+                x: 50,
+                y: 75,
+                scale: 1.0,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'Exploring the beautiful coast! 🌊',
+                textColor: '#FFFFFF',
+                fontSize: 'medium'
+            },
+            {
+                id: 'location-sticker-sarah-2',
+                stickerId: 'location-sticker-sarah-2',
+                sticker: {
+                    id: 'location-sticker-sarah-2',
+                    name: 'Howth, Dublin',
+                    category: 'Location',
+                    emoji: undefined,
+                    url: undefined,
+                    isTrending: false
+                },
+                x: 50,
+                y: 85,
+                scale: 0.9,
+                rotation: 0,
+                opacity: 1,
+                textContent: 'Howth, Dublin',
+                textColor: '#FFFFFF',
+                fontSize: 'small'
+            }
+        ]
     }
 ];
 
@@ -259,8 +652,9 @@ export async function createStory(
     textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string }, // Text style for text-only stories
     stickers?: StickerOverlay[], // Stickers/GIFs for stories
     taggedUsers?: string[], // Tagged users (handles only)
-    poll?: { question: string; option1: string; option2: string }, // Poll data
-    taggedUsersPositions?: Array<{ handle: string; x: number; y: number }> // Tagged users with positions
+    poll?: { question: string; option1: string; option2: string; option3?: string }, // Poll data
+    taggedUsersPositions?: Array<{ handle: string; x: number; y: number }>, // Tagged users with positions
+    question?: string // Question prompt (e.g., "Ask me anything")
 ): Promise<Story> {
     // Use real Laravel API
     const { apiRequest } = await import('./client');
@@ -280,7 +674,8 @@ export async function createStory(
                 stickers: stickers || undefined,
                 taggedUsers: taggedUsers || undefined, // Send tagged users to backend
                 taggedUsersPositions: taggedUsersPositions || undefined, // Send tagged users with positions
-                poll: poll || undefined
+                poll: poll || undefined,
+                question: question || undefined // Question prompt
             }),
         });
 
@@ -313,9 +708,15 @@ export async function createStory(
                 question: poll.question,
                 option1: poll.option1,
                 option2: poll.option2,
+                option3: poll.option3,
                 votes1: 0,
                 votes2: 0,
+                votes3: poll.option3 ? 0 : undefined,
                 userVote: undefined
+            } : undefined),
+            question: response.question || (question ? {
+                prompt: question,
+                responses: []
             } : undefined)
         };
 
@@ -357,9 +758,15 @@ export async function createStory(
                 question: poll.question,
                 option1: poll.option1,
                 option2: poll.option2,
+                option3: poll.option3,
                 votes1: 0,
                 votes2: 0,
+                votes3: poll.option3 ? 0 : undefined,
                 userVote: undefined
+            } : undefined,
+            question: question ? {
+                prompt: question,
+                responses: []
             } : undefined
         };
 
@@ -428,8 +835,41 @@ export async function addStoryReply(storyId: string, userId: string, userHandle:
     }
 }
 
+// Add answer to question in story - stores question in questions API (not messages)
+export async function addQuestionAnswer(storyId: string, userId: string, userHandle: string, text: string): Promise<void> {
+    await delay();
+
+    const story = stories.find(s => s.id === storyId);
+    if (story && story.question) {
+        const storyCreatorHandle = story.userHandle;
+        
+        // Store question in questions API (not messages)
+        const { addQuestion } = await import('./questions');
+        await addQuestion(
+            storyId,
+            story.question.prompt || 'Ask me anything',
+            storyCreatorHandle,
+            userId,
+            userHandle,
+            text
+        );
+        
+        // Also store in story for insights (optional, for tracking)
+        if (!story.question.responses) {
+            story.question.responses = [];
+        }
+        story.question.responses.push({
+            id: `answer-${Date.now()}`,
+            userId,
+            userHandle,
+            text,
+            createdAt: Date.now()
+        });
+    }
+}
+
 // Vote on a poll in a story
-export async function voteOnPoll(storyId: string, userId: string, option: 'option1' | 'option2'): Promise<void> {
+export async function voteOnPoll(storyId: string, userId: string, option: 'option1' | 'option2' | 'option3'): Promise<void> {
     await delay();
 
     const story = stories.find(s => s.id === storyId);
@@ -439,13 +879,17 @@ export async function voteOnPoll(storyId: string, userId: string, option: 'optio
             story.poll.votes1 = (story.poll.votes1 || 0) - 1;
         } else if (story.poll.userVote === 'option2') {
             story.poll.votes2 = (story.poll.votes2 || 0) - 1;
+        } else if (story.poll.userVote === 'option3') {
+            story.poll.votes3 = (story.poll.votes3 || 0) - 1;
         }
 
         // Add new vote
         if (option === 'option1') {
             story.poll.votes1 = (story.poll.votes1 || 0) + 1;
-        } else {
+        } else if (option === 'option2') {
             story.poll.votes2 = (story.poll.votes2 || 0) + 1;
+        } else if (option === 'option3') {
+            story.poll.votes3 = (story.poll.votes3 || 0) + 1;
         }
 
         story.poll.userVote = option;
@@ -461,6 +905,17 @@ export interface StoryInsight {
     createdAt: number;
     likes: number;
     likers: string[]; // user handles who reacted with a heart
+    question?: {
+        prompt: string;
+        responseCount: number;
+        responses: Array<{
+            id: string;
+            userId: string;
+            userHandle: string;
+            text: string;
+            createdAt: number;
+        }>;
+    };
 }
 
 export async function getStoryInsightsForUser(userHandle: string): Promise<StoryInsight[]> {
@@ -480,7 +935,12 @@ export async function getStoryInsightsForUser(userHandle: string): Promise<Story
                 text: story.text,
                 createdAt: story.createdAt,
                 likes: likers.length,
-                likers
+                likers,
+                question: story.question ? {
+                    prompt: story.question.prompt,
+                    responseCount: story.question.responses?.length || 0,
+                    responses: story.question.responses || []
+                } : undefined
             };
         })
         // Newest stories first

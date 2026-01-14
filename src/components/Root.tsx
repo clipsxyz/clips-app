@@ -25,6 +25,7 @@ import VideoEditorPage from '../pages/VideoEditorPage';
 import CanvaVideoEditor from '../pages/CanvaVideoEditor';
 import TextOnlyPostPage from '../pages/TextOnlyPostPage';
 import TextOnlyPostDetailsPage from '../pages/TextOnlyPostDetailsPage';
+import ReplyQuestionPage from '../pages/ReplyQuestionPage';
 
 
 export default function Root() {
@@ -60,6 +61,7 @@ export default function Root() {
                             </Route>
                             <Route path="messages/:handle" element={<MessagesPage />} />
                             <Route path="inbox" element={<InboxPage />} />
+                            <Route path="reply-question" element={<ReplyQuestionPage />} />
                         </Routes>
                     </BrowserRouter>
                 </ThemeProvider>

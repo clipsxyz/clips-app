@@ -21,6 +21,19 @@ interface MessageUI extends ChatMessage {
     senderAvatar?: string;
 }
 
+// Helper function to parse question messages
+function parseQuestionMessage(text: string | undefined): { question: string; answer: string } | null {
+    if (!text || !text.startsWith('QUESTION:')) return null;
+    const match = text.match(/QUESTION:(.+?)\|ANSWER:(.+)/);
+    if (match) {
+        return {
+            question: match[1],
+            answer: match[2]
+        };
+    }
+    return null;
+}
+
 // Helper function to extract post ID from message text
 function extractPostId(text: string): string | null {
     if (!text) return null;
@@ -1435,6 +1448,52 @@ export default function MessagesPage() {
                                                                     <div className="flex items-center justify-center py-8">
                                                                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
                                                                     </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+                                                
+                                                // Check if this is a question message (from someone asking a question)
+                                                const questionData = parseQuestionMessage(msg.text);
+                                                
+                                                // If it's a question message, show special UI with reply button
+                                                if (questionData) {
+                                                    return (
+                                                        <div className="flex items-start gap-2 w-full mb-2" style={{ maxWidth: '100%' }}>
+                                                            {msg.senderAvatar && (
+                                                                <Avatar
+                                                                    src={msg.senderAvatar}
+                                                                    name={msg.senderHandle}
+                                                                    size="sm"
+                                                                />
+                                                            )}
+                                                            <div className="flex-1 min-w-0" style={{ maxWidth: '448px' }}>
+                                                                <div className="bg-gray-800 rounded-2xl p-4 border border-purple-500/50">
+                                                                    <div className="mb-3">
+                                                                        <p className="text-xs text-gray-400 mb-1 font-semibold">Question:</p>
+                                                                        <p className="text-white font-semibold text-sm">{questionData.question}</p>
+                                                                    </div>
+                                                                    <div className="mb-3">
+                                                                        <p className="text-xs text-gray-400 mb-1 font-semibold">Answer from {msg.senderHandle}:</p>
+                                                                        <p className="text-white text-sm">{questionData.answer}</p>
+                                                                    </div>
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            navigate('/clip', {
+                                                                                state: {
+                                                                                    replyToQuestion: {
+                                                                                        question: questionData.question,
+                                                                                        response: questionData.answer,
+                                                                                        responderHandle: msg.senderHandle
+                                                                                    }
+                                                                                }
+                                                                            });
+                                                                        }}
+                                                                        className="w-full py-2 px-4 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold hover:opacity-90 transition-opacity text-sm"
+                                                                    >
+                                                                        Reply in Story
+                                                                    </button>
                                                                 </div>
                                                             </div>
                                                         </div>
