@@ -2,10 +2,11 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 import { noCache } from './vite-plugin-no-cache'
+import basicSsl from '@vitejs/plugin-basic-ssl'
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react(), noCache()],
+  plugins: [react(), noCache(), basicSsl()],
   resolve: {
     alias: {
       '@': resolve(__dirname, './src'),
@@ -61,7 +62,7 @@ export default defineConfig({
       'ETag': '', // Disable ETag caching
     },
     hmr: {
-      protocol: 'ws',
+      protocol: 'wss', // Use secure WebSocket for HTTPS
       host: '0.0.0.0', // Allow HMR from network devices
     },
   },

@@ -22,6 +22,7 @@ import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from '../constants';
 function HeartDropAnimation({ startX, startY, targetElement, onComplete }: { startX: number; startY: number; targetElement: HTMLElement; onComplete: () => void }) {
     const [progress, setProgress] = React.useState(0);
     const [endPosition, setEndPosition] = React.useState<{ x: number; y: number } | null>(null);
+    const [isComplete, setIsComplete] = React.useState(false);
     const heartRef = React.useRef<HTMLDivElement>(null);
     const animationFrameRef = React.useRef<number | null>(null);
     const startTimeRef = React.useRef<number | null>(null);
@@ -52,6 +53,14 @@ function HeartDropAnimation({ startX, startY, targetElement, onComplete }: { sta
                 if (t < 1) {
                     animationFrameRef.current = requestAnimationFrame(animate);
                 } else {
+                    // Mark as complete immediately
+                    setIsComplete(true);
+                    // Cancel any pending animation frames
+                    if (animationFrameRef.current) {
+                        cancelAnimationFrame(animationFrameRef.current);
+                        animationFrameRef.current = null;
+                    }
+                    // Call onComplete immediately to clean up
                     onComplete();
                 }
             };
@@ -65,18 +74,23 @@ function HeartDropAnimation({ startX, startY, targetElement, onComplete }: { sta
             };
         } catch (error) {
             console.error('Error calculating heart animation target:', error);
+            setIsComplete(true);
             onComplete();
         }
     }, [targetElement, onComplete]);
 
-    if (!endPosition) return null;
+    // Don't render if complete or no end position
+    if (!endPosition || isComplete) return null;
 
     const deltaX = endPosition.x - startX;
     const deltaY = endPosition.y - startY;
     const currentX = startX + deltaX * progress;
     const currentY = startY + deltaY * progress;
     const scale = 1 - (progress * 0.7); // Scale from 1 to 0.3
-    const opacity = 1 - progress;
+    const opacity = Math.max(0, 1 - progress); // Ensure opacity never goes below 0
+
+    // Don't render if opacity is 0 or very close to 0, or if complete
+    if (opacity <= 0.01 || isComplete) return null;
 
     return (
         <div
@@ -87,7 +101,8 @@ function HeartDropAnimation({ startX, startY, targetElement, onComplete }: { sta
                 top: `${currentY}px`,
                 transform: `translate(-50%, -50%) scale(${scale})`,
                 opacity: opacity,
-                transition: 'none'
+                transition: 'none',
+                willChange: 'transform, opacity'
             }}
         >
             <svg
@@ -104,7 +119,9 @@ function HeartDropAnimation({ startX, startY, targetElement, onComplete }: { sta
 type ScenesModalProps = {
     post: Post;
     isOpen: boolean;
-    onClose: () => void;
+    initialVideoTime?: number | null;
+    initialMutedState?: boolean | null;
+    onClose: (savedTime?: number) => void;
     onLike: () => Promise<void>;
     onFollow: () => Promise<void>;
     onShare: () => Promise<void>;
@@ -115,6 +132,8 @@ type ScenesModalProps = {
 export default function ScenesModal({
     post,
     isOpen,
+    initialVideoTime,
+    initialMutedState,
     onClose,
     onLike,
     onFollow,
@@ -135,7 +154,7 @@ export default function ScenesModal({
     const [heartBurst, setHeartBurst] = React.useState(false);
     const [shareModalOpen, setShareModalOpen] = React.useState(false);
     const [videoProgress, setVideoProgress] = React.useState(0);
-    const [isMuted, setIsMuted] = React.useState(true);
+    const [isMuted, setIsMuted] = React.useState(initialMutedState !== null ? initialMutedState : true);
     const [isPaused, setIsPaused] = React.useState(false);
     const [isCaptionExpanded, setIsCaptionExpanded] = React.useState(false);
     const [commentsList, setCommentsList] = React.useState<Comment[]>([]);
@@ -153,6 +172,8 @@ export default function ScenesModal({
     const likeButtonRef = React.useRef<HTMLButtonElement>(null);
     const isProcessingDoubleTap = React.useRef<boolean>(false);
     const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
+    const profileBorderOverlayRef = React.useRef<HTMLDivElement>(null);
+    const profileBorderOverlayRef2 = React.useRef<HTMLDivElement>(null);
     const { user } = useAuth();
     const online = useOnline();
 
@@ -186,6 +207,44 @@ export default function ScenesModal({
         }
     }, [post.stickers, currentIndex]);
 
+    // Animate profile picture borders on mount (same animation as location newsfeed borders)
+    React.useEffect(() => {
+        if (!isOpen) return;
+        
+        const animateBorder = (overlay: HTMLDivElement | null) => {
+            if (!overlay) return;
+            
+            const duration = 1500; // 1.5 seconds
+            const startTime = Date.now();
+            
+            const animate = () => {
+                const elapsed = Date.now() - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                const angle = progress * 360;
+                
+                // Create mask that reveals progressively going around
+                const mask = `conic-gradient(from 0deg, transparent 0deg, transparent ${angle}deg, black ${angle}deg, black 360deg)`;
+                overlay.style.maskImage = mask;
+                overlay.style.webkitMaskImage = mask;
+                
+                if (progress < 1) {
+                    requestAnimationFrame(animate);
+                } else {
+                    // Animation complete - make overlay fully transparent so border is fully visible
+                    overlay.style.maskImage = 'conic-gradient(from 0deg, transparent 0deg, transparent 360deg)';
+                    overlay.style.webkitMaskImage = 'conic-gradient(from 0deg, transparent 0deg, transparent 360deg)';
+                }
+            };
+            
+            // Start animation
+            requestAnimationFrame(animate);
+        };
+        
+        // Animate both profile picture borders
+        animateBorder(profileBorderOverlayRef.current);
+        animateBorder(profileBorderOverlayRef2.current);
+    }, [isOpen]);
+
     // Reset video state when switching items
     React.useEffect(() => {
         if (currentItem?.type === 'video' && videoRef.current) {
@@ -199,26 +258,62 @@ export default function ScenesModal({
             setIsPaused(false); // Reset to playing when switching videos
         }
         // Reset animation states when switching items
+        // Clear all heart animation states when switching stories
         setTapPosition(null);
         setHeartAnimation(null);
         setHeartBurst(false);
         isProcessingDoubleTap.current = false;
+        
+        // Double-check cleanup after a brief delay
+        setTimeout(() => {
+            setTapPosition(null);
+            setHeartAnimation(null);
+            setHeartBurst(false);
+        }, 100);
     }, [currentIndex, currentItem?.type]);
 
-    // Sync video muted state with ref
+    // Sync video muted state with ref and restore from feed if available
     React.useEffect(() => {
         if (videoRef.current && currentItem?.type === 'video') {
-            videoRef.current.muted = isMuted;
+            const video = videoRef.current;
+            const shouldBeMuted = isMuted;
+            
+            // Always sync the video's muted property with state
+            video.muted = shouldBeMuted;
+            
+            // If unmuting, ensure video is playing and audio is enabled
+            if (!shouldBeMuted) {
+                // Double-check muted is false
+                video.muted = false;
+                
+                // Ensure video is playing
+                if (video.paused) {
+                    video.play().catch(console.error);
+                    setIsPaused(false);
+                }
+                
+                // Use a small delay to ensure the muted state is applied
+                const timeoutId = setTimeout(() => {
+                    if (videoRef.current && !shouldBeMuted) {
+                        videoRef.current.muted = false;
+                        if (videoRef.current.paused) {
+                            videoRef.current.play().catch(console.error);
+                        }
+                    }
+                }, 50);
+                
+                return () => clearTimeout(timeoutId);
+            }
         }
     }, [isMuted, currentItem?.type]);
 
-    // Ensure video is paused when isPaused is true
+    // Ensure video is paused when isPaused is true (but not when initially loading)
+    // This effect only handles pausing, not playing - let autoPlay handle initial playback
     React.useEffect(() => {
-        if (videoRef.current && currentItem?.type === 'video') {
+        if (videoRef.current && currentItem?.type === 'video' && videoRef.current.readyState >= 2 && isOpen) {
+            // Only pause if user explicitly paused (isPaused is true)
             if (isPaused && !videoRef.current.paused) {
                 videoRef.current.pause();
-                // Force pause to ensure audio stops immediately
-                videoRef.current.currentTime = videoRef.current.currentTime;
                 // Also pause all other videos on the page to prevent background audio
                 const allVideos = document.querySelectorAll('video');
                 allVideos.forEach((video) => {
@@ -226,24 +321,112 @@ export default function ScenesModal({
                         video.pause();
                     }
                 });
-            } else if (!isPaused && videoRef.current.paused) {
-                videoRef.current.play().catch(console.error);
             }
+            // Don't force play here - let autoPlay attribute handle initial playback
         }
-    }, [isPaused, currentItem?.type]);
+    }, [isPaused, currentItem?.type, isOpen]);
 
-    // Pause all videos on the page when Scenes opens
+    // Pause all videos on the page when Scenes opens (after a brief delay for smooth transition)
     React.useEffect(() => {
         if (isOpen) {
-            // Pause all video elements on the page to prevent background audio
+            // Small delay to allow Scenes video to sync before pausing feed videos
+            // This creates a smoother, Instagram-like transition
+            const pauseTimer = setTimeout(() => {
             const allVideos = document.querySelectorAll('video');
             allVideos.forEach((video) => {
-                if (!video.paused) {
+                    // Don't pause the Scenes video itself
+                    if (video !== videoRef.current && !video.paused) {
                     video.pause();
                 }
             });
+            }, 150); // 150ms delay for smooth transition - matches Media component delay
+            
+            return () => clearTimeout(pauseTimer);
         }
     }, [isOpen]);
+
+    // Set initial muted state when video first loads
+    React.useEffect(() => {
+        if (!isOpen || currentItem?.type !== 'video' || !videoRef.current) return;
+        
+        if (initialMutedState !== null && initialMutedState !== undefined) {
+            const handleLoadedData = () => {
+                if (videoRef.current) {
+                    videoRef.current.muted = initialMutedState;
+                    setIsMuted(initialMutedState);
+                }
+            };
+            
+            if (videoRef.current.readyState >= 2) {
+                // Video already loaded
+                handleLoadedData();
+            } else {
+                videoRef.current.addEventListener('loadeddata', handleLoadedData);
+                return () => {
+                    if (videoRef.current) {
+                        videoRef.current.removeEventListener('loadeddata', handleLoadedData);
+                    }
+                };
+            }
+        }
+    }, [isOpen, currentItem?.type, initialMutedState]);
+
+    // Set initial video time when opening Scenes (seamless transition from feed)
+    React.useEffect(() => {
+        if (!isOpen || currentItem?.type !== 'video' || !videoRef.current) return;
+        
+        let hasSynced = false;
+        
+        // Function to sync video time (only once) - don't try to play, let autoPlay handle it
+        const syncVideoTime = () => {
+            if (hasSynced || !videoRef.current) return;
+            
+            // Wait for video to have duration
+            if (!videoRef.current.duration || videoRef.current.duration === 0) {
+                return;
+            }
+            
+            if (initialVideoTime !== null && initialVideoTime !== undefined && initialVideoTime > 0) {
+                if (initialVideoTime < videoRef.current.duration) {
+                    videoRef.current.currentTime = initialVideoTime;
+                    hasSynced = true;
+                }
+            }
+            // Don't try to play here - let autoPlay attribute handle playback
+        };
+
+        // Try to set immediately if video is already loaded
+        if (videoRef.current.readyState >= 2) {
+            syncVideoTime();
+        }
+
+        // Listen for when video data is loaded
+        const handleLoadedData = () => {
+            syncVideoTime();
+        };
+        
+        // Listen for canplay event
+        const handleCanPlay = () => {
+            syncVideoTime();
+        };
+        
+        // Listen for loadedmetadata for better compatibility
+        const handleLoadedMetadata = () => {
+            syncVideoTime();
+        };
+
+        videoRef.current.addEventListener('loadeddata', handleLoadedData);
+        videoRef.current.addEventListener('canplay', handleCanPlay);
+        videoRef.current.addEventListener('loadedmetadata', handleLoadedMetadata);
+
+        return () => {
+            if (videoRef.current) {
+                videoRef.current.removeEventListener('loadeddata', handleLoadedData);
+                videoRef.current.removeEventListener('canplay', handleCanPlay);
+                videoRef.current.removeEventListener('loadedmetadata', handleLoadedMetadata);
+            }
+        };
+    }, [isOpen, currentItem?.type, initialVideoTime]);
 
     // Cleanup animation states when modal closes
     React.useEffect(() => {
@@ -252,10 +435,20 @@ export default function ScenesModal({
             if (videoRef.current && !videoRef.current.paused) {
                 videoRef.current.pause();
             }
+            // Clear all heart animation states immediately
             setTapPosition(null);
             setHeartAnimation(null);
             setHeartBurst(false);
             isProcessingDoubleTap.current = false;
+            
+            // Double-check cleanup after a brief delay to ensure nothing is left behind
+            const cleanupTimeout = setTimeout(() => {
+                setTapPosition(null);
+                setHeartAnimation(null);
+                setHeartBurst(false);
+            }, 100);
+            
+            return () => clearTimeout(cleanupTimeout);
         }
     }, [isOpen]);
 
@@ -337,7 +530,14 @@ export default function ScenesModal({
 
     React.useEffect(() => {
         function onKeyDown(e: KeyboardEvent) {
-            if (e.key === 'Escape') onClose();
+            if (e.key === 'Escape') {
+                // Save current video time before closing
+                let savedTime: number | undefined;
+                if (videoRef.current && currentItem?.type === 'video') {
+                    savedTime = videoRef.current.currentTime;
+                }
+                onClose(savedTime);
+            }
         }
         if (isOpen) {
             document.addEventListener('keydown', onKeyDown);
@@ -347,7 +547,7 @@ export default function ScenesModal({
             document.removeEventListener('keydown', onKeyDown);
             document.body.style.overflow = '';
         };
-    }, [isOpen, onClose]);
+    }, [isOpen, onClose, currentItem?.type]);
 
     async function handleLike() {
         if (busy) return;
@@ -382,6 +582,11 @@ export default function ScenesModal({
         const timeSinceLastTap = now - lastTapRef.current;
 
         if (timeSinceLastTap < DOUBLE_TAP_THRESHOLD) {
+            // Double tap detected - clear any pending single tap timer
+            if ((lastTapRef as any).singleTapTimer) {
+                clearTimeout((lastTapRef as any).singleTapTimer);
+                (lastTapRef as any).singleTapTimer = null;
+            }
             // Double tap detected
             isProcessingDoubleTap.current = true;
 
@@ -440,9 +645,18 @@ export default function ScenesModal({
             }, 200);
 
             // Clear tap position and burst after pop-up animation completes (400ms)
+            // Add a fade-out before clearing to ensure smooth transition
+            setTimeout(() => {
+                setHeartBurst(false);
+                // Clear tap position after fade-out completes
+                setTimeout(() => {
+                    setTapPosition(null);
+                    // Double-check to ensure it's cleared
             setTimeout(() => {
                 setTapPosition(null);
                 setHeartBurst(false);
+                    }, 100);
+                }, 300); // Wait for fade-out transition
             }, 400);
 
             // Reset processing flag after all animations complete (pop-up 400ms + drop 800ms = 1200ms)
@@ -468,8 +682,11 @@ export default function ScenesModal({
             }
             // Note: Processing flag is reset after 1200ms regardless of whether we liked or not
         } else {
-            // Single tap - toggle play/pause for videos
-            if (currentItem?.type === 'video' && videoRef.current) {
+            // Single tap - wait to see if it's actually a double tap before pausing
+            // This prevents conflict between double tap like and single tap pause
+            const singleTapTimer = setTimeout(() => {
+                // Only process single tap if no second tap came within threshold
+                if (!isProcessingDoubleTap.current && currentItem?.type === 'video' && videoRef.current) {
                 if (videoRef.current.paused) {
                     videoRef.current.play().catch(console.error);
                     setIsPaused(false);
@@ -489,6 +706,10 @@ export default function ScenesModal({
                     });
                 }
             }
+            }, DOUBLE_TAP_THRESHOLD);
+            
+            // Store timer to clear if double tap occurs
+            (lastTapRef as any).singleTapTimer = singleTapTimer;
         }
         lastTapRef.current = now;
     }, [currentItem?.type, onLike, busy, liked]);
@@ -688,7 +909,14 @@ export default function ScenesModal({
                         {/* Right side - Close button */}
                         <div className="flex-1 flex justify-end">
                             <button
-                                onClick={onClose}
+                                onClick={() => {
+                                    // Save current video time before closing
+                                    let savedTime: number | undefined;
+                                    if (videoRef.current && currentItem?.type === 'video') {
+                                        savedTime = videoRef.current.currentTime;
+                                    }
+                                    onClose(savedTime);
+                                }}
                                 aria-label="Close scenes"
                                 className="p-1.5 rounded-full bg-black/30 hover:bg-black/50 text-white transition-colors"
                             >
@@ -700,9 +928,9 @@ export default function ScenesModal({
                     {/* Main Media Content */}
                     <div
                         ref={mediaContainerRef}
-                        className={`w-full h-full flex items-center justify-center relative select-none cursor-pointer transition-all duration-300 ease-out ${isCaptionExpanded
-                            ? 'scale-[0.45] -translate-y-[25%] origin-top'
-                            : 'scale-100 translate-y-0'
+                        className={`w-full h-full flex items-center justify-center select-none cursor-pointer transition-all duration-300 ease-out ${isCaptionExpanded
+                            ? 'absolute top-[8%] left-1/2 -translate-x-1/2 scale-[0.45] origin-top'
+                            : 'relative scale-100'
                             }`}
                         onClick={(e) => {
                             // Only handle media click if clicking directly on the media area (not on buttons)
@@ -792,13 +1020,14 @@ export default function ScenesModal({
                                 <div className="relative w-full h-full">
                                     <video
                                         ref={videoRef}
-                                        className="w-full h-full object-contain pointer-events-none"
+                                        className="w-full h-full object-contain pointer-events-none transition-opacity duration-200"
                                         src={currentItem.url}
                                         controls={false}
                                         autoPlay
                                         loop
                                         playsInline
                                         muted={isMuted}
+                                        preload="auto"
                                         onPlay={() => setIsPaused(false)}
                                         onPause={() => setIsPaused(true)}
                                         onTimeUpdate={(e) => {
@@ -1020,25 +1249,27 @@ export default function ScenesModal({
                         )}
 
                         {/* Heart pop-up animation at tap position */}
-                        {tapPosition && (
+                        {tapPosition && heartBurst && (
                             <div
-                                className="absolute pointer-events-none z-50 transition-opacity duration-300"
+                                className="absolute pointer-events-none z-50"
                                 style={{
                                     left: `${tapPosition.x}px`,
                                     top: `${tapPosition.y}px`,
                                     transform: 'translate(-50%, -50%)',
-                                    animation: 'heartPopUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards'
+                                    animation: 'heartPopUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards',
+                                    opacity: 1,
+                                    transition: 'opacity 0.3s ease-out'
                                 }}
                             >
-                                {/* Enhanced heart burst animation with Gazetteer gradient */}
-                                <div className={`relative transition-all duration-300 ${heartBurst ? 'opacity-100 scale-100' : 'opacity-0 scale-50'}`}>
-                                    {/* Main heart */}
-                                    <svg className="w-20 h-20 drop-shadow-lg animate-pulse" viewBox="0 0 24 24">
+                                {/* Enhanced heart burst animation with white to purple gradient */}
+                                <div className="relative transition-all duration-300 opacity-100 scale-100">
+                                    {/* Main heart - doubled in size (removed animate-pulse to prevent continuous flashing) */}
+                                    <svg className="w-40 h-40 drop-shadow-lg" viewBox="0 0 24 24">
                                         <defs>
                                             <linearGradient id="scenesHeartGradientMain" x1="0%" y1="0%" x2="100%" y2="100%">
-                                                <stop offset="0%" stopColor="#ff4ecb" />
-                                                <stop offset="50%" stopColor="#8f5bff" />
-                                                <stop offset="100%" stopColor="#ff4ecb" />
+                                                <stop offset="0%" stopColor="#ffffff" />
+                                                <stop offset="50%" stopColor="#a855f7" />
+                                                <stop offset="100%" stopColor="#8f5bff" />
                                             </linearGradient>
                                         </defs>
                                         <path
@@ -1136,15 +1367,79 @@ export default function ScenesModal({
                                     </div>
                                     {/* Mute Button over logo */}
                                     <button
-                                        onClick={(e) => {
+                                        onClick={async (e) => {
                                             e.stopPropagation();
                                             e.preventDefault();
-                                            setIsMuted(prev => !prev);
+                                            const newMuted = !isMuted;
+                                            setIsMuted(newMuted);
+                                            
+                                            // Force update video muted state immediately
+                                            if (videoRef.current) {
+                                                videoRef.current.muted = newMuted;
+                                                
+                                                // If unmuting, ensure video is playing and audio is enabled
+                                                if (!newMuted) {
+                                                    try {
+                                                        // Double-check muted is false
+                                                        videoRef.current.muted = false;
+                                                        
+                                                        // Ensure video is playing
+                                                        if (videoRef.current.paused) {
+                                                            await videoRef.current.play();
+                                                            setIsPaused(false);
+                                                        }
+                                                        
+                                                        // Use a small delay to ensure the muted state is applied
+                                                        setTimeout(() => {
+                                                            if (videoRef.current && !newMuted) {
+                                                                videoRef.current.muted = false;
+                                                                if (videoRef.current.paused) {
+                                                                    videoRef.current.play().catch(console.error);
+                                                                }
+                                                            }
+                                                        }, 50);
+                                                    } catch (error) {
+                                                        console.error('Error unmuting video:', error);
+                                                    }
+                                                }
+                                            }
                                         }}
-                                        onTouchEnd={(e) => {
+                                        onTouchEnd={async (e) => {
                                             e.stopPropagation();
                                             e.preventDefault();
-                                            setIsMuted(prev => !prev);
+                                            const newMuted = !isMuted;
+                                            setIsMuted(newMuted);
+                                            
+                                            // Force update video muted state immediately
+                                            if (videoRef.current) {
+                                                videoRef.current.muted = newMuted;
+                                                
+                                                // If unmuting, ensure video is playing and audio is enabled
+                                                if (!newMuted) {
+                                                    try {
+                                                        // Double-check muted is false
+                                                        videoRef.current.muted = false;
+                                                        
+                                                        // Ensure video is playing
+                                                        if (videoRef.current.paused) {
+                                                            await videoRef.current.play();
+                                                            setIsPaused(false);
+                                                        }
+                                                        
+                                                        // Use a small delay to ensure the muted state is applied
+                                                        setTimeout(() => {
+                                                            if (videoRef.current && !newMuted) {
+                                                                videoRef.current.muted = false;
+                                                                if (videoRef.current.paused) {
+                                                                    videoRef.current.play().catch(console.error);
+                                                                }
+                                                            }
+                                                        }, 50);
+                                                    } catch (error) {
+                                                        console.error('Error unmuting video:', error);
+                                                    }
+                                                }
+                                            }
                                         }}
                                         className="p-1.5 rounded-full bg-black/50 hover:bg-black/70 active:bg-black/80 text-white transition-colors pointer-events-auto z-50"
                                         aria-label={isMuted ? 'Unmute video' : 'Mute video'}
@@ -1173,16 +1468,13 @@ export default function ScenesModal({
                                 <button
                                     ref={likeButtonRef}
                                     onClick={handleLike}
-                                    className={`w-8 h-8 flex items-center justify-center rounded transition-all duration-200 ${liked
-                                        ? 'bg-white/20'
-                                        : 'bg-black/30 hover:bg-black/50'
-                                        }`}
+                                    className="flex items-center justify-center transition-all duration-200"
                                     aria-label={liked ? 'Unlike' : 'Like'}
                                 >
                                     {liked ? (
-                                        <AiFillHeart className="text-red-500 w-4 h-4" />
+                                        <AiFillHeart className="text-red-500 w-7 h-7" />
                                     ) : (
-                                        <FiHeart className="text-white w-4 h-4" />
+                                        <FiHeart className="text-white w-7 h-7" />
                                     )}
                                 </button>
                                 <span className="text-white text-[10px] font-semibold drop-shadow-md">{likes}</span>
@@ -1192,10 +1484,10 @@ export default function ScenesModal({
                             <div className="flex flex-col items-center gap-1.5">
                                 <button
                                     onClick={handleShare}
-                                    className="w-8 h-8 flex items-center justify-center rounded bg-black/30 hover:bg-black/50 transition-colors"
+                                    className="flex items-center justify-center transition-colors"
                                     aria-label="Share"
                                 >
-                                    <FiShare2 className="text-white w-4 h-4" />
+                                    <FiShare2 className="text-white w-7 h-7" />
                                 </button>
                                 <span className="text-white text-[10px] font-semibold drop-shadow-md">{shares}</span>
                             </div>
@@ -1205,11 +1497,11 @@ export default function ScenesModal({
                                 <button
                                     onClick={(e) => handleReclip(e)}
                                     disabled={post.userHandle === user?.handle || userReclipped || busy}
-                                    className={`w-8 h-8 flex items-center justify-center rounded transition-colors relative z-10 ${post.userHandle === user?.handle || busy ? 'opacity-30 cursor-not-allowed' : userReclipped ? 'bg-green-500/20 hover:bg-green-500/30' : 'bg-black/30 hover:bg-black/50'}`}
+                                    className={`flex items-center justify-center transition-colors relative z-10 ${post.userHandle === user?.handle || busy ? 'opacity-30 cursor-not-allowed' : ''}`}
                                     aria-label={post.userHandle === user?.handle ? "Cannot reclip your own post" : userReclipped ? "Post already reclipped" : "Reclip"}
                                     title={post.userHandle === user?.handle ? "Cannot reclip your own post" : userReclipped ? "Post already reclipped" : "Reclip"}
                                 >
-                                    <FiRepeat className={`w-4 h-4 ${userReclipped ? 'text-green-500' : 'text-white'}`} />
+                                    <FiRepeat className={`w-7 h-7 ${userReclipped ? 'text-green-500' : 'text-white'}`} />
                                 </button>
                                 <span className="text-white text-[10px] font-semibold drop-shadow-md">{reclips}</span>
                             </div>
@@ -1224,12 +1516,58 @@ export default function ScenesModal({
                                 <div className="pt-12 pb-4">
                                     {/* Profile Section */}
                                     <div className="flex items-center gap-3 mb-3">
-                                        <Avatar
-                                            src={user?.handle === post.userHandle ? user?.avatarUrl : getAvatarForHandle(post.userHandle)}
-                                            name={post.userHandle.split('@')[0]}
-                                            size="sm"
-                                            className="border-2 border-white"
-                                        />
+                                        {/* Profile picture with rounded-md shape and animated white border */}
+                                        <div className="relative w-8 h-8 rounded-md overflow-visible">
+                                            {/* Animated white border wrapper */}
+                                            <div
+                                                className="absolute inset-0 rounded-md p-0.5 overflow-hidden z-0"
+                                                style={{
+                                                    background: 'white',
+                                                }}
+                                            >
+                                                {/* Overlay that covers border initially, then rotates to reveal it */}
+                                                <div
+                                                    ref={profileBorderOverlayRef}
+                                                    className="absolute inset-0 bg-black rounded-md"
+                                                    style={{
+                                                        maskImage: 'conic-gradient(from 0deg, black 360deg)',
+                                                        WebkitMaskImage: 'conic-gradient(from 0deg, black 360deg)',
+                                                    }}
+                                                />
+                                                <div className="w-full h-full rounded-md bg-black" />
+                                            </div>
+                                            {/* Profile picture content - positioned above border */}
+                                            <div className="absolute inset-[2px] rounded-md overflow-hidden flex items-center justify-center bg-black z-10">
+                                                {user?.handle === post.userHandle && user?.avatarUrl ? (
+                                                    <img
+                                                        src={user.avatarUrl}
+                                                        alt={post.userHandle.split('@')[0]}
+                                                        className="w-full h-full object-cover"
+                                                        onError={(e) => {
+                                                            (e.target as HTMLImageElement).style.display = 'none';
+                                                        }}
+                                                    />
+                                                ) : getAvatarForHandle(post.userHandle) ? (
+                                                    <img
+                                                        src={getAvatarForHandle(post.userHandle)}
+                                                        alt={post.userHandle.split('@')[0]}
+                                                        className="w-full h-full object-cover"
+                                                        onError={(e) => {
+                                                            (e.target as HTMLImageElement).style.display = 'none';
+                                                        }}
+                                                    />
+                                                ) : null}
+                                                {/* Fallback initials if no image */}
+                                                {(!user?.avatarUrl && (!getAvatarForHandle(post.userHandle) || 
+                                                    (user?.handle === post.userHandle && !user?.avatarUrl))) && (
+                                                    <div className="w-full h-full bg-gray-700 flex items-center justify-center">
+                                                        <span className="text-white text-xs font-semibold">
+                                                            {post.userHandle.split('@')[0].charAt(0).toUpperCase()}
+                                                        </span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
                                         <div className="flex-1">
                                             <button className="text-white font-semibold text-sm hover:opacity-80">
                                                 {post.userHandle}
@@ -1355,8 +1693,8 @@ export default function ScenesModal({
                                 className="fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-gray-900 rounded-t-3xl shadow-2xl transition-transform duration-300 ease-out flex flex-col"
                                 style={{
                                     transform: `translateY(${Math.max(0, sheetDragY)}px)`,
-                                    maxHeight: '80vh',
-                                    height: sheetDragY > 0 ? `calc(80vh - ${sheetDragY}px)` : '80vh',
+                                    maxHeight: '50vh',
+                                    height: sheetDragY > 0 ? `calc(50vh - ${sheetDragY}px)` : '50vh',
                                     paddingBottom: 'env(safe-area-inset-bottom, 0px)'
                                 }}
                                 onTouchStart={handleSheetTouchStart}
@@ -1374,12 +1712,48 @@ export default function ScenesModal({
                                     <div className="flex-1 overflow-y-auto px-4 pb-4 min-h-0">
                                         {/* Profile Section */}
                                         <div className="flex items-center gap-3 mb-4 pt-2">
-                                            <Avatar
+                                            {/* Profile picture with rounded-md shape and animated white border */}
+                                            <div className="relative w-8 h-8 rounded-md overflow-visible">
+                                                {/* Animated white border wrapper */}
+                                                <div
+                                                    className="absolute inset-0 rounded-md p-0.5 overflow-hidden z-0"
+                                                    style={{
+                                                        background: 'white',
+                                                    }}
+                                                >
+                                                    {/* Overlay that covers border initially, then rotates to reveal it */}
+                                                    <div
+                                                        ref={profileBorderOverlayRef2}
+                                                        className="absolute inset-0 bg-white dark:bg-gray-900 rounded-md"
+                                                        style={{
+                                                            maskImage: 'conic-gradient(from 0deg, black 360deg)',
+                                                            WebkitMaskImage: 'conic-gradient(from 0deg, black 360deg)',
+                                                        }}
+                                                    />
+                                                    <div className="w-full h-full rounded-md bg-white dark:bg-gray-900" />
+                                                </div>
+                                                {/* Profile picture content - positioned above border */}
+                                                <div className="absolute inset-[2px] rounded-md overflow-hidden flex items-center justify-center bg-white dark:bg-gray-900 z-10">
+                                                    {getAvatarForHandle(post.userHandle) ? (
+                                                        <img
                                                 src={getAvatarForHandle(post.userHandle)}
-                                                name={post.userHandle.split('@')[0]}
-                                                size="sm"
-                                                className="border-2 border-gray-200 dark:border-gray-700"
-                                            />
+                                                            alt={post.userHandle.split('@')[0]}
+                                                            className="w-full h-full object-cover"
+                                                            onError={(e) => {
+                                                                (e.target as HTMLImageElement).style.display = 'none';
+                                                            }}
+                                                        />
+                                                    ) : null}
+                                                    {/* Fallback initials if no image */}
+                                                    {!getAvatarForHandle(post.userHandle) && (
+                                                        <div className="w-full h-full bg-gray-700 flex items-center justify-center">
+                                                            <span className="text-white text-xs font-semibold">
+                                                                {post.userHandle.split('@')[0].charAt(0).toUpperCase()}
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
                                             <div className="flex-1">
                                                 <button className="text-gray-900 dark:text-white font-semibold text-sm hover:opacity-80">
                                                     {post.userHandle}

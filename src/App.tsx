@@ -40,6 +40,10 @@ import ZoomableMedia from './components/ZoomableMedia';
 import { getInstagramImageDimensions, getImageSize } from './utils/imageDimensions';
 import Swal from 'sweetalert2';
 
+// Global map to store video playback times per post ID for seamless transitions
+const videoTimesMap = new Map<string, number>();
+const videoMutedMap = new Map<string, boolean>();
+
 type Tab = string; // Dynamic based on user location
 
 function BottomNav({ onCreateClick }: { onCreateClick: () => void }) {
@@ -799,7 +803,7 @@ function PostHeader({ post, onFollow, isOverlaid = false, onMenuClick }: {
           {/* Location and 3 dots - side by side */}
           <div className="flex items-center gap-2">
             {/* Location Button - White banner with camera icon */}
-            {post.locationLabel && (
+            {post.locationLabel && post.locationLabel !== 'Unknown Location' && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1241,7 +1245,7 @@ function BottomCaptionOverlay({ caption, onExpand }: { caption: string; onExpand
   );
 }
 
-function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onCarouselIndexChange, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled, videoCaptionText, subtitlesEnabled, subtitleText, postUserHandle, postLocationLabel, postCreatedAt, priority = false }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onCarouselIndexChange?: (index: number) => void; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string; priority?: boolean }) {
+function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onCarouselIndexChange, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled, videoCaptionText, subtitlesEnabled, subtitleText, postUserHandle, postLocationLabel, postCreatedAt, postId, priority = false }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onCarouselIndexChange?: (index: number) => void; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string; postId?: string; priority?: boolean }) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [burst, setBurst] = React.useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1335,9 +1339,99 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       if (videoRef.current) {
         videoRef.current.muted = newMuted;
       }
+      // Store mute state for seamless transition to Scenes
+      if (postId && videoMutedMap) {
+        videoMutedMap.set(postId, newMuted);
+      }
       return newMuted;
     });
   };
+
+  // Restore video time when video loads (if returning from Scenes)
+  React.useEffect(() => {
+    if (currentItem?.type === 'video' && videoRef.current && postId && videoTimesMap) {
+      const savedTime = videoTimesMap.get(postId);
+      if (savedTime !== undefined && savedTime > 0) {
+        const handleLoadedData = () => {
+          if (videoRef.current && savedTime < videoRef.current.duration) {
+            videoRef.current.currentTime = savedTime;
+          }
+        };
+        videoRef.current.addEventListener('loadeddata', handleLoadedData);
+        // Also try to set immediately if already loaded
+        if (videoRef.current.readyState >= 2 && savedTime < videoRef.current.duration) {
+          videoRef.current.currentTime = savedTime;
+        }
+        return () => {
+          if (videoRef.current) {
+            videoRef.current.removeEventListener('loadeddata', handleLoadedData);
+          }
+        };
+      }
+    }
+  }, [currentItem?.type, postId]);
+
+  // Listen for resume video events (when returning from Scenes)
+  React.useEffect(() => {
+    if (!postId || currentItem?.type !== 'video') return;
+    
+    const handleResume = (e: CustomEvent) => {
+      if (videoRef.current && e.detail?.time !== null && e.detail?.time !== undefined) {
+        const resumeTime = e.detail.time;
+        // Update saved time
+        videoTimesMap.set(postId, resumeTime);
+        // Set video time
+        if (resumeTime < videoRef.current.duration) {
+          videoRef.current.currentTime = resumeTime;
+          // Resume playback if video is in view (check with intersection observer)
+          const checkAndPlay = () => {
+            if (videoRef.current && videoRef.current.paused) {
+              // Check if video is in viewport
+              const rect = videoRef.current.getBoundingClientRect();
+              const isInView = rect.top < window.innerHeight && rect.bottom > 0;
+              if (isInView) {
+                videoRef.current.play().catch(console.error);
+                setIsPlaying(true);
+              }
+            }
+          };
+          // Try immediately
+          checkAndPlay();
+          // Also try after a short delay to ensure element is ready
+          setTimeout(checkAndPlay, 200);
+        }
+      }
+    };
+    
+    window.addEventListener(`resumeVideo-${postId}`, handleResume as EventListener);
+    return () => {
+      window.removeEventListener(`resumeVideo-${postId}`, handleResume as EventListener);
+    };
+  }, [postId, currentItem?.type]);
+
+  // Listen for Scenes opening to pause feed video smoothly
+  React.useEffect(() => {
+    if (!postId || currentItem?.type !== 'video') return;
+    
+    const handleScenesOpening = () => {
+      // Pause feed video when Scenes opens (after a brief delay for smooth transition)
+      setTimeout(() => {
+        if (videoRef.current && !videoRef.current.paused) {
+          // Save current time
+          if (postId && videoTimesMap) {
+            videoTimesMap.set(postId, videoRef.current.currentTime);
+          }
+          videoRef.current.pause();
+          setIsPlaying(false);
+        }
+      }, 150); // Small delay to allow Scenes video to sync
+    };
+    
+    window.addEventListener(`scenesOpening-${postId}`, handleScenesOpening as EventListener);
+    return () => {
+      window.removeEventListener(`scenesOpening-${postId}`, handleScenesOpening as EventListener);
+    };
+  }, [postId, currentItem?.type]);
 
   // Intersection Observer for auto-play
   React.useEffect(() => {
@@ -1348,6 +1442,13 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
             if (entry.isIntersecting) {
               // Video is in view - play it
               if (videoRef.current) {
+                // Restore saved time if available
+                if (postId && videoTimesMap) {
+                  const savedTime = videoTimesMap.get(postId);
+                  if (savedTime !== undefined && savedTime > 0 && savedTime < videoRef.current.duration) {
+                    videoRef.current.currentTime = savedTime;
+                  }
+                }
                 // Regular videos play muted
                 videoRef.current.play().catch((error) => {
                   console.error('Error playing video:', error);
@@ -1357,6 +1458,10 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
             } else {
               // Video is out of view - pause it
               if (videoRef.current) {
+                // Save current time before pausing
+                if (postId && videoTimesMap) {
+                  videoTimesMap.set(postId, videoRef.current.currentTime);
+                }
                 videoRef.current.pause();
                 setIsPlaying(false);
                 setShowControls(false); // Don't show controls when auto-paused by scrolling
@@ -1375,14 +1480,18 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
         observerRef.current.disconnect();
       }
     };
-  }, [currentItem?.type]);
+  }, [currentItem?.type, postId]);
 
   // Sync video muted state with isMuted state
   React.useEffect(() => {
     if (videoRef.current && currentItem?.type === 'video') {
       videoRef.current.muted = isMuted;
+      // Store mute state for seamless transition to Scenes
+      if (postId && videoMutedMap) {
+        videoMutedMap.set(postId, isMuted);
+      }
     }
-  }, [isMuted, currentItem?.type]);
+  }, [isMuted, currentItem?.type, postId]);
 
   // Video event handlers
   const handleVideoLoad = () => {
@@ -1808,7 +1917,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                           )}
                         </h3>
                         <div className="text-xs text-gray-600 flex items-center gap-2 mt-0.5">
-                          {postLocationLabel && (
+                          {postLocationLabel && postLocationLabel !== 'Unknown Location' && (
                             <>
                               <span className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/80 backdrop-blur-sm text-gray-800 font-medium">
                                 <span>{postLocationLabel}</span>
@@ -1913,39 +2022,66 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                 </div>
               )}
 
+              {/* Mute/Unmute Button - Center of video (always visible) */}
+              {!isLoading && !hasError && currentItem.type === 'video' && (
+                <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none" style={{ touchAction: 'auto' }}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      setIsMuted(prev => !prev);
+                    }}
+                    onTouchEnd={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      setIsMuted(prev => !prev);
+                    }}
+                    className="p-3 rounded-full bg-black/50 hover:bg-black/70 active:bg-black/80 text-white transition-colors shadow-lg pointer-events-auto"
+                    aria-label={isMuted ? 'Unmute video' : 'Mute video'}
+                    title={isMuted ? 'Unmute video' : 'Mute video'}
+                  >
+                    {isMuted ? (
+                      <FiVolumeX size={24} />
+                    ) : (
+                      <FiVolume2 size={24} />
+                    )}
+                  </button>
+                </div>
+              )}
+
               {/* View in Scenes Button - Bottom right of video (kept below bottom nav z-index) */}
               {!isLoading && !hasError && currentItem.type === 'video' && onOpenScenes && (
                 <div className="absolute bottom-4 right-4 z-20 pointer-events-auto" style={{ touchAction: 'auto' }}>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      // Pause the newsfeed video before opening Scenes
-                      if (videoRef.current && !videoRef.current.paused) {
-                        videoRef.current.pause();
+                      // Store current video time before opening Scenes for seamless transition
+                      if (videoRef.current && postId) {
+                        const currentTime = videoRef.current.currentTime;
+                        videoTimesMap.set(postId, currentTime);
+                        // Dispatch event to store time
+                        window.dispatchEvent(new CustomEvent(`storeVideoTime-${postId}`, {
+                          detail: { time: currentTime }
+                        }));
                       }
-                      // Also pause all other videos on the page
-                      const allVideos = document.querySelectorAll('video');
-                      allVideos.forEach((video) => {
-                        if (!video.paused) {
-                          video.pause();
-                        }
-                      });
+                      // Don't pause immediately - let ScenesModal handle the transition
+                      // This allows for a smoother, Instagram-like experience
                       onOpenScenes();
                     }}
                     onTouchEnd={(e) => {
                       e.stopPropagation();
                       e.preventDefault();
-                      // Pause the newsfeed video before opening Scenes
-                      if (videoRef.current && !videoRef.current.paused) {
-                        videoRef.current.pause();
+                      // Store current video time before opening Scenes for seamless transition
+                      if (videoRef.current && postId) {
+                        const currentTime = videoRef.current.currentTime;
+                        videoTimesMap.set(postId, currentTime);
+                        // Dispatch event to store time
+                        window.dispatchEvent(new CustomEvent(`storeVideoTime-${postId}`, {
+                          detail: { time: currentTime }
+                        }));
                       }
-                      // Also pause all other videos on the page
-                      const allVideos = document.querySelectorAll('video');
-                      allVideos.forEach((video) => {
-                        if (!video.paused) {
-                          video.pause();
-                        }
-                      });
+                      // Don't pause immediately - let ScenesModal handle the transition
+                      // This allows for a smoother, Instagram-like experience
                       onOpenScenes();
                     }}
                     onMouseEnter={() => setIsViewInScenesExpanded(true)}
@@ -2174,7 +2310,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
             </div>
           </div>
         )}
-        {/* Heart pop-up animation at tap position */}
+        {/* Heart pop-up animation at tap position - doubled size with white to purple gradient */}
         {tapPosition && (
           <div
             className="absolute pointer-events-none z-50 transition-opacity duration-300"
@@ -2185,12 +2321,12 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
               animation: 'heartPopUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards'
             }}
           >
-            <svg className="w-20 h-20 drop-shadow-2xl" viewBox="0 0 24 24">
+            <svg className="w-40 h-40 drop-shadow-2xl" viewBox="0 0 24 24">
               <defs>
                 <linearGradient id="heartGradientTap" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#ff4ecb" />
-                  <stop offset="50%" stopColor="#8f5bff" />
-                  <stop offset="100%" stopColor="#ff4ecb" />
+                  <stop offset="0%" stopColor="#ffffff" />
+                  <stop offset="50%" stopColor="#a855f7" />
+                  <stop offset="100%" stopColor="#8f5bff" />
                 </linearGradient>
               </defs>
               <path
@@ -2876,6 +3012,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             mediaItems={post.mediaItems}
             onDoubleLike={onLike}
             onOpenScenes={onOpenScenes}
+            postId={post.id}
             onCarouselIndexChange={setCarouselIndex}
             onHeartAnimation={(clientX, clientY) => {
               // Small delay to ensure EngagementBar ref is set
@@ -3224,6 +3361,8 @@ function FeedPageWrapper() {
   const [selectedPostForShare, setSelectedPostForShare] = React.useState<Post | null>(null);
   const [scenesOpen, setScenesOpen] = React.useState(false);
   const [selectedPostForScenes, setSelectedPostForScenes] = React.useState<Post | null>(null);
+  const [initialVideoTime, setInitialVideoTime] = React.useState<number | null>(null);
+  const [initialMutedState, setInitialMutedState] = React.useState<boolean | null>(null);
   const [boostModalOpen, setBoostModalOpen] = React.useState(false);
   const [selectedPostForBoost, setSelectedPostForBoost] = React.useState<Post | null>(null);
   const [unreadCount, setUnreadCount] = React.useState(0);
@@ -3994,8 +4133,16 @@ function FeedPageWrapper() {
               window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`));
             }}
             onOpenScenes={() => {
+              // Get current video time from the videoTimesMap for seamless transition
+              const currentTime = videoTimesMap.get(p.id);
+              setInitialVideoTime(currentTime !== undefined ? currentTime : null);
+              // Get current mute state from the videoMutedMap for seamless transition
+              const currentMuted = videoMutedMap.get(p.id);
+              setInitialMutedState(currentMuted !== undefined ? currentMuted : null);
               setSelectedPostForScenes(p);
               setScenesOpen(true);
+              // Dispatch event to pause feed video smoothly
+              window.dispatchEvent(new CustomEvent(`scenesOpening-${p.id}`));
             }}
             showBoostIcon={user?.handle === p.userHandle}
             onBoost={async () => {
@@ -4091,9 +4238,21 @@ function FeedPageWrapper() {
           <ScenesModal
             post={p}
             isOpen={scenesOpen}
-            onClose={() => {
+            initialVideoTime={initialVideoTime}
+            initialMutedState={initialMutedState}
+            onClose={(savedTime) => {
+              // Save video time when closing Scenes
+              if (savedTime !== null && savedTime !== undefined) {
+                videoTimesMap.set(p.id, savedTime);
+              }
               setScenesOpen(false);
               setSelectedPostForScenes(null);
+              setInitialVideoTime(null);
+              setInitialMutedState(null);
+              // Dispatch event to resume video in feed
+              window.dispatchEvent(new CustomEvent(`resumeVideo-${p.id}`, {
+                detail: { time: savedTime }
+              }));
             }}
             onLike={async () => {
               console.log('Like button clicked for post:', p.id, 'userLiked:', p.userLiked);

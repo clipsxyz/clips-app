@@ -40,6 +40,7 @@ export default function StoriesPage() {
     const [progress, setProgress] = React.useState(0);
     const [paused, setPaused] = React.useState(false);
     const [isMuted, setIsMuted] = React.useState(true);
+    const [hasVideo, setHasVideo] = React.useState(false);
     const [showEmojiPicker, setShowEmojiPicker] = React.useState(false);
     const [showReplyModal, setShowReplyModal] = React.useState(false);
     const [replyText, setReplyText] = React.useState('');
@@ -189,13 +190,18 @@ export default function StoriesPage() {
         setIsMuted(true);
         elapsedTimeRef.current = 0;
 
-        // If we came from feed (via avatar click), navigate back
+        // Always navigate back to feed when stories finish
+        // If we came from feed (via avatar click), use navigate(-1)
+        // Otherwise, navigate to /feed
         if (openUserHandle) {
             // Dispatch event to refresh story indicators
             window.dispatchEvent(new CustomEvent('storiesViewed', {
                 detail: { userHandle: openUserHandle }
             }));
             navigate(-1);
+        } else {
+            // Navigate to feed if we came from sharing a post or other source
+            navigate('/feed');
         }
     }
 
@@ -733,6 +739,114 @@ export default function StoriesPage() {
         }
     }, [paused, viewingStories, currentGroupIndex, currentStoryIndex, storyGroups]);
 
+    // Sync video muted state with isMuted state (for both regular and shared post videos)
+    React.useEffect(() => {
+        if (!viewingStories || !videoRef.current) return;
+
+        try {
+            const currentGroup = storyGroups[currentGroupIndex];
+            const currentStory = currentGroup?.stories?.[currentStoryIndex];
+            
+            // Check if current story is a video (regular or shared post)
+            const isVideo = currentStory?.mediaType === 'video' || 
+                           (currentStory?.sharedFromPost && originalPost && 
+                            (originalPost.mediaType === 'video' || originalPost.mediaItems?.[0]?.type === 'video'));
+            
+            if (isVideo && videoRef.current) {
+                const video = videoRef.current;
+                const shouldBeMuted = isMuted;
+                
+                // Force update muted state immediately
+                video.muted = shouldBeMuted;
+                
+                // If unmuting, ensure video is playing and audio is enabled
+                if (!shouldBeMuted) {
+                    // Aggressively set muted to false multiple times
+                    video.muted = false;
+                    
+                    // Ensure video is playing
+                    if (video.paused) {
+                        video.play().then(() => {
+                            // After play succeeds, ensure muted is still false
+                            if (videoRef.current) {
+                                videoRef.current.muted = false;
+                            }
+                        }).catch(console.error);
+                    } else {
+                        // Video is already playing, just ensure muted is false
+                        video.muted = false;
+                    }
+                    
+                    // Use multiple timeouts to ensure the muted state sticks
+                    const timeout1 = setTimeout(() => {
+                        if (videoRef.current && !shouldBeMuted) {
+                            videoRef.current.muted = false;
+                        }
+                    }, 50);
+                    
+                    const timeout2 = setTimeout(() => {
+                        if (videoRef.current && !shouldBeMuted) {
+                            videoRef.current.muted = false;
+                            if (videoRef.current.paused) {
+                                videoRef.current.play().catch(console.error);
+                            }
+                        }
+                    }, 150);
+                    
+                    return () => {
+                        clearTimeout(timeout1);
+                        clearTimeout(timeout2);
+                    };
+                }
+            }
+        } catch (error) {
+            console.error('Error syncing video muted state:', error);
+        }
+    }, [isMuted, viewingStories, currentGroupIndex, currentStoryIndex, storyGroups, originalPost]);
+
+    // Also sync when originalPost loads (for shared posts)
+    React.useEffect(() => {
+        if (!viewingStories || !videoRef.current || !originalPost) return;
+
+        const currentGroup = storyGroups[currentGroupIndex];
+        const currentStory = currentGroup?.stories?.[currentStoryIndex];
+        
+        // Check if this is a shared post video
+        if (currentStory?.sharedFromPost && 
+            (originalPost.mediaType === 'video' || originalPost.mediaItems?.[0]?.type === 'video')) {
+            // Sync muted state when originalPost loads
+            if (videoRef.current) {
+                const video = videoRef.current;
+                const shouldBeMuted = isMuted;
+                
+                video.muted = shouldBeMuted;
+                
+                // If unmuting, ensure video is playing and audio is enabled
+                if (!shouldBeMuted) {
+                    // Double-check muted is false
+                    video.muted = false;
+                    
+                    // Ensure video is playing
+                    if (video.paused) {
+                        video.play().catch(console.error);
+                    }
+                    
+                    // Use a small delay to ensure the muted state is applied (capture current value)
+                    const timeoutId = setTimeout(() => {
+                        if (videoRef.current && videoRef.current.muted !== false) {
+                            videoRef.current.muted = false;
+                            if (videoRef.current.paused) {
+                                videoRef.current.play().catch(console.error);
+                            }
+                        }
+                    }, 100);
+                    
+                    return () => clearTimeout(timeoutId);
+                }
+            }
+        }
+    }, [originalPost, isMuted, viewingStories, currentGroupIndex, currentStoryIndex, storyGroups]);
+
     // Reset optimistic vote when story changes - MUST be before conditional returns
     React.useEffect(() => {
         setOptimisticVote(null);
@@ -881,13 +995,52 @@ export default function StoriesPage() {
                                             // Shared post with media - show the media
                                             return originalPost.mediaType === 'video' || originalPost.mediaItems?.[0]?.type === 'video' ? (
                                                 <video
-                                                    ref={videoRef}
+                                                    ref={(el) => {
+                                                        videoRef.current = el;
+                                                        setHasVideo(el !== null);
+                                                    }}
                                                     src={originalPost.mediaUrl || originalPost.mediaItems?.[0]?.url}
                                                     className="w-full h-full object-cover"
                                                     autoPlay
                                                     loop
                                                     muted={isMuted}
                                                     playsInline
+                                                    onLoadedData={() => {
+                                                        // Ensure muted state is synced when video loads
+                                                        if (videoRef.current) {
+                                                            const video = videoRef.current;
+                                                            video.muted = isMuted;
+                                                            
+                                                            // If unmuted, ensure video plays and audio is enabled
+                                                            if (!isMuted) {
+                                                                video.muted = false;
+                                                                if (video.paused) {
+                                                                    video.play().catch(console.error);
+                                                                }
+                                                            }
+                                                        }
+                                                    }}
+                                                    onCanPlay={() => {
+                                                        // Sync muted state when video can play
+                                                        if (videoRef.current) {
+                                                            const video = videoRef.current;
+                                                            video.muted = isMuted;
+                                                            
+                                                            // If unmuted, ensure video plays and audio is enabled
+                                                            if (!isMuted) {
+                                                                video.muted = false;
+                                                                if (video.paused) {
+                                                                    video.play().catch(console.error);
+                                                                }
+                                                            }
+                                                        }
+                                                    }}
+                                                    onPlay={() => {
+                                                        // Ensure muted state is correct when video plays
+                                                        if (videoRef.current && !isMuted) {
+                                                            videoRef.current.muted = false;
+                                                        }
+                                                    }}
                                                 />
                                             ) : (
                                                 <img
@@ -1000,13 +1153,52 @@ export default function StoriesPage() {
                                     if (currentStory?.mediaUrl) {
                                         return currentStory.mediaType === 'video' ? (
                                             <video
-                                                ref={videoRef}
+                                                ref={(el) => {
+                                                    videoRef.current = el;
+                                                    setHasVideo(el !== null);
+                                                }}
                                                 src={currentStory.mediaUrl}
                                                 className="w-full h-full object-cover"
                                                 autoPlay
                                                 loop
                                                 muted={isMuted}
                                                 playsInline
+                                                onLoadedData={() => {
+                                                    // Ensure muted state is synced when video loads
+                                                    if (videoRef.current) {
+                                                        const video = videoRef.current;
+                                                        video.muted = isMuted;
+                                                        
+                                                        // If unmuted, ensure video plays and audio is enabled
+                                                        if (!isMuted) {
+                                                            video.muted = false;
+                                                            if (video.paused) {
+                                                                video.play().catch(console.error);
+                                                            }
+                                                        }
+                                                    }
+                                                }}
+                                                onCanPlay={() => {
+                                                    // Sync muted state when video can play
+                                                    if (videoRef.current) {
+                                                        const video = videoRef.current;
+                                                        video.muted = isMuted;
+                                                        
+                                                        // If unmuted, ensure video plays and audio is enabled
+                                                        if (!isMuted) {
+                                                            video.muted = false;
+                                                            if (video.paused) {
+                                                                video.play().catch(console.error);
+                                                            }
+                                                        }
+                                                    }
+                                                }}
+                                                onPlay={() => {
+                                                    // Ensure muted state is correct when video plays
+                                                    if (videoRef.current && !isMuted) {
+                                                        videoRef.current.muted = false;
+                                                    }
+                                                }}
                                             />
                                         ) : (
                                             <img
@@ -2104,7 +2296,7 @@ export default function StoriesPage() {
 
                     {/* Story Text - Only show if media is not a generated text image (data URL) */}
                     {currentStory?.text && currentStory?.mediaUrl && !currentStory.mediaUrl.startsWith('data:image') && (
-                        <div className="absolute bottom-24 left-0 right-0 px-4 z-[60] pointer-events-none">
+                        <div className="absolute bottom-32 left-0 right-0 px-4 z-[55] pointer-events-none">
                             <div className="backdrop-blur-md bg-black/30 rounded-2xl px-4 py-3 border border-white/10 shadow-lg max-w-md mx-auto pointer-events-auto">
                                 <p
                                     className={`font-semibold text-center ${currentStory?.textSize === 'small' ? 'text-sm' :
@@ -2210,8 +2402,8 @@ export default function StoriesPage() {
                     )}
 
                     {/* Bottom Action Bar - Instagram Style */}
-                    <div className="absolute bottom-0 left-0 right-0 z-[60] px-4 pb-4">
-                        <div className="flex items-center gap-3 max-w-md mx-auto">
+                    <div className="absolute bottom-0 left-0 right-0 z-[60] px-2 pb-4">
+                        <div className="flex items-center gap-1.5 max-w-md mx-auto" style={{ flexWrap: 'nowrap' }}>
                             {/* Send Message Input */}
                             <input
                                 type="text"
@@ -2222,7 +2414,7 @@ export default function StoriesPage() {
                                     setShowReplyModal(true);
                                 }}
                                 placeholder="Send message"
-                                className="flex-1 bg-white/10 rounded-full px-4 py-2.5 text-white placeholder-white/60 text-sm outline-none border-0"
+                                className="flex-1 bg-white/10 rounded-full px-3 py-2 text-white placeholder-white/60 text-xs outline-none border-0 min-w-0"
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     setShowReplyModal(true);
@@ -2237,12 +2429,12 @@ export default function StoriesPage() {
                                     e.preventDefault();
                                     handleReaction('❤️');
                                 }}
-                                className="p-2 flex-shrink-0"
+                                className="p-1.5 flex-shrink-0"
                             >
                                 {currentStory?.userReaction ? (
-                                    <AiFillHeart className="w-6 h-6 text-red-500" />
+                                    <AiFillHeart className="w-5 h-5 text-red-500" />
                                 ) : (
-                                    <FiHeart className="w-6 h-6 text-white" />
+                                    <FiHeart className="w-5 h-5 text-white" />
                                 )}
                             </button>
 
@@ -2253,9 +2445,99 @@ export default function StoriesPage() {
                                     e.preventDefault();
                                     setShowStoryShareModal(true);
                                 }}
-                                className="p-2 flex-shrink-0"
+                                className="p-1.5 flex-shrink-0"
                             >
-                                <FiSend className="w-6 h-6 text-white" />
+                                <FiSend className="w-5 h-5 text-white" />
+                            </button>
+
+                            {/* Mute/Unmute Button - ALWAYS VISIBLE */}
+                            <button
+                                onClick={async (e) => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    
+                                    console.log('Mute button clicked, current isMuted:', isMuted);
+                                    console.log('videoRef.current:', videoRef.current);
+                                    
+                                    // Find video element if ref is not set
+                                    let video = videoRef.current;
+                                    if (!video || video.tagName !== 'VIDEO') {
+                                        // Try to find video in the DOM
+                                        const videoElement = document.querySelector('video');
+                                        if (videoElement) {
+                                            video = videoElement as HTMLVideoElement;
+                                            videoRef.current = video;
+                                            setHasVideo(true);
+                                        } else {
+                                            console.log('No video element found');
+                                            return;
+                                        }
+                                    }
+                                    
+                                    const newMuted = !isMuted;
+                                    console.log('Setting muted to:', newMuted);
+                                    
+                                    // Update state first
+                                    setIsMuted(newMuted);
+                                    
+                                    // Force update video muted state immediately
+                                    video.muted = newMuted;
+                                    console.log('Video muted property set to:', video.muted);
+                                    
+                                    // If unmuting, ensure video plays and audio is enabled
+                                    if (!newMuted) {
+                                        try {
+                                            // Aggressively set muted to false multiple times
+                                            video.muted = false;
+                                            console.log('Force unmuted, video.muted is now:', video.muted);
+                                            
+                                            // Ensure video is playing
+                                            if (video.paused) {
+                                                console.log('Video was paused, playing now');
+                                                await video.play();
+                                            }
+                                            
+                                            // Triple-check muted state after play
+                                            video.muted = false;
+                                            console.log('After play, video.muted is:', video.muted);
+                                            
+                                            // Use multiple timeouts to ensure the muted state is applied
+                                            setTimeout(() => {
+                                                if (videoRef.current) {
+                                                    videoRef.current.muted = false;
+                                                    console.log('Timeout 1: video.muted set to false');
+                                                }
+                                            }, 50);
+                                            
+                                            setTimeout(() => {
+                                                if (videoRef.current) {
+                                                    videoRef.current.muted = false;
+                                                    if (videoRef.current.paused) {
+                                                        videoRef.current.play().catch(console.error);
+                                                    }
+                                                    console.log('Timeout 2: video.muted set to false');
+                                                }
+                                            }, 150);
+                                        } catch (error) {
+                                            console.error('Error unmuting video:', error);
+                                        }
+                                    }
+                                }}
+                                className="p-1.5 flex-shrink-0 bg-purple-600/80 rounded-full hover:bg-purple-600 transition-colors border border-white/50 shadow-lg"
+                                style={{ 
+                                    minWidth: '32px',
+                                    minHeight: '32px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center'
+                                }}
+                                aria-label={isMuted ? 'Unmute video' : 'Mute video'}
+                            >
+                                {isMuted ? (
+                                    <FiVolumeX className="w-5 h-5 text-white" />
+                                ) : (
+                                    <FiVolume2 className="w-5 h-5 text-white" />
+                                )}
                             </button>
                         </div>
                     </div>

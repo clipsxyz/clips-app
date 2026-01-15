@@ -99,7 +99,9 @@ export default function InstantCreatePage() {
         'https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=1200'
     ]);
     const presetIdxRef = React.useRef(0);
-    const MAX_VIDEO_SECONDS = 90;
+    const MAX_VIDEO_SECONDS = 60;
+    const [recordingTime, setRecordingTime] = React.useState(60); // Countdown from 60 to 0
+    const recordingTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
 
     async function initStream(mode: 'user' | 'environment', audio: boolean, video: boolean = true) {
         try {
@@ -115,7 +117,73 @@ export default function InstantCreatePage() {
                 }
                 return;
             }
-            const stream = await navigator.mediaDevices.getUserMedia({ 
+
+            // Check if we're in a secure context (HTTPS or localhost)
+            const isSecureContext = window.isSecureContext || window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+            
+            // Check if getUserMedia is available (with fallback for older browsers)
+            let getUserMedia: any = null;
+            
+            // First check modern API
+            if (navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
+                getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+            } 
+            // Fallback to legacy API (might work even if mediaDevices is undefined)
+            else if ((navigator as any).getUserMedia && typeof (navigator as any).getUserMedia === 'function') {
+                getUserMedia = (navigator as any).getUserMedia.bind(navigator);
+            } 
+            // WebKit fallback
+            else if ((navigator as any).webkitGetUserMedia && typeof (navigator as any).webkitGetUserMedia === 'function') {
+                getUserMedia = (navigator as any).webkitGetUserMedia.bind(navigator);
+            }
+            // Try to create mediaDevices if it doesn't exist (some browsers)
+            else if (!navigator.mediaDevices && (navigator as any).getUserMedia) {
+                // Polyfill mediaDevices
+                (navigator as any).mediaDevices = {
+                    getUserMedia: (constraints: any) => {
+                        return new Promise((resolve, reject) => {
+                            (navigator as any).getUserMedia(constraints, resolve, reject);
+                        });
+                    }
+                };
+                getUserMedia = (navigator as any).mediaDevices.getUserMedia.bind((navigator as any).mediaDevices);
+            }
+
+            if (!getUserMedia) {
+                console.error('getUserMedia not available. Navigator:', {
+                    hasMediaDevices: !!navigator.mediaDevices,
+                    hasGetUserMedia: !!(navigator as any).getUserMedia,
+                    hasWebkitGetUserMedia: !!(navigator as any).webkitGetUserMedia,
+                    isSecureContext: isSecureContext,
+                    protocol: window.location.protocol,
+                    hostname: window.location.hostname
+                });
+                
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Camera Not Available',
+                    html: `
+                        <div class="text-left">
+                            <p class="mb-2">Camera access is not available. This usually happens because:</p>
+                            <ul class="list-disc list-inside mb-4 space-y-1 text-sm">
+                                <li>Android Chrome requires HTTPS for camera access</li>
+                                <li>The "Insecure origins" flag may need a browser restart</li>
+                                <li>Camera permissions may be blocked</li>
+                            </ul>
+                            <p class="text-sm"><strong>Solution:</strong> Use the "Take Photo/Video" button below, which works on HTTP.</p>
+                        </div>
+                    `,
+                    confirmButtonColor: '#8B5CF6',
+                });
+                return;
+            }
+
+            // Warn if not secure context (but still try)
+            if (!isSecureContext && navigator.mediaDevices) {
+                console.warn('Camera access may be blocked: not in secure context (HTTPS required on Android Chrome)');
+            }
+
+            const stream = await getUserMedia({ 
                 video: video ? { facingMode: mode } : false, 
                 audio 
             });
@@ -126,6 +194,12 @@ export default function InstantCreatePage() {
             }
         } catch (e: any) {
             console.error('Stream init error:', e);
+            Swal.fire({
+                icon: 'error',
+                title: 'Camera Access Failed',
+                text: e.name === 'NotAllowedError' ? 'Please allow camera access in your browser settings' : `Error: ${e.message || e.name || 'Unknown error'}`,
+                confirmButtonColor: '#8B5CF6',
+            });
         }
     }
 
@@ -152,7 +226,29 @@ export default function InstantCreatePage() {
             try {
                 // Get the opposite camera
                 const oppositeMode = facingMode === 'user' ? 'environment' : 'user';
-                const dualStream = await navigator.mediaDevices.getUserMedia({ 
+                
+                // Check if getUserMedia is available
+                let getUserMedia: any = null;
+                if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                    getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+                } else if ((navigator as any).getUserMedia) {
+                    getUserMedia = (navigator as any).getUserMedia.bind(navigator);
+                } else if ((navigator as any).webkitGetUserMedia) {
+                    getUserMedia = (navigator as any).webkitGetUserMedia.bind(navigator);
+                }
+
+                if (!getUserMedia) {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Camera Not Supported',
+                        text: 'Your browser does not support camera access.',
+                        confirmButtonColor: '#8B5CF6',
+                    });
+                    setDualCamera(false);
+                    return;
+                }
+
+                const dualStream = await getUserMedia({ 
                     video: { facingMode: oppositeMode }, 
                     audio: false 
                 });
@@ -440,6 +536,12 @@ export default function InstantCreatePage() {
                 dualStreamRef.current.getTracks().forEach(t => t.stop());
                 dualStreamRef.current = null;
             }
+            
+            // Clean up recording timer
+            if (recordingTimerRef.current) {
+                clearInterval(recordingTimerRef.current);
+                recordingTimerRef.current = null;
+            }
         };
     }, [facingMode, micOn, cameraOn, previewUrl]);
 
@@ -689,9 +791,33 @@ export default function InstantCreatePage() {
         };
         mr.start(100); // Request data every 100ms
         setRecording(true);
+        setRecordingTime(60); // Reset to 60 seconds
+        
+        // Start countdown timer
+        recordingTimerRef.current = setInterval(() => {
+            setRecordingTime(prev => {
+                if (prev <= 1) {
+                    // Stop recording when timer reaches 0
+                    if (recordingTimerRef.current) {
+                        clearInterval(recordingTimerRef.current);
+                        recordingTimerRef.current = null;
+                    }
+                    stopRecording();
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
     }
 
     function stopRecording() {
+        // Clear recording timer
+        if (recordingTimerRef.current) {
+            clearInterval(recordingTimerRef.current);
+            recordingTimerRef.current = null;
+        }
+        setRecordingTime(60); // Reset timer
+        
         if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
             mediaRecorderRef.current.stop();
             setRecording(false);
@@ -1145,22 +1271,11 @@ export default function InstantCreatePage() {
         </svg>
     );
 
-    return (
+        return (
         <div className="fixed inset-0 bg-black z-50 flex flex-col">
-            {/* Back Button - Top Left */}
-            <div className="absolute top-0 left-0 right-0 z-50 bg-gradient-to-b from-black/80 to-transparent p-4 flex items-center justify-between">
-                <button
-                    onClick={() => navigate('/feed')}
-                    className="p-2 bg-black/50 backdrop-blur-sm text-white rounded-full hover:bg-black/70 transition-colors"
-                >
-                    <FiArrowLeft className="w-6 h-6" />
-                </button>
-                <div className="w-10"></div>
-            </div>
-
             {/* Regular Icons - Top Bar (always visible) */}
             {!previewUrl && (
-                <div className="absolute top-16 left-0 right-0 z-40 flex items-center justify-between px-6 py-2">
+                <div className="absolute top-0 left-0 right-0 z-50 bg-gradient-to-b from-black/80 to-transparent flex items-center justify-between px-6 py-4">
                     <button 
                         title="Flip camera" 
                         className="p-2 rounded-lg bg-black/60 text-white hover:bg-black/80 active:scale-95 transition-all duration-200" 
@@ -1225,6 +1340,39 @@ export default function InstantCreatePage() {
                         >
                             <span className="text-xs font-semibold">GS</span>
                         </button>
+                        
+                        {/* 60 Second Timer - Circular Progress Bar (Absolute positioned below GS icon) */}
+                        {recording && (
+                            <div className="absolute top-12 left-1/2 -translate-x-1/2 w-12 h-12 z-50">
+                                <svg className="w-12 h-12 transform -rotate-90" viewBox="0 0 48 48">
+                                    {/* Background circle */}
+                                    <circle
+                                        cx="24"
+                                        cy="24"
+                                        r="20"
+                                        stroke="rgba(255, 255, 255, 0.2)"
+                                        strokeWidth="4"
+                                        fill="none"
+                                    />
+                                    {/* Progress circle */}
+                                    <circle
+                                        cx="24"
+                                        cy="24"
+                                        r="20"
+                                        stroke="rgba(255, 255, 255, 0.9)"
+                                        strokeWidth="4"
+                                        fill="none"
+                                        strokeDasharray={`${2 * Math.PI * 20}`}
+                                        strokeDashoffset={`${2 * Math.PI * 20 * (1 - (60 - recordingTime) / 60)}`}
+                                        strokeLinecap="round"
+                                    />
+                                </svg>
+                                {/* Countdown text in center */}
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                    <span className="text-white text-xs font-bold">{recordingTime}</span>
+                                </div>
+                            </div>
+                        )}
                         
                         {/* Hidden file input for green screen background */}
                         <input
@@ -1313,6 +1461,17 @@ export default function InstantCreatePage() {
                     </div>
                 </div>
             )}
+
+            {/* Back Button - Below Icons */}
+            <div className="absolute top-16 left-0 right-0 z-50 p-4 flex items-center justify-between">
+                <button
+                    onClick={() => navigate('/feed')}
+                    className="p-2 bg-black/50 backdrop-blur-sm text-white rounded-full hover:bg-black/70 transition-colors"
+                >
+                    <FiArrowLeft className="w-6 h-6" />
+                </button>
+                <div className="w-10"></div>
+            </div>
 
             {/* Video Preview - Full Screen */}
             <div className="flex-1 flex items-center justify-center bg-black relative">
@@ -1525,8 +1684,8 @@ export default function InstantCreatePage() {
                             onClick={stopRecording}
                             className={`w-20 h-20 rounded-full border-4 border-white shadow-2xl flex items-center justify-center hover:scale-105 transition-all duration-500 active:scale-95 ${
                                 countdown !== null 
-                                    ? 'bg-gradient-to-br from-green-500 via-yellow-500 to-red-500 animate-pulse' 
-                                    : 'bg-gradient-to-br from-red-500 to-red-700'
+                                    ? 'bg-red-500 animate-pulse' 
+                                    : 'bg-red-500'
                             }`}
                             aria-label={recording ? "Stop recording" : "Recording starting..."}
                         >
@@ -1539,17 +1698,6 @@ export default function InstantCreatePage() {
                             )}
                         </button>
                     )}
-                    
-                    {/* Text Icon - Underneath Record Button */}
-                    <button
-                        onClick={() => {
-                            navigate('/create/text-only');
-                        }}
-                        className="w-10 h-10 rounded-lg bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/20 hover:bg-black/80 active:scale-95 transition-all cursor-pointer"
-                        aria-label="Create text post"
-                    >
-                        <FiType className="w-6 h-6 text-white" />
-                    </button>
                 </div>
             )}
 
@@ -1665,6 +1813,17 @@ export default function InstantCreatePage() {
                         <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 text-white">
                             <path d="M17.77 10.32c-.77-.32-1.2-.5-1.2-.5L18 9.06c1.84-.96 2.53-3.23 1.56-5.06s-3.24-2.53-5.07-1.56L6 6.94c-1.29.68-2.07 2.04-2 3.49.07 1.42.93 2.67 2.22 3.25.03.01 1.2.5 1.2.5L6 14.94c-1.84.96-2.53 3.23-1.56 5.06.97 1.83 3.24 2.53 5.07 1.56l8.5-4.5c1.29-.68 2.06-2.04 1.99-3.49-.06-1.42-.92-2.67-2.21-3.25zM10 14.65v-5.3L15 12l-5 2.65z"/>
                         </svg>
+                    </button>
+                    
+                    {/* Text Icon - Underneath Shorts Icon */}
+                    <button
+                        onClick={() => {
+                            navigate('/create/text-only');
+                        }}
+                        className="w-10 h-10 rounded-lg bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/20 hover:bg-black/80 active:scale-95 transition-all cursor-pointer"
+                        aria-label="Create text post"
+                    >
+                        <FiType className="w-6 h-6 text-white" />
                     </button>
                 </div>
             )}
