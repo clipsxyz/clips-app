@@ -71,7 +71,7 @@ function BottomNav({ onCreateClick }: { onCreateClick: () => void }) {
   // Helper to create square icon container (Uber Eats style)
   const createSquareIcon = (icon: React.ReactNode, isActive: boolean) => {
     return (
-      <div className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
+      <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-200 ${
         isActive 
           ? 'bg-gray-900 dark:bg-gray-100' 
           : 'bg-transparent border border-white'
@@ -95,7 +95,7 @@ function BottomNav({ onCreateClick }: { onCreateClick: () => void }) {
           aria-current={active ? 'page' : undefined}
           title={label}
         >
-          <div className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-200 ${
             active 
               ? 'bg-gray-900 dark:bg-gray-100' 
               : 'bg-transparent border border-white'
@@ -159,10 +159,10 @@ function BottomNav({ onCreateClick }: { onCreateClick: () => void }) {
   return (
     <nav aria-label="Primary navigation" className="fixed bottom-0 inset-x-0 bg-gradient-to-t from-black/60 via-black/40 to-transparent z-40 pb-safe backdrop-blur-sm">
       <div className="mx-auto max-w-md flex items-center justify-around px-2 py-1">
-        {item('/feed', 'Home', <FiHome size={20} />, handleHomeClick)}
-        {item('/boost', 'Boost', <FiZap size={20} />)}
-        {item('/create', 'Create', <FiPlusSquare size={20} />, onCreateClick)}
-        {item('/search', 'Search', <FiSearch size={20} />)}
+        {item('/feed', 'Home', <FiHome size={16} />, handleHomeClick)}
+        {item('/boost', 'Boost', <FiZap size={16} />)}
+        {item('/create', 'Create', <FiPlusSquare size={16} />, onCreateClick)}
+        {item('/search', 'Search', <FiSearch size={16} />)}
         {item('/profile', 'Passport', profileIcon, undefined, true)}
       </div>
     </nav>
