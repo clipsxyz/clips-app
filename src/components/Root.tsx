@@ -17,6 +17,7 @@ import InboxPage from '../pages/InboxPage';
 import InstantCreatePage from '../pages/InstantCreatePage';
 import InstantFiltersPage from '../pages/InstantFiltersPage';
 import SplashPage from '../pages/SplashPage';
+import LandingPage from '../pages/LandingPage';
 import PaymentPage from '../pages/PaymentPage';
 import CollectionFeedPage from '../pages/CollectionFeedPage';
 import TemplatesPage from '../pages/TemplatesPage';
@@ -36,6 +37,7 @@ export default function Root() {
                     <BrowserRouter>
                         <Routes>
                             <Route path="/splash" element={<SplashPage />} />
+                            <Route path="/landing" element={<LandingPage />} />
                             <Route path="/" element={<App />}>
                                 <Route index element={<Navigate to="/splash" replace />} />
                                 <Route path="feed" element={<FeedPage />} />

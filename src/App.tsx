@@ -51,27 +51,6 @@ function BottomNav({ onCreateClick }: { onCreateClick: () => void }) {
   const loc = useLocation();
   const { user } = useAuth();
 
-  const item = (path: string, label: string, icon: React.ReactNode, onClick?: () => void) => {
-    const active = loc.pathname === path;
-    return (
-      <button
-        onClick={onClick || (() => nav(path))}
-        className={`flex flex-col items-center justify-center flex-1 py-2 ${active ? 'text-white font-semibold' : 'text-gray-500'} transition-colors`}
-        aria-current={active ? 'page' : undefined}
-        title={label}
-      >
-        {icon}
-        <span className="text-xs mt-1">{label}</span>
-      </button>
-    );
-  };
-
-  const handleHomeClick = () => {
-    nav('/feed');
-    // Dispatch event to reset feed state
-    window.dispatchEvent(new CustomEvent('resetFeed'));
-  };
-
   // Get user initials for fallback
   const getUserInitials = (name: string): string => {
     const names = name.trim().split(' ');
@@ -83,9 +62,79 @@ function BottomNav({ onCreateClick }: { onCreateClick: () => void }) {
 
   const userInitials = user?.name ? getUserInitials(user.name) : 'U';
 
-  // Profile picture icon - square with rounded corners (styled like the "4" icon)
+  const handleHomeClick = () => {
+    nav('/feed');
+    // Dispatch event to reset feed state
+    window.dispatchEvent(new CustomEvent('resetFeed'));
+  };
+
+  // Helper to create square icon container (Uber Eats style)
+  const createSquareIcon = (icon: React.ReactNode, isActive: boolean) => {
+    return (
+      <div className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
+        isActive 
+          ? 'bg-gray-900 dark:bg-gray-100' 
+          : 'bg-transparent border border-white'
+      }`}>
+        <div className={isActive ? 'text-white dark:text-gray-900' : 'text-white'}>
+          {icon}
+        </div>
+      </div>
+    );
+  };
+
+  const item = (path: string, label: string, icon: React.ReactNode, onClick?: () => void, isCustomIcon?: boolean) => {
+    const active = loc.pathname === path;
+    
+    // For custom icons (like profile), render as-is but wrap in square container
+    if (isCustomIcon) {
+      return (
+        <button
+          onClick={onClick || (() => nav(path))}
+          className="flex flex-col items-center justify-center flex-1 py-2 px-1 transition-all duration-200 active:scale-95"
+          aria-current={active ? 'page' : undefined}
+          title={label}
+        >
+          <div className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
+            active 
+              ? 'bg-gray-900 dark:bg-gray-100' 
+              : 'bg-transparent border border-white'
+          }`}>
+            {icon}
+          </div>
+          <span className={`text-[10px] mt-1.5 font-medium transition-colors ${
+            active 
+              ? 'text-gray-900 dark:text-white' 
+              : 'text-white'
+          }`}>
+            {label}
+          </span>
+        </button>
+      );
+    }
+
+    return (
+      <button
+        onClick={onClick || (() => nav(path))}
+        className="flex flex-col items-center justify-center flex-1 py-2 px-1 transition-all duration-200 active:scale-95"
+        aria-current={active ? 'page' : undefined}
+        title={label}
+      >
+        {createSquareIcon(icon, active)}
+        <span className={`text-[10px] mt-1.5 font-medium transition-colors ${
+          active 
+            ? 'text-gray-900 dark:text-white' 
+            : 'text-white'
+        }`}>
+          {label}
+        </span>
+      </button>
+    );
+  };
+
+  // Profile picture icon - square with rounded corners (Uber Eats style)
   const profileIcon = (
-    <div className="w-[22px] h-[22px] rounded-md overflow-hidden bg-gray-700 dark:bg-gray-600 flex items-center justify-center relative">
+    <div className="w-full h-full rounded-lg overflow-hidden bg-gray-700 dark:bg-gray-600 flex items-center justify-center relative">
       {user?.avatarUrl ? (
         <img
           src={user.avatarUrl}
@@ -108,13 +157,13 @@ function BottomNav({ onCreateClick }: { onCreateClick: () => void }) {
   );
 
   return (
-    <nav aria-label="Primary navigation" className="fixed bottom-0 inset-x-0 bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 z-40 pb-safe">
-      <div className="mx-auto max-w-md flex">
-        {item('/feed', 'Home', <FiHome size={22} />, handleHomeClick)}
-        {item('/boost', 'Boost', <FiZap size={22} />)}
-        {item('/create', 'Create', <FiPlusSquare size={22} />, onCreateClick)}
-        {item('/search', 'Search', <FiSearch size={22} />)}
-        {item('/profile', 'Passport', profileIcon)}
+    <nav aria-label="Primary navigation" className="fixed bottom-0 inset-x-0 bg-gradient-to-t from-black/60 via-black/40 to-transparent z-40 pb-safe backdrop-blur-sm">
+      <div className="mx-auto max-w-md flex items-center justify-around px-2 py-1">
+        {item('/feed', 'Home', <FiHome size={20} />, handleHomeClick)}
+        {item('/boost', 'Boost', <FiZap size={20} />)}
+        {item('/create', 'Create', <FiPlusSquare size={20} />, onCreateClick)}
+        {item('/search', 'Search', <FiSearch size={20} />)}
+        {item('/profile', 'Passport', profileIcon, undefined, true)}
       </div>
     </nav>
   );

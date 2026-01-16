@@ -38,8 +38,8 @@ export default function SplashPage() {
                     // User is logged in, go to feed
                     navigate('/feed', { replace: true });
                 } else {
-                    // User is not logged in, go to login
-                    navigate('/login', { replace: true });
+                    // User is not logged in, go to landing page
+                    navigate('/landing', { replace: true });
                 }
             }, 3500);
 
