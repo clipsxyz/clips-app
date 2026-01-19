@@ -21,17 +21,22 @@ return [
 
     'allowed_origins' => [
         'http://localhost:5173',
+        'https://localhost:5173',
         'http://localhost:3000',
+        'https://localhost:3000',
         'http://127.0.0.1:5173',
+        'https://127.0.0.1:5173',
         'http://127.0.0.1:3000',
+        'https://127.0.0.1:3000',
         'http://192.168.1.3:5173', // Allow network access from phone
+        'https://192.168.1.3:5173', // Allow HTTPS network access from phone
     ],
     
     'allowed_origins_patterns' => [
-        '/^http:\/\/192\.168\.\d+\.\d+:5173$/', // Allow any local network IP
+        '/^https?:\/\/192\.168\.\d+\.\d+:5173$/', // Allow any local network IP (HTTP or HTTPS)
+        '/^https?:\/\/localhost:5173$/', // Allow localhost with HTTP or HTTPS
+        '/^https?:\/\/127\.0\.0\.1:5173$/', // Allow 127.0.0.1 with HTTP or HTTPS
     ],
-
-    'allowed_origins_patterns' => [],
 
     'allowed_headers' => ['*'],
 

@@ -65,5 +65,13 @@ export default defineConfig({
       protocol: 'wss', // Use secure WebSocket for HTTPS
       host: '0.0.0.0', // Allow HMR from network devices
     },
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false, // Allow self-signed certificates
+        rewrite: (path) => path.replace(/^\/api/, '/api'),
+      },
+    },
   },
 })

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiHeart, FiVolume2, FiVolumeX, FiMaximize2, FiMapPin, FiSend, FiLink, FiCopy } from 'react-icons/fi';
+import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiHeart, FiVolume2, FiVolumeX, FiMaximize2, FiMapPin, FiSend, FiLink, FiCopy, FiPlus } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
@@ -8,12 +8,14 @@ import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryView
 import { appendMessage } from '../api/messages';
 import Swal from 'sweetalert2';
 import { isProfilePrivate, canSendMessage } from '../api/privacy';
-import { getFollowedUsers, getPostById } from '../api/posts';
+import { getFollowedUsers, getPostById, toggleFollowForPost, getState } from '../api/posts';
 import { showToast } from '../utils/toast';
 import ScenesModal from '../components/ScenesModal';
 import { getFlagForHandle, getAvatarForHandle } from '../api/users';
 import Flag from '../components/Flag';
 import { timeAgo } from '../utils/timeAgo';
+import { toggleFollow } from '../api/client';
+import { FiUserPlus, FiUserCheck } from 'react-icons/fi';
 import type { Story, StoryGroup, Post } from '../types';
 
 export default function StoriesPage() {
@@ -49,6 +51,9 @@ export default function StoriesPage() {
     const [showScenesModal, setShowScenesModal] = React.useState(false);
     const [fullPost, setFullPost] = React.useState<Post | null>(null);
     const [originalPost, setOriginalPost] = React.useState<Post | null>(null);
+    const [showSharedPostModal, setShowSharedPostModal] = React.useState(false);
+    const [isFollowingStoryUser, setIsFollowingStoryUser] = React.useState<boolean>(false);
+    const [isFollowLoading, setIsFollowLoading] = React.useState<boolean>(false);
     const [optimisticVote, setOptimisticVote] = React.useState<'option1' | 'option2' | null>(null);
     const [showQuestionAnswerModal, setShowQuestionAnswerModal] = React.useState(false);
     const [questionAnswer, setQuestionAnswer] = React.useState('');
@@ -144,6 +149,29 @@ export default function StoriesPage() {
         loadStories();
     }, [loadStories]);
 
+    // Check if current user is following the story owner
+    React.useEffect(() => {
+        const checkFollowStatus = async () => {
+            const currentGroup = storyGroups[currentGroupIndex];
+            if (!user?.id || !currentGroup?.userHandle || currentGroup.userHandle === user.handle) {
+                setIsFollowingStoryUser(false);
+                return;
+            }
+
+            try {
+                const followedUsers = await getFollowedUsers(user.id);
+                setIsFollowingStoryUser(followedUsers.includes(currentGroup.userHandle));
+            } catch (error) {
+                console.error('Error checking follow status:', error);
+                setIsFollowingStoryUser(false);
+            }
+        };
+
+        if (viewingStories && storyGroups.length > 0 && currentGroupIndex >= 0) {
+            checkFollowStatus();
+        }
+    }, [viewingStories, currentGroupIndex, storyGroups, user?.id, user?.handle]);
+
     // Auto-open specific user's stories if requested
     React.useEffect(() => {
         if (openUserHandle && storyGroups.length > 0) {
@@ -157,29 +185,53 @@ export default function StoriesPage() {
 
     // Handle starting to view stories for a specific user
     async function startViewingStories(group: StoryGroup) {
-        if (!group || !user?.id || !group.stories || group.stories.length === 0) return;
+        if (!group || !user?.id) return;
 
         const stories = await fetchUserStories(user.id, group.userId);
         if (!stories || stories.length === 0) return;
 
-        // Find the group index in the original array
-        const groupIndex = storyGroups.findIndex(g => g.userId === group.userId);
-        if (groupIndex === -1) return;
-
-        // Update the current group with the fetched stories and avatar
+        // Find the group index in the original array, or add it if not found
         setStoryGroups(prev => {
-            const updated = [...prev];
-            updated[groupIndex] = { ...group, stories, avatarUrl: group.avatarUrl };
-            return updated;
+            let groupIndex = prev.findIndex(g => g.userId === group.userId);
+            
+            if (groupIndex === -1) {
+                // Group not found, add it to the array
+                const updated = [...prev, { ...group, stories, avatarUrl: group.avatarUrl }];
+                groupIndex = updated.length - 1;
+                
+                // Set the index after state update
+                setTimeout(() => {
+                    setCurrentGroupIndex(groupIndex);
+                    currentGroupIndexRef.current = groupIndex;
+                    setCurrentStoryIndex(0);
+                    currentStoryIndexRef.current = 0;
+                    setViewingStories(true);
+                    setProgress(0);
+                    setPaused(false);
+                    setIsMuted(true);
+                    elapsedTimeRef.current = 0;
+                }, 0);
+                
+                return updated;
+            } else {
+                // Group found, update it
+                const updated = [...prev];
+                updated[groupIndex] = { ...group, stories, avatarUrl: group.avatarUrl };
+                
+                // Set the index immediately
+                setCurrentGroupIndex(groupIndex);
+                currentGroupIndexRef.current = groupIndex;
+                setCurrentStoryIndex(0);
+                currentStoryIndexRef.current = 0;
+                setViewingStories(true);
+                setProgress(0);
+                setPaused(false);
+                setIsMuted(true);
+                elapsedTimeRef.current = 0;
+                
+                return updated;
+            }
         });
-
-        setCurrentGroupIndex(groupIndex);
-        setCurrentStoryIndex(0);
-        setViewingStories(true);
-        setProgress(0);
-        setPaused(false);
-        setIsMuted(true);
-        elapsedTimeRef.current = 0;
     }
 
     // Close story viewer
@@ -207,65 +259,113 @@ export default function StoriesPage() {
 
     // Handle moving to next user's stories
     function handleNextUserStories(currentGroups: StoryGroup[], currentIdx: number) {
-        console.log('handleNextUserStories called. Current group index:', currentIdx, 'Total groups:', currentGroups.length, 'Condition check:', currentIdx < currentGroups.length - 1);
-        console.log('All groups:', currentGroups.map((g, idx) => ({ index: idx, userHandle: g.userHandle, storiesCount: g.stories?.length || 0 })));
+        console.log('handleNextUserStories called. Current group index:', currentIdx, 'Total groups:', currentGroups.length);
+        console.log('All groups:', currentGroups.map((g, idx) => ({ index: idx, userHandle: g.userHandle, userId: g.userId, storiesCount: g.stories?.length || 0 })));
         
-        if (currentIdx < currentGroups.length - 1) {
-            const nextGroupIndex = currentIdx + 1;
-            const nextGroup = currentGroups[nextGroupIndex];
-            
-            console.log('Next group found:', {
-                index: nextGroupIndex,
-                userHandle: nextGroup?.userHandle,
-                userId: nextGroup?.userId,
-                hasStories: !!(nextGroup?.stories),
-                storiesLength: nextGroup?.stories?.length || 0
-            });
-            
+        const currentGroup = currentGroups[currentIdx];
+        const isViewingOwnStories = currentGroup && (currentGroup.userId === user?.id || currentGroup.userHandle === user?.handle);
+        
+        // Find the next group that's NOT the current user's group
+        let nextGroupIndex = -1;
+        let nextGroup: StoryGroup | null = null;
+        
+        // Start searching from the next index
+        for (let i = currentIdx + 1; i < currentGroups.length; i++) {
+            const candidate = currentGroups[i];
+            // Skip if it's the current user's group (shouldn't happen, but just in case)
+            if (candidate && candidate.userId !== user?.id && candidate.userHandle !== user?.handle) {
+                nextGroupIndex = i;
+                nextGroup = candidate;
+                break;
+            }
+        }
+        
+        // If no next group found after current index, search from the beginning (but skip user's own group)
+        if (nextGroupIndex === -1) {
+            for (let i = 0; i < currentIdx; i++) {
+                const candidate = currentGroups[i];
+                if (candidate && candidate.userId !== user?.id && candidate.userHandle !== user?.handle) {
+                    nextGroupIndex = i;
+                    nextGroup = candidate;
+                    break;
+                }
+            }
+        }
+        
+        console.log('Next group search result:', {
+            found: nextGroupIndex !== -1,
+            index: nextGroupIndex,
+            userHandle: nextGroup?.userHandle,
+            userId: nextGroup?.userId,
+            isViewingOwnStories
+        });
+        
+        if (nextGroupIndex !== -1 && nextGroup) {
             // Always fetch stories for next user to ensure they're loaded
-            if (nextGroup && user?.id && nextGroup.userId) {
+            if (user?.id && nextGroup.userId) {
                 console.log('Fetching stories for next user:', nextGroup.userHandle);
                 fetchUserStories(user.id, nextGroup.userId)
                     .then((stories) => {
                         console.log('Fetched stories for next user:', stories?.length || 0);
                         if (stories && stories.length > 0) {
-                            // Update the group with fetched stories
+                            // Update the group with fetched stories - find by userId to handle array updates
                             setStoryGroups(prev => {
                                 const updated = [...prev];
-                                updated[nextGroupIndex] = { ...nextGroup, stories, avatarUrl: nextGroup.avatarUrl };
+                                const groupIndex = updated.findIndex(g => g.userId === nextGroup.userId);
+                                if (groupIndex !== -1) {
+                                    updated[groupIndex] = { ...nextGroup, stories, avatarUrl: nextGroup.avatarUrl };
+                                } else {
+                                    // If group not found, add it
+                                    updated.push({ ...nextGroup, stories, avatarUrl: nextGroup.avatarUrl });
+                                }
+                                
+                                // Find the actual index after update (in case array order changed)
+                                const actualIndex = updated.findIndex(g => g.userId === nextGroup.userId);
+                                if (actualIndex !== -1) {
+                                    // Navigate to the next user's first story
+                                    console.log('Navigating to next user stories at index:', actualIndex);
+                                    setCurrentGroupIndex(actualIndex);
+                                    currentGroupIndexRef.current = actualIndex;
+                                    setCurrentStoryIndex(0);
+                                    currentStoryIndexRef.current = 0;
+                                    setProgress(0);
+                                    setIsMuted(true);
+                                    elapsedTimeRef.current = 0;
+                                    setPaused(false);
+                                    pausedRef.current = false;
+                                }
+                                
                                 return updated;
                             });
-                            
-                            // Navigate to the next user's first story
-                            console.log('Navigating to next user stories');
-                            setCurrentGroupIndex(nextGroupIndex);
-                            currentGroupIndexRef.current = nextGroupIndex;
-                            setCurrentStoryIndex(0);
-                            currentStoryIndexRef.current = 0;
-            setProgress(0);
-            setIsMuted(true);
-            elapsedTimeRef.current = 0;
-                            setPaused(false);
-                            pausedRef.current = false;
-        } else {
+                        } else {
                             console.warn('Next user group has no stories after fetching, trying next group or closing');
-                            // Try to find next group with stories, or close
-                            const nextGroupWithStories = currentGroups.find((g, idx) => idx > nextGroupIndex && g.stories && g.stories.length > 0);
-                            if (nextGroupWithStories) {
-                                const foundIndex = currentGroups.findIndex(g => g.userId === nextGroupWithStories.userId);
-                                setCurrentGroupIndex(foundIndex);
-                                currentGroupIndexRef.current = foundIndex;
-                setCurrentStoryIndex(0);
-                                currentStoryIndexRef.current = 0;
-                setProgress(0);
-                setIsMuted(true);
-                elapsedTimeRef.current = 0;
-                                setPaused(false);
-                                pausedRef.current = false;
-            } else {
-                closeStories();
-            }
-        }
+                            // Try to find next group with stories (excluding user's own group), or close
+                            setStoryGroups(prev => {
+                                // Find next group after nextGroupIndex that's not the user's own group
+                                const nextGroupWithStories = prev.find((g, idx) => 
+                                    idx > nextGroupIndex && 
+                                    g.userId !== user?.id && 
+                                    g.userHandle !== user?.handle &&
+                                    g.stories && 
+                                    g.stories.length > 0
+                                );
+                                if (nextGroupWithStories) {
+                                    const foundIndex = prev.findIndex(g => g.userId === nextGroupWithStories.userId);
+                                    setCurrentGroupIndex(foundIndex);
+                                    currentGroupIndexRef.current = foundIndex;
+                                    setCurrentStoryIndex(0);
+                                    currentStoryIndexRef.current = 0;
+                                    setProgress(0);
+                                    setIsMuted(true);
+                                    elapsedTimeRef.current = 0;
+                                    setPaused(false);
+                                    pausedRef.current = false;
+                                } else {
+                                    closeStories();
+                                }
+                                return prev;
+                            });
+                        }
                     })
                     .catch((error) => {
                         console.error('Error fetching next user stories:', error);
@@ -276,8 +376,8 @@ export default function StoriesPage() {
                 closeStories();
             }
         } else {
-            // At the end of all stories, close
-            console.log('Reached end of all stories. Current index:', currentGroupIndex, 'Total groups:', currentGroups.length);
+            // No next group found (excluding user's own group), close
+            console.log('No more user stories to view. Current index:', currentIdx, 'Total groups:', currentGroups.length, 'Is viewing own stories:', isViewingOwnStories);
             closeStories();
         }
     }
@@ -314,6 +414,8 @@ export default function StoriesPage() {
                 return currentGroups;
             } else {
                 // Move to next user's stories - call handler with latest groups and indices
+                console.log('Moving to next user. Current index:', currentIdx, 'Total groups:', currentGroups.length);
+                console.log('Current group:', currentGroup.userHandle, 'Stories:', currentGroup.stories.length);
                 handleNextUserStories(currentGroups, currentIdx);
                 return currentGroups;
             }
@@ -596,7 +698,7 @@ export default function StoriesPage() {
 
     // Track story view progress
     React.useEffect(() => {
-        if (!viewingStories || !user?.id || showScenesModal) return; // Don't run progress when ScenesModal is open
+        if (!viewingStories || !user?.id || showScenesModal || showSharedPostModal) return; // Don't run progress when modals are open
 
         const currentGroup = storyGroups[currentGroupIndex];
         if (!currentGroup || !currentGroup.stories) return;
@@ -660,7 +762,7 @@ export default function StoriesPage() {
         }, interval);
 
         return () => clearInterval(timer);
-    }, [viewingStories, currentGroupIndex, currentStoryIndex, storyGroups, user?.id, showScenesModal]);
+    }, [viewingStories, currentGroupIndex, currentStoryIndex, storyGroups, user?.id, showScenesModal, showSharedPostModal]);
 
     // Auto-hide controls on inactivity
     React.useEffect(() => {
@@ -852,12 +954,29 @@ export default function StoriesPage() {
         setOptimisticVote(null);
     }, [currentStoryIndex, currentGroupIndex]);
 
-    // Sort story groups by latest story (most recent first) - MUST be before conditional returns
+    // Sort story groups: new (unviewed) stories first, then by latest (most recent) last
     const sortedGroups = React.useMemo(() => {
         return [...storyGroups].filter(group => group.stories && group.stories.length > 0).sort((a, b) => {
+            // Check if groups have unviewed stories
+            const aHasUnviewed = a.stories.some(s => !s.hasViewed);
+            const bHasUnviewed = b.stories.some(s => !s.hasViewed);
+            
+            // Unviewed stories come first
+            if (aHasUnviewed && !bHasUnviewed) return -1;
+            if (!aHasUnviewed && bHasUnviewed) return 1;
+            
+            // Within same category (both unviewed or both viewed), sort by latest story
+            // Most recent first for unviewed, most recent last for viewed
             const aLatest = a.stories.length > 0 ? Math.max(...a.stories.map(s => s.createdAt)) : 0;
             const bLatest = b.stories.length > 0 ? Math.max(...b.stories.map(s => s.createdAt)) : 0;
-            return bLatest - aLatest;
+            
+            if (aHasUnviewed && bHasUnviewed) {
+                // Both unviewed: newest first
+                return bLatest - aLatest;
+            } else {
+                // Both viewed: oldest first (newest last)
+                return aLatest - bLatest;
+            }
         });
     }, [storyGroups]);
 
@@ -966,6 +1085,7 @@ export default function StoriesPage() {
                                 {(() => {
                                     // Debug logging
                                     if (currentStory?.sharedFromPost) {
+                                        // This block intentionally left for debugging
                                         console.log('Rendering shared post story:', {
                                             sharedFromPost: currentStory.sharedFromPost,
                                             hasOriginalPost: !!originalPost,
@@ -992,81 +1112,155 @@ export default function StoriesPage() {
                                         const hasRealMedia = (originalPost.mediaUrl && originalPost.mediaUrl.trim() !== '' && !originalPost.mediaUrl.startsWith('data:image')) || (originalPost.mediaItems && originalPost.mediaItems.length > 0);
                                         
                                         if (hasRealMedia) {
-                                            // Shared post with media - show the media
-                                            return originalPost.mediaType === 'video' || originalPost.mediaItems?.[0]?.type === 'video' ? (
-                                                <video
-                                                    ref={(el) => {
-                                                        videoRef.current = el;
-                                                        setHasVideo(el !== null);
-                                                    }}
-                                                    src={originalPost.mediaUrl || originalPost.mediaItems?.[0]?.url}
-                                                    className="w-full h-full object-cover"
-                                                    autoPlay
-                                                    loop
-                                                    muted={isMuted}
-                                                    playsInline
-                                                    onLoadedData={() => {
-                                                        // Ensure muted state is synced when video loads
-                                                        if (videoRef.current) {
-                                                            const video = videoRef.current;
-                                                            video.muted = isMuted;
-                                                            
-                                                            // If unmuted, ensure video plays and audio is enabled
-                                                            if (!isMuted) {
-                                                                video.muted = false;
-                                                                if (video.paused) {
-                                                                    video.play().catch(console.error);
-                                                                }
-                                                            }
-                                                        }
-                                                    }}
-                                                    onCanPlay={() => {
-                                                        // Sync muted state when video can play
-                                                        if (videoRef.current) {
-                                                            const video = videoRef.current;
-                                                            video.muted = isMuted;
-                                                            
-                                                            // If unmuted, ensure video plays and audio is enabled
-                                                            if (!isMuted) {
-                                                                video.muted = false;
-                                                                if (video.paused) {
-                                                                    video.play().catch(console.error);
-                                                                }
-                                                            }
-                                                        }
-                                                    }}
-                                                    onPlay={() => {
-                                                        // Ensure muted state is correct when video plays
-                                                        if (videoRef.current && !isMuted) {
-                                                            videoRef.current.muted = false;
-                                                        }
-                                                    }}
-                                                />
-                                            ) : (
-                                                <img
-                                                    src={originalPost.mediaUrl || originalPost.mediaItems?.[0]?.url}
-                                                    alt="Shared post"
-                                                    className="w-full h-full object-cover"
-                                                />
-                                            );
-                                        } else if (originalPost.text) {
-                                            // Display shared text-only post as screenshot of original post card (Twitter style)
-                                            // This handles text-only posts (tweets) - ignore any generated mediaUrl from ShareModal
+                                            // Shared post with media - Instagram style: blurred background with centered card
+                                            const mediaIsVideo = originalPost.mediaType === 'video' || originalPost.mediaItems?.[0]?.type === 'video';
+                                            const mediaUrl = originalPost.mediaUrl || originalPost.mediaItems?.[0]?.url;
+                                            
                                             return (
                                                 <div
-                                                    className="w-full h-full flex items-center justify-center p-4"
+                                                    className="w-full h-full flex flex-col items-center justify-center relative p-6"
                                                     style={{
-                                                        background: '#000000' // Black background
+                                                        // Blurred background using the post image - this is the reclipper's story space
+                                                        backgroundImage: `url(${mediaUrl})`,
+                                                        backgroundSize: 'cover',
+                                                        backgroundPosition: 'center',
+                                                        backgroundRepeat: 'no-repeat'
                                                     }}
                                                 >
+                                                    {/* Blurred background overlay - creates the outer story frame */}
                                                     <div 
-                                                        className="w-full max-w-md rounded-2xl overflow-hidden bg-white border border-gray-200 shadow-2xl" 
-                                                        style={{ 
-                                                            maxWidth: '100%', 
-                                                            boxSizing: 'border-box',
-                                                            backgroundColor: '#ffffff' // Force white background
+                                                        className="absolute inset-0"
+                                                        style={{
+                                                            backdropFilter: 'blur(25px)',
+                                                            WebkitBackdropFilter: 'blur(25px)',
+                                                            backgroundColor: 'rgba(0, 0, 0, 0.4)'
                                                         }}
-                                                    >
+                                                    />
+                                                    
+                                                    {/* Container for card and attribution - centered column */}
+                                                    <div className="relative z-10 flex flex-col items-center">
+                                                        {/* Nested story card - the original post embedded within (TikTok style) */}
+                                                        <div 
+                                                            className="relative w-full max-w-xs rounded-2xl overflow-hidden bg-white shadow-[0_8px_32px_rgba(0,0,0,0.4)] cursor-pointer transform transition-transform hover:scale-[1.02] active:scale-[0.98] border-2 border-white/20"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setShowSharedPostModal(true);
+                                                            }}
+                                                            style={{
+                                                                maxHeight: '60vh',
+                                                                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1)'
+                                                            }}
+                                                        >
+                                                            {mediaIsVideo ? (
+                                                                <video
+                                                                    ref={(el) => {
+                                                                        videoRef.current = el;
+                                                                        setHasVideo(el !== null);
+                                                                    }}
+                                                                    src={mediaUrl}
+                                                                    className="w-full h-auto object-cover"
+                                                                    autoPlay
+                                                                    loop
+                                                                    muted={isMuted}
+                                                                    playsInline
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setShowSharedPostModal(true);
+                                                                    }}
+                                                                    style={{
+                                                                        display: 'block'
+                                                                    }}
+                                                                    onLoadedData={() => {
+                                                                        if (videoRef.current) {
+                                                                            const video = videoRef.current;
+                                                                            video.muted = isMuted;
+                                                                            if (!isMuted) {
+                                                                                video.muted = false;
+                                                                                if (video.paused) {
+                                                                                    video.play().catch(console.error);
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }}
+                                                                    onCanPlay={() => {
+                                                                        if (videoRef.current) {
+                                                                            const video = videoRef.current;
+                                                                            video.muted = isMuted;
+                                                                            if (!isMuted) {
+                                                                                video.muted = false;
+                                                                                if (video.paused) {
+                                                                                    video.play().catch(console.error);
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }}
+                                                                    onPlay={() => {
+                                                                        if (videoRef.current && !isMuted) {
+                                                                            videoRef.current.muted = false;
+                                                                        }
+                                                                    }}
+                                                                />
+                                                            ) : (
+                                                                <img
+                                                                    src={mediaUrl}
+                                                                    alt="Shared post"
+                                                                    className="w-full h-auto object-cover"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setShowSharedPostModal(true);
+                                                                    }}
+                                                                    style={{
+                                                                        display: 'block'
+                                                                    }}
+                                                                />
+                                                            )}
+                                                        </div>
+                                                        
+                                                        {/* Original creator attribution - centered directly below the card */}
+                                                        <div 
+                                                            className="mt-3 flex items-center justify-center"
+                                                        >
+                                                            <div 
+                                                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-md cursor-pointer hover:bg-black/80 transition-colors"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setViewingStories(false);
+                                                                    setTimeout(() => {
+                                                                        navigate(`/user/${encodeURIComponent(originalPost.userHandle)}`);
+                                                                    }, 100);
+                                                                }}
+                                                            >
+                                                                <span className="text-white text-sm font-semibold">
+                                                                    @{originalPost.userHandle}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        } else if (originalPost.text) {
+                                            // Display shared text-only post as a nested story card
+                                            return (
+                                                <div
+                                                    className="w-full h-full flex flex-col items-center justify-center relative p-6"
+                                                    style={{
+                                                        backgroundColor: '#000000'
+                                                    }}
+                                                >
+                                                    {/* Container for card and attribution - centered column */}
+                                                    <div className="relative z-10 flex flex-col items-center">
+                                                        {/* Nested story card - the original post embedded within (TikTok style) */}
+                                                        <div 
+                                                            className="relative w-full max-w-xs rounded-2xl overflow-hidden bg-white shadow-[0_8px_32px_rgba(0,0,0,0.4)] cursor-pointer transform transition-transform hover:scale-[1.02] active:scale-[0.98] border-2 border-white/20"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setShowSharedPostModal(true);
+                                                            }}
+                                                            style={{
+                                                                maxHeight: '60vh',
+                                                                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1)'
+                                                            }}
+                                                        >
                                                         {/* Post Header */}
                                                         <div 
                                                             className="flex items-start justify-between px-4 pt-4 pb-3 border-b border-gray-200" 
@@ -1104,7 +1298,7 @@ export default function StoriesPage() {
                                                             </div>
                                                         </div>
 
-                                                        {/* Text Content - styled like feed (Twitter card style) */}
+                                                        {/* Text Content */}
                                                         <div 
                                                             className="p-4 w-full overflow-hidden" 
                                                             style={{ 
@@ -1114,7 +1308,7 @@ export default function StoriesPage() {
                                                             }}
                                                         >
                                                             <div 
-                                                                className="p-4 rounded-lg bg-black overflow-hidden w-full" 
+                                                                className="p-4 rounded-2xl bg-black overflow-hidden w-full" 
                                                                 style={{ 
                                                                     maxWidth: '100%', 
                                                                     boxSizing: 'border-box', 
@@ -1133,6 +1327,27 @@ export default function StoriesPage() {
                                                                 >
                                                                     {originalPost.text || 'Shared post'}
                                                                 </div>
+                                                            </div>
+                                                        </div>
+                                                        </div>
+                                                        
+                                                        {/* Original creator attribution - centered directly below the card */}
+                                                        <div 
+                                                            className="mt-3 flex items-center justify-center"
+                                                        >
+                                                            <div 
+                                                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-md cursor-pointer hover:bg-black/80 transition-colors"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setViewingStories(false);
+                                                                    setTimeout(() => {
+                                                                        navigate(`/user/${encodeURIComponent(originalPost.userHandle)}`);
+                                                                    }, 100);
+                                                                }}
+                                                            >
+                                                                <span className="text-white text-sm font-semibold">
+                                                                    @{originalPost.userHandle}
+                                                                </span>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -1250,7 +1465,7 @@ export default function StoriesPage() {
                                                         <>
                                                             {taggedUsersPositions.map((taggedUser) => (
                                                                 <div
-                                                                    key={taggedUser.id || taggedUser.handle}
+                                                                    key={taggedUser.handle}
                                                                     className="absolute"
                                                                     style={{
                                                                         left: `${taggedUser.x}%`,
@@ -1323,8 +1538,8 @@ export default function StoriesPage() {
                                     );
                                 })()}
 
-                                {/* Sticker Overlays for all stories */}
-                                {currentStory?.stickers && currentStory.stickers.length > 0 && (
+                                {/* Sticker Overlays for all stories (but never on re-shared posts from feed) */}
+                                {currentStory?.stickers && currentStory.stickers.length > 0 && !currentStory?.sharedFromPost && (
                                     <>
                                         {currentStory.stickers.map((overlay) => {
                                             // Render question cards (special card style)
@@ -1659,6 +1874,7 @@ export default function StoriesPage() {
                                                                 // Preserve current position before refreshing
                                                                 const currentUserId = currentGroup?.userId;
                                                                 const currentStoryIdx = currentStoryIndex;
+                                                                const currentStoryId = currentStory?.id; // Preserve story ID to find it after refresh
                                                                 
                                                                 await voteOnPoll(currentStory.id, user.id, 'option1');
                                                                 
@@ -1710,16 +1926,62 @@ export default function StoriesPage() {
                                                                 
                                                                 if (sameUserGroupIndex !== -1) {
                                                                     const sameUserGroup = groups[sameUserGroupIndex];
-                                                                    // Make sure we don't go beyond the available stories
-                                                                    const safeStoryIndex = Math.min(currentStoryIdx, sameUserGroup.stories.length - 1);
                                                                     
-                                                                    // Update story groups
-                                                                    setStoryGroups(groups);
-                                                                    // Restore position to same user and same story
-                                                                    setCurrentGroupIndex(sameUserGroupIndex);
-                                                                    currentGroupIndexRef.current = sameUserGroupIndex;
-                                                                    setCurrentStoryIndex(safeStoryIndex);
-                                                                    currentStoryIndexRef.current = safeStoryIndex;
+                                                                    // Preserve the original story order from current state
+                                                                    setStoryGroups(prev => {
+                                                                        const prevGroupIndex = prev.findIndex(g => g.userId === currentUserId || g.userHandle === currentUserHandle);
+                                                                        if (prevGroupIndex !== -1) {
+                                                                            const prevGroup = prev[prevGroupIndex];
+                                                                            const prevStories = prevGroup.stories || [];
+                                                                            
+                                                                            // Create a map of refreshed stories by ID for quick lookup
+                                                                            const refreshedStoriesMap = new Map(
+                                                                                (sameUserGroup.stories || []).map(s => [s.id, s])
+                                                                            );
+                                                                            
+                                                                            // Preserve original order, but update stories with refreshed data
+                                                                            const preservedStories = prevStories.map(prevStory => {
+                                                                                const refreshedStory = refreshedStoriesMap.get(prevStory.id);
+                                                                                // Use refreshed story data if available, otherwise keep original
+                                                                                return refreshedStory || prevStory;
+                                                                            });
+                                                                            
+                                                                            // Add any new stories that weren't in the original (shouldn't happen, but just in case)
+                                                                            const existingStoryIds = new Set(preservedStories.map(s => s.id));
+                                                                            const newStories = (sameUserGroup.stories || []).filter(s => !existingStoryIds.has(s.id));
+                                                                            
+                                                                            // Find the current story index in preserved order
+                                                                            let storyIndexToRestore = currentStoryIdx;
+                                                                            if (currentStoryId) {
+                                                                                const foundStoryIndex = preservedStories.findIndex(s => s.id === currentStoryId);
+                                                                                if (foundStoryIndex !== -1) {
+                                                                                    storyIndexToRestore = foundStoryIndex;
+                                                                                }
+                                                                            }
+                                                                            
+                                                                            // Update the group with preserved order but refreshed data
+                                                                            // Use prev array to preserve group order, only update the specific group
+                                                                            const updatedGroups = [...prev];
+                                                                            if (prevGroupIndex !== -1) {
+                                                                                updatedGroups[prevGroupIndex] = {
+                                                                                    ...prevGroup,
+                                                                                    ...sameUserGroup, // Keep refreshed group metadata
+                                                                                    stories: [...preservedStories, ...newStories] // Preserve original story order
+                                                                                };
+                                                                            }
+                                                                            
+                                                                            // Restore position to same user and same story (by ID)
+                                                                            setCurrentGroupIndex(prevGroupIndex !== -1 ? prevGroupIndex : sameUserGroupIndex);
+                                                                            currentGroupIndexRef.current = prevGroupIndex !== -1 ? prevGroupIndex : sameUserGroupIndex;
+                                                                            setCurrentStoryIndex(storyIndexToRestore);
+                                                                            currentStoryIndexRef.current = storyIndexToRestore;
+                                                                            
+                                                                            return updatedGroups;
+                                                                        }
+                                                                        
+                                                                        // Fallback: if prev group not found, use refreshed groups as-is
+                                                                        return groups;
+                                                                    });
                                                                 } else {
                                                                     // If user not found, try to keep current position if still valid
                                                                     if (currentGroupIndex < groups.length && groups[currentGroupIndex]?.stories?.length > 0) {
@@ -1862,6 +2124,7 @@ export default function StoriesPage() {
                                                                 // Preserve current position before refreshing
                                                                 const currentUserId = currentGroup?.userId;
                                                                 const currentStoryIdx = currentStoryIndex;
+                                                                const currentStoryId = currentStory?.id; // Preserve story ID to find it after refresh
                                                                 
                                                                 await voteOnPoll(currentStory.id, user.id, 'option2');
                                                                 
@@ -1913,16 +2176,62 @@ export default function StoriesPage() {
                                                                 
                                                                 if (sameUserGroupIndex !== -1) {
                                                                     const sameUserGroup = groups[sameUserGroupIndex];
-                                                                    // Make sure we don't go beyond the available stories
-                                                                    const safeStoryIndex = Math.min(currentStoryIdx, sameUserGroup.stories.length - 1);
                                                                     
-                                                                    // Update story groups
-                                                                    setStoryGroups(groups);
-                                                                    // Restore position to same user and same story
-                                                                    setCurrentGroupIndex(sameUserGroupIndex);
-                                                                    currentGroupIndexRef.current = sameUserGroupIndex;
-                                                                    setCurrentStoryIndex(safeStoryIndex);
-                                                                    currentStoryIndexRef.current = safeStoryIndex;
+                                                                    // Preserve the original story order from current state
+                                                                    setStoryGroups(prev => {
+                                                                        const prevGroupIndex = prev.findIndex(g => g.userId === currentUserId || g.userHandle === currentUserHandle);
+                                                                        if (prevGroupIndex !== -1) {
+                                                                            const prevGroup = prev[prevGroupIndex];
+                                                                            const prevStories = prevGroup.stories || [];
+                                                                            
+                                                                            // Create a map of refreshed stories by ID for quick lookup
+                                                                            const refreshedStoriesMap = new Map(
+                                                                                (sameUserGroup.stories || []).map(s => [s.id, s])
+                                                                            );
+                                                                            
+                                                                            // Preserve original order, but update stories with refreshed data
+                                                                            const preservedStories = prevStories.map(prevStory => {
+                                                                                const refreshedStory = refreshedStoriesMap.get(prevStory.id);
+                                                                                // Use refreshed story data if available, otherwise keep original
+                                                                                return refreshedStory || prevStory;
+                                                                            });
+                                                                            
+                                                                            // Add any new stories that weren't in the original (shouldn't happen, but just in case)
+                                                                            const existingStoryIds = new Set(preservedStories.map(s => s.id));
+                                                                            const newStories = (sameUserGroup.stories || []).filter(s => !existingStoryIds.has(s.id));
+                                                                            
+                                                                            // Find the current story index in preserved order
+                                                                            let storyIndexToRestore = currentStoryIdx;
+                                                                            if (currentStoryId) {
+                                                                                const foundStoryIndex = preservedStories.findIndex(s => s.id === currentStoryId);
+                                                                                if (foundStoryIndex !== -1) {
+                                                                                    storyIndexToRestore = foundStoryIndex;
+                                                                                }
+                                                                            }
+                                                                            
+                                                                            // Update the group with preserved order but refreshed data
+                                                                            // Use prev array to preserve group order, only update the specific group
+                                                                            const updatedGroups = [...prev];
+                                                                            if (prevGroupIndex !== -1) {
+                                                                                updatedGroups[prevGroupIndex] = {
+                                                                                    ...prevGroup,
+                                                                                    ...sameUserGroup, // Keep refreshed group metadata
+                                                                                    stories: [...preservedStories, ...newStories] // Preserve original story order
+                                                                                };
+                                                                            }
+                                                                            
+                                                                            // Restore position to same user and same story (by ID)
+                                                                            setCurrentGroupIndex(prevGroupIndex !== -1 ? prevGroupIndex : sameUserGroupIndex);
+                                                                            currentGroupIndexRef.current = prevGroupIndex !== -1 ? prevGroupIndex : sameUserGroupIndex;
+                                                                            setCurrentStoryIndex(storyIndexToRestore);
+                                                                            currentStoryIndexRef.current = storyIndexToRestore;
+                                                                            
+                                                                            return updatedGroups;
+                                                                        }
+                                                                        
+                                                                        // Fallback: if prev group not found, use refreshed groups as-is
+                                                                        return groups;
+                                                                    });
                                                                 } else {
                                                                     // If user not found, try to keep current position if still valid
                                                                     if (currentGroupIndex < groups.length && groups[currentGroupIndex]?.stories?.length > 0) {
@@ -2272,18 +2581,158 @@ export default function StoriesPage() {
                     {/* Header with user info - Instagram style */}
                     <div className="absolute top-3 left-0 right-0 px-4 z-50">
                         <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-3 flex-1">
+                                <div 
+                                    className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity flex-1"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (currentGroup?.userHandle) {
+                                            setViewingStories(false);
+                                            setTimeout(() => {
+                                                navigate(`/user/${encodeURIComponent(currentGroup.userHandle)}`);
+                                            }, 100);
+                                        }
+                                    }}
+                                >
                                     <Avatar
                                         src={currentGroup?.avatarUrl}
                                         name={currentGroup?.name || 'User'}
                                         size="sm"
                                     />
-                                <div>
-                                    <p className="text-white font-semibold text-sm">{currentGroup?.userHandle}</p>
-                                    {currentStory?.createdAt && (
-                                        <p className="text-white/70 text-xs">{getTimeAgo(currentStory.createdAt)}</p>
-                                    )}
+                                    <div>
+                                        <p className="text-white font-semibold text-sm">{currentGroup?.userHandle}</p>
+                                        {currentStory?.createdAt && (
+                                            <p className="text-white/70 text-xs">{getTimeAgo(currentStory.createdAt)}</p>
+                                        )}
+                                    </div>
                                 </div>
+                                
+                                {/* Follow/Following button */}
+                                {currentGroup?.userHandle && user?.handle && currentGroup.userHandle !== user.handle && (
+                                    <button
+                                        onClick={async (e) => {
+                                            e.stopPropagation();
+                                            if (!currentGroup?.userHandle || isFollowLoading || !user?.id) return;
+                                            
+                                            setIsFollowLoading(true);
+                                            const handle = currentGroup.userHandle;
+                                            
+                                            try {
+                                                // Get current follow status
+                                                const followedUsers = await getFollowedUsers(user.id);
+                                                const isCurrentlyFollowing = followedUsers.includes(handle);
+                                                
+                                                // Call API to toggle follow (handle encoding is done inside toggleFollow)
+                                                console.log('Toggling follow for handle:', handle);
+                                                const result = await toggleFollow(handle);
+                                                console.log('Toggle follow result:', result);
+                                                
+                                                // Update state based on response
+                                                if (result.status === 'unfollowed') {
+                                                    setIsFollowingStoryUser(false);
+                                                    showToast?.('Unfollowed');
+                                                } else if (result.status === 'pending') {
+                                                    setIsFollowingStoryUser(false);
+                                                    Swal.fire({
+                                                        title: 'Follow Request Sent',
+                                                        text: 'Your follow request has been sent.',
+                                                        icon: 'success',
+                                                        timer: 2000,
+                                                        showConfirmButton: false
+                                                    });
+                                                } else if (result.status === 'accepted' || result.following === true) {
+                                                    setIsFollowingStoryUser(true);
+                                                    showToast?.('Following');
+                                                } else {
+                                                    // Fallback: toggle based on current state if response is unclear
+                                                    setIsFollowingStoryUser(!isCurrentlyFollowing);
+                                                }
+                                                
+                                                // Refresh follow status to ensure accuracy
+                                                setTimeout(async () => {
+                                                    try {
+                                                        const updatedFollowedUsers = await getFollowedUsers(user.id);
+                                                        setIsFollowingStoryUser(updatedFollowedUsers.includes(handle));
+                                                    } catch (refreshError) {
+                                                        console.error('Error refreshing follow status:', refreshError);
+                                                    }
+                                                }, 500);
+                                                
+                                            } catch (error: any) {
+                                                console.error('Error toggling follow:', error);
+                                                
+                                                // Check if it's a connection error
+                                                const isConnectionError = 
+                                                    error?.message === 'CONNECTION_REFUSED' ||
+                                                    error?.name === 'ConnectionRefused' ||
+                                                    error?.message?.includes('Failed to fetch') ||
+                                                    error?.message?.includes('ERR_CONNECTION_REFUSED') ||
+                                                    error?.message?.includes('NetworkError');
+                                                
+                                                if (isConnectionError) {
+                                                    // Backend not available - use local/mock fallback
+                                                    console.log('Backend not available, using local state fallback');
+                                                    
+                                                    try {
+                                                        // Update local follow state directly
+                                                        const userState = getState(user.id);
+                                                        const wasFollowing = userState.follows[handle] === true;
+                                                        userState.follows[handle] = !wasFollowing;
+                                                        
+                                                        // Try to find a post from this user to update via toggleFollowForPost (for consistency)
+                                                        const userPost = currentStory?.sharedFromPost 
+                                                            ? originalPost 
+                                                            : null;
+                                                        
+                                                        if (userPost?.id) {
+                                                            await toggleFollowForPost(user.id, userPost.id);
+                                                        }
+                                                        
+                                                        // Update UI state
+                                                        const newFollowingState = !wasFollowing;
+                                                        setIsFollowingStoryUser(newFollowingState);
+                                                        
+                                                        if (newFollowingState) {
+                                                            showToast?.('Following');
+                                                        } else {
+                                                            showToast?.('Unfollowed');
+                                                        }
+                                                        
+                                                        // Dispatch event to update newsfeed
+                                                        window.dispatchEvent(new CustomEvent('followToggled', {
+                                                            detail: { handle: handle, isFollowing: newFollowingState }
+                                                        }));
+                                                    } catch (fallbackError) {
+                                                        console.error('Error in fallback follow toggle:', fallbackError);
+                                                        showToast?.('Backend not available. Please start the backend server.');
+                                                    }
+                                                } else {
+                                                    showToast?.('Failed to update follow status. Please try again.');
+                                                }
+                                            } finally {
+                                                setIsFollowLoading(false);
+                                            }
+                                        }}
+                                        disabled={isFollowLoading}
+                                        className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-200 disabled:opacity-50 flex items-center gap-1.5 ${
+                                            isFollowingStoryUser
+                                                ? 'bg-white/20 text-white border border-white/30 hover:bg-white/30'
+                                                : 'bg-blue-500 text-white hover:bg-blue-600'
+                                        }`}
+                                    >
+                                        {isFollowingStoryUser ? (
+                                            <>
+                                                <FiUserCheck className="w-3.5 h-3.5" />
+                                                <span>Following</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <FiUserPlus className="w-3.5 h-3.5" />
+                                                <span>Follow</span>
+                                            </>
+                                        )}
+                                    </button>
+                                )}
                             </div>
                                 <button
                                     onClick={closeStories}
@@ -2294,8 +2743,9 @@ export default function StoriesPage() {
                         </div>
                     </div>
 
-                    {/* Story Text - Only show if media is not a generated text image (data URL) */}
-                    {currentStory?.text && currentStory?.mediaUrl && !currentStory.mediaUrl.startsWith('data:image') && (
+                    {/* Story Text - Only show for original stories (not feed re-shares),
+                        and only if media is not a generated text image (data URL) */}
+                    {currentStory?.text && !currentStory?.sharedFromPost && currentStory?.mediaUrl && !currentStory.mediaUrl.startsWith('data:image') && (
                         <div className="absolute bottom-32 left-0 right-0 px-4 z-[55] pointer-events-none">
                             <div className="backdrop-blur-md bg-black/30 rounded-2xl px-4 py-3 border border-white/10 shadow-lg max-w-md mx-auto pointer-events-auto">
                                 <p
@@ -2925,25 +3375,87 @@ export default function StoriesPage() {
                         }}
                     />
                 )}
+
+                {/* Shared Post Modal - Instagram style card popup */}
+                {showSharedPostModal && originalPost && currentStory?.sharedFromPost && (
+                    <div
+                        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+                        onClick={() => {
+                            setShowSharedPostModal(false);
+                        }}
+                    >
+                        <div
+                            className="bg-white dark:bg-gray-900 rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                                    View Original Post
+                                </h3>
+                                <button
+                                    onClick={() => setShowSharedPostModal(false)}
+                                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors"
+                                >
+                                    <FiX className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                                </button>
+                            </div>
+                            
+                            <div className="mb-4">
+                                <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                                    This story was shared from a post by <span className="font-semibold text-gray-900 dark:text-gray-100">{originalPost.userHandle}</span>
+                                </p>
+                            </div>
+
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => {
+                                        setShowSharedPostModal(false);
+                                        setFullPost(originalPost);
+                                        setShowScenesModal(true);
+                                    }}
+                                    className="flex-1 px-4 py-3 rounded-xl bg-blue-500 text-white font-medium hover:bg-blue-600 transition-colors"
+                                >
+                                    View Full Post
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setShowSharedPostModal(false);
+                                        setViewingStories(false);
+                                        setTimeout(() => {
+                                            navigate(`/user/${encodeURIComponent(originalPost.userHandle)}`);
+                                        }, 100);
+                                    }}
+                                    className="flex-1 px-4 py-3 rounded-xl bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                                >
+                                    View Profile
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </>
         );
     }
 
     // Story list UI
     return (
-        <div className="min-h-screen bg-black text-white p-4">
-            {/* Header */}
-            <div className="flex items-center justify-between mb-6">
-                <h1 className="text-2xl font-bold text-white">Clips 24</h1>
-                <button
-                    onClick={() => navigate('/feed')}
-                    className="p-2 rounded-full hover:bg-gray-800 transition-colors"
-                >
-                    <FiX className="w-6 h-6 text-gray-400" />
-                </button>
+        <div className="min-h-screen bg-black text-white">
+            {/* Sticky Header - pinned to top */}
+            <div className="sticky top-0 z-40 bg-black pt-3 px-4 pb-3 border-b border-gray-800/50">
+                <div className="flex items-center justify-between">
+                    <h1 className="text-lg font-semibold text-white">Clips 24</h1>
+                    <button
+                        onClick={() => navigate('/feed')}
+                        className="p-1.5 rounded-full hover:bg-gray-800 transition-colors"
+                    >
+                        <FiX className="w-5 h-5 text-gray-400" />
+                    </button>
+                </div>
             </div>
 
-            {!hasStories ? (
+            {/* Scrollable content area */}
+            <div className="px-4 pt-8 pb-4">
+            {loading ? (
                 <div className="text-center py-12">
                     <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 flex items-center justify-center mx-auto mb-4">
                         <div className="w-12 h-12 rounded-full bg-gray-950 flex items-center justify-center">
@@ -2953,21 +3465,191 @@ export default function StoriesPage() {
                         </div>
                     </div>
                     <h3 className="text-lg font-semibold text-white mb-2">
-                        No clips available
+                        Loading clips...
                     </h3>
-                    <p className="text-gray-400">
-                        Share your first clip to get started!
-                    </p>
-                    <button
-                        onClick={() => navigate('/clip')}
-                        className="mt-4 px-6 py-3 rounded-full bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 text-white font-medium hover:opacity-90 transition-opacity"
-                    >
-                        Create Clip
-                    </button>
                 </div>
             ) : (
-                <div className="grid grid-cols-3 gap-3">
-                    {sortedGroups.map((group, index) => {
+                <div className="grid grid-cols-4 gap-2">
+                    {/* Current user's card - always first */}
+                    {(() => {
+                        // Always show user's card, even if not in sortedGroups
+                        const currentUserGroup = sortedGroups.find(g => g.userId === user?.id || g.userHandle === user?.handle) 
+                            || (user ? {
+                                userId: user.id,
+                                userHandle: user.handle || '',
+                                name: user.name || user.handle || 'You',
+                                avatarUrl: user.avatarUrl || null,
+                                stories: []
+                            } as StoryGroup : null);
+                        const hasStories = currentUserGroup && currentUserGroup.stories && currentUserGroup.stories.length > 0;
+                        
+                        if (!user || !currentUserGroup) return null;
+                        
+                        // Extract location for current user
+                        const userLocationMatch = user?.handle?.match(/@(.+)/);
+                        const userLocation = userLocationMatch ? userLocationMatch[1] : '';
+                        const userDisplayName = user?.handle?.split('@')[0] || '';
+                        const getUserLocationColor = (loc: string): string => {
+                            if (!loc) return 'rgb(140, 40, 255)';
+                            let hash = 0;
+                            for (let i = 0; i < loc.length; i++) {
+                                hash = loc.charCodeAt(i) + ((hash << 5) - hash);
+                            }
+                            const hue = Math.abs(hash % 360);
+                            const saturation = 65 + (Math.abs(hash) % 20);
+                            const lightness = 50 + (Math.abs(hash) % 15);
+                            return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+                        };
+                        const userLocationColor = getUserLocationColor(userLocation || user?.handle || '');
+                        
+                        return (
+                            <button
+                                key="current-user-card"
+                                onClick={() => {
+                                    if (hasStories && currentUserGroup) {
+                                        startViewingStories(currentUserGroup);
+                                    } else {
+                                        navigate('/clip');
+                                    }
+                                }}
+                                className="relative aspect-[9/16] rounded-lg overflow-hidden bg-gray-800 group cursor-pointer border border-gray-700 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-black"
+                            >
+                                <div className="relative w-full h-full rounded-lg overflow-hidden bg-gray-800">
+                                    {hasStories && currentUserGroup ? (
+                                        <>
+                                            {/* Show latest story thumbnail if user has stories */}
+                                            <div className="absolute inset-0">
+                                                {(() => {
+                                                    const latestStory = currentUserGroup.stories.reduce((latest, current) =>
+                                                        current.createdAt > latest.createdAt ? current : latest
+                                                    );
+                                                    // Use the same StoryThumbnail component logic
+                                                    const thumbnailUrl = latestStory.mediaUrl;
+                                                    if (thumbnailUrl) {
+                                                        return latestStory.mediaType === 'video' ? (
+                                                            <video
+                                                                src={thumbnailUrl}
+                                                                className="w-full h-full object-cover"
+                                                                muted
+                                                                playsInline
+                                                                preload="metadata"
+                                                            />
+                                                        ) : (
+                                                            <img
+                                                                src={thumbnailUrl}
+                                                                alt="Your clip"
+                                                                className="w-full h-full object-cover"
+                                                                loading="lazy"
+                                                            />
+                                                        );
+                                                    } else if (latestStory.text) {
+                                                        return (
+                                                            <div
+                                                                className="w-full h-full flex items-center justify-center p-4"
+                                                                style={{
+                                                                    background: latestStory.textStyle?.background || '#1a1a1a'
+                                                                }}
+                                                            >
+                                                                <div
+                                                                    className="text-xs leading-relaxed whitespace-pre-wrap font-normal text-center line-clamp-4"
+                                                                    style={{
+                                                                        color: latestStory.textStyle?.color || '#ffffff'
+                                                                    }}
+                                                                >
+                                                                    {latestStory.text}
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    }
+                                                    return null;
+                                                })()}
+                                            </div>
+                                            {/* Profile picture overlay */}
+                                            <div className="absolute inset-0 flex items-center justify-center z-20">
+                                                <div 
+                                                    className="relative w-16 h-16 rounded-full overflow-hidden border-4 shadow-lg"
+                                                    style={{
+                                                        borderColor: userLocationColor,
+                                                        boxShadow: `0 0 0 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.4)`
+                                                    }}
+                                                >
+                                                    {user?.avatarUrl ? (
+                                                        <img
+                                                            src={user.avatarUrl}
+                                                            alt={user.handle || 'You'}
+                                                            className="w-full h-full object-cover"
+                                                        />
+                                                    ) : (
+                                                        <div 
+                                                            className="w-full h-full flex items-center justify-center"
+                                                            style={{ backgroundColor: userLocationColor + '40' }}
+                                                        >
+                                                            <span className="text-xl text-white font-bold">
+                                                                {userDisplayName.charAt(0).toUpperCase()}
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <>
+                                            {/* Add card - no stories */}
+                                            <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-800">
+                                                {/* Profile picture */}
+                                                <div className="relative mb-3">
+                                                    <div 
+                                                        className="relative w-10 h-10 rounded-full overflow-hidden border-2 shadow-lg"
+                                                        style={{
+                                                            borderColor: userLocationColor,
+                                                            boxShadow: `0 0 0 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.4)`
+                                                        }}
+                                                    >
+                                                        {user?.avatarUrl ? (
+                                                            <img
+                                                                src={user.avatarUrl}
+                                                                alt={user.handle || 'You'}
+                                                                className="w-full h-full object-cover"
+                                                            />
+                                                        ) : (
+                                                            <div 
+                                                                className="w-full h-full flex items-center justify-center"
+                                                                style={{ backgroundColor: userLocationColor + '40' }}
+                                                            >
+                                                                <span className="text-sm text-white font-bold">
+                                                                    {userDisplayName.charAt(0).toUpperCase()}
+                                                                </span>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                {/* Plus icon in center */}
+                                                <div className="relative w-10 h-10 rounded-full bg-green-500 border-2 border-gray-800 flex items-center justify-center shadow-lg">
+                                                    <FiPlus className="w-5 h-5 text-white font-bold" />
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
+                                    
+                                    {/* Username at bottom */}
+                                    <div className={`absolute bottom-0 left-0 right-0 rounded-b-lg z-20 ${
+                                        hasStories 
+                                            ? 'p-2 bg-gradient-to-t from-black/90 via-black/70 to-transparent' 
+                                            : 'p-1.5 bg-gradient-to-t from-black/60 via-black/40 to-transparent'
+                                    }`}>
+                                        <p className="text-white text-[10px] font-medium text-center truncate leading-tight">
+                                            {user?.handle || 'You'}
+                                        </p>
+                                    </div>
+                                </div>
+                            </button>
+                        );
+                    })()}
+                    
+                    {/* Other users' story cards */}
+                    {sortedGroups
+                        .filter(group => group.userId !== user?.id && group.userHandle !== user?.handle)
+                        .map((group, index) => {
                         if (!group.stories || group.stories.length === 0) return null;
 
                         const isUnviewed = group.stories.some(s => !s.hasViewed);
@@ -3079,33 +3761,14 @@ export default function StoriesPage() {
                                         />
                                     );
                                 } else if (originalPost.text) {
-                                    // Shared text-only post - show Twitter card style preview
+                                    // Shared text-only post - show compact preview without header
                                     return (
                                         <div className="w-full h-full flex items-center justify-center p-2 bg-black">
                                             <div className="w-full max-w-full rounded-lg overflow-hidden bg-white border border-gray-200 shadow-lg">
-                                                {/* Post Header */}
-                                                <div className="px-2 pt-1.5 pb-1 border-b border-gray-200 bg-white">
-                                                    <div className="flex items-center gap-1.5">
-                                                        <Avatar
-                                                            src={getAvatarForHandle(originalPost.userHandle)}
-                                                            name={originalPost.userHandle.split('@')[0]}
-                                                            size="xs"
-                                                        />
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="flex items-center gap-1">
-                                                                <span className="font-semibold text-[9px] text-gray-900 truncate">{originalPost.userHandle}</span>
-                                                                <Flag
-                                                                    value={getFlagForHandle(originalPost.userHandle) || ''}
-                                                                    size={8}
-                                                                />
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                {/* Text Content - Twitter card style */}
-                                                <div className="p-1.5 bg-white">
-                                                    <div className="p-1.5 rounded bg-black">
-                                                        <div className="text-[8px] leading-tight text-white line-clamp-4 whitespace-pre-wrap break-words">
+                                                {/* Text Content - compact style without header */}
+                                                <div className="p-2 bg-white">
+                                                    <div className="p-2 rounded bg-black">
+                                                        <div className="text-[9px] leading-tight text-white line-clamp-5 whitespace-pre-wrap break-words">
                                                             {originalPost.text}
                                                         </div>
                                                     </div>
@@ -3243,6 +3906,7 @@ export default function StoriesPage() {
                     })}
                 </div>
             )}
+            </div>
         </div>
     );
 }

@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera } from 'react-icons/fi';
+import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from './constants';
 import TopBar from './components/TopBar';
@@ -182,7 +182,7 @@ export default function App() {
   return (
     <>
       <main id="main" className="mx-auto max-w-md min-h-screen pb-[calc(64px+theme(spacing.safe))] md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800" style={{ backgroundColor: '#030712' }}>
-        {loc.pathname !== '/login' && loc.pathname !== '/feed' && loc.pathname !== '/profile' && loc.pathname !== '/clip' && !loc.pathname.startsWith('/user/') && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
+        {loc.pathname !== '/login' && loc.pathname !== '/feed' && loc.pathname !== '/profile' && loc.pathname !== '/clip' && loc.pathname !== '/stories' && !loc.pathname.startsWith('/user/') && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
         <Outlet context={{ activeTab, setActiveTab, customLocation, setCustomLocation }} />
         {loc.pathname !== '/discover' && loc.pathname !== '/create/filters' && loc.pathname !== '/create/instant' && loc.pathname !== '/payment' && loc.pathname !== '/clip' && loc.pathname !== '/create' && loc.pathname !== '/template-editor' && loc.pathname !== '/login' && (
           <BottomNav onCreateClick={() => navigate('/create/instant')} />
@@ -394,21 +394,18 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                 />
               </svg>
             </div>
-            <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0">
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+              {/* Green dot for notifications */}
               {notificationCount > 0 && (
-                <span className="min-w-[16px] sm:min-w-[18px] h-4 sm:h-5 px-1 bg-blue-500 text-white text-[9px] sm:text-[10px] font-semibold leading-4 sm:leading-5 rounded-full text-center flex items-center justify-center">
-                  {notificationCount > 9 ? '9+' : notificationCount}
-                </span>
+                <div className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-green-500"></div>
               )}
+              {/* Purple dot for insights */}
               {insightsCount > 0 && (
-                <span className="min-w-[16px] sm:min-w-[18px] h-4 sm:h-5 px-1 bg-purple-500 text-white text-[9px] sm:text-[10px] font-semibold leading-4 sm:leading-5 rounded-full text-center flex items-center justify-center">
-                  {insightsCount > 9 ? '9+' : insightsCount}
-                </span>
+                <div className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-purple-500"></div>
               )}
+              {/* Red dot for questions */}
               {questionsCount > 0 && (
-                <span className="min-w-[16px] sm:min-w-[18px] h-4 sm:h-5 px-1 bg-pink-500 text-white text-[9px] sm:text-[10px] font-semibold leading-4 sm:leading-5 rounded-full text-center flex items-center justify-center">
-                  {questionsCount > 9 ? '9+' : questionsCount}
-                </span>
+                <div className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-red-500"></div>
               )}
             </div>
           </button>

@@ -6,17 +6,24 @@ const getApiBaseUrl = () => {
         console.log('Using VITE_API_URL from env:', import.meta.env.VITE_API_URL);
         return import.meta.env.VITE_API_URL;
     }
+    // Check if frontend is using HTTPS
+    const isHttps = window.location.protocol === 'https:';
+    const protocol = isHttps ? 'https' : 'http';
+    
     // If accessing from a different host (like phone on network), use IP address
     const hostname = window.location.hostname;
     if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
         // Extract IP from current URL (e.g., 192.168.1.3:5173 -> 192.168.1.3:8000)
         const ip = hostname;
-        const apiUrl = `http://${ip}:8000/api`;
-        console.log('Using network IP for API:', apiUrl, '(from hostname:', hostname, ')');
+        // For network access, use the same protocol as frontend but direct to backend port
+        const apiUrl = `${protocol}://${ip}:8000/api`;
+        console.log('Using network IP for API:', apiUrl, '(from hostname:', hostname, ', protocol:', protocol, ')');
         return apiUrl;
     }
-    const localhostUrl = 'http://localhost:8000/api';
-    console.log('Using localhost for API:', localhostUrl);
+    // For localhost, use proxy (same origin) to avoid mixed content issues
+    // The Vite proxy will forward /api requests to http://localhost:8000/api
+    const localhostUrl = '/api';
+    console.log('Using proxy for API (localhost):', localhostUrl, '(frontend protocol:', protocol, ')');
     return localhostUrl;
 };
 
@@ -217,7 +224,9 @@ export async function fetchUserProfile(handle: string, userId?: string) {
 }
 
 export async function toggleFollow(handle: string) {
-    return apiRequest(`/users/${handle}/follow`, {
+    // Encode the handle for URL (handles special characters like @)
+    const encodedHandle = encodeURIComponent(handle);
+    return apiRequest(`/users/${encodedHandle}/follow`, {
         method: 'POST',
     });
 }

@@ -251,36 +251,41 @@ export default function InboxPage() {
                 <button
                     onClick={() => setActiveTab('notifications')}
                     className={`flex-1 py-1.5 text-xs font-medium transition-colors relative whitespace-nowrap flex items-center justify-center gap-1 ${activeTab === 'notifications'
-                            ? 'text-purple-600 border-b-2 border-purple-600'
+                            ? 'text-green-500 border-b-2 border-green-500'
                             : 'text-gray-500 hover:text-gray-300'
                         }`}
                 >
                     <span>Notifs</span>
                     {unreadNotifications > 0 && (
-                        <span className="px-1 py-0.5 bg-pink-500 text-white text-[9px] rounded-full min-w-[16px] text-center leading-none">
+                        <span className="px-1 py-0.5 bg-green-500 text-white text-[9px] rounded-full min-w-[16px] text-center leading-none">
                             {unreadNotifications > 9 ? '9+' : unreadNotifications}
                         </span>
                     )}
                 </button>
                 <button
                     onClick={() => setActiveTab('insights')}
-                    className={`flex-1 py-1.5 text-xs font-medium transition-colors relative whitespace-nowrap flex items-center justify-center ${activeTab === 'insights'
-                            ? 'text-purple-600 border-b-2 border-purple-600'
+                    className={`flex-1 py-1.5 text-xs font-medium transition-colors relative whitespace-nowrap flex items-center justify-center gap-1 ${activeTab === 'insights'
+                            ? 'text-purple-500 border-b-2 border-purple-500'
                             : 'text-gray-500 hover:text-gray-300'
                         }`}
                 >
-                    Insights
+                    <span>Insights</span>
+                    {insights && insights.length > 0 && (
+                        <span className="px-1 py-0.5 bg-purple-500 text-white text-[9px] rounded-full min-w-[16px] text-center leading-none">
+                            {insights.length > 9 ? '9+' : insights.length}
+                        </span>
+                    )}
                 </button>
                 <button
                     onClick={() => setActiveTab('questions')}
                     className={`flex-1 py-1.5 text-xs font-medium transition-colors relative whitespace-nowrap flex items-center justify-center gap-1 ${activeTab === 'questions'
-                            ? 'text-purple-600 border-b-2 border-purple-600'
+                            ? 'text-red-500 border-b-2 border-red-500'
                             : 'text-gray-500 hover:text-gray-300'
                         }`}
                 >
                     <span>Questions</span>
                     {questions && questions.length > 0 && (
-                        <span className="px-1 py-0.5 bg-pink-500 text-white text-[9px] rounded-full min-w-[16px] text-center leading-none">
+                        <span className="px-1 py-0.5 bg-red-500 text-white text-[9px] rounded-full min-w-[16px] text-center leading-none">
                             {questions.length > 9 ? '9+' : questions.length}
                         </span>
                     )}
@@ -302,7 +307,7 @@ export default function InboxPage() {
                                             await loadData();
                                         }
                                     }}
-                                    className="text-xs text-purple-500 hover:text-purple-400"
+                                    className="text-xs text-green-500 hover:text-green-400"
                                 >
                                     Mark all as read
                                 </button>
@@ -313,7 +318,7 @@ export default function InboxPage() {
                                 key={notif.id}
                                 className={`w-full text-left flex items-center gap-3 py-3 px-2 rounded-lg transition-colors ${notif.read
                                         ? 'hover:bg-gray-100 dark:hover:bg-gray-800'
-                                        : 'bg-purple-900/20 hover:bg-purple-900/30 border-l-4 border-purple-500'
+                                        : 'bg-green-900/20 hover:bg-green-900/30 border-l-4 border-green-500'
                                     }`}
                             >
                                 <button
@@ -339,7 +344,7 @@ export default function InboxPage() {
                                             {new Date(notif.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                         </div>
                                         {!notif.read && (
-                                            <span className="w-2 h-2 bg-purple-500 rounded-full"></span>
+                                            <span className="w-2 h-2 bg-green-500 rounded-full"></span>
                                         )}
                                     </div>
                                 </button>
