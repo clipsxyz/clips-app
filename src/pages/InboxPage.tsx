@@ -4,7 +4,7 @@ import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile, FiUserPlus, Fi
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { getAvatarForHandle } from '../api/users';
-import { getNotifications, type Notification, markNotificationRead, markAllNotificationsRead, getUnreadNotificationCount, deleteNotification } from '../api/notifications';
+import { getNotifications, type Notification, type NotificationType, markNotificationRead, markAllNotificationsRead, getUnreadNotificationCount, deleteNotification } from '../api/notifications';
 import { getStoryInsightsForUser, type StoryInsight } from '../api/stories';
 // Import questions API - using type-only import to avoid runtime issues
 type Question = {
@@ -52,7 +52,37 @@ export default function InboxPage() {
                     return [];
                 })
             ]);
-            setNotifications(notifs);
+            
+            // Convert conversations to notifications format so they appear in Notifs tab
+            // Include ALL conversations (both sent and received) so users can see all their DM conversations
+            const existingNotifHandles = new Set(notifs.filter(n => n.type === 'dm' || n.type === 'sticker' || n.type === 'reply').map(n => n.fromHandle));
+            const conversationNotifications: Notification[] = conversations
+                .filter(conv => {
+                    // Only include if:
+                    // 1. Has a last message
+                    // 2. Doesn't already have a notification for this handle
+                    if (!conv.lastMessage) return false;
+                    if (existingNotifHandles.has(conv.otherHandle)) return false; // Already has notification
+                    return true;
+                })
+                .map(conv => {
+                    // TypeScript: we know lastMessage exists because of the filter above
+                    const lastMsg = conv.lastMessage!;
+                    return {
+                        id: `conv-${conv.otherHandle}-${lastMsg.timestamp || Date.now()}`,
+                        type: 'dm' as const,
+                        fromHandle: conv.otherHandle,
+                        toHandle: user.handle,
+                        message: lastMsg.text || '',
+                        timestamp: lastMsg.timestamp || Date.now(),
+                        read: conv.unread === 0 || lastMsg.senderHandle === user.handle // Mark as read if you sent it
+                    };
+                });
+            
+            // Combine notifications and conversations, sorted by timestamp (newest first)
+            const allNotifications = [...notifs, ...conversationNotifications].sort((a, b) => b.timestamp - a.timestamp);
+            
+            setNotifications(allNotifications);
             setInsights(storyInsights);
             setItems(conversations);
             setQuestions(userQuestions || []);

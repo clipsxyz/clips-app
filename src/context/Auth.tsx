@@ -1,7 +1,7 @@
 import React from 'react';
 import * as Sentry from '@sentry/react';
 import { User } from '../types';
-import { setProfilePrivacy } from '../api/privacy';
+import { setProfilePrivacy, initializePrivateMockUser } from '../api/privacy';
 type AuthCtx = { user: User | null; login: (userData: any) => void; logout: () => void };
 const Ctx = React.createContext<AuthCtx | null>(null);
 
@@ -32,6 +32,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem('user', JSON.stringify(testUser));
         // Sync privacy setting
         setProfilePrivacy(testUser.handle, false);
+        // Initialize mock private user for testing
+        initializePrivateMockUser();
         return;
       }
 
@@ -70,6 +72,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       console.error('Error loading user from localStorage:', error);
     }
+    
+    // Initialize mock private user for testing (Sarah@Artane)
+    initializePrivateMockUser();
   }, []);
 
   const login = (userData: any) => {

@@ -1637,7 +1637,7 @@ export default function MessagesPage() {
                                 }
                             }}
                             placeholder="Message..."
-                            className="flex-1 bg-gray-800 text-white placeholder-gray-500 px-4 py-2 rounded-full focus:outline-none focus:ring-2 focus:ring-purple-600"
+                            className="flex-1 bg-gray-800 text-white placeholder-gray-500 px-4 py-2 rounded-full focus:outline-none focus:ring-2 focus:ring-green-500"
                         />
                         {messageText.trim() && (
                             <button

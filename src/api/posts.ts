@@ -123,7 +123,7 @@ if (!postsInitialized) {
   console.log('Initializing posts array...');
   const now = Date.now();
   // Generate timestamps spread over the last 7 days for variety
-  const jsonPosts = (raw as Post[]).map((p, index) => {
+  const jsonPosts = (raw as any[]).map((p, index) => {
     const location = getUserLocationFromHandle(p.userHandle);
     // Extract timestamp from ID if it exists, otherwise generate one
     const timestampMatch = p.id?.match(/\d{13}/);
@@ -134,9 +134,9 @@ if (!postsInitialized) {
     return {
       ...p,
       id: `post-${p.id}-${index}-${createdAt}-${Math.random().toString(36).substr(2, 9)}`,
-      createdAt,
+      createdAt: createdAt,
       ...location
-    };
+    } as Post;
   });
   
   // Load user-created posts from localStorage
@@ -163,6 +163,45 @@ if (!postsInitialized) {
 
   // Add mock posts for test user from Artane
   const artaneNow = Date.now();
+  
+  // Add mock posts for another user (Bob@Ireland) so they appear in Ireland feed for testing
+  const bobPosts: Post[] = [
+    {
+      id: `bob-post-1-${artaneNow - 5400000}-${Math.random().toString(36).substr(2, 9)}`,
+      userHandle: 'Bob@Ireland',
+      locationLabel: 'Cork, Ireland',
+      tags: [],
+      text: 'Exploring the beautiful streets of Cork today! The architecture here is incredible. Love discovering new places around Ireland. 🇮🇪',
+      createdAt: artaneNow - 5400000, // 1.5 hours ago
+      stats: { likes: 34, views: 198, comments: 7, shares: 3, reclips: 1 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Cork',
+      userRegional: 'Cork',
+      userNational: 'Ireland',
+      mediaUrl: undefined,
+      mediaType: undefined
+    } as Post,
+    {
+      id: `bob-post-2-${artaneNow - 9000000}-${Math.random().toString(36).substr(2, 9)}`,
+      userHandle: 'Bob@Ireland',
+      locationLabel: 'Galway, Ireland',
+      tags: [],
+      mediaUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?q=80&w=800',
+      mediaType: 'image',
+      caption: 'Amazing sunset over Galway Bay! The west of Ireland never disappoints.',
+      createdAt: artaneNow - 9000000, // 2.5 hours ago
+      stats: { likes: 56, views: 289, comments: 11, shares: 2, reclips: 1 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Galway',
+      userRegional: 'Galway',
+      userNational: 'Ireland'
+    } as Post
+  ];
+  
   const artanePosts: Post[] = [
     {
       id: `artane-post-1-${artaneNow}-${Math.random().toString(36).substr(2, 9)}`,
@@ -262,7 +301,7 @@ if (!postsInitialized) {
     }
   ];
 
-  posts = [...posts, ...artanePosts];
+  posts = [...posts, ...artanePosts, ...bobPosts];
 } else {
   console.log('Posts array already initialized, length:', posts.length);
 }
@@ -481,8 +520,8 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
     // Reload posts from localStorage to get latest user-created posts
     // This ensures posts created in this session are included
     const userCreatedPosts = getPostsFromStorage();
-    // Get JSON posts (those that start with 'post-post-' or 'artane-post-')
-    const jsonPosts = posts.filter(p => p.id.startsWith('post-post-') || p.id.startsWith('artane-post-'));
+    // Get JSON posts (those that start with 'post-post-', 'artane-post-', or 'bob-post-')
+    const jsonPosts = posts.filter(p => p.id.startsWith('post-post-') || p.id.startsWith('artane-post-') || p.id.startsWith('bob-post-'));
     // Merge: user-created posts first (newest), then existing JSON posts
     // Only update if we have user-created posts to avoid overwriting with empty array
     if (userCreatedPosts.length > 0 || posts.length === 0) {
@@ -1008,6 +1047,7 @@ export async function addComment(postId: string, userHandle: string, text: strin
         postId: response.post_id || response.postId || postId,
         userHandle: response.user_handle || response.userHandle || userHandle,
         text: response.text || response.text_content,
+        userLiked: false,
         createdAt: new Date(response.created_at || response.createdAt).getTime(),
         likes: response.likes_count || response.likes || 0
       };

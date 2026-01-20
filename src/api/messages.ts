@@ -50,29 +50,24 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
     if (!message.isSystemMessage && message.text) {
         // Dynamically import to avoid circular dependency
         const { createNotification, isStickerMessage, isReplyToPost } = await import('./notifications');
+        
+        // Determine notification type
+        let notificationType: 'sticker' | 'reply' | 'dm';
         if (isStickerMessage(message.text)) {
-            await createNotification({
-                type: 'sticker',
-                fromHandle: from,
-                toHandle: to,
-                message: message.text
-            });
+            notificationType = 'sticker';
         } else if (isReplyToPost(message.text)) {
-            await createNotification({
-                type: 'reply',
-                fromHandle: from,
-                toHandle: to,
-                message: message.text
-            });
+            notificationType = 'reply';
         } else {
-            // Create notification for regular DMs
-            await createNotification({
-                type: 'dm',
-                fromHandle: from,
-                toHandle: to,
-                message: message.text
-            });
+            notificationType = 'dm';
         }
+        
+        // Create notification for receiver only (they received a message)
+        await createNotification({
+            type: notificationType,
+            fromHandle: from,
+            toHandle: to,
+            message: message.text
+        });
     }
 
     // Dispatch events so UI can update/notify

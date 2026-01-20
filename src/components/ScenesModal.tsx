@@ -1,7 +1,10 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { FiX, FiHeart, FiShare2, FiRepeat, FiMapPin, FiVolume2, FiVolumeX, FiMessageSquare, FiChevronUp } from 'react-icons/fi';
+import { useNavigate } from 'react-router-dom';
+import { FiX, FiHeart, FiShare2, FiRepeat, FiMapPin, FiVolume2, FiVolumeX, FiMessageSquare, FiMessageCircle, FiChevronUp, FiBookmark, FiMoreHorizontal, FiSend } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
+import SavePostModal from './SavePostModal';
+import PostMenuModal from './PostMenuModal';
 import Avatar from './Avatar';
 import ShareModal from './ShareModal';
 import StickerOverlayComponent from './StickerOverlay';
@@ -11,12 +14,17 @@ import type { EffectConfig } from '../utils/effects';
 import { useAuth } from '../context/Auth';
 import { useOnline } from '../hooks/useOnline';
 import { addComment, fetchComments } from '../api/posts';
+import { getCollectionsForPost } from '../api/collections';
+import { isProfilePrivate, canSendMessage, hasPendingFollowRequest, createFollowRequest } from '../api/privacy';
+import { getFollowedUsers } from '../api/posts';
+import Swal from 'sweetalert2';
 import type { Comment } from '../types';
 import { enqueue } from '../utils/mutationQueue';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
 import { timeAgo } from '../utils/timeAgo';
 import type { Post } from '../types';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from '../constants';
+import StreetSign from './StreetSign';
 
 // Heart drop animation component - animates from tap position to like button
 function HeartDropAnimation({ startX, startY, targetElement, onComplete }: { startX: number; startY: number; targetElement: HTMLElement; onComplete: () => void }) {
@@ -164,7 +172,6 @@ export default function ScenesModal({
     const sheetRef = React.useRef<HTMLDivElement>(null);
     const dragStartY = React.useRef<number>(0);
     const [tapPosition, setTapPosition] = React.useState<{ x: number; y: number } | null>(null);
-    const [heartAnimation, setHeartAnimation] = React.useState<{ startX: number; startY: number } | null>(null);
     const videoRef = React.useRef<HTMLVideoElement>(null);
     const lastTapRef = React.useRef<number>(0);
     const touchHandledRef = React.useRef<boolean>(false);
@@ -176,6 +183,10 @@ export default function ScenesModal({
     const profileBorderOverlayRef2 = React.useRef<HTMLDivElement>(null);
     const { user } = useAuth();
     const online = useOnline();
+    const navigate = useNavigate();
+    const [saveModalOpen, setSaveModalOpen] = React.useState(false);
+    const [isSaved, setIsSaved] = React.useState(false);
+    const [menuOpen, setMenuOpen] = React.useState(false);
 
     // Determine if we have multiple media items (carousel)
     const items: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }> = post.mediaItems && post.mediaItems.length > 0
@@ -258,25 +269,16 @@ export default function ScenesModal({
             setIsPaused(false); // Reset to playing when switching videos
         }
         // Reset animation states when switching items
-        // Clear all heart animation states when switching stories
         setTapPosition(null);
-        setHeartAnimation(null);
         setHeartBurst(false);
         isProcessingDoubleTap.current = false;
-        
-        // Double-check cleanup after a brief delay
-        setTimeout(() => {
-            setTapPosition(null);
-            setHeartAnimation(null);
-            setHeartBurst(false);
-        }, 100);
     }, [currentIndex, currentItem?.type]);
 
     // Sync video muted state with ref and restore from feed if available
     React.useEffect(() => {
         if (videoRef.current && currentItem?.type === 'video') {
             const video = videoRef.current;
-            const shouldBeMuted = isMuted;
+            const shouldBeMuted = !!isMuted;
             
             // Always sync the video's muted property with state
             video.muted = shouldBeMuted;
@@ -288,7 +290,7 @@ export default function ScenesModal({
                 
                 // Ensure video is playing
                 if (video.paused) {
-                    video.play().catch(console.error);
+                    video.play().catch(() => { /* ignore */ });
                     setIsPaused(false);
                 }
                 
@@ -297,7 +299,7 @@ export default function ScenesModal({
                     if (videoRef.current && !shouldBeMuted) {
                         videoRef.current.muted = false;
                         if (videoRef.current.paused) {
-                            videoRef.current.play().catch(console.error);
+                            videoRef.current.play().catch(() => { /* ignore */ });
                         }
                     }
                 }, 50);
@@ -435,20 +437,10 @@ export default function ScenesModal({
             if (videoRef.current && !videoRef.current.paused) {
                 videoRef.current.pause();
             }
-            // Clear all heart animation states immediately
+            // Clear heart animation state immediately
             setTapPosition(null);
-            setHeartAnimation(null);
             setHeartBurst(false);
             isProcessingDoubleTap.current = false;
-            
-            // Double-check cleanup after a brief delay to ensure nothing is left behind
-            const cleanupTimeout = setTimeout(() => {
-                setTapPosition(null);
-                setHeartAnimation(null);
-                setHeartBurst(false);
-            }, 100);
-            
-            return () => clearTimeout(cleanupTimeout);
         }
     }, [isOpen]);
 
@@ -549,6 +541,36 @@ export default function ScenesModal({
         };
     }, [isOpen, onClose, currentItem?.type]);
 
+    // Check if this post is saved (for Scenes save icon state)
+    React.useEffect(() => {
+        async function checkIfSaved() {
+            if (!user?.id) return;
+            try {
+                const collections = await getCollectionsForPost(user.id, post.id);
+                setIsSaved(collections.length > 0);
+            } catch (error) {
+                console.error('Error checking if post is saved in Scenes:', error);
+            }
+        }
+        checkIfSaved();
+    }, [user?.id, post.id]);
+
+    // Listen for global save events to keep Scenes icon in sync
+    React.useEffect(() => {
+        if (!user?.id) return;
+
+        const handlePostSaved = () => {
+            getCollectionsForPost(user.id, post.id)
+                .then(collections => setIsSaved(collections.length > 0))
+                .catch(console.error);
+        };
+
+        window.addEventListener(`postSaved-${post.id}`, handlePostSaved);
+        return () => {
+            window.removeEventListener(`postSaved-${post.id}`, handlePostSaved);
+        };
+    }, [user?.id, post.id]);
+
     async function handleLike() {
         if (busy) return;
         setBusy(true);
@@ -633,16 +655,8 @@ export default function ScenesModal({
             // Set tap position for heart pop-up animation
             setTapPosition({ x: tapX, y: tapY });
 
-            // Show heart burst animation
+            // Show heart burst animation (big purple heart at tap position)
             setHeartBurst(true);
-
-            // Trigger heart animation to like button - start after pop-up animation has appeared
-            // The pop-up animation is 400ms, start drop animation at 200ms so they overlap smoothly
-            setTimeout(() => {
-                if (likeButtonRef.current) {
-                    setHeartAnimation({ startX: clientX, startY: clientY });
-                }
-            }, 200);
 
             // Clear tap position and burst after pop-up animation completes (400ms)
             // Add a fade-out before clearing to ensure smooth transition
@@ -876,19 +890,12 @@ export default function ScenesModal({
                     aria-label="Scenes fullscreen viewer"
                     className="fixed inset-0 z-[100] bg-black flex items-center justify-center"
                 >
-                    {/* Top Left - Location and Time */}
-                    <div className="absolute top-6 left-4 z-10 flex flex-col gap-1">
-                        {post.locationLabel && (
-                            <div className="bg-red-500 text-white text-sm font-medium flex items-center gap-1.5 px-2 py-1 rounded">
-                                <FiMapPin className="w-4 h-4" />
-                                <span>{post.locationLabel}</span>
-                            </div>
-                        )}
-                        {post.createdAt && (
-                            <div className="bg-black text-white text-xs px-2 py-1 rounded">
-                                {timeAgo(post.createdAt)}
-                            </div>
-                        )}
+                    {/* Top Left - Street sign with location (top) and time (bottom) */}
+                    <div className="absolute top-5 left-3 z-10">
+                        <StreetSign
+                            topLabel={post.locationLabel || ''}
+                            bottomLabel={post.createdAt ? timeAgo(post.createdAt) : ''}
+                        />
                     </div>
 
                     {/* Top Bar - Counter and Close Button - Evenly Spaced */}
@@ -906,22 +913,48 @@ export default function ScenesModal({
                             )}
                         </div>
 
-                        {/* Right side - Close button */}
+                        {/* Right side - Close button with circular progress ring around it */}
                         <div className="flex-1 flex justify-end">
-                            <button
-                                onClick={() => {
-                                    // Save current video time before closing
-                                    let savedTime: number | undefined;
-                                    if (videoRef.current && currentItem?.type === 'video') {
-                                        savedTime = videoRef.current.currentTime;
-                                    }
-                                    onClose(savedTime);
-                                }}
-                                aria-label="Close scenes"
-                                className="p-1.5 rounded-full bg-black/30 hover:bg-black/50 text-white transition-colors"
-                            >
-                                <FiX size={18} />
-                            </button>
+                            <div className="relative w-10 h-10 flex items-center justify-center">
+                                {/* Progress ring behind the X */}
+                                <svg className="absolute inset-0 w-10 h-10 transform -rotate-90" viewBox="0 0 48 48">
+                                    {/* Background circle */}
+                                    <circle
+                                        cx="24"
+                                        cy="24"
+                                        r="18"
+                                        stroke="rgba(255,255,255,0.25)"
+                                        strokeWidth="3"
+                                        fill="none"
+                                    />
+                                    {/* Progress circle */}
+                                    <circle
+                                        cx="24"
+                                        cy="24"
+                                        r="18"
+                                        stroke="rgba(255,255,255,0.95)"
+                                        strokeWidth="3"
+                                        fill="none"
+                                        strokeDasharray={`${2 * Math.PI * 18}`}
+                                        strokeDashoffset={`${2 * Math.PI * 18 * (1 - Math.max(0, Math.min(1, videoProgress)))}`}
+                                        strokeLinecap="round"
+                                    />
+                                </svg>
+                                <button
+                                    onClick={() => {
+                                        // Save current video time before closing
+                                        let savedTime: number | undefined;
+                                        if (videoRef.current && currentItem?.type === 'video') {
+                                            savedTime = videoRef.current.currentTime;
+                                        }
+                                        onClose(savedTime);
+                                    }}
+                                    aria-label="Close scenes"
+                                    className="relative z-10 p-1.5 rounded-full bg-black/40 hover:bg-black/60 text-white transition-colors"
+                                >
+                                    <FiX size={16} />
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -1037,17 +1070,6 @@ export default function ScenesModal({
                                             }
                                         }}
                                     />
-                                    {/* Video progress bar - positioned at top */}
-                                    <div className="absolute top-0 left-0 right-0 h-1.5 bg-black/50 z-20">
-                                        <div
-                                            className="h-full transition-all duration-100"
-                                            style={{
-                                                width: `${Math.max(0, Math.min(100, videoProgress * 100))}%`,
-                                                background: 'linear-gradient(to right, rgb(255, 140, 0) 5%, rgb(248, 0, 50) 25%, rgb(255, 0, 160) 45%, rgb(140, 40, 255) 65%, rgb(0, 35, 255) 82%, rgb(25, 160, 255) 96%)',
-                                                boxShadow: '0 0 12px rgba(139,92,246,0.45)'
-                                            }}
-                                        />
-                                    </div>
                                 </div>
                             ) : (
                                 <img
@@ -1225,27 +1247,6 @@ export default function ScenesModal({
                                 </div>
 
                             </>
-                        )}
-
-                        {/* Permanent small hearts on left side when liked */}
-                        {liked && (
-                            <div className="absolute left-4 top-1/2 -translate-y-1/2 z-10 flex flex-col gap-3 pointer-events-none">
-                                <div className="w-4 h-4">
-                                    <svg className="w-full h-full" viewBox="0 0 24 24" fill="none">
-                                        <path fill="#ef4444" d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
-                                    </svg>
-                                </div>
-                                <div className="w-3 h-3">
-                                    <svg className="w-full h-full" viewBox="0 0 24 24" fill="none">
-                                        <path fill="#ef4444" d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
-                                    </svg>
-                                </div>
-                                <div className="w-2.5 h-2.5">
-                                    <svg className="w-full h-full" viewBox="0 0 24 24" fill="none">
-                                        <path fill="#ef4444" d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z" />
-                                    </svg>
-                                </div>
-                            </div>
                         )}
 
                         {/* Heart pop-up animation at tap position */}
@@ -1456,13 +1457,13 @@ export default function ScenesModal({
                         )}
                     </div>
 
-                    {/* Right Side Engagement Bar - Instagram Reels Style with Scrim */}
-                    <div className="absolute right-0 bottom-32 z-20 flex flex-col items-center gap-6 px-4 py-3 pointer-events-none" onClick={(e) => e.stopPropagation()}>
-                        {/* Scrim effect - gradient overlay for better readability */}
-                        <div className="absolute inset-0 bg-gradient-to-l from-black/70 via-black/50 to-transparent pointer-events-none z-0 rounded-l-2xl" />
-
-                        {/* Content layer - above scrim */}
-                        <div className="relative z-10 flex flex-col items-center gap-6 pointer-events-auto">
+                    {/* Right Side Engagement Bar - centered vertically, no background scrim */}
+                    <div
+                        className="absolute right-0 top-1/2 -translate-y-1/2 z-20 flex flex-col items-center gap-6 px-3 pointer-events-none"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {/* Content layer */}
+                        <div className="flex flex-col items-center gap-6 pointer-events-auto">
                             {/* Like Button */}
                             <div className="flex flex-col items-center gap-1.5">
                                 <button
@@ -1472,12 +1473,12 @@ export default function ScenesModal({
                                     aria-label={liked ? 'Unlike' : 'Like'}
                                 >
                                     {liked ? (
-                                        <AiFillHeart className="text-red-500 w-7 h-7" />
+                                        <AiFillHeart className="text-purple-500 w-7 h-7" />
                                     ) : (
-                                        <FiHeart className="text-white w-7 h-7" />
+                                        <AiFillHeart className="text-white w-7 h-7" />
                                     )}
                                 </button>
-                                <span className="text-white text-[10px] font-semibold drop-shadow-md">{likes}</span>
+                                <span className="text-white text-[10px] font-semibold">{likes}</span>
                             </div>
 
                             {/* Share Button */}
@@ -1489,7 +1490,25 @@ export default function ScenesModal({
                                 >
                                     <FiShare2 className="text-white w-7 h-7" />
                                 </button>
-                                <span className="text-white text-[10px] font-semibold drop-shadow-md">{shares}</span>
+                                <span className="text-white text-[10px] font-semibold">{shares}</span>
+                            </div>
+
+                            {/* Save to Collection Button */}
+                            <div className="flex flex-col items-center gap-1.5">
+                                <button
+                                    onClick={() => {
+                                        setSaveModalOpen(true);
+                                    }}
+                                    className="flex items-center justify-center transition-colors"
+                                    aria-label="Save to collection"
+                                >
+                                    <FiBookmark
+                                        className={`w-7 h-7 ${isSaved ? 'text-yellow-400 fill-yellow-400' : 'text-white'}`}
+                                    />
+                                </button>
+                                <span className="text-white text-[10px] font-semibold">
+                                    {isSaved ? 'Saved' : 'Save'}
+                                </span>
                             </div>
 
                             {/* Reclip Button */}
@@ -1503,7 +1522,107 @@ export default function ScenesModal({
                                 >
                                     <FiRepeat className={`w-7 h-7 ${userReclipped ? 'text-green-500' : 'text-white'}`} />
                                 </button>
-                                <span className="text-white text-[10px] font-semibold drop-shadow-md">{reclips}</span>
+                                <span className="text-white text-[10px] font-semibold">{reclips}</span>
+                            </div>
+
+                            {/* DM Button */}
+                            <div className="flex flex-col items-center gap-1.5">
+                                <button
+                                    onClick={async () => {
+                                        if (!post.userHandle || !user?.handle || !user?.id) return;
+                                        if (post.userHandle === user.handle) return;
+                                        
+                                        // Check privacy and follow status
+                                        const followedUsers = await getFollowedUsers(user.id);
+                                        const profilePrivate = isProfilePrivate(post.userHandle);
+                                        const canMessage = canSendMessage(user.handle, post.userHandle, followedUsers);
+                                        const hasPending = hasPendingFollowRequest(user.handle, post.userHandle);
+                                        
+                                        if (!canMessage && profilePrivate) {
+                                            // Show SweetAlert explaining they need to follow
+                                            if (hasPending) {
+                                                await Swal.fire({
+                                                    title: 'Follow Request Pending',
+                                                    html: `
+                                                        <div style="text-align: center; padding: 10px 0;">
+                                                            <p style="color: #ffffff; font-size: 14px; line-height: 20px; margin: 0 0 20px 0;">
+                                                                This user has a private profile. You have already sent a follow request. Once they accept, you'll be able to send them a message.
+                                                            </p>
+                                                        </div>
+                                                    `,
+                                                    icon: 'info',
+                                                    background: '#262626',
+                                                    color: '#ffffff',
+                                                    confirmButtonText: 'OK',
+                                                    confirmButtonColor: '#8B5CF6'
+                                                });
+                                                return;
+                                            }
+                                            
+                                            const result = await Swal.fire({
+                                                title: 'Cannot Send Message',
+                                                html: `
+                                                    <div style="text-align: center; padding: 10px 0;">
+                                                        <p style="color: #ffffff; font-size: 14px; line-height: 20px; margin: 0 0 20px 0;">
+                                                            This user has a private profile. You must follow them and have your follow request accepted before you can send them a message.
+                                                        </p>
+                                                    </div>
+                                                `,
+                                                icon: 'warning',
+                                                background: '#262626',
+                                                color: '#ffffff',
+                                                showCancelButton: true,
+                                                confirmButtonText: 'Request to Follow',
+                                                confirmButtonColor: '#8B5CF6',
+                                                cancelButtonText: 'Cancel',
+                                                cancelButtonColor: '#6B7280'
+                                            });
+                                            
+                                            if (result.isConfirmed) {
+                                                // Create follow request
+                                                createFollowRequest(user.handle, post.userHandle);
+                                                
+                                                // Try to follow via API
+                                                try {
+                                                    await onFollow();
+                                                } catch (error) {
+                                                    console.error('Error sending follow request:', error);
+                                                }
+                                                
+                                                Swal.fire({
+                                                    title: 'Follow Request Sent',
+                                                    text: 'You will be notified when they accept your request.',
+                                                    icon: 'success',
+                                                    timer: 2000,
+                                                    showConfirmButton: false,
+                                                    background: '#262626',
+                                                    color: '#ffffff'
+                                                });
+                                            }
+                                            return;
+                                        }
+                                        
+                                        // If they can message, navigate to DM page
+                                        navigate(`/messages/${encodeURIComponent(post.userHandle)}`);
+                                        onClose();
+                                    }}
+                                    disabled={!user || post.userHandle === user?.handle}
+                                    className="flex items-center justify-center transition-colors disabled:opacity-30 disabled:cursor-not-allowed hover:opacity-80"
+                                    aria-label="Send direct message"
+                                >
+                                    <FiSend className="w-7 h-7 text-white" />
+                                </button>
+                            </div>
+
+                            {/* More Options (three dots) */}
+                            <div className="flex flex-col items-center gap-1.5">
+                                <button
+                                    onClick={() => setMenuOpen(true)}
+                                    className="flex items-center justify-center transition-colors"
+                                    aria-label="More options"
+                                >
+                                    <FiMoreHorizontal className="text-white w-7 h-7" />
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -1517,7 +1636,14 @@ export default function ScenesModal({
                                     {/* Profile Section */}
                                     <div className="flex items-center gap-3 mb-3">
                                         {/* Profile picture with rounded-md shape and animated white border */}
-                                        <div className="relative w-8 h-8 rounded-md overflow-visible">
+                                        <button
+                                            onClick={() => {
+                                                window.scrollTo(0, 0);
+                                                navigate(`/user/${encodeURIComponent(post.userHandle)}`);
+                                                onClose();
+                                            }}
+                                            className="relative w-8 h-8 rounded-md overflow-visible cursor-pointer"
+                                        >
                                             {/* Animated white border wrapper */}
                                             <div
                                                 className="absolute inset-0 rounded-md p-0.5 overflow-hidden z-0"
@@ -1567,9 +1693,16 @@ export default function ScenesModal({
                                                     </div>
                                                 )}
                                             </div>
-                                        </div>
+                                        </button>
                                         <div className="flex-1">
-                                            <button className="text-white font-semibold text-sm hover:opacity-80">
+                                            <button
+                                                onClick={() => {
+                                                    window.scrollTo(0, 0);
+                                                    navigate(`/user/${encodeURIComponent(post.userHandle)}`);
+                                                    onClose();
+                                                }}
+                                                className="text-white font-semibold text-sm hover:opacity-80"
+                                            >
                                                 {post.userHandle}
                                             </button>
                                             {post.locationLabel && (
@@ -1646,30 +1779,26 @@ export default function ScenesModal({
                                 </div>
 
                                 {/* Comment Input at Bottom - Instagram Reels Style */}
-                                <div className="pb-4">
+                                <div className="pb-4 px-3 sm:px-4">
                                     <form onSubmit={handleAddComment} className="flex items-center gap-2">
                                         <Avatar
                                             src={user?.avatarUrl}
                                             name={user?.name || user?.handle || 'User'}
                                             size="sm"
-                                            className="border border-white/50"
+                                            className="border border-white/50 flex-shrink-0"
                                         />
-                                        <div className="relative flex-1 rounded">
-                                            {/* Scrim effect */}
-                                            <div className="pointer-events-none absolute inset-0 rounded bg-black/30 backdrop-blur-sm"></div>
-                                            <input
-                                                type="text"
-                                                value={commentText}
-                                                onChange={(e) => setCommentText(e.target.value)}
-                                                placeholder="Add Comment..."
-                                                className="relative w-full px-3 py-1.5 rounded bg-white/10 backdrop-blur-sm border border-white/20 text-white text-sm placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/50 focus:bg-white/15"
-                                                disabled={isAddingComment || !user}
-                                            />
-                                        </div>
+                                        <input
+                                            type="text"
+                                            value={commentText}
+                                            onChange={(e) => setCommentText(e.target.value)}
+                                            placeholder="Add Comment..."
+                                            className="flex-1 px-3 sm:px-4 py-2.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white text-sm placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/50 focus:bg-white/15 min-w-0"
+                                            disabled={isAddingComment || !user}
+                                        />
                                         <button
                                             type="submit"
                                             disabled={!commentText.trim() || isAddingComment || !user}
-                                            className="w-12 h-8 flex items-center justify-center text-white font-semibold text-xs disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80 transition-opacity border-2 border-white rounded"
+                                            className="px-3 sm:px-4 h-9 flex items-center justify-center text-white font-semibold text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80 transition-opacity flex-shrink-0 whitespace-nowrap"
                                         >
                                             {isAddingComment ? '...' : 'Post'}
                                         </button>
@@ -1846,31 +1975,118 @@ export default function ScenesModal({
                                     </div>
 
                                     {/* Comment Input at Bottom */}
-                                    <div className="border-t border-gray-200 dark:border-gray-700 px-4 pt-4 pb-6 bg-white dark:bg-gray-900 flex-shrink-0 safe-area-inset-bottom">
-                                        <form onSubmit={handleAddComment} className="flex items-center gap-2">
+                                    <div className="border-t border-gray-200 dark:border-gray-700 px-4 sm:px-6 pt-4 pb-6 bg-white dark:bg-gray-900 flex-shrink-0 safe-area-inset-bottom">
+                                        <form onSubmit={handleAddComment} className="flex items-center gap-3 sm:gap-4">
                                             <Avatar
                                                 src={user?.avatarUrl}
                                                 name={user?.name || user?.handle || 'User'}
                                                 size="sm"
-                                                className="border border-gray-200 dark:border-gray-700"
+                                                className="border border-gray-200 dark:border-gray-700 flex-shrink-0"
                                             />
-                                            <div className="relative flex-1 rounded">
+                                            <div className="relative flex-1 rounded min-w-0">
                                                 <div className="pointer-events-none absolute inset-0 rounded bg-gray-100 dark:bg-gray-800"></div>
                                                 <input
                                                     type="text"
                                                     value={commentText}
                                                     onChange={(e) => setCommentText(e.target.value)}
                                                     placeholder="Add a comment..."
-                                                    className="relative w-full px-3 py-1.5 rounded bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white text-sm placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white focus:bg-white dark:focus:bg-gray-700"
+                                                    className="relative w-full px-3 sm:px-4 py-2 rounded bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white text-sm placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white focus:bg-white dark:focus:bg-gray-700"
                                                     disabled={isAddingComment || !user}
                                                 />
                                             </div>
                                             <button
                                                 type="submit"
                                                 disabled={!commentText.trim() || isAddingComment || !user}
-                                                className="w-12 h-8 flex items-center justify-center text-black dark:text-white font-semibold text-xs disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80 transition-opacity border-2 border-black dark:border-white rounded"
+                                                className="px-4 sm:px-5 h-9 sm:h-10 flex items-center justify-center text-black dark:text-white font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80 transition-opacity border-2 border-black dark:border-white rounded-full flex-shrink-0"
                                             >
                                                 {isAddingComment ? '...' : 'Post'}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={async () => {
+                                                    if (!post.userHandle || !user?.handle || !user?.id) return;
+                                                    if (post.userHandle === user.handle) return;
+                                                    
+                                                    // Check privacy and follow status
+                                                    const followedUsers = await getFollowedUsers(user.id);
+                                                    const profilePrivate = isProfilePrivate(post.userHandle);
+                                                    const canMessage = canSendMessage(user.handle, post.userHandle, followedUsers);
+                                                    const hasPending = hasPendingFollowRequest(user.handle, post.userHandle);
+                                                    
+                                                    if (!canMessage && profilePrivate) {
+                                                        // Show SweetAlert explaining they need to follow
+                                                        if (hasPending) {
+                                                            await Swal.fire({
+                                                                title: 'Follow Request Pending',
+                                                                html: `
+                                                                    <div style="text-align: center; padding: 10px 0;">
+                                                                        <p style="color: #ffffff; font-size: 14px; line-height: 20px; margin: 0 0 20px 0;">
+                                                                            This user has a private profile. You have already sent a follow request. Once they accept, you'll be able to send them a message.
+                                                                        </p>
+                                                                    </div>
+                                                                `,
+                                                                icon: 'info',
+                                                                background: '#262626',
+                                                                color: '#ffffff',
+                                                                confirmButtonText: 'OK',
+                                                                confirmButtonColor: '#8B5CF6'
+                                                            });
+                                                            return;
+                                                        }
+                                                        
+                                                        const result = await Swal.fire({
+                                                            title: 'Cannot Send Message',
+                                                            html: `
+                                                                <div style="text-align: center; padding: 10px 0;">
+                                                                    <p style="color: #ffffff; font-size: 14px; line-height: 20px; margin: 0 0 20px 0;">
+                                                                        This user has a private profile. You must follow them and have your follow request accepted before you can send them a message.
+                                                                    </p>
+                                                                </div>
+                                                            `,
+                                                            icon: 'warning',
+                                                            background: '#262626',
+                                                            color: '#ffffff',
+                                                            showCancelButton: true,
+                                                            confirmButtonText: 'Request to Follow',
+                                                            confirmButtonColor: '#8B5CF6',
+                                                            cancelButtonText: 'Cancel',
+                                                            cancelButtonColor: '#6B7280'
+                                                        });
+                                                        
+                                                        if (result.isConfirmed) {
+                                                            // Create follow request
+                                                            createFollowRequest(user.handle, post.userHandle);
+                                                            
+                                                            // Try to follow via API
+                                                            try {
+                                                                await onFollow();
+                                                            } catch (error) {
+                                                                console.error('Error sending follow request:', error);
+                                                            }
+                                                            
+                                                            Swal.fire({
+                                                                title: 'Follow Request Sent',
+                                                                text: 'You will be notified when they accept your request.',
+                                                                icon: 'success',
+                                                                timer: 2000,
+                                                                showConfirmButton: false,
+                                                                background: '#262626',
+                                                                color: '#ffffff'
+                                                            });
+                                                        }
+                                                        return;
+                                                    }
+                                                    
+                                                    // If they can message, navigate to DM page
+                                                    window.scrollTo(0, 0);
+                                                    navigate(`/messages/${encodeURIComponent(post.userHandle)}`);
+                                                    onClose();
+                                                }}
+                                                disabled={!user || post.userHandle === user?.handle}
+                                                className="ml-3 sm:ml-4 p-2 h-9 sm:h-10 flex items-center justify-center text-black dark:text-white disabled:opacity-30 disabled:cursor-not-allowed hover:opacity-80 transition-opacity flex-shrink-0"
+                                                aria-label="Send direct message"
+                                            >
+                                                <FiSend className="w-5 h-5 sm:w-6 sm:h-6" />
                                             </button>
                                         </form>
                                     </div>
@@ -1892,19 +2108,74 @@ export default function ScenesModal({
                 />,
                 document.body
             )}
-
-            {/* Heart animation from tap to like button - rendered after EngagementBar so ref is set */}
-            {heartAnimation && likeButtonRef.current && (
-                <HeartDropAnimation
-                    key={`heart-${post.id}-${heartAnimation.startX}-${heartAnimation.startY}`}
-                    startX={heartAnimation.startX}
-                    startY={heartAnimation.startY}
-                    targetElement={likeButtonRef.current}
-                    onComplete={() => setHeartAnimation(null)}
+            {/* Save Post Modal - Render directly so it appears above Scenes overlay */}
+            {saveModalOpen && user && (
+                <SavePostModal
+                    post={post}
+                    userId={user.id}
+                    isOpen={saveModalOpen}
+                    onClose={() => {
+                        setSaveModalOpen(false);
+                    }}
+                />
+            )}
+            {/* Post Options Menu - same as feed 3-dots menu */}
+            {menuOpen && user && (
+                <PostMenuModal
+                    post={post}
+                    userId={user.id}
+                    isOpen={menuOpen}
+                    onClose={() => setMenuOpen(false)}
+                    onCopyLink={() => { }}
+                    onShare={onShare}
+                    onReport={() => {
+                        console.log('Report post from Scenes:', post.id);
+                    }}
+                    onUnfollow={async () => {
+                        await onFollow();
+                    }}
+                    onMute={async () => {
+                        console.log('Mute user from Scenes:', post.userHandle);
+                    }}
+                    onBlock={async () => {
+                        console.log('Block user from Scenes:', post.userHandle);
+                    }}
+                    onHide={() => {
+                        console.log('Hide post from Scenes:', post.id);
+                    }}
+                    onNotInterested={() => {
+                        console.log('Not interested in post from Scenes:', post.id);
+                    }}
+                    onDelete={async () => {
+                        console.log('Delete post from Scenes:', post.id);
+                    }}
+                    onEdit={() => {
+                        console.log('Edit post from Scenes:', post.id);
+                    }}
+                    onArchive={async () => {
+                        console.log('Archive post from Scenes:', post.id);
+                    }}
+                    onBoost={() => {
+                        console.log('Boost post from Scenes:', post.id);
+                    }}
+                    onReclip={onReclip}
+                    onTurnOnNotifications={() => {
+                        console.log('Turn on notifications for post from Scenes:', post.id);
+                    }}
+                    onTurnOffNotifications={() => {
+                        console.log('Turn off notifications for post from Scenes:', post.id);
+                    }}
+                    isCurrentUser={user.handle === post.userHandle}
+                    isFollowing={post.isFollowing === true}
+                    isSaved={isSaved}
+                    isMuted={false}
+                    isBlocked={false}
+                    hasNotifications={false}
                 />
             )}
         </>
     );
 }
+
 
 

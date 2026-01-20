@@ -147,7 +147,7 @@ export default function PostMenuModal({
 
     return (
         <>
-            <div className="fixed inset-0 z-50 flex items-end">
+            <div className="fixed inset-0 z-[200] flex items-end">
                 {/* Backdrop */}
                 <div
                     className="absolute inset-0 bg-black/60 backdrop-blur-sm"

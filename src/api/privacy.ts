@@ -46,6 +46,23 @@ function saveFollowRequests(requests: FollowRequest[]): void {
   localStorage.setItem(FOLLOW_REQUESTS_KEY, JSON.stringify(requests));
 }
 
+// Initialize mock users with different privacy settings (for testing)
+export function initializePrivateMockUser(): void {
+  // Set Sarah@Artane as a private profile user for testing
+  setProfilePrivacy('Sarah@Artane', true);
+  
+  // Set multiple users as public for testing (so you have options to test public DM access)
+  // These users exist in posts.json and can be used to test public DM access
+  setProfilePrivacy('Username@Dublin', false);
+  setProfilePrivacy('Alice@Finglas', false);
+  setProfilePrivacy('Bob@Ireland', false);
+  setProfilePrivacy('Sarah@NewYork', false);
+  setProfilePrivacy('Mike@London', false);
+  setProfilePrivacy('Emma@Paris', false);
+  setProfilePrivacy('John@Tokyo', false);
+  setProfilePrivacy('Lisa@Sydney', false);
+}
+
 // Check if a user's profile is private
 export function isProfilePrivate(handle: string): boolean {
   const settings = getPrivacySettings();

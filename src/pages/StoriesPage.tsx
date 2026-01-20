@@ -18,6 +18,72 @@ import { toggleFollow } from '../api/client';
 import { FiUserPlus, FiUserCheck } from 'react-icons/fi';
 import type { Story, StoryGroup, Post } from '../types';
 
+// Special Gazetteer world highlights configuration (mock stories only for now)
+const GAZETTEER_WORLD_USER_ID = 'gazetteer-world';
+const GAZETTEER_WORLD_HANDLE = 'Gazetteer@world highlights';
+
+function createGazetteerWorldStories(): Story[] {
+    const now = Date.now();
+    const twentyFourHours = 24 * 60 * 60 * 1000;
+    const expiresAt = now + twentyFourHours;
+
+    return [
+        {
+            id: 'gazetteer-world-1',
+            userId: GAZETTEER_WORLD_USER_ID,
+            userHandle: GAZETTEER_WORLD_HANDLE,
+            text: 'World highlights: top Clips24 stories from around the globe today.',
+            textStyle: {
+                background: 'linear-gradient(145deg, #0f172a, #1d4ed8, #22c55e)',
+                color: '#ffffff',
+                size: 'medium',
+            },
+            createdAt: now - 2 * 60 * 60 * 1000,
+            expiresAt,
+            views: 0,
+            hasViewed: false,
+            reactions: [],
+            replies: [],
+        },
+        {
+            id: 'gazetteer-world-2',
+            userId: GAZETTEER_WORLD_USER_ID,
+            userHandle: GAZETTEER_WORLD_HANDLE,
+            text: 'Gazetteer editors pick today’s must-see stories and news.',
+            textStyle: {
+                background: 'linear-gradient(145deg, #581c87, #db2777)',
+                color: '#ffffff',
+                size: 'medium',
+            },
+            createdAt: now - 4 * 60 * 60 * 1000,
+            expiresAt,
+            views: 0,
+            hasViewed: false,
+            reactions: [],
+            replies: [],
+        },
+    ];
+}
+
+function withGazetteerWorldGroup(groups: StoryGroup[]): StoryGroup[] {
+    // If backend ever creates this user, avoid duplicating it
+    if (groups.some(g => g.userId === GAZETTEER_WORLD_USER_ID || g.userHandle === GAZETTEER_WORLD_HANDLE)) {
+        return groups;
+    }
+
+    const gazetteerStories = createGazetteerWorldStories();
+
+    const gazetteerGroup: StoryGroup = {
+        userId: GAZETTEER_WORLD_USER_ID,
+        userHandle: GAZETTEER_WORLD_HANDLE,
+        name: 'Gazetteer World Highlights',
+        avatarUrl: '/gazetteer logo 1/gazetteer logo 1.jpg',
+        stories: gazetteerStories,
+    };
+
+    return [gazetteerGroup, ...groups];
+}
+
 export default function StoriesPage() {
     const { user } = useAuth();
     const navigate = useNavigate();
@@ -54,11 +120,11 @@ export default function StoriesPage() {
     const [showSharedPostModal, setShowSharedPostModal] = React.useState(false);
     const [isFollowingStoryUser, setIsFollowingStoryUser] = React.useState<boolean>(false);
     const [isFollowLoading, setIsFollowLoading] = React.useState<boolean>(false);
-    const [optimisticVote, setOptimisticVote] = React.useState<'option1' | 'option2' | null>(null);
+    const [optimisticVote, setOptimisticVote] = React.useState<'option1' | 'option2' | 'option3' | null>(null);
     const [showQuestionAnswerModal, setShowQuestionAnswerModal] = React.useState(false);
     const [questionAnswer, setQuestionAnswer] = React.useState('');
     const [selectedResponse, setSelectedResponse] = React.useState<{ id: string; userHandle: string; text: string; createdAt: number } | null>(null);
-    const videoRef = React.useRef<HTMLVideoElement>(null);
+    const videoRef = React.useRef<HTMLVideoElement | null>(null);
     const elapsedTimeRef = React.useRef<number>(0);
     const pausedRef = React.useRef<boolean>(false);
     const isVotingRef = React.useRef<boolean>(false);
@@ -136,7 +202,8 @@ export default function StoriesPage() {
                 return { ...group, avatarUrl };
             }));
 
-            setStoryGroups(groupsWithAvatars);
+            // Always inject Gazetteer world highlights as a mock story group (first position)
+            setStoryGroups(withGazetteerWorldGroup(groupsWithAvatars));
         } catch (error) {
             console.error('Error loading stories:', error);
         } finally {
@@ -186,6 +253,25 @@ export default function StoriesPage() {
     // Handle starting to view stories for a specific user
     async function startViewingStories(group: StoryGroup) {
         if (!group || !user?.id) return;
+
+        // Special handling for Gazetteer world highlights - use local mock stories only
+        if (group.userId === GAZETTEER_WORLD_USER_ID || group.userHandle === GAZETTEER_WORLD_HANDLE) {
+            const groupIndex = storyGroups.findIndex(
+                g => g.userId === GAZETTEER_WORLD_USER_ID || g.userHandle === GAZETTEER_WORLD_HANDLE
+            );
+            if (groupIndex === -1) return;
+
+            setCurrentGroupIndex(groupIndex);
+            currentGroupIndexRef.current = groupIndex;
+            setCurrentStoryIndex(0);
+            currentStoryIndexRef.current = 0;
+            setViewingStories(true);
+            setProgress(0);
+            setPaused(false);
+            setIsMuted(true);
+            elapsedTimeRef.current = 0;
+            return;
+        }
 
         const stories = await fetchUserStories(user.id, group.userId);
         if (!stories || stories.length === 0) return;
@@ -265,26 +351,34 @@ export default function StoriesPage() {
         const currentGroup = currentGroups[currentIdx];
         const isViewingOwnStories = currentGroup && (currentGroup.userId === user?.id || currentGroup.userHandle === user?.handle);
         
-        // Find the next group that's NOT the current user's group
+        // Find the next group
         let nextGroupIndex = -1;
         let nextGroup: StoryGroup | null = null;
         
         // Start searching from the next index
         for (let i = currentIdx + 1; i < currentGroups.length; i++) {
             const candidate = currentGroups[i];
-            // Skip if it's the current user's group (shouldn't happen, but just in case)
-            if (candidate && candidate.userId !== user?.id && candidate.userHandle !== user?.handle) {
+            // When viewing own stories, skip looping back to own group. Otherwise allow any group.
+            if (
+                candidate &&
+                (!isViewingOwnStories ||
+                    (candidate.userId !== user?.id && candidate.userHandle !== user?.handle))
+            ) {
                 nextGroupIndex = i;
                 nextGroup = candidate;
                 break;
             }
         }
         
-        // If no next group found after current index, search from the beginning (but skip user's own group)
+        // If no next group found after current index, search from the beginning
         if (nextGroupIndex === -1) {
             for (let i = 0; i < currentIdx; i++) {
                 const candidate = currentGroups[i];
-                if (candidate && candidate.userId !== user?.id && candidate.userHandle !== user?.handle) {
+                if (
+                    candidate &&
+                    (!isViewingOwnStories ||
+                        (candidate.userId !== user?.id && candidate.userHandle !== user?.handle))
+                ) {
                     nextGroupIndex = i;
                     nextGroup = candidate;
                     break;
@@ -339,14 +433,14 @@ export default function StoriesPage() {
                             });
                         } else {
                             console.warn('Next user group has no stories after fetching, trying next group or closing');
-                            // Try to find next group with stories (excluding user's own group), or close
+                            // Try to find next group with stories, or close
                             setStoryGroups(prev => {
-                                // Find next group after nextGroupIndex that's not the user's own group
-                                const nextGroupWithStories = prev.find((g, idx) => 
-                                    idx > nextGroupIndex && 
-                                    g.userId !== user?.id && 
-                                    g.userHandle !== user?.handle &&
-                                    g.stories && 
+                                // Find next group after nextGroupIndex (optionally skipping user's own group)
+                                const nextGroupWithStories = prev.find((g, idx) =>
+                                    idx > nextGroupIndex &&
+                                    (!isViewingOwnStories ||
+                                        (g.userId !== user?.id && g.userHandle !== user?.handle)) &&
+                                    g.stories &&
                                     g.stories.length > 0
                                 );
                                 if (nextGroupWithStories) {
@@ -718,9 +812,11 @@ export default function StoriesPage() {
         }
         // If same story, preserve elapsedTimeRef (for resuming after vote)
 
-        // Mark story as viewed
-        markStoryViewed(currentStory.id, user.id).catch(console.error);
-        incrementStoryViews(currentStory.id).catch(console.error);
+        // Mark story as viewed for real user stories only (skip Gazetteer mock stories)
+        if (currentStory.userId !== GAZETTEER_WORLD_USER_ID) {
+            markStoryViewed(currentStory.id, user.id).catch(console.error);
+            incrementStoryViews(currentStory.id).catch(console.error);
+        }
 
         // Progress bar animation (15 seconds per story)
         const duration = 15000;
@@ -831,9 +927,13 @@ export default function StoriesPage() {
 
             if (currentStory?.mediaType === 'video') {
                 if (paused) {
-                    videoRef.current.pause().catch(() => { });
+                    Promise
+                        .resolve(videoRef.current.pause())
+                        .catch(() => { /* ignore */ });
                 } else {
-                    videoRef.current.play().catch(() => { });
+                    Promise
+                        .resolve(videoRef.current.play())
+                        .catch(() => { /* ignore */ });
                 }
             }
         } catch (error) {
@@ -1153,10 +1253,7 @@ export default function StoriesPage() {
                                                         >
                                                             {mediaIsVideo ? (
                                                                 <video
-                                                                    ref={(el) => {
-                                                                        videoRef.current = el;
-                                                                        setHasVideo(el !== null);
-                                                                    }}
+                                                                    ref={videoRef}
                                                                     src={mediaUrl}
                                                                     className="w-full h-auto object-cover"
                                                                     autoPlay
@@ -1177,7 +1274,9 @@ export default function StoriesPage() {
                                                                             if (!isMuted) {
                                                                                 video.muted = false;
                                                                                 if (video.paused) {
-                                                                                    video.play().catch(console.error);
+                                                                                    Promise
+                                                                                        .resolve(video.play())
+                                                                                        .catch(() => { /* ignore */ });
                                                                                 }
                                                                             }
                                                                         }
@@ -1368,10 +1467,7 @@ export default function StoriesPage() {
                                     if (currentStory?.mediaUrl) {
                                         return currentStory.mediaType === 'video' ? (
                                             <video
-                                                ref={(el) => {
-                                                    videoRef.current = el;
-                                                    setHasVideo(el !== null);
-                                                }}
+                                                ref={videoRef}
                                                 src={currentStory.mediaUrl}
                                                 className="w-full h-full object-cover"
                                                 autoPlay
@@ -3187,10 +3283,10 @@ export default function StoriesPage() {
                                             setQuestionAnswer('');
                                             setPaused(false);
                                             pausedRef.current = false;
-                                            showToast('Answer sent!', 'success');
+                                            showToast('Answer sent!');
                                         } catch (error) {
                                             console.error('Error submitting answer:', error);
-                                            showToast('Failed to send answer. Please try again.', 'error');
+                                            showToast('Failed to send answer. Please try again.');
                                         }
                                     }}
                                     disabled={!questionAnswer.trim()}
@@ -3470,7 +3566,58 @@ export default function StoriesPage() {
                 </div>
             ) : (
                 <div className="grid grid-cols-4 gap-2">
-                    {/* Current user's card - always first */}
+                    {/* Gazetteer world highlights - always first for everyone */}
+                    {(() => {
+                        const gazetteerGroup = storyGroups.find(
+                            g => g.userId === GAZETTEER_WORLD_USER_ID || g.userHandle === GAZETTEER_WORLD_HANDLE
+                        );
+                        if (!gazetteerGroup || !gazetteerGroup.stories || gazetteerGroup.stories.length === 0) return null;
+
+                        const hasUnviewed = gazetteerGroup.stories.some(s => !s.hasViewed);
+
+                        return (
+                            <button
+                                key="gazetteer-world-highlights"
+                                onClick={() => startViewingStories(gazetteerGroup)}
+                                className={`relative aspect-[9/16] rounded-lg overflow-hidden bg-gray-900 group cursor-pointer border focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-black ${
+                                    hasUnviewed ? 'border-transparent' : 'border-gray-700'
+                                }`}
+                                style={
+                                    hasUnviewed
+                                        ? {
+                                              background:
+                                                  'linear-gradient(to right, rgb(16, 185, 129), rgb(59, 130, 246))',
+                                              padding: '2px',
+                                          }
+                                        : {}
+                                }
+                            >
+                                <div
+                                    className={`relative w-full h-full rounded-lg overflow-hidden ${
+                                        hasUnviewed ? 'bg-gray-900' : ''
+                                    }`}
+                                >
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+                                        <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-white/40 shadow-lg mb-3">
+                                            <img
+                                                src="/gazetteer logo 1/gazetteer logo 1.jpg"
+                                                alt="Gazetteer World Highlights"
+                                                className="w-full h-full object-cover"
+                                            />
+                                        </div>
+                                        <p className="text-[11px] font-semibold text-white text-center px-2 leading-tight">
+                                            Gazetteer@world highlights
+                                        </p>
+                                        <p className="mt-1 text-[9px] text-emerald-300 text-center px-3 leading-tight">
+                                            World stories curated for everyone
+                                        </p>
+                                    </div>
+                                </div>
+                            </button>
+                        );
+                    })()}
+
+                    {/* Current user's card - always first after Gazetteer */}
                     {(() => {
                         // Always show user's card, even if not in sortedGroups
                         const currentUserGroup = sortedGroups.find(g => g.userId === user?.id || g.userHandle === user?.handle) 
@@ -3648,8 +3795,14 @@ export default function StoriesPage() {
                     
                     {/* Other users' story cards */}
                     {sortedGroups
-                        .filter(group => group.userId !== user?.id && group.userHandle !== user?.handle)
-                        .map((group, index) => {
+                        .filter(
+                            group =>
+                                group.userId !== user?.id &&
+                                group.userHandle !== user?.handle &&
+                                group.userId !== GAZETTEER_WORLD_USER_ID &&
+                                group.userHandle !== GAZETTEER_WORLD_HANDLE
+                        )
+                        .map((group) => {
                         if (!group.stories || group.stories.length === 0) return null;
 
                         const isUnviewed = group.stories.some(s => !s.hasViewed);

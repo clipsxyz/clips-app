@@ -681,7 +681,8 @@ function PostHeader({ post, onFollow, isOverlaid = false, onMenuClick }: {
 
   // Check if this is the current user's post
   const isCurrentUser = user?.handle === post.userHandle;
-  const avatarSrc = isCurrentUser ? user?.avatarUrl : undefined;
+  // Use current user's avatarUrl if it's their post, otherwise get from handle
+  const avatarSrc = isCurrentUser ? user?.avatarUrl : getAvatarForHandle(post.userHandle);
 
   // Check if user has unviewed stories using API
   React.useEffect(() => {
