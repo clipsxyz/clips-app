@@ -3,11 +3,13 @@ export interface ChatMessage {
     senderHandle: string;
     text?: string;
     imageUrl?: string;
+    audioUrl?: string; // For voice/audio messages
     timestamp: number;
     isSystemMessage?: boolean;
     postId?: string; // For comment notifications - the post that was commented on
     commentId?: string; // For comment notifications - the comment ID
     commentText?: string; // For comment notifications - the comment text
+    replyTo?: { messageId: string; text: string; senderHandle: string; imageUrl?: string }; // Reply to another message
 }
 
 type ConversationId = string; // sorted `${a}|${b}`
@@ -17,6 +19,10 @@ const conversations = new Map<ConversationId, ChatMessage[]>();
 const unreadByHandle = new Map<string, number>();
 // Track per-thread last read timestamps per user: `${user}::${other}` => timestamp
 const lastReadByThread = new Map<string, number>();
+// Track pinned conversations per user: userHandle => Set<otherHandle>
+const pinnedConversations = new Map<string, Set<string>>();
+// Track message requests per user: userHandle => Set<senderHandle>
+const messageRequests = new Map<string, Set<string>>();
 
 function getConversationId(a: string, b: string): ConversationId {
     return [a, b].sort((x, y) => x.localeCompare(y)).join('|');
@@ -35,11 +41,13 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
         senderHandle: from,
         text: message.text,
         imageUrl: message.imageUrl,
+        audioUrl: message.audioUrl, // Support audio messages
         isSystemMessage: message.isSystemMessage,
         timestamp: message.timestamp ?? Date.now(),
         postId: message.postId, // Preserve postId for comment notifications
         commentId: message.commentId, // Preserve commentId for comment notifications
-        commentText: message.commentText // Preserve commentText for comment notifications
+        commentText: message.commentText, // Preserve commentText for comment notifications
+        replyTo: message.replyTo // Preserve replyTo data
     };
     list.push(msg);
     conversations.set(id, list);
@@ -70,7 +78,12 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
         });
     }
 
-    // Dispatch events so UI can update/notify
+    // Dispatch events via Socket.IO (with fallback to Custom Events)
+    const { emitMessage, emitInboxUnreadChanged } = await import('../services/socketio');
+    emitMessage(from, to, msg);
+    emitInboxUnreadChanged(to, unreadByHandle.get(to) || 0);
+    
+    // Also dispatch Custom Events as fallback for compatibility
     window.dispatchEvent(new CustomEvent('conversationUpdated', { detail: { participants: [from, to], message: msg } }));
     window.dispatchEvent(new CustomEvent('inboxUnreadChanged', { detail: { handle: to, unread: unreadByHandle.get(to) || 0 } }));
     return msg;
@@ -78,6 +91,37 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
 
 export async function appendSystemNotice(to: string, from: string, text: string): Promise<void> {
     await appendMessage(from, to, { text, isSystemMessage: true });
+}
+
+// Edit an existing message
+export async function editMessage(messageId: string, newText: string, from: string, to: string): Promise<ChatMessage | null> {
+    const id = getConversationId(from, to);
+    const list = conversations.get(id) || [];
+    const messageIndex = list.findIndex(msg => msg.id === messageId);
+    
+    if (messageIndex === -1) {
+        return null; // Message not found
+    }
+    
+    // Only allow editing your own messages
+    if (list[messageIndex].senderHandle !== from) {
+        throw new Error('Cannot edit messages from other users');
+    }
+    
+    // Update the message
+    const updatedMessage: ChatMessage = {
+        ...list[messageIndex],
+        text: newText,
+        // Mark as edited (we'll add this to the interface if needed)
+    };
+    
+    list[messageIndex] = updatedMessage;
+    conversations.set(id, list);
+    
+    // Dispatch event for UI update
+    window.dispatchEvent(new CustomEvent('conversationUpdated', { detail: { participants: [from, to], message: updatedMessage } }));
+    
+    return updatedMessage;
 }
 
 export async function getUnreadTotal(handle: string): Promise<number> {
@@ -88,6 +132,8 @@ export async function markConversationRead(selfHandle: string, otherHandle: stri
     const key = `${selfHandle}::${otherHandle}`;
     lastReadByThread.set(key, Date.now());
     unreadByHandle.set(selfHandle, await computeUnreadTotal(selfHandle));
+    const { emitInboxUnreadChanged } = await import('../services/socketio');
+    emitInboxUnreadChanged(selfHandle, unreadByHandle.get(selfHandle) || 0);
     window.dispatchEvent(new CustomEvent('inboxUnreadChanged', { detail: { handle: selfHandle, unread: unreadByHandle.get(selfHandle) || 0 } }));
 }
 
@@ -95,10 +141,17 @@ export interface ConversationSummary {
     otherHandle: string;
     lastMessage?: ChatMessage;
     unread: number;
+    isPinned?: boolean;
+    isRequest?: boolean; // True if this is a message request from a non-follower
+    hasUnviewedStories?: boolean; // True if the other user has unviewed stories
+    isFollowing?: boolean; // True if current user is following the other user
 }
 
 export async function listConversations(forHandle: string): Promise<ConversationSummary[]> {
-    const summaries = new Map<string, { last?: ChatMessage; unread: number }>();
+    const summaries = new Map<string, { last?: ChatMessage; unread: number; isRequest?: boolean }>();
+    const pinned = pinnedConversations.get(forHandle) || new Set<string>();
+    const requests = messageRequests.get(forHandle) || new Set<string>();
+    
     conversations.forEach((msgs, id) => {
         const [a, b] = id.split('|');
         if (a !== forHandle && b !== forHandle) return;
@@ -109,10 +162,178 @@ export async function listConversations(forHandle: string): Promise<Conversation
         const unread = sorted.filter(m => m.senderHandle !== forHandle && m.timestamp > lastRead && !m.isSystemMessage).length;
         const existing = summaries.get(other) || { last: undefined, unread: 0 };
         const betterLast = !existing.last || (last && last.timestamp > existing.last.timestamp) ? last : existing.last;
-        summaries.set(other, { last: betterLast, unread });
+        const isRequest = requests.has(other);
+        summaries.set(other, { last: betterLast, unread, isRequest });
     });
-    return Array.from(summaries.entries()).map(([otherHandle, v]) => ({ otherHandle, lastMessage: v.last, unread: v.unread }))
-        .sort((a, b) => (b.lastMessage?.timestamp || 0) - (a.lastMessage?.timestamp || 0));
+    
+    // Check for unviewed stories and follow status for each conversation
+    const { userHasUnviewedStoriesByHandle } = await import('./stories');
+    const { getFollowedUsers } = await import('./posts');
+    
+    // Get current user's followed users (need userId - will be passed from component)
+    // For now, we'll check follow status in the component where we have userId
+    const allConversations = await Promise.all(
+        Array.from(summaries.entries()).map(async ([otherHandle, v]) => {
+            const hasUnviewedStories = await userHasUnviewedStoriesByHandle(otherHandle);
+            return {
+                otherHandle,
+                lastMessage: v.last,
+                unread: v.unread,
+                isPinned: pinned.has(otherHandle),
+                isRequest: v.isRequest || false,
+                hasUnviewedStories
+            };
+        })
+    );
+    
+    // Sort: pinned first, then by timestamp
+    return allConversations.sort((a, b) => {
+        if (a.isPinned && !b.isPinned) return -1;
+        if (!a.isPinned && b.isPinned) return 1;
+        return (b.lastMessage?.timestamp || 0) - (a.lastMessage?.timestamp || 0);
+    });
+}
+
+// Pin/unpin conversation
+export async function pinConversation(userHandle: string, otherHandle: string): Promise<void> {
+    const pinned = pinnedConversations.get(userHandle) || new Set<string>();
+    pinned.add(otherHandle);
+    pinnedConversations.set(userHandle, pinned);
+    const { emitConversationUpdate } = await import('../services/socketio');
+    emitConversationUpdate({ participants: [userHandle, otherHandle], updateType: 'pin' });
+    window.dispatchEvent(new CustomEvent('conversationUpdated'));
+}
+
+export async function unpinConversation(userHandle: string, otherHandle: string): Promise<void> {
+    const pinned = pinnedConversations.get(userHandle);
+    if (pinned) {
+        pinned.delete(otherHandle);
+        pinnedConversations.set(userHandle, pinned);
+        const { emitConversationUpdate } = await import('../services/socketio');
+        emitConversationUpdate({ participants: [userHandle, otherHandle], updateType: 'unpin' });
+        window.dispatchEvent(new CustomEvent('conversationUpdated'));
+    }
+}
+
+// Add message request (when non-follower sends a message)
+export async function addMessageRequest(recipientHandle: string, senderHandle: string): Promise<void> {
+    const requests = messageRequests.get(recipientHandle) || new Set<string>();
+    requests.add(senderHandle);
+    messageRequests.set(recipientHandle, requests);
+    window.dispatchEvent(new CustomEvent('conversationUpdated'));
+}
+
+// Accept message request (when user accepts/follows)
+export async function acceptMessageRequest(userHandle: string, otherHandle: string): Promise<void> {
+    const requests = messageRequests.get(userHandle);
+    if (requests) {
+        requests.delete(otherHandle);
+        messageRequests.set(userHandle, requests);
+        const { emitConversationUpdate } = await import('../services/socketio');
+        emitConversationUpdate({ participants: [userHandle, otherHandle], updateType: 'accept' });
+        window.dispatchEvent(new CustomEvent('conversationUpdated'));
+    }
+}
+
+// Track muted conversations per user: userHandle => Set<otherHandle>
+const mutedConversations = new Map<string, Set<string>>();
+
+// Track blocked users per user: userHandle => Set<blockedHandle>
+const blockedUsers = new Map<string, Set<string>>();
+
+// Mute/unmute conversation notifications
+export async function muteConversation(userHandle: string, otherHandle: string): Promise<void> {
+    const muted = mutedConversations.get(userHandle) || new Set<string>();
+    muted.add(otherHandle);
+    mutedConversations.set(userHandle, muted);
+    window.dispatchEvent(new CustomEvent('conversationUpdated'));
+}
+
+export async function unmuteConversation(userHandle: string, otherHandle: string): Promise<void> {
+    const muted = mutedConversations.get(userHandle);
+    if (muted) {
+        muted.delete(otherHandle);
+        mutedConversations.set(userHandle, muted);
+        const { emitConversationUpdate } = await import('../services/socketio');
+        emitConversationUpdate({ participants: [userHandle, otherHandle], updateType: 'unmute' });
+        window.dispatchEvent(new CustomEvent('conversationUpdated'));
+    }
+}
+
+export async function isConversationMuted(userHandle: string, otherHandle: string): Promise<boolean> {
+    const muted = mutedConversations.get(userHandle);
+    return muted ? muted.has(otherHandle) : false;
+}
+
+// Block/unblock user
+export async function blockUser(userHandle: string, blockedHandle: string): Promise<void> {
+    const blocked = blockedUsers.get(userHandle) || new Set<string>();
+    blocked.add(blockedHandle);
+    blockedUsers.set(userHandle, blocked);
+    
+    // Also delete the conversation when blocking
+    const id = getConversationId(userHandle, blockedHandle);
+    conversations.delete(id);
+    
+    // Remove from pinned if pinned
+    const pinned = pinnedConversations.get(userHandle);
+    if (pinned) {
+        pinned.delete(blockedHandle);
+    }
+    
+    // Remove from muted if muted
+    const muted = mutedConversations.get(userHandle);
+    if (muted) {
+        muted.delete(blockedHandle);
+    }
+    
+    // Recompute unread
+    unreadByHandle.set(userHandle, await computeUnreadTotal(userHandle));
+    
+    window.dispatchEvent(new CustomEvent('conversationUpdated'));
+}
+
+export async function unblockUser(userHandle: string, blockedHandle: string): Promise<void> {
+    const blocked = blockedUsers.get(userHandle);
+    if (blocked) {
+        blocked.delete(blockedHandle);
+        blockedUsers.set(userHandle, blocked);
+        const { emitConversationUpdate } = await import('../services/socketio');
+        emitConversationUpdate({ participants: [userHandle, blockedHandle], updateType: 'unblock' });
+        window.dispatchEvent(new CustomEvent('conversationUpdated'));
+    }
+}
+
+export async function isUserBlocked(userHandle: string, otherHandle: string): Promise<boolean> {
+    const blocked = blockedUsers.get(userHandle);
+    return blocked ? blocked.has(otherHandle) : false;
+}
+
+// Delete conversation
+export async function deleteConversation(userHandle: string, otherHandle: string): Promise<void> {
+    const id = getConversationId(userHandle, otherHandle);
+    conversations.delete(id);
+    
+    // Remove from pinned if pinned
+    const pinned = pinnedConversations.get(userHandle);
+    if (pinned) {
+        pinned.delete(otherHandle);
+    }
+    
+    // Remove from muted if muted
+    const muted = mutedConversations.get(userHandle);
+    if (muted) {
+        muted.delete(otherHandle);
+    }
+    
+    // Recompute unread
+    unreadByHandle.set(userHandle, await computeUnreadTotal(userHandle));
+    
+    const { emitConversationUpdate, emitInboxUnreadChanged } = await import('../services/socketio');
+    emitConversationUpdate({ participants: [userHandle, otherHandle], updateType: 'delete' });
+    emitInboxUnreadChanged(userHandle, unreadByHandle.get(userHandle) || 0);
+    window.dispatchEvent(new CustomEvent('conversationUpdated'));
+    window.dispatchEvent(new CustomEvent('inboxUnreadChanged', { detail: { handle: userHandle, unread: unreadByHandle.get(userHandle) || 0 } }));
 }
 
 async function computeUnreadTotal(handle: string): Promise<number> {

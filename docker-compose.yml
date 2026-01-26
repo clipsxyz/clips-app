@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  # Frontend Application
+  clips-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Socket.IO URL for browser clients (use localhost since browser connects from outside container)
+        VITE_SOCKETIO_URL: http://localhost:3001
+    container_name: clips-app
+    ports:
+      - "80:80"
+    restart: unless-stopped
+    depends_on:
+      - socketio-server
+    networks:
+      - clips-network
+
+  # Socket.IO Server for DMs
+  socketio-server:
+    build:
+      context: ./socketio-server
+      dockerfile: Dockerfile
+    container_name: socketio-dm-server
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+    restart: unless-stopped
+    networks:
+      - clips-network
+
+networks:
+  clips-network:
+    driver: bridge

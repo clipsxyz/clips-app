@@ -1021,3 +1021,90 @@ export async function isStoryMediaActive(mediaUrl: string): Promise<boolean> {
 export function wasEverAStory(mediaUrl: string): boolean {
     return stories.some(s => s.mediaUrl === mediaUrl);
 }
+
+// Seed mock 24hr stories for a user (for testing)
+export async function seedMockStoriesForUser(userHandle: string, userId: string = `user-${userHandle}`): Promise<void> {
+    const now = Date.now();
+    const expiresAt = now + (24 * 60 * 60 * 1000); // 24 hours from now
+    
+    const mockStories: Story[] = [
+        {
+            id: `story-${userHandle}-1-${Date.now()}`,
+            userId: userId,
+            userHandle: userHandle,
+            text: 'Just posted a new story! 📸',
+            textStyle: {
+                color: '#ffffff',
+                size: 'medium',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+            },
+            createdAt: now - 10000,
+            expiresAt: expiresAt - 10000,
+            views: 0,
+            hasViewed: false,
+            reactions: [],
+            replies: [],
+            userReaction: undefined
+        },
+        {
+            id: `story-${userHandle}-2-${Date.now()}`,
+            userId: userId,
+            userHandle: userHandle,
+            mediaUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800',
+            mediaType: 'image',
+            createdAt: now - 5000,
+            expiresAt: expiresAt - 5000,
+            views: 0,
+            hasViewed: false,
+            reactions: [],
+            replies: [],
+            userReaction: undefined,
+            stickers: [
+                {
+                    id: `text-sticker-${userHandle}-1`,
+                    stickerId: `text-sticker-${userHandle}-1`,
+                    sticker: {
+                        id: `text-sticker-${userHandle}-1`,
+                        name: 'Check this out! 🎉',
+                        category: 'Text',
+                        emoji: undefined,
+                        url: undefined,
+                        isTrending: false
+                    },
+                    x: 50,
+                    y: 75,
+                    scale: 1.0,
+                    rotation: 0,
+                    opacity: 1,
+                    textContent: 'Check this out! 🎉',
+                    textColor: '#FFFFFF',
+                    fontSize: 'medium'
+                }
+            ]
+        },
+        {
+            id: `story-${userHandle}-3-${Date.now()}`,
+            userId: userId,
+            userHandle: userHandle,
+            text: 'Another story update! ✨',
+            textStyle: {
+                color: '#ffffff',
+                size: 'large',
+                background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)'
+            },
+            createdAt: now - 2000,
+            expiresAt: expiresAt - 2000,
+            views: 0,
+            hasViewed: false,
+            reactions: [],
+            replies: [],
+            userReaction: undefined
+        }
+    ];
+    
+    // Add stories to the array
+    stories.push(...mockStories);
+    
+    // Dispatch event to update UI
+    window.dispatchEvent(new CustomEvent('storiesUpdated'));
+}

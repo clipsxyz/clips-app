@@ -1,24 +1,29 @@
 import React, { useState } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { FiChevronLeft, FiSend, FiCornerUpLeft, FiCopy, FiMoreHorizontal, FiMapPin } from 'react-icons/fi';
+import { FiChevronLeft, FiSend, FiCornerUpLeft, FiCopy, FiMoreHorizontal, FiMapPin, FiEdit3, FiX, FiMic, FiUserPlus } from 'react-icons/fi';
 import { IoMdPhotos } from 'react-icons/io';
 import { BsEmojiSmile } from 'react-icons/bs';
 import { FaPaperPlane, FaExclamationCircle } from 'react-icons/fa';
 import { MdStickyNote2, MdTranslate } from 'react-icons/md';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
-import { fetchConversation, appendMessage, type ChatMessage, markConversationRead } from '../api/messages';
+import { fetchConversation, appendMessage, editMessage, type ChatMessage, markConversationRead, deleteConversation, blockUser, muteConversation, unmuteConversation, isConversationMuted } from '../api/messages';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
-import { isStoryMediaActive, wasEverAStory } from '../api/stories';
+import { isStoryMediaActive, wasEverAStory, userHasUnviewedStoriesByHandle } from '../api/stories';
 import { getPostById } from '../api/posts';
 import type { Post } from '../types';
 import Flag from '../components/Flag';
 import { timeAgo } from '../utils/timeAgo';
 import { showToast } from '../utils/toast';
+import { getSocket } from '../services/socketio';
 
 interface MessageUI extends ChatMessage {
     isFromMe: boolean;
     senderAvatar?: string;
+    reactions?: { emoji: string; users: string[] }[];
+    replyTo?: { messageId: string; text: string; senderHandle: string; imageUrl?: string };
+    edited?: boolean;
+    read?: boolean;
 }
 
 // Helper function to parse question messages
@@ -402,6 +407,7 @@ export default function MessagesPage() {
     }, [location.state, handle]);
     const [loading, setLoading] = useState(true);
     const [otherUserAvatar, setOtherUserAvatar] = useState<string | undefined>(undefined);
+    const [hasUnviewedStories, setHasUnviewedStories] = useState(false);
     const [sharedPosts, setSharedPosts] = useState<Record<string, Post>>({});
     const fileInputRef = React.useRef<HTMLInputElement>(null);
     const listRef = React.useRef<HTMLDivElement>(null);
@@ -416,6 +422,103 @@ export default function MessagesPage() {
 
     // Sticker picker state
     const [showStickerPicker, setShowStickerPicker] = useState(false);
+    
+    // Message reactions state (messageId -> { emoji: string, users: string[] }[])
+    const [messageReactions, setMessageReactions] = useState<Record<string, { emoji: string; users: string[] }[]>>({});
+    
+    // Reply state
+    const [replyingTo, setReplyingTo] = useState<MessageUI | null>(null);
+    
+    // Forward state
+    const [forwardingMessage, setForwardingMessage] = useState<MessageUI | null>(null);
+    const [availableConversations, setAvailableConversations] = useState<Array<{ otherHandle: string; lastMessage?: ChatMessage }>>([]);
+    
+    // Translation state
+    const [translatedMessages, setTranslatedMessages] = useState<Record<string, string>>({});
+    
+    // Report state
+    const [reportingMessage, setReportingMessage] = useState<MessageUI | null>(null);
+    const [reportReason, setReportReason] = useState<string>('');
+    
+    // Chat info modal state
+    const [showChatInfo, setShowChatInfo] = useState(false);
+    const [isMuted, setIsMuted] = useState(false);
+    
+    // Edit state
+    const [editingMessage, setEditingMessage] = useState<MessageUI | null>(null);
+    
+    // Typing indicator
+    const [isTyping, setIsTyping] = useState(false);
+    
+    // Voice message state
+    const [isRecording, setIsRecording] = useState(false);
+    const [recordingTime, setRecordingTime] = useState(0);
+    const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
+    const audioChunksRef = React.useRef<Blob[]>([]);
+    const recordingTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+    
+    // Vanish mode state
+    const [vanishMode, setVanishMode] = useState(false);
+    
+    // Start voice recording
+    const handleStartRecording = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const mediaRecorder = new MediaRecorder(stream);
+            mediaRecorderRef.current = mediaRecorder;
+            audioChunksRef.current = [];
+            
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    audioChunksRef.current.push(event.data);
+                }
+            };
+            
+            mediaRecorder.onstop = async () => {
+                const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+                // Convert to data URL for storage (in production, upload to server and get URL)
+                const reader = new FileReader();
+                reader.onloadend = async () => {
+                    const base64Audio = reader.result as string;
+                    if (user?.handle && handle) {
+                        await appendMessage(user.handle, handle, {
+                            text: `🎤 Voice Message`,
+                            audioUrl: base64Audio // Use audioUrl field for voice messages
+                        });
+                        scrollToBottom();
+                    }
+                };
+                reader.readAsDataURL(audioBlob);
+                
+                stream.getTracks().forEach(track => track.stop());
+            };
+            
+            mediaRecorder.start();
+            setIsRecording(true);
+            setRecordingTime(0);
+            
+            // Start timer
+            recordingTimerRef.current = setInterval(() => {
+                setRecordingTime(prev => prev + 1);
+            }, 1000);
+        } catch (error) {
+            console.error('Error starting recording:', error);
+            showToast?.('Failed to start recording. Please check microphone permissions.');
+        }
+    };
+    
+    // Stop voice recording
+    const handleStopRecording = () => {
+        if (mediaRecorderRef.current && isRecording) {
+            mediaRecorderRef.current.stop();
+            setIsRecording(false);
+            if (recordingTimerRef.current) {
+                clearInterval(recordingTimerRef.current);
+                recordingTimerRef.current = null;
+            }
+            setRecordingTime(0);
+        }
+    };
 
     const scrollToBottom = React.useCallback(() => {
         const el = listRef.current;
@@ -445,6 +548,7 @@ export default function MessagesPage() {
     const lastMessageIdRef = React.useRef<string | null>(null);
     const lastMessageCountRef = React.useRef<number>(0);
     const lastMessageRef = React.useRef<HTMLDivElement | null>(null);
+    const isSendingMessageRef = React.useRef<boolean>(false); // Track if we're currently sending a message
 
     // Auto-scroll to bottom whenever messages change
     // Use useLayoutEffect for immediate DOM updates
@@ -458,146 +562,31 @@ export default function MessagesPage() {
             const countChanged = currentCount !== lastMessageCountRef.current;
             const lastIdChanged = currentLastId !== lastMessageIdRef.current;
 
-            if (countChanged || lastIdChanged) {
+            // Skip auto-scroll if we're in the middle of sending our own message (to prevent jerking)
+            // Only scroll if it's a new message from someone else, or if we're not currently sending
+            const shouldScroll = (countChanged || lastIdChanged) && !isSendingMessageRef.current;
+
+            if (shouldScroll) {
                 lastMessageCountRef.current = currentCount;
                 lastMessageIdRef.current = currentLastId;
 
-                // Force scroll to bottom - use requestAnimationFrame for immediate execution
-                const forceScroll = () => {
+                // Simple, smooth scroll to bottom - single attempt to prevent jerking
+                requestAnimationFrame(() => {
                     const el = listRef.current;
                     if (!el) return;
 
-                    const scrollHeight = el.scrollHeight;
-
-                    // Find the input bar element to get its actual height
-                    const inputBar = document.querySelector('.fixed.bottom-0.bg-gray-900');
-                    const inputBarHeight = inputBar ? inputBar.getBoundingClientRect().height : 80;
-
-                    // Force scroll to absolute bottom - try multiple methods
-                    // Method 1: Direct assignment
-                    el.scrollTop = scrollHeight;
-
-                    // Method 2: scrollTo method
-                    el.scrollTo({
-                        top: scrollHeight,
-                        behavior: 'instant'
-                    });
-
-                    // Method 3: scrollTop assignment after a frame
-                    requestAnimationFrame(() => {
-                        el.scrollTop = scrollHeight;
-                    });
-
-                    // Also try scrollIntoView on last message - this is often more reliable
                     const lastMsgEl = lastMessageRef.current;
                     if (lastMsgEl) {
-                        // Use scrollIntoView with block: 'end' to scroll the message into view
-                        requestAnimationFrame(() => {
-                            lastMsgEl.scrollIntoView({
-                                behavior: 'instant',
-                                block: 'end',
-                                inline: 'nearest'
-                            });
-
-                            // Calculate exact scroll position to place message above input bar
-                            // Use requestAnimationFrame to ensure DOM is ready
-                            requestAnimationFrame(() => {
-                                setTimeout(() => {
-                                    const lastMsgRect = lastMsgEl.getBoundingClientRect();
-                                    const containerRect = el.getBoundingClientRect();
-                                    const viewportHeight = window.innerHeight;
-
-                                    // Get the actual input bar height dynamically
-                                    const inputBar = document.querySelector('.fixed.bottom-0.bg-gray-900');
-                                    const actualInputBarHeight = inputBar ? inputBar.getBoundingClientRect().height : inputBarHeight;
-                                    const inputBarTop = viewportHeight - actualInputBarHeight;
-
-                                    // Calculate message position relative to container
-                                    const messageTopRelative = lastMsgRect.top - containerRect.top + el.scrollTop;
-                                    const messageBottomRelative = messageTopRelative + lastMsgRect.height;
-
-                                    // Calculate visible container height (above input bar)
-                                    const visibleContainerHeight = inputBarTop - containerRect.top;
-
-                                    // We want the entire message (including its height) to be above the footer with padding
-                                    // Target: message bottom should be at visibleContainerHeight - padding
-                                    // But we need to account for the message's full height
-                                    const padding = 150; // Extra padding above input bar to ensure full visibility (increased significantly)
-                                    const targetMessageBottom = visibleContainerHeight - padding;
-
-                                    // Calculate the exact scroll position needed
-                                    // We want: messageBottomRelative - scrollTop = targetMessageBottom
-                                    // So: scrollTop = messageBottomRelative - targetMessageBottom
-                                    const targetScrollTop = messageBottomRelative - targetMessageBottom;
-
-                                    // Always scroll to ensure message is visible above footer
-                                    // Force scroll using multiple methods
-                                    el.scrollTop = targetScrollTop;
-                                    el.scrollTo({ top: targetScrollTop, behavior: 'instant' });
-
-                                    // Also try after a frame to ensure it sticks
-                                    requestAnimationFrame(() => {
-                                        el.scrollTop = targetScrollTop;
-                                        el.scrollTo({ top: targetScrollTop, behavior: 'instant' });
-                                    });
-
-                                    if (targetScrollTop > el.scrollTop) {
-
-
-                                        // Double-check after a delay and make a final adjustment if needed
-                                        setTimeout(() => {
-                                            const finalMsgRect = lastMsgEl.getBoundingClientRect();
-                                            const finalContainerRect = el.getBoundingClientRect();
-                                            const finalInputBar = document.querySelector('.fixed.bottom-0.bg-gray-900');
-                                            const finalInputBarHeight = finalInputBar ? finalInputBar.getBoundingClientRect().height : actualInputBarHeight;
-                                            const finalInputBarTop = window.innerHeight - finalInputBarHeight;
-                                            const finalVisibleContainerHeight = finalInputBarTop - finalContainerRect.top;
-                                            const finalPadding = 180; // Extra padding for final adjustment to ensure full visibility (increased significantly)
-                                            const finalTargetMessageBottom = finalVisibleContainerHeight - finalPadding;
-
-                                            const finalMessageTopRelative = finalMsgRect.top - finalContainerRect.top + el.scrollTop;
-                                            const finalMessageBottomRelative = finalMessageTopRelative + finalMsgRect.height;
-
-                                            if (finalMessageBottomRelative > el.scrollTop + finalTargetMessageBottom) {
-                                                const finalTargetScrollTop = finalMessageBottomRelative - finalTargetMessageBottom;
-
-                                                // Force scroll using multiple methods
-                                                el.scrollTop = finalTargetScrollTop;
-                                                el.scrollTo({ top: finalTargetScrollTop, behavior: 'instant' });
-
-                                                // Verify and retry multiple times if needed
-                                                requestAnimationFrame(() => {
-                                                    if (Math.abs(el.scrollTop - finalTargetScrollTop) > 1) {
-
-                                                        // Try multiple scroll methods
-                                                        el.scrollTop = finalTargetScrollTop;
-                                                        el.scrollTo({ top: finalTargetScrollTop, behavior: 'instant' });
-
-                                                        // Try again after a delay
-                                                        setTimeout(() => {
-                                                            el.scrollTop = finalTargetScrollTop;
-                                                            el.scrollTo({ top: finalTargetScrollTop, behavior: 'instant' });
-
-                                                        }, 50);
-                                                    }
-
-                                                });
-                                            }
-                                        }, 150);
-                                    }
-                                }, 50);
-                            });
+                        // Use scrollIntoView for smooth, reliable scrolling
+                        lastMsgEl.scrollIntoView({
+                            behavior: 'smooth',
+                            block: 'end',
+                            inline: 'nearest'
                         });
+                    } else {
+                        // Fallback to scrollTop if no message element
+                        el.scrollTop = el.scrollHeight;
                     }
-                };
-
-                // Try immediately with requestAnimationFrame
-                requestAnimationFrame(() => {
-                    forceScroll();
-                    // Try again after a short delay
-                    setTimeout(forceScroll, 50);
-                    setTimeout(forceScroll, 150);
-                    setTimeout(forceScroll, 300);
                 });
             }
         }
@@ -609,6 +598,9 @@ export default function MessagesPage() {
         if (!el) return;
 
         const observer = new MutationObserver(() => {
+            // Skip if we're currently sending a message (to prevent jerking)
+            if (isSendingMessageRef.current) return;
+            
             // When DOM changes, check if we need to scroll
             const scrollHeight = el.scrollHeight;
             const scrollTop = el.scrollTop;
@@ -711,26 +703,111 @@ export default function MessagesPage() {
         async function loadAvatar() {
             if (!handle) return;
 
-            // Avatar is retrieved via getAvatarForHandle function
-            // No need to fetch from posts
-
-            // Mock avatar for Sarah@Artane
-            if (handle === 'Sarah@Artane') {
-                setOtherUserAvatar('https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=400&fit=crop');
+            // Get avatar using getAvatarForHandle function
+            const avatarUrl = getAvatarForHandle(handle);
+            if (avatarUrl) {
+                setOtherUserAvatar(avatarUrl);
+            } else {
+                // If no avatar found, try fetching from API
+                try {
+                    if (user?.id) {
+                        const { fetchUserProfile } = await import('../api/client');
+                        const profile = await fetchUserProfile(handle, user.id);
+                        if (profile && (profile.avatar_url || profile.avatarUrl)) {
+                            setOtherUserAvatar(profile.avatar_url || profile.avatarUrl);
+                        }
+                    }
+                } catch (error) {
+                    console.warn(`Failed to fetch avatar for ${handle}:`, error);
+                    // Keep undefined to show fallback initial
+                }
             }
         }
 
         loadAvatar();
+    }, [handle, user?.id]);
 
-        // Load conversation from API
+    // Check for unviewed stories
+    React.useEffect(() => {
+        async function checkStories() {
+            if (!handle || !user?.handle) return;
+            try {
+                const hasUnviewed = await userHasUnviewedStoriesByHandle(handle);
+                setHasUnviewedStories(hasUnviewed);
+            } catch (error) {
+                console.error('Error checking stories:', error);
+            }
+        }
+
+        checkStories();
+
+        // Listen for stories viewed event
+        const handleStoriesViewed = (event: CustomEvent) => {
+            if (event.detail?.userHandle === handle) {
+                setHasUnviewedStories(false);
+            }
+        };
+
+        window.addEventListener('storiesViewed', handleStoriesViewed as EventListener);
+
+        return () => {
+            window.removeEventListener('storiesViewed', handleStoriesViewed as EventListener);
+        };
+    }, [handle, user?.handle]);
+
+    // Check if conversation is muted
+    React.useEffect(() => {
+        async function checkMuted() {
+            if (!handle || !user?.handle) return;
+            try {
+                const muted = await isConversationMuted(user.handle, handle);
+                setIsMuted(muted);
+            } catch (error) {
+                console.error('Error checking muted status:', error);
+            }
+        }
+
+        checkMuted();
+    }, [handle, user?.handle]);
+
+    // Listen to Socket.IO events (connection is handled globally in Auth context)
+    React.useEffect(() => {
+        const socket = getSocket();
+        if (socket) {
+            // Listen for conversation updates via Socket.IO
+            const handleConversationUpdate = (data: any) => {
+                const participants: string[] = data.participants || [];
+                if (!participants.includes(user?.handle || '') || !participants.includes(handle || '')) return;
+                
+                // Trigger the existing onUpdate handler
+                window.dispatchEvent(new CustomEvent('conversationUpdated', { detail: data }));
+            };
+            
+            const handleInboxUnreadChanged = (data: any) => {
+                window.dispatchEvent(new CustomEvent('inboxUnreadChanged', { detail: data }));
+            };
+            
+            socket.on('conversationUpdated', handleConversationUpdate);
+            socket.on('inboxUnreadChanged', handleInboxUnreadChanged);
+            
+            return () => {
+                socket.off('conversationUpdated', handleConversationUpdate);
+                socket.off('inboxUnreadChanged', handleInboxUnreadChanged);
+            };
+        }
+    }, [user?.handle, handle]);
+
+    // Load conversation from API
+    React.useEffect(() => {
         if (!handle || !user?.handle) return;
-        fetchConversation(user.handle, handle).then(items => {
+            fetchConversation(user.handle, handle).then(items => {
             // Ensure ascending order by timestamp so latest is at the bottom
             const sorted = [...items].sort((a, b) => a.timestamp - b.timestamp);
             const mapped: MessageUI[] = sorted.map(m => ({
                 ...m,
                 isFromMe: m.senderHandle === user.handle,
-                senderAvatar: m.senderHandle === user.handle ? (user.avatarUrl || getAvatarForHandle(user.handle)) : getAvatarForHandle(handle)
+                senderAvatar: m.senderHandle === user.handle ? (user.avatarUrl || getAvatarForHandle(user.handle)) : getAvatarForHandle(handle),
+                replyTo: m.replyTo // Preserve replyTo data
             }));
             
             // Debug: Log all messages to see their structure
@@ -815,64 +892,152 @@ export default function MessagesPage() {
             const participants: string[] = e.detail?.participants || [];
             if (!participants.includes(user?.handle || '') || !participants.includes(handle || '')) return;
 
+            const newMessage = e.detail?.message;
+            const isOurMessage = newMessage && newMessage.senderHandle === user?.handle;
+
+            // If it's our own message, we already have it optimistically - just update it if needed
+            if (isOurMessage) {
+                setMessages(prev => {
+                    // Check if message already exists (by ID or by matching temp message)
+                    // For images, also match by imageUrl and timestamp
+                    const existingIndex = prev.findIndex(m => {
+                        if (m.id === newMessage.id) return true;
+                        if (m.id.startsWith('temp-') && Math.abs(m.timestamp - newMessage.timestamp) < 2000) {
+                            // Match temp messages by timestamp and content
+                            if (newMessage.imageUrl && m.imageUrl) {
+                                // For images, match by imageUrl (data URLs will be different, so just check both have images)
+                                return true;
+                            }
+                            if (newMessage.text && m.text && m.text === newMessage.text) {
+                                return true;
+                            }
+                            return true; // Match by timestamp alone if close enough
+                        }
+                        return false;
+                    });
+                    
+                    if (existingIndex >= 0) {
+                        // Update existing message without full reload
+                        const updated = [...prev];
+                        const existing = updated[existingIndex];
+                        updated[existingIndex] = {
+                            ...newMessage,
+                            isFromMe: true,
+                            senderAvatar: user!.avatarUrl || getAvatarForHandle(user!.handle),
+                            replyTo: newMessage.replyTo || existing.replyTo, // Preserve replyTo
+                            imageUrl: newMessage.imageUrl || existing.imageUrl // Preserve imageUrl if new one doesn't have it
+                        };
+                        // Clear sending flag after a short delay to allow DOM to settle
+                        setTimeout(() => {
+                            isSendingMessageRef.current = false;
+                        }, 200);
+                        return updated;
+                    }
+                    // If not found, check if we already have a message with the same content to avoid duplicates
+                    const duplicateIndex = prev.findIndex(m => 
+                        m.isFromMe && 
+                        Math.abs(m.timestamp - newMessage.timestamp) < 2000 &&
+                        ((newMessage.imageUrl && m.imageUrl) || (newMessage.text && m.text && m.text === newMessage.text))
+                    );
+                    
+                    if (duplicateIndex >= 0) {
+                        // Update the duplicate instead of adding a new one
+                        const updated = [...prev];
+                        updated[duplicateIndex] = {
+                            ...newMessage,
+                            isFromMe: true,
+                            senderAvatar: user!.avatarUrl || getAvatarForHandle(user!.handle),
+                            replyTo: newMessage.replyTo
+                        };
+                        setTimeout(() => {
+                            isSendingMessageRef.current = false;
+                        }, 200);
+                        return updated;
+                    }
+                    
+                    // If not found and no duplicate, add it
+                    const result = [...prev, {
+                        ...newMessage,
+                        isFromMe: true,
+                        senderAvatar: user!.avatarUrl || getAvatarForHandle(user!.handle),
+                        replyTo: newMessage.replyTo
+                    }].sort((a, b) => a.timestamp - b.timestamp);
+                    // Clear sending flag after a short delay to allow DOM to settle
+                    setTimeout(() => {
+                        isSendingMessageRef.current = false;
+                    }, 200);
+                    return result;
+                });
+                return; // Don't do full reload for our own messages
+            }
+
+            // For other people's messages, do full reload
             fetchConversation(user!.handle!, handle!).then(items => {
                 const sorted = [...items].sort((a, b) => a.timestamp - b.timestamp);
-                const mapped = sorted.map(m => ({
-                    ...m,
-                    isFromMe: m.senderHandle === user!.handle,
-                    senderAvatar: m.senderHandle === user!.handle ? (user!.avatarUrl || getAvatarForHandle(user!.handle)) : getAvatarForHandle(handle!)
-                }));
-
-                // Debug: Log new messages
-                console.log('Live update - new messages:', mapped.map(m => ({
-                    id: m.id,
-                    sender: m.senderHandle,
-                    text: m.text?.substring(0, 30),
-                    postId: m.postId,
-                    commentText: m.commentText,
-                    isSystemMessage: m.isSystemMessage
-                })));
-
-                // Reset the refs so the useEffect will detect the change
-                lastMessageCountRef.current = 0;
-                lastMessageIdRef.current = null;
-                setMessages(mapped);
                 
-                // Detect and fetch shared posts in new messages (from postId field, URLs in text, and comment notifications)
+                // Preserve replyTo from existing messages in state
+                setMessages(prev => {
+                    const replyToMap = new Map(prev.map(m => [m.id, m.replyTo]));
+                    
+                    const mapped: MessageUI[] = sorted.map(m => ({
+                        ...m,
+                        isFromMe: m.senderHandle === user!.handle,
+                        senderAvatar: m.senderHandle === user!.handle ? (user!.avatarUrl || getAvatarForHandle(user!.handle)) : getAvatarForHandle(handle!),
+                        replyTo: m.replyTo || replyToMap.get(m.id) // Use API replyTo or preserve from existing state
+                    }));
+
+                    // Reset the refs so the useEffect will detect the change
+                    lastMessageCountRef.current = 0;
+                    lastMessageIdRef.current = null;
+                    
+                    // Store mapped for use outside (for story media check)
+                    (window as any).__lastMappedMessages = mapped;
+                    
+                    return mapped;
+                });
+                
+                // Get mapped messages for story media check (use a small delay to ensure state is updated)
+                setTimeout(() => {
+                    const mapped = (window as any).__lastMappedMessages || sorted.map(m => ({
+                        ...m,
+                        isFromMe: m.senderHandle === user!.handle,
+                        senderAvatar: m.senderHandle === user!.handle ? (user!.avatarUrl || getAvatarForHandle(user!.handle)) : getAvatarForHandle(handle!)
+                    }));
+                    
+                    const urls = Array.from(new Set(mapped.map((m: MessageUI) => m.imageUrl).filter(Boolean) as string[]));
+                    Promise.all(urls.map(async (u) => [u, await isStoryMediaActive(u)] as const))
+                        .then(entries => setStoryActiveByUrl(Object.fromEntries(entries)));
+                }, 10);
+                
+                // Detect and fetch shared posts in new messages (outside setState to avoid blocking)
                 const postIds = new Set<string>();
-                mapped.forEach(msg => {
+                sorted.forEach(msg => {
                     // Check postId field first (most reliable)
                     if (msg.postId) {
-                        console.log('Live update - Found postId in message field:', msg.postId, 'commentText:', msg.commentText);
                         postIds.add(msg.postId);
                     }
                     // Also check for post URLs in text (fallback)
                     else if (msg.text) {
                         const postId = extractPostId(msg.text);
                         if (postId) {
-                            console.log('Live update - Found post ID in message text:', postId);
                             postIds.add(postId);
                         }
                     }
                 });
                 
-                console.log('Live update - Fetching posts for IDs:', Array.from(postIds));
-                
                 // Fetch all detected posts
-                Promise.all(Array.from(postIds).map(async (postId) => {
-                    try {
-                        console.log('Live update - Fetching post:', postId);
-                        const post = await getPostById(postId);
-                        if (post) {
-                            console.log('Live update - Successfully fetched post:', postId, 'userHandle:', post.userHandle);
-                            setSharedPosts(prev => ({ ...prev, [postId]: post }));
-                        } else {
-                            console.warn('Live update - Post not found:', postId);
+                if (postIds.size > 0) {
+                    Promise.all(Array.from(postIds).map(async (postId) => {
+                        try {
+                            const post = await getPostById(postId);
+                            if (post) {
+                                setSharedPosts(prev => ({ ...prev, [postId]: post }));
+                            }
+                        } catch (error) {
+                            console.error('Failed to fetch shared post:', postId, error);
                         }
-                    } catch (error) {
-                        console.error('Live update - Failed to fetch shared post:', postId, error);
-                    }
-                }));
+                    }));
+                }
 
                 // Force scroll after messages are set - try multiple times for reliability
                 const forceScrollRealTime = () => {
@@ -905,10 +1070,6 @@ export default function MessagesPage() {
                 setTimeout(forceScrollRealTime, 50);
                 setTimeout(forceScrollRealTime, 150);
                 setTimeout(forceScrollRealTime, 300);
-
-                const urls = Array.from(new Set(mapped.map(m => m.imageUrl).filter(Boolean) as string[]));
-                Promise.all(urls.map(async (u) => [u, await isStoryMediaActive(u)] as const))
-                    .then(entries => setStoryActiveByUrl(Object.fromEntries(entries)));
             });
         };
         window.addEventListener('conversationUpdated', onUpdate as any);
@@ -918,6 +1079,30 @@ export default function MessagesPage() {
     const handleSend = async () => {
         if (!messageText.trim()) return;
         if (!user?.handle || !handle) return;
+
+        // Handle editing existing message
+        if (editingMessage) {
+            try {
+                const updatedMessage = await editMessage(editingMessage.id, messageText, user.handle, handle);
+                if (updatedMessage) {
+                    setMessages(prev => prev.map(msg => 
+                        msg.id === editingMessage.id
+                            ? { ...msg, text: messageText, edited: true }
+                            : msg
+                    ));
+                    showToast('Message edited');
+                } else {
+                    showToast('Failed to edit message');
+                }
+            } catch (error) {
+                console.error('Error editing message:', error);
+                showToast('Failed to edit message');
+            }
+            setEditingMessage(null);
+            setMessageText('');
+            closeContextMenu();
+            return;
+        }
 
         // Get postId from pendingSharePostId or extract from text
         const postId = pendingSharePostId || extractPostId(messageText);
@@ -933,6 +1118,9 @@ export default function MessagesPage() {
             });
         }
 
+        // Set flag to prevent auto-scroll during message sending
+        isSendingMessageRef.current = true;
+
         // Optimistically add message to state immediately for instant UI update
         const tempMessage: MessageUI = {
             id: `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -942,7 +1130,13 @@ export default function MessagesPage() {
             isFromMe: true,
             senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle),
             isSystemMessage: false,
-            postId: postId || undefined // Include postId if available
+            postId: postId || undefined, // Include postId if available
+            replyTo: replyingTo ? {
+                messageId: replyingTo.id,
+                text: replyingTo.text || '',
+                senderHandle: replyingTo.senderHandle,
+                imageUrl: replyingTo.imageUrl
+            } : undefined
         };
 
         // Add message immediately to state
@@ -950,17 +1144,67 @@ export default function MessagesPage() {
             const sorted = [...prev, tempMessage].sort((a, b) => a.timestamp - b.timestamp);
             return sorted;
         });
+        // Store replyTo data before clearing replyingTo state
+        const replyToData = replyingTo ? {
+            messageId: replyingTo.id,
+            text: replyingTo.text || '',
+            senderHandle: replyingTo.senderHandle,
+            imageUrl: replyingTo.imageUrl
+        } : undefined;
+        
         setMessageText('');
         setPendingSharePostId(null); // Clear pending postId
+        setReplyingTo(null); // Clear reply state
 
-        // Scroll to bottom immediately
-        setTimeout(() => scrollToBottom(), 100);
+        // Don't manually scroll - let the useLayoutEffect handle it after flag is cleared
+        // This prevents multiple scrolls causing jerking
 
-        // Then send to API (will update state again via event)
-        // Include postId in the message so it's stored properly
-        await appendMessage(user.handle, handle, { 
+        // Then send to API - replace temp message with real one to preserve replyTo
+        const tempId = tempMessage.id;
+        appendMessage(user.handle, handle, { 
             text: messageText,
-            postId: postId || undefined
+            postId: postId || undefined,
+            replyTo: replyToData
+        }).then((realMessage) => {
+            // Update temp message with real one - the onUpdate handler will handle it, but we update here too for immediate feedback
+            setMessages(prev => {
+                // Remove temp message
+                const filtered = prev.filter(m => m.id !== tempId);
+                // Check if real message already exists (from conversationUpdated event)
+                const existingIndex = filtered.findIndex(m => m.id === realMessage.id);
+                
+                if (existingIndex >= 0) {
+                    // Update existing message to ensure replyTo is preserved
+                    const updated = [...filtered];
+                    updated[existingIndex] = {
+                        ...updated[existingIndex],
+                        replyTo: realMessage.replyTo || updated[existingIndex].replyTo
+                    };
+                    // Clear sending flag after a short delay to allow DOM to settle
+                    setTimeout(() => {
+                        isSendingMessageRef.current = false;
+                    }, 200);
+                    return updated;
+                } else {
+                    // Add new message
+                    const newMessage: MessageUI = {
+                        ...realMessage,
+                        isFromMe: true,
+                        senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle),
+                        replyTo: realMessage.replyTo // Preserve replyTo from API
+                    };
+                    const sorted = [...filtered, newMessage].sort((a, b) => a.timestamp - b.timestamp);
+                    // Clear sending flag after a short delay to allow DOM to settle
+                    setTimeout(() => {
+                        isSendingMessageRef.current = false;
+                    }, 200);
+                    return sorted;
+                }
+            });
+        }).catch(error => {
+            console.error('Error sending message:', error);
+            // Clear flag on error too
+            isSendingMessageRef.current = false;
         });
     };
 
@@ -1001,15 +1245,22 @@ export default function MessagesPage() {
         const file = e.target.files?.[0];
         if (!file) return;
 
+        // Reset file input to allow selecting the same file again
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+        }
+
         // For demo, create a data URL
         const reader = new FileReader();
         reader.onloadend = () => {
             const imageUrl = reader.result as string;
             if (!user?.handle || !handle) return;
 
+            const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+            
             // Optimistically add message to state immediately for instant UI update
             const tempMessage: MessageUI = {
-                id: `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                id: tempId,
                 senderHandle: user.handle,
                 imageUrl: imageUrl,
                 timestamp: Date.now(),
@@ -1027,8 +1278,53 @@ export default function MessagesPage() {
             // Scroll to bottom immediately
             setTimeout(() => scrollToBottom(), 100);
 
-            // Then send to API (will update state again via event)
-            appendMessage(user.handle, handle, { imageUrl });
+            // Set flag to prevent auto-scroll during image sending
+            isSendingMessageRef.current = true;
+
+            // Then send to API - when the real message comes back, replace the temp one
+            appendMessage(user.handle, handle, { imageUrl }).then((realMessage) => {
+                // Replace temp message with real one to avoid duplicates
+                setMessages(prev => {
+                    // Remove temp message
+                    const filtered = prev.filter(m => m.id !== tempId);
+                    
+                    // Check if real message already exists (from conversationUpdated event)
+                    const existingIndex = filtered.findIndex(m => m.id === realMessage.id);
+                    
+                    if (existingIndex >= 0) {
+                        // Update existing message to ensure all fields are correct
+                        const updated = [...filtered];
+                        updated[existingIndex] = {
+                            ...realMessage,
+                            isFromMe: true,
+                            senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle),
+                            imageUrl: realMessage.imageUrl || updated[existingIndex].imageUrl
+                        };
+                        // Clear sending flag after a short delay to allow DOM to settle
+                        setTimeout(() => {
+                            isSendingMessageRef.current = false;
+                        }, 200);
+                        return updated;
+                    }
+                    
+                    // If not found, add new message
+                    const newMessage: MessageUI = {
+                        ...realMessage,
+                        isFromMe: true,
+                        senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle)
+                    };
+                    const sorted = [...filtered, newMessage].sort((a, b) => a.timestamp - b.timestamp);
+                    // Clear sending flag after a short delay to allow DOM to settle
+                    setTimeout(() => {
+                        isSendingMessageRef.current = false;
+                    }, 200);
+                    return sorted;
+                });
+            }).catch(error => {
+                console.error('Error sending image:', error);
+                // Clear flag on error too
+                isSendingMessageRef.current = false;
+            });
         };
         reader.readAsDataURL(file);
     };
@@ -1072,8 +1368,17 @@ export default function MessagesPage() {
         });
     };
 
-    // Handle long-press start
+    // Swipe gesture state
+    const swipeStartRef = React.useRef<{ x: number; y: number; message: MessageUI | null } | null>(null);
+    const [swipeOffset, setSwipeOffset] = React.useState(0);
+    const [swipingMessageId, setSwipingMessageId] = React.useState<string | null>(null);
+
+    // Handle long-press start and swipe detection
     const handleTouchStart = (msg: MessageUI, e: React.TouchEvent) => {
+        const touch = e.touches[0];
+        swipeStartRef.current = { x: touch.clientX, y: touch.clientY, message: msg };
+        setSwipingMessageId(msg.id);
+        
         if (longPressTimerRef.current) {
             clearTimeout(longPressTimerRef.current);
         }
@@ -1082,12 +1387,36 @@ export default function MessagesPage() {
         }, 500); // 500ms for long press
     };
 
+    const handleTouchMove = (e: React.TouchEvent) => {
+        if (!swipeStartRef.current) return;
+        const touch = e.touches[0];
+        const deltaX = touch.clientX - swipeStartRef.current.x;
+        const deltaY = Math.abs(touch.clientY - swipeStartRef.current.y);
+        
+        // Only detect horizontal swipe (more horizontal than vertical)
+        if (Math.abs(deltaX) > deltaY && deltaX > 0 && !swipeStartRef.current.message?.isFromMe) {
+            // Swipe right on received message = reply
+            setSwipeOffset(Math.min(deltaX, 100)); // Max 100px swipe
+        }
+    };
+
     // Handle long-press end
     const handleTouchEnd = () => {
         if (longPressTimerRef.current) {
             clearTimeout(longPressTimerRef.current);
             longPressTimerRef.current = null;
         }
+        
+        // Check if swipe was significant enough to trigger reply
+        if (swipeStartRef.current && swipeOffset > 50) {
+            setReplyingTo(swipeStartRef.current.message);
+            setSwipeOffset(0);
+        } else {
+            setSwipeOffset(0);
+        }
+        
+        setSwipingMessageId(null);
+        swipeStartRef.current = null;
     };
 
     // Close context menu
@@ -1098,8 +1427,7 @@ export default function MessagesPage() {
     // Handle context menu actions
     const handleReply = () => {
         if (!contextMenu?.message) return;
-        // Set reply text and focus input
-        setMessageText(`Replying to: ${contextMenu.message.text || 'message'} - `);
+        setReplyingTo(contextMenu.message);
         closeContextMenu();
     };
 
@@ -1114,24 +1442,194 @@ export default function MessagesPage() {
         closeContextMenu();
     };
 
-    const handleForward = () => {
-        if (!contextMenu?.message) return;
-        // TODO: Implement forward functionality
+    const handleForward = async () => {
+        if (!contextMenu?.message || !user?.handle) return;
+        
+        // Get list of conversations to forward to
+        const { listConversations } = await import('../api/messages');
+        const conversations = await listConversations(user.handle);
+        
+        // Filter out current conversation
+        const otherConversations = conversations.filter(conv => conv.otherHandle !== handle);
+        
+        setAvailableConversations(otherConversations);
+        setForwardingMessage(contextMenu.message);
         closeContextMenu();
     };
+    
+    const handleForwardToConversation = async (targetHandle: string) => {
+        if (!forwardingMessage || !user?.handle) return;
+        
+        try {
+            // Forward the message text (and image if present)
+            await appendMessage(user.handle, targetHandle, {
+                text: forwardingMessage.text ? `Forwarded: ${forwardingMessage.text}` : undefined,
+                imageUrl: forwardingMessage.imageUrl,
+                audioUrl: forwardingMessage.audioUrl,
+            });
+            
+            showToast('Message forwarded');
+            setForwardingMessage(null);
+            setAvailableConversations([]);
+        } catch (error) {
+            console.error('Error forwarding message:', error);
+            showToast('Failed to forward message');
+        }
+    };
 
-    const handleTranslate = () => {
-        if (!contextMenu?.message) return;
-        // TODO: Implement translate functionality
+    const handleTranslate = async () => {
+        if (!contextMenu?.message || !contextMenu.message.text) return;
+        
+        const messageId = contextMenu.message.id;
+        const text = contextMenu.message.text;
+        
+        // If already translated, toggle it off
+        if (translatedMessages[messageId]) {
+            setTranslatedMessages(prev => {
+                const next = { ...prev };
+                delete next[messageId];
+                return next;
+            });
+            closeContextMenu();
+            return;
+        }
+        
+        try {
+            // Use browser's built-in translation or a simple API
+            // For now, we'll use a mock translation (in production, use Google Translate API or similar)
+            // Note: This is a placeholder - you'd need to integrate with a real translation service
+            const translatedText = await translateText(text);
+            
+            setTranslatedMessages(prev => ({
+                ...prev,
+                [messageId]: translatedText
+            }));
+            
+            showToast('Message translated');
+        } catch (error) {
+            console.error('Translation error:', error);
+            showToast('Failed to translate message');
+        }
+        
         closeContextMenu();
+    };
+    
+    // Simple translation function (placeholder - replace with real API)
+    const translateText = async (text: string): Promise<string> => {
+        // In production, use Google Translate API, DeepL, or similar
+        // For now, return a mock translation
+        return new Promise((resolve) => {
+            setTimeout(() => {
+                // Mock translation - in production, call actual translation API
+                resolve(`[Translated] ${text}`);
+            }, 500);
+        });
     };
 
     const handleReport = () => {
         if (!contextMenu?.message) return;
-        // TODO: Implement report functionality
-        if (confirm('Report this message?')) {
-            // Report logic here
+        setReportingMessage(contextMenu.message);
+        setReportReason('');
+        closeContextMenu();
+    };
+    
+    const handleSubmitReport = async () => {
+        if (!reportingMessage || !reportReason.trim() || !user?.handle) return;
+        
+        try {
+            // In production, send report to backend API
+            // For now, just log and show success message
+            console.log('Reporting message:', {
+                messageId: reportingMessage.id,
+                senderHandle: reportingMessage.senderHandle,
+                reason: reportReason,
+                reporterHandle: user.handle
+            });
+            
+            // TODO: Call backend API to report message
+            // await apiRequest('/api/messages/report', {
+            //     method: 'POST',
+            //     body: JSON.stringify({
+            //         message_id: reportingMessage.id,
+            //         reason: reportReason
+            //     })
+            // });
+            
+            showToast('Message reported. Thank you for your feedback.');
+            setReportingMessage(null);
+            setReportReason('');
+        } catch (error) {
+            console.error('Error reporting message:', error);
+            showToast('Failed to report message');
         }
+    };
+
+    // Handle adding reaction to message
+    const handleAddReaction = (messageId: string, emoji: string) => {
+        if (!user?.handle) return;
+        
+        setMessageReactions(prev => {
+            const current = prev[messageId] || [];
+            const existingReaction = current.find(r => r.emoji === emoji);
+            
+            if (existingReaction) {
+                // Toggle: if user already reacted, remove; otherwise add
+                const userIndex = existingReaction.users.indexOf(user.handle);
+                if (userIndex > -1) {
+                    // Remove user from reaction
+                    const updatedUsers = existingReaction.users.filter(u => u !== user.handle);
+                    if (updatedUsers.length === 0) {
+                        // Remove reaction entirely if no users left
+                        return {
+                            ...prev,
+                            [messageId]: current.filter(r => r.emoji !== emoji)
+                        };
+                    }
+                    return {
+                        ...prev,
+                        [messageId]: current.map(r => 
+                            r.emoji === emoji 
+                                ? { ...r, users: updatedUsers }
+                                : r
+                        )
+                    };
+                } else {
+                    // Add user to reaction
+                    return {
+                        ...prev,
+                        [messageId]: current.map(r => 
+                            r.emoji === emoji 
+                                ? { ...r, users: [...r.users, user.handle] }
+                                : r
+                        )
+                    };
+                }
+            } else {
+                // Add new reaction
+                return {
+                    ...prev,
+                    [messageId]: [...current, { emoji, users: [user.handle] }]
+                };
+            }
+        });
+    };
+
+    // Handle cancel reply
+    const handleCancelReply = () => {
+        setReplyingTo(null);
+    };
+
+    // Handle cancel edit
+    const handleCancelEdit = () => {
+        setEditingMessage(null);
+        setMessageText('');
+    };
+
+    // Handle edit message
+    const handleEditMessage = () => {
+        if (!contextMenu?.message) return;
+        setEditingMessage(contextMenu.message);
+        setMessageText(contextMenu.message.text || '');
         closeContextMenu();
     };
 
@@ -1179,20 +1677,57 @@ export default function MessagesPage() {
                                 src={otherUserAvatar}
                                 name={handle}
                                 size="sm"
+                                hasStory={hasUnviewedStories}
+                                className="cursor-pointer"
+                                onClick={() => {
+                                    if (hasUnviewedStories) {
+                                        navigate('/stories', { state: { openUserHandle: handle } });
+                                    } else {
+                                        navigate(`/user/${encodeURIComponent(handle)}`);
+                                    }
+                                }}
                             />
                             <div className="ml-3 flex-1">
-                                <div className="flex items-center gap-1">
-                                    <span className="font-medium">{handle}</span>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => navigate(`/user/${encodeURIComponent(handle)}`)}
+                                        className="text-left"
+                                    >
+                                        <span className="font-semibold text-white">{handle}</span>
+                                    </button>
+                                </div>
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                    <span className="text-xs text-gray-400">Active now</span>
                                 </div>
                             </div>
                         </div>
                     )}
+                    <div className="flex items-center gap-2">
+                        {/* Gazetteer Logo */}
+                        <div className="p-2 flex items-center justify-center">
+                            <img 
+                                src="/gazetteer logo 1/gazetteer logo 1.jpg" 
+                                alt="Gazetteer Logo" 
+                                className="w-8 h-8 object-contain"
+                                style={{ 
+                                    filter: 'brightness(0) invert(1)',
+                                    mixBlendMode: 'normal'
+                                }}
+                            />
+                        </div>
+                        <button
+                            className="p-2 hover:bg-gray-900 rounded-full transition-colors"
+                            onClick={() => setShowChatInfo(true)}
+                        >
+                            <FiMoreHorizontal className="w-6 h-6" />
+                        </button>
+                    </div>
                 </div>
             </div>
 
             {/* Messages */}
             <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-4 pb-40" style={{ minHeight: 0, maxHeight: 'calc(100vh - 120px)' }}>
-                <div className="space-y-3">
+                <div className="space-y-1">
                     {messages.map((msg, idx) => {
                         const showTimestamp = idx === 0 ||
                             (msg.timestamp - messages[idx - 1].timestamp) > 60000; // gap > 1 minute
@@ -1272,7 +1807,7 @@ export default function MessagesPage() {
                                                 
                                                 if (hasPostUrlPattern && !postId) {
                                                     // URL detected but no postId - try to extract it and fetch
-                                                    const extractedPostId = extractPostId(msg.text);
+                                                    const extractedPostId = extractPostId(msg.text || '');
                                                     if (extractedPostId) {
                                                         // If we already have the post, render it
                                                         if (sharedPosts[extractedPostId]) {
@@ -1312,31 +1847,139 @@ export default function MessagesPage() {
                                                 }
                                                 
                                                 return (
-                                                    <div
-                                                        className="bg-purple-600 rounded-2xl px-4 py-2 max-w-[70%] break-words cursor-pointer select-none"
-                                                        onContextMenu={(e) => handleMessageContextMenu(msg, e)}
-                                                        onTouchStart={(e) => handleTouchStart(msg, e)}
-                                                        onTouchEnd={handleTouchEnd}
-                                                        onTouchCancel={handleTouchEnd}
-                                                        onClick={(e) => {
-                                                            // Prevent navigation if message contains a URL
-                                                            if (msg.text && (msg.text.includes('http://') || msg.text.includes('https://'))) {
-                                                                e.preventDefault();
-                                                                e.stopPropagation();
-                                                            }
-                                                        }}
-                                                    >
-                                                        {msg.imageUrl && (
-                                                            <div className="relative mb-2">
-                                                                <img src={msg.imageUrl} alt="Sent image" className="max-w-full rounded-lg" />
-                                                                {msg.imageUrl && wasEverAStory(msg.imageUrl) && storyActiveByUrl[msg.imageUrl] === false && (
-                                                                    <div className="absolute inset-0 bg-black/50 rounded-lg flex items-center justify-center">
-                                                                        <span className="text-[10px] text-white/90 px-2 py-1 rounded">Story unavailable</span>
+                                                    <div className="flex flex-col items-end gap-1 max-w-[75%]">
+                                                        <div
+                                                            className="bg-[#0095f6] rounded-2xl rounded-tr-sm px-4 py-2.5 break-words cursor-pointer select-none shadow-sm relative"
+                                                            style={{
+                                                                maxWidth: '100%',
+                                                                wordBreak: 'break-word',
+                                                                overflowWrap: 'break-word',
+                                                                transform: swipingMessageId === msg.id ? `translateX(${swipeOffset}px)` : 'translateX(0)',
+                                                                transition: swipeOffset === 0 ? 'transform 0.2s' : 'none',
+                                                                paddingBottom: messageReactions[msg.id] && messageReactions[msg.id].length > 0 ? '20px' : '10px'
+                                                            }}
+                                                            onContextMenu={(e) => handleMessageContextMenu(msg, e)}
+                                                            onTouchStart={(e) => handleTouchStart(msg, e)}
+                                                            onTouchMove={handleTouchMove}
+                                                            onTouchEnd={handleTouchEnd}
+                                                            onTouchCancel={handleTouchEnd}
+                                                            onClick={(e) => {
+                                                                // Prevent navigation if message contains a URL
+                                                                if (msg.text && (msg.text.includes('http://') || msg.text.includes('https://'))) {
+                                                                    e.preventDefault();
+                                                                    e.stopPropagation();
+                                                                }
+                                                            }}
+                                                        >
+                                                            {/* Reply Preview - Instagram style */}
+                                                            {msg.replyTo && (
+                                                                <div className="mb-2 pb-2 border-l-2 border-white/30 pl-2 -mx-2">
+                                                                    <div className="flex items-start gap-2">
+                                                                        {/* Image thumbnail if original message had image */}
+                                                                        {msg.replyTo.imageUrl && (
+                                                                            <div className="w-12 h-12 rounded overflow-hidden flex-shrink-0 border border-white/20">
+                                                                                <img 
+                                                                                    src={msg.replyTo.imageUrl} 
+                                                                                    alt="Reply preview" 
+                                                                                    className="w-full h-full object-cover"
+                                                                                />
+                                                                            </div>
+                                                                        )}
+                                                                        <div className="flex-1 min-w-0">
+                                                                            <div className="text-xs text-white/70 font-medium mb-0.5">
+                                                                                {msg.replyTo.senderHandle}
+                                                                            </div>
+                                                                            <div className="text-xs text-white/60 truncate">
+                                                                                {msg.replyTo.imageUrl ? (msg.replyTo.text || 'Photo') : (msg.replyTo.text || 'Message')}
+                                                                            </div>
+                                                                        </div>
                                                                     </div>
-                                                                )}
+                                                                </div>
+                                                            )}
+                                                            {msg.imageUrl && (
+                                                                <div className="relative mb-2 -mx-2 -mt-2 first:mt-0">
+                                                                    <img src={msg.imageUrl} alt="Sent image" className="max-w-full rounded-t-2xl rounded-tr-sm" />
+                                                                    {msg.imageUrl && wasEverAStory(msg.imageUrl) && storyActiveByUrl[msg.imageUrl] === false && (
+                                                                        <div className="absolute inset-0 bg-black/50 rounded-t-2xl rounded-tr-sm flex items-center justify-center">
+                                                                            <span className="text-[10px] text-white/90 px-2 py-1 rounded">Story unavailable</span>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                            {msg.audioUrl && (
+                                                                <div className="mb-2 -mx-2 -mt-2 first:mt-0 flex items-center gap-2 p-3 bg-black/20 rounded-lg">
+                                                                    <button
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            const audio = new Audio(msg.audioUrl);
+                                                                            audio.play().catch(err => console.error('Error playing audio:', err));
+                                                                        }}
+                                                                        className="w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors"
+                                                                    >
+                                                                        <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                                                            <path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.617.793L4.383 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.383l4.617-3.793a1 1 0 011.383.07zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-1.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.984 5.984 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.983 3.983 0 00-1.172-2.828 1 1 0 010-1.415z" clipRule="evenodd" />
+                                                                        </svg>
+                                                                    </button>
+                                                                    <div className="flex-1">
+                                                                        <div className="h-1 bg-white/20 rounded-full overflow-hidden">
+                                                                            <div className="h-full bg-white/60 rounded-full" style={{ width: '60%' }}></div>
+                                                                        </div>
+                                                                        <span className="text-xs text-white/70 mt-1 block">Voice message</span>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                            {msg.text && (
+                                                                <div>
+                                                                    <p className="text-white text-sm leading-relaxed" style={{ userSelect: 'text' }}>
+                                                                        {translatedMessages[msg.id] || msg.text}
+                                                                    </p>
+                                                                    {translatedMessages[msg.id] && (
+                                                                        <p className="text-white/60 text-xs mt-1 italic" style={{ userSelect: 'text' }}>
+                                                                            Original: {msg.text}
+                                                                        </p>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                            {/* Reactions - WhatsApp style on bottom-right of bubble */}
+                                                            {messageReactions[msg.id] && messageReactions[msg.id].length > 0 && (
+                                                                <div className="absolute bottom-0 right-0 flex items-center gap-0.5 mb-1 mr-1">
+                                                                    {messageReactions[msg.id].map((reaction, idx) => (
+                                                                        <button
+                                                                            key={idx}
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                handleAddReaction(msg.id, reaction.emoji);
+                                                                            }}
+                                                                            className="bg-white/90 hover:bg-white rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm transition-colors"
+                                                                            title={`${reaction.users.length} ${reaction.users.length === 1 ? 'reaction' : 'reactions'}`}
+                                                                        >
+                                                                            <span className="text-sm leading-none">{reaction.emoji}</span>
+                                                                            {reaction.users.length > 1 && (
+                                                                                <span className="text-[10px] text-gray-700 font-medium leading-none">{reaction.users.length}</span>
+                                                                            )}
+                                                                        </button>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        {/* Read receipt and timestamp */}
+                                                        <div className="flex items-center gap-1.5 px-1">
+                                                            <span className="text-[10px] text-gray-400">
+                                                                {formatTimestamp(msg.timestamp)}
+                                                            </span>
+                                                            {msg.edited && (
+                                                                <span className="text-[10px] text-gray-500 italic">edited</span>
+                                                            )}
+                                                            {/* Read receipt - double checkmark (sent), filled (delivered), blue (read) */}
+                                                            <div className="flex items-center">
+                                                                <svg className={`w-3.5 h-3.5 ${msg.read ? 'text-blue-400' : 'text-gray-400'}`} fill="currentColor" viewBox="0 0 20 20">
+                                                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                                </svg>
+                                                                <svg className={`w-3.5 h-3.5 -ml-1.5 ${msg.read ? 'text-blue-400' : 'text-gray-400'}`} fill="currentColor" viewBox="0 0 20 20">
+                                                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                                </svg>
                                                             </div>
-                                                        )}
-                                                        {msg.text && <p className="text-white text-sm" style={{ userSelect: 'text' }}>{msg.text}</p>}
+                                                        </div>
                                                     </div>
                                                 );
                                             })()
@@ -1523,7 +2166,7 @@ export default function MessagesPage() {
                                                 
                                                 if (hasPostUrlPattern && !postId) {
                                                     // URL detected but no postId - try to extract it and fetch
-                                                    const extractedPostId = extractPostId(msg.text);
+                                                    const extractedPostId = extractPostId(msg.text || '');
                                                     if (extractedPostId) {
                                                         // If we already have the post, render it
                                                         if (sharedPosts[extractedPostId]) {
@@ -1577,39 +2220,139 @@ export default function MessagesPage() {
                                                 }
                                                 
                                                 return (
-                                                    <div className="flex items-start gap-2 max-w-[70%]">
+                                                    <div className="flex items-start gap-2 max-w-[75%]">
                                                         {msg.senderAvatar && (
                                                             <Avatar
                                                                 src={msg.senderAvatar}
                                                                 name={msg.senderHandle}
                                                                 size="sm"
+                                                                className="flex-shrink-0"
                                                             />
                                                         )}
-                                                        <div
-                                                            className="bg-gray-800 rounded-2xl px-4 py-2 break-words cursor-pointer select-none"
-                                                            onContextMenu={(e) => handleMessageContextMenu(msg, e)}
-                                                            onTouchStart={(e) => handleTouchStart(msg, e)}
-                                                            onTouchEnd={handleTouchEnd}
-                                                            onTouchCancel={handleTouchEnd}
-                                                            onClick={(e) => {
-                                                                // Prevent navigation if message contains a URL
-                                                                if (msg.text && (msg.text.includes('http://') || msg.text.includes('https://'))) {
-                                                                    e.preventDefault();
-                                                                    e.stopPropagation();
-                                                                }
-                                                            }}
-                                                        >
-                                                            {msg.imageUrl && (
-                                                                <div className="relative mb-2">
-                                                                    <img src={msg.imageUrl} alt="Received image" className="max-w-full rounded-lg" />
-                                                                    {msg.imageUrl && wasEverAStory(msg.imageUrl) && storyActiveByUrl[msg.imageUrl] === false && (
-                                                                        <div className="absolute inset-0 bg-black/50 rounded-lg flex items-center justify-center">
-                                                                            <span className="text-[10px] text-white/90 px-2 py-1 rounded">Story unavailable</span>
+                                                        <div className="flex flex-col gap-1.5 flex-1 min-w-0">
+                                                            <div
+                                                                className="bg-gray-800 rounded-2xl rounded-tl-sm px-4 py-2.5 break-words cursor-pointer select-none shadow-sm relative"
+                                                                style={{
+                                                                    maxWidth: '100%',
+                                                                    wordBreak: 'break-word',
+                                                                    overflowWrap: 'break-word',
+                                                                    transform: swipingMessageId === msg.id ? `translateX(${swipeOffset}px)` : 'translateX(0)',
+                                                                    transition: swipeOffset === 0 ? 'transform 0.2s' : 'none',
+                                                                    paddingBottom: messageReactions[msg.id] && messageReactions[msg.id].length > 0 ? '20px' : '10px'
+                                                                }}
+                                                                onContextMenu={(e) => handleMessageContextMenu(msg, e)}
+                                                                onTouchStart={(e) => handleTouchStart(msg, e)}
+                                                                onTouchMove={handleTouchMove}
+                                                                onTouchEnd={handleTouchEnd}
+                                                                onTouchCancel={handleTouchEnd}
+                                                                onClick={(e) => {
+                                                                    // Prevent navigation if message contains a URL
+                                                                    if (msg.text && (msg.text.includes('http://') || msg.text.includes('https://'))) {
+                                                                        e.preventDefault();
+                                                                        e.stopPropagation();
+                                                                    }
+                                                                }}
+                                                            >
+                                                                {/* Reply Preview - Instagram style */}
+                                                                {msg.replyTo && (
+                                                                    <div className="mb-2 pb-2 border-l-2 border-white/30 pl-2 -mx-2">
+                                                                        <div className="flex items-start gap-2">
+                                                                            {/* Image thumbnail if original message had image */}
+                                                                            {msg.replyTo.imageUrl && (
+                                                                                <div className="w-12 h-12 rounded overflow-hidden flex-shrink-0 border border-white/20">
+                                                                                    <img 
+                                                                                        src={msg.replyTo.imageUrl} 
+                                                                                        alt="Reply preview" 
+                                                                                        className="w-full h-full object-cover"
+                                                                                    />
+                                                                                </div>
+                                                                            )}
+                                                                            <div className="flex-1 min-w-0">
+                                                                                <div className="text-xs text-white/70 font-medium mb-0.5">
+                                                                                    {msg.replyTo.senderHandle}
+                                                                                </div>
+                                                                                <div className="text-xs text-white/60 truncate">
+                                                                                    {msg.replyTo.imageUrl ? (msg.replyTo.text || 'Photo') : (msg.replyTo.text || 'Message')}
+                                                                                </div>
+                                                                            </div>
                                                                         </div>
-                                                                    )}
-                                                                </div>
-                                                            )}
-                                                            {msg.text && !commentPostId && <p className="text-white text-sm" style={{ userSelect: 'text' }}>{msg.text}</p>}
+                                                                    </div>
+                                                                )}
+                                                                {msg.imageUrl && (
+                                                                    <div className="relative mb-2 -mx-2 -mt-2 first:mt-0">
+                                                                        <img src={msg.imageUrl} alt="Received image" className="max-w-full rounded-t-2xl rounded-tl-sm" />
+                                                                        {msg.imageUrl && wasEverAStory(msg.imageUrl) && storyActiveByUrl[msg.imageUrl] === false && (
+                                                                            <div className="absolute inset-0 bg-black/50 rounded-t-2xl rounded-tl-sm flex items-center justify-center">
+                                                                                <span className="text-[10px] text-white/90 px-2 py-1 rounded">Story unavailable</span>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                                {msg.audioUrl && (
+                                                                    <div className="mb-2 -mx-2 -mt-2 first:mt-0 flex items-center gap-2 p-3 bg-white/10 rounded-lg">
+                                                                        <button
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                const audio = new Audio(msg.audioUrl);
+                                                                                audio.play().catch(err => console.error('Error playing audio:', err));
+                                                                            }}
+                                                                            className="w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors"
+                                                                        >
+                                                                            <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                                                                <path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.617.793L4.383 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.383l4.617-3.793a1 1 0 011.383.07zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-1.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.984 5.984 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.983 3.983 0 00-1.172-2.828 1 1 0 010-1.415z" clipRule="evenodd" />
+                                                                            </svg>
+                                                                        </button>
+                                                                        <div className="flex-1">
+                                                                            <div className="h-1 bg-white/20 rounded-full overflow-hidden">
+                                                                                <div className="h-full bg-white/60 rounded-full" style={{ width: '60%' }}></div>
+                                                                            </div>
+                                                                            <span className="text-xs text-white/70 mt-1 block">Voice message</span>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                                {msg.text && !commentPostId && (
+                                                                    <div>
+                                                                        <p className="text-white text-sm leading-relaxed" style={{ userSelect: 'text' }}>
+                                                                            {translatedMessages[msg.id] || msg.text}
+                                                                        </p>
+                                                                        {translatedMessages[msg.id] && (
+                                                                            <p className="text-white/60 text-xs mt-1 italic" style={{ userSelect: 'text' }}>
+                                                                                Original: {msg.text}
+                                                                            </p>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                                {/* Reactions - WhatsApp style on bottom-right of bubble */}
+                                                                {messageReactions[msg.id] && messageReactions[msg.id].length > 0 && (
+                                                                    <div className="absolute bottom-0 right-0 flex items-center gap-0.5 mb-1 mr-1">
+                                                                        {messageReactions[msg.id].map((reaction, idx) => (
+                                                                            <button
+                                                                                key={idx}
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    handleAddReaction(msg.id, reaction.emoji);
+                                                                                }}
+                                                                                className="bg-white/90 hover:bg-white rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm transition-colors"
+                                                                                title={`${reaction.users.length} ${reaction.users.length === 1 ? 'reaction' : 'reactions'}`}
+                                                                            >
+                                                                                <span className="text-sm leading-none">{reaction.emoji}</span>
+                                                                                {reaction.users.length > 1 && (
+                                                                                    <span className="text-[10px] text-gray-700 font-medium leading-none">{reaction.users.length}</span>
+                                                                                )}
+                                                                            </button>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                            {/* Timestamp */}
+                                                            <div className="flex items-center gap-1.5 px-1">
+                                                                <span className="text-[10px] text-gray-400">
+                                                                    {formatTimestamp(msg.timestamp)}
+                                                                </span>
+                                                                {msg.edited && (
+                                                                    <span className="text-[10px] text-gray-500 italic">edited</span>
+                                                                )}
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 );
@@ -1620,56 +2363,122 @@ export default function MessagesPage() {
                             </React.Fragment>
                         );
                     })}
+                    
+                    {/* Typing Indicator */}
+                    {isTyping && (
+                        <div className="flex items-start gap-2 max-w-[75%]">
+                            <Avatar
+                                src={otherUserAvatar}
+                                name={handle || ''}
+                                size="sm"
+                                className="flex-shrink-0"
+                            />
+                            <div className="bg-gray-800 rounded-2xl rounded-tl-sm px-4 py-3">
+                                <div className="flex items-center gap-1">
+                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
 
             {/* Input Bar */}
-            <div className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 px-4 py-3 z-20">
-                <div className="flex items-center gap-3">
-                    <div className="flex-1 flex items-center gap-3">
+            <div className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 z-20">
+                {/* Reply Preview */}
+                {replyingTo && (
+                    <div className="px-4 pt-3 pb-2 border-b border-gray-800 bg-gray-800/50">
+                        <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                                <div className="w-0.5 h-12 bg-[#0095f6] rounded-full flex-shrink-0" />
+                                {/* Image thumbnail if message has image */}
+                                {replyingTo.imageUrl && (
+                                    <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 border border-gray-700">
+                                        <img 
+                                            src={replyingTo.imageUrl} 
+                                            alt="Reply preview" 
+                                            className="w-full h-full object-cover"
+                                        />
+                                    </div>
+                                )}
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-xs text-gray-400 mb-0.5">Replying to {replyingTo.senderHandle}</div>
+                                    {replyingTo.imageUrl ? (
+                                        <div className="text-sm text-gray-300 truncate">{replyingTo.text || 'Photo'}</div>
+                                    ) : (
+                                        <div className="text-sm text-gray-300 truncate">{replyingTo.text || 'Message'}</div>
+                                    )}
+                                </div>
+                            </div>
+                            <button
+                                onClick={handleCancelReply}
+                                className="p-1 hover:bg-gray-700 rounded-full transition-colors flex-shrink-0"
+                            >
+                                <FiX className="w-4 h-4 text-gray-400" />
+                            </button>
+                        </div>
+                    </div>
+                )}
+                {/* Edit Preview */}
+                {editingMessage && (
+                    <div className="px-4 pt-3 pb-2 border-b border-gray-800 bg-gray-800/50">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                                <span className="text-xs text-gray-400">Editing message</span>
+                            </div>
+                            <button
+                                onClick={handleCancelEdit}
+                                className="p-1 hover:bg-gray-700 rounded-full transition-colors flex-shrink-0"
+                            >
+                                <FiX className="w-4 h-4 text-gray-400" />
+                            </button>
+                        </div>
+                    </div>
+                )}
+                <div className="flex items-center gap-2 px-3 py-3 sm:gap-3 sm:px-4">
+                    {!messageText.trim() && (
+                        <button
+                            onClick={handleImageClick}
+                            className="p-2 hover:bg-gray-800 rounded-full transition-colors flex-shrink-0"
+                        >
+                            <IoMdPhotos className="w-5 h-5 sm:w-6 sm:h-6 text-gray-400" />
+                        </button>
+                    )}
+                    <div className="flex-1 flex items-center gap-2 min-w-0">
                         <input
                             type="text"
                             value={messageText}
-                            onChange={(e) => setMessageText(e.target.value)}
+                            onChange={(e) => {
+                                setMessageText(e.target.value);
+                                // Simulate typing indicator (in real app, this would be sent to server)
+                                // For now, we'll just show it when user is typing
+                            }}
                             onKeyPress={(e) => {
                                 if (e.key === 'Enter') {
                                     handleSend();
                                 }
                             }}
-                            placeholder="Message..."
-                            className="flex-1 bg-gray-800 text-white placeholder-gray-500 px-4 py-2 rounded-full focus:outline-none focus:ring-2 focus:ring-green-500"
+                            placeholder={editingMessage ? "Edit message..." : replyingTo ? "Message..." : "Message..."}
+                            className="flex-1 bg-gray-800 text-white placeholder-gray-500 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full focus:outline-none focus:ring-2 focus:ring-green-500 text-sm sm:text-base min-w-0"
                         />
                         {messageText.trim() && (
                             <button
                                 onClick={handleSend}
-                                className="text-purple-600 hover:text-purple-500 transition-colors"
+                                className="text-[#0095f6] hover:text-[#0084d4] transition-colors flex-shrink-0"
                             >
-                                <FiSend className="w-6 h-6" />
+                                <FiSend className="w-5 h-5 sm:w-6 sm:h-6" />
                             </button>
                         )}
                     </div>
-                    <div className="flex items-center gap-2">
-                        {!messageText.trim() && (
-                            <>
-                                <button
-                                    onClick={handleImageClick}
-                                    className="p-2 hover:bg-gray-800 rounded-full transition-colors"
-                                >
-                                    <IoMdPhotos className="w-6 h-6 text-gray-400" />
-                                </button>
-                                <button className="p-2 hover:bg-gray-800 rounded-full transition-colors">
-                                    <BsEmojiSmile className="w-6 h-6 text-gray-400" />
-                                </button>
-                                <input
-                                    type="file"
-                                    ref={fileInputRef}
-                                    onChange={handleImageChange}
-                                    accept="image/*"
-                                    className="hidden"
-                                />
-                            </>
-                        )}
-                    </div>
+                    <input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={handleImageChange}
+                        accept="image/*"
+                        className="hidden"
+                    />
                 </div>
             </div>
 
@@ -1693,6 +2502,15 @@ export default function MessagesPage() {
                         )}
 
                         {/* Menu Items */}
+                        {contextMenu.message?.isFromMe && (
+                            <button
+                                onClick={handleEditMessage}
+                                className="w-full text-left px-4 py-3 hover:bg-gray-800 flex items-center gap-3 text-white"
+                            >
+                                <FiEdit3 className="w-5 h-5" />
+                                <span>Edit</span>
+                            </button>
+                        )}
                         <button
                             onClick={handleReply}
                             className="w-full text-left px-4 py-3 hover:bg-gray-800 flex items-center gap-3 text-white"
@@ -1700,7 +2518,18 @@ export default function MessagesPage() {
                             <FiCornerUpLeft className="w-5 h-5" />
                             <span>Reply</span>
                         </button>
-
+                        <button
+                            onClick={() => {
+                                if (contextMenu?.message) {
+                                    handleAddReaction(contextMenu.message.id, '❤️');
+                                }
+                                closeContextMenu();
+                            }}
+                            className="w-full text-left px-4 py-3 hover:bg-gray-800 flex items-center gap-3 text-white"
+                        >
+                            <span className="text-lg">❤️</span>
+                            <span>React</span>
+                        </button>
                         <button
                             onClick={() => {
                                 setShowStickerPicker(true);
@@ -1745,7 +2574,22 @@ export default function MessagesPage() {
                         </button>
 
                         <button
-                            onClick={() => { /* TODO: More options */ closeContextMenu(); }}
+                            onClick={() => {
+                                // Show additional options
+                                if (contextMenu?.message) {
+                                    const msg = contextMenu.message;
+                                    // Options: Pin message, Save message, etc.
+                                    const options = [
+                                        { label: 'Pin Message', action: () => showToast('Message pinned') },
+                                        { label: 'Save Message', action: () => showToast('Message saved') },
+                                        { label: 'Select Messages', action: () => showToast('Select mode enabled') },
+                                    ];
+                                    
+                                    // For now, just show a toast - could expand to a submenu
+                                    showToast('More options coming soon');
+                                }
+                                closeContextMenu();
+                            }}
                             className="w-full text-left px-4 py-3 hover:bg-gray-800 flex items-center gap-3 text-white"
                         >
                             <FiMoreHorizontal className="w-5 h-5" />
@@ -1816,6 +2660,264 @@ export default function MessagesPage() {
                                         {emoji}
                                     </button>
                                 ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Forward Message Modal */}
+            {forwardingMessage && (
+                <div
+                    className="fixed inset-0 bg-black/80 z-50 flex items-end justify-center"
+                    onClick={() => {
+                        setForwardingMessage(null);
+                        setAvailableConversations([]);
+                    }}
+                >
+                    <div
+                        className="bg-gray-900 rounded-t-3xl w-full max-w-md max-h-[60vh] overflow-y-auto"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="sticky top-0 bg-gray-900 border-b border-gray-700 px-4 py-3 flex items-center justify-between">
+                            <h3 className="text-white font-semibold">Forward Message</h3>
+                            <button
+                                onClick={() => {
+                                    setForwardingMessage(null);
+                                    setAvailableConversations([]);
+                                }}
+                                className="text-gray-400 hover:text-white"
+                            >
+                                <FiX className="w-6 h-6" />
+                            </button>
+                        </div>
+
+                        <div className="p-4">
+                            {availableConversations.length === 0 ? (
+                                <div className="text-center text-gray-400 py-8">
+                                    No other conversations to forward to
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    {availableConversations.map((conv) => (
+                                        <button
+                                            key={conv.otherHandle}
+                                            onClick={() => handleForwardToConversation(conv.otherHandle)}
+                                            className="w-full flex items-center gap-3 p-3 hover:bg-gray-800 rounded-lg transition-colors text-left"
+                                        >
+                                            <Avatar
+                                                name={conv.otherHandle}
+                                                src={getAvatarForHandle(conv.otherHandle)}
+                                                size="md"
+                                            />
+                                            <div className="flex-1 min-w-0">
+                                                <div className="font-medium text-white truncate">
+                                                    {conv.otherHandle}
+                                                </div>
+                                                {conv.lastMessage && (
+                                                    <div className="text-xs text-gray-400 truncate">
+                                                        {conv.lastMessage.text || 'Photo'}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Report Message Modal */}
+            {reportingMessage && (
+                <div
+                    className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4"
+                    onClick={() => {
+                        setReportingMessage(null);
+                        setReportReason('');
+                    }}
+                >
+                    <div
+                        className="bg-gray-900 rounded-2xl w-full max-w-md p-6"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-white font-semibold text-lg">Report Message</h3>
+                            <button
+                                onClick={() => {
+                                    setReportingMessage(null);
+                                    setReportReason('');
+                                }}
+                                className="text-gray-400 hover:text-white"
+                            >
+                                <FiX className="w-6 h-6" />
+                            </button>
+                        </div>
+
+                        <div className="mb-4">
+                            <p className="text-gray-400 text-sm mb-2">
+                                Why are you reporting this message?
+                            </p>
+                            <div className="space-y-2">
+                                {[
+                                    'Spam',
+                                    'Harassment or bullying',
+                                    'Inappropriate content',
+                                    'False information',
+                                    'Other'
+                                ].map((reason) => (
+                                    <button
+                                        key={reason}
+                                        onClick={() => setReportReason(reason)}
+                                        className={`w-full text-left px-4 py-2 rounded-lg transition-colors ${
+                                            reportReason === reason
+                                                ? 'bg-blue-600 text-white'
+                                                : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                                        }`}
+                                    >
+                                        {reason}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => {
+                                    setReportingMessage(null);
+                                    setReportReason('');
+                                }}
+                                className="flex-1 px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleSubmitReport}
+                                disabled={!reportReason.trim()}
+                                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                Report
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Chat Info/Options Modal */}
+            {showChatInfo && handle && (
+                <div
+                    className="fixed inset-0 bg-black/80 z-50 flex items-end justify-center"
+                    onClick={() => setShowChatInfo(false)}
+                >
+                    <div
+                        className="bg-gray-900 rounded-t-3xl w-full max-w-md max-h-[80vh] overflow-y-auto"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="sticky top-0 bg-gray-900 border-b border-gray-700 px-4 py-3 flex items-center justify-between">
+                            <h3 className="text-white font-semibold">Chat Info</h3>
+                            <button
+                                onClick={() => setShowChatInfo(false)}
+                                className="text-gray-400 hover:text-white"
+                            >
+                                <FiX className="w-6 h-6" />
+                            </button>
+                        </div>
+
+                        <div className="p-4">
+                            {/* User Info */}
+                            <div className="flex items-center gap-4 mb-6">
+                                <Avatar
+                                    name={handle}
+                                    src={getAvatarForHandle(handle)}
+                                    size="lg"
+                                />
+                                <div className="flex-1">
+                                    <h4 className="text-white font-semibold text-lg">{handle}</h4>
+                                    <p className="text-gray-400 text-sm">Active now</p>
+                                </div>
+                            </div>
+
+                            {/* Options */}
+                            <div className="space-y-2">
+                                <button
+                                    onClick={async () => {
+                                        if (!handle) return;
+                                        navigate(`/user/${encodeURIComponent(handle)}`);
+                                        setShowChatInfo(false);
+                                    }}
+                                    className="w-full text-left px-4 py-3 hover:bg-gray-800 rounded-lg flex items-center gap-3 text-white transition-colors"
+                                >
+                                    <FiUserPlus className="w-5 h-5" />
+                                    <span>View Profile</span>
+                                </button>
+
+                                <button
+                                    onClick={async () => {
+                                        if (!user?.handle || !handle) return;
+                                        try {
+                                            if (isMuted) {
+                                                await unmuteConversation(user.handle, handle);
+                                                setIsMuted(false);
+                                                showToast('Notifications unmuted');
+                                            } else {
+                                                await muteConversation(user.handle, handle);
+                                                setIsMuted(true);
+                                                showToast('Notifications muted');
+                                            }
+                                            setShowChatInfo(false);
+                                        } catch (error) {
+                                            console.error('Error toggling mute:', error);
+                                            showToast('Failed to update mute settings');
+                                        }
+                                    }}
+                                    className="w-full text-left px-4 py-3 hover:bg-gray-800 rounded-lg flex items-center gap-3 text-white transition-colors"
+                                >
+                                    <FiMic className="w-5 h-5" />
+                                    <span>{isMuted ? 'Unmute Notifications' : 'Mute Notifications'}</span>
+                                </button>
+
+                                <button
+                                    onClick={async () => {
+                                        if (!user?.handle || !handle) return;
+                                        if (confirm(`Block ${handle}? You won't receive messages from them.`)) {
+                                            try {
+                                                await blockUser(user.handle, handle);
+                                                showToast('User blocked');
+                                                setShowChatInfo(false);
+                                                navigate('/inbox');
+                                            } catch (error) {
+                                                console.error('Error blocking user:', error);
+                                                showToast('Failed to block user');
+                                            }
+                                        }
+                                    }}
+                                    className="w-full text-left px-4 py-3 hover:bg-gray-800 rounded-lg flex items-center gap-3 text-red-500 transition-colors"
+                                >
+                                    <FaExclamationCircle className="w-5 h-5" />
+                                    <span>Block User</span>
+                                </button>
+
+                                <button
+                                    onClick={async () => {
+                                        if (!user?.handle || !handle) return;
+                                        if (confirm(`Delete conversation with ${handle}? This cannot be undone.`)) {
+                                            try {
+                                                await deleteConversation(user.handle, handle);
+                                                showToast('Conversation deleted');
+                                                setShowChatInfo(false);
+                                                navigate('/inbox');
+                                            } catch (error) {
+                                                console.error('Error deleting conversation:', error);
+                                                showToast('Failed to delete conversation');
+                                            }
+                                        }
+                                    }}
+                                    className="w-full text-left px-4 py-3 hover:bg-gray-800 rounded-lg flex items-center gap-3 text-red-500 transition-colors"
+                                >
+                                    <FiX className="w-5 h-5" />
+                                    <span>Delete Conversation</span>
+                                </button>
                             </div>
                         </div>
                     </div>

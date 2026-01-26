@@ -6,7 +6,7 @@ interface AvatarProps {
     size?: 'sm' | 'md' | 'lg' | 'xl';
     className?: string;
     hasStory?: boolean;
-    onClick?: () => void;
+    onClick?: (e?: React.MouseEvent) => void;
 }
 
 export default function Avatar({ src, name, size = 'md', className = '', hasStory = false, onClick }: AvatarProps) {
@@ -31,64 +31,18 @@ export default function Avatar({ src, name, size = 'md', className = '', hasStor
 
     const sizeClass = sizeClasses[size];
 
-    const Component = onClick ? 'button' : 'div';
-
-    // Wrap with border if hasStory
-    if (hasStory) {
-        return (
-            <Component
-                onClick={onClick}
-                className={`${sizeClass} ${className} relative rounded-full overflow-visible ${onClick ? 'cursor-pointer hover:scale-105 transition-transform' : ''}`}
-            >
-                {/* Outer purple gradient border ring */}
-                <div className="absolute -inset-0.5 rounded-full p-[2px]" style={{
-                    background: 'linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%)',
-                }}>
-                    <div className="w-full h-full rounded-full bg-white dark:bg-gray-950"></div>
-                </div>
-
-                {/* Avatar content */}
-                <div className="absolute inset-[2px] rounded-full overflow-hidden flex items-center justify-center bg-white dark:bg-gray-950">
-                    {src ? (
-                        <img
-                            src={src}
-                            alt={`${name}'s profile picture`}
-                            className="w-full h-full object-cover rounded-full"
-                            onError={(e) => {
-                                (e.target as HTMLImageElement).style.display = 'none';
-                            }}
-                        />
-                    ) : null}
-
-                    {/* Fallback initials */}
-                    <div
-                        className={`absolute inset-0 rounded-full flex items-center justify-center font-bold text-white ${src ? 'opacity-0' : 'opacity-100'
-                            } transition-opacity duration-200`}
-                        style={{ background: '#000000' }}
-                    >
-                        {initials}
-                    </div>
-                </div>
-            </Component>
-        );
-    }
-
-    return (
-        <Component
-            onClick={onClick}
-            className={`${sizeClass} ${className} rounded-full overflow-hidden flex items-center justify-center relative ${onClick ? 'cursor-pointer hover:scale-105 transition-transform' : ''}`}
-        >
+    const avatarContent = (
+        <>
             {src ? (
                 <img
                     src={src}
                     alt={`${name}'s profile picture`}
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-cover rounded-full"
                     onError={(e) => {
                         (e.target as HTMLImageElement).style.display = 'none';
                     }}
                 />
             ) : null}
-
             {/* Fallback initials */}
             <div
                 className={`absolute inset-0 rounded-full flex items-center justify-center font-bold text-white ${src ? 'opacity-0' : 'opacity-100'
@@ -97,6 +51,51 @@ export default function Avatar({ src, name, size = 'md', className = '', hasStor
             >
                 {initials}
             </div>
-        </Component>
+        </>
     );
+
+    const baseClassName = `${sizeClass} ${className} ${onClick ? 'cursor-pointer hover:scale-105 transition-transform' : ''}`;
+    const handleClick = onClick ? (e: React.MouseEvent) => {
+        onClick(e);
+    } : undefined;
+
+    // Always show a border - purple for unviewed stories, white for viewed/no stories
+    const borderStyle = hasStory 
+        ? { background: 'linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%)' } // Purple gradient for unviewed stories
+        : { background: '#ffffff' }; // White border for viewed stories or no stories
+
+    if (onClick) {
+        return (
+            <button
+                onClick={handleClick}
+                className={`${baseClassName} relative rounded-full overflow-visible`}
+            >
+                {/* Outer border ring - purple for unviewed stories, white otherwise */}
+                <div className="absolute -inset-0.5 rounded-full p-[2px]" style={borderStyle}>
+                    <div className="w-full h-full rounded-full bg-white dark:bg-gray-950"></div>
+                </div>
+
+                {/* Avatar content */}
+                <div className="absolute inset-[2px] rounded-full overflow-hidden flex items-center justify-center bg-white dark:bg-gray-950">
+                    {avatarContent}
+                </div>
+            </button>
+        );
+    } else {
+        return (
+            <div
+                className={`${baseClassName} relative rounded-full overflow-visible`}
+            >
+                {/* Outer border ring - purple for unviewed stories, white otherwise */}
+                <div className="absolute -inset-0.5 rounded-full p-[2px]" style={borderStyle}>
+                    <div className="w-full h-full rounded-full bg-white dark:bg-gray-950"></div>
+                </div>
+
+                {/* Avatar content */}
+                <div className="absolute inset-[2px] rounded-full overflow-hidden flex items-center justify-center bg-white dark:bg-gray-950">
+                    {avatarContent}
+                </div>
+            </div>
+        );
+    }
 }

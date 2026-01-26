@@ -4,7 +4,7 @@ import { FiCompass, FiX, FiSearch, FiMapPin, FiMenu, FiHome, FiSend, FiPlay, FiM
 import Avatar from './Avatar';
 import { getUnreadTotal } from '../api/messages';
 import { useAuth } from '../context/Auth';
-import { fetchFollowedUsersStoryGroups } from '../api/stories';
+import { fetchFollowedUsersStoryGroups, userHasStoriesByHandle } from '../api/stories';
 import { getFollowedUsers } from '../api/posts';
 
 type TopBarProps = {
@@ -22,6 +22,7 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
   const [unreadCount, setUnreadCount] = React.useState(0);
   const [lastSender, setLastSender] = React.useState<string | null>(null);
   const [hasNewStories, setHasNewStories] = React.useState(false);
+  const [userHasStories, setUserHasStories] = React.useState(false);
   const localBorderOverlayRef = React.useRef<HTMLDivElement>(null);
 
   // Check for new stories from followed users
@@ -40,6 +41,34 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
       console.error('Error checking new stories:', error);
     }
   }, [user?.id]);
+
+  // Check if current user has stories
+  React.useEffect(() => {
+    async function checkUserStories() {
+      if (!user?.handle) return;
+      try {
+        const hasStories = await userHasStoriesByHandle(user.handle);
+        setUserHasStories(hasStories);
+      } catch (error) {
+        console.error('Error checking user stories:', error);
+      }
+    }
+
+    checkUserStories();
+
+    // Listen for story created event
+    const handleStoryCreated = (event: CustomEvent) => {
+      if (event.detail?.userHandle === user?.handle) {
+        setUserHasStories(true);
+      }
+    };
+
+    window.addEventListener('storyCreated', handleStoryCreated as EventListener);
+
+    return () => {
+      window.removeEventListener('storyCreated', handleStoryCreated as EventListener);
+    };
+  }, [user?.handle]);
 
   React.useEffect(() => {
     checkNewStories();
@@ -219,7 +248,12 @@ export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
                 {/* Content */}
                 <span className="relative z-10">{user?.local || 'Local'}</span>
               </button>
-              <Avatar src={user?.avatarUrl} name={(user?.handle || 'User').split('@')[0]} size="sm" />
+              <Avatar 
+                src={user?.avatarUrl} 
+                name={(user?.handle || 'User').split('@')[0]} 
+                size="sm"
+                hasStory={userHasStories}
+              />
             </div>
           </div>
         ) : (

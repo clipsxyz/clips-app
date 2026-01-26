@@ -2,6 +2,7 @@ import React from 'react';
 import * as Sentry from '@sentry/react';
 import { User } from '../types';
 import { setProfilePrivacy, initializePrivateMockUser } from '../api/privacy';
+import { connectSocket, disconnectSocket } from '../services/socketio';
 type AuthCtx = { user: User | null; login: (userData: any) => void; logout: () => void };
 const Ctx = React.createContext<AuthCtx | null>(null);
 
@@ -68,6 +69,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (parsed.handle) {
           setProfilePrivacy(parsed.handle, parsed.is_private || false);
         }
+        // Connect to Socket.IO when user is loaded
+        if (parsed.handle) {
+          connectSocket(parsed.handle);
+        }
       }
     } catch (error) {
       console.error('Error loading user from localStorage:', error);
@@ -106,6 +111,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = () => {
+    // Disconnect Socket.IO when user logs out
+    disconnectSocket();
     setUser(null);
     localStorage.removeItem('user');
     Sentry.setUser(null);

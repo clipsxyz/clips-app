@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile, FiUserPlus, FiX } from 'react-icons/fi';
+import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile, FiUserPlus, FiX, FiPlus, FiCheck } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { getAvatarForHandle } from '../api/users';
@@ -19,11 +19,158 @@ type Question = {
     repliedTo: boolean;
     replyStoryId?: string;
 };
-import { listConversations, seedMockDMs, type ConversationSummary } from '../api/messages';
+import { listConversations, seedMockDMs, type ConversationSummary, pinConversation, unpinConversation, acceptMessageRequest } from '../api/messages';
 import { timeAgo } from '../utils/timeAgo';
 import Swal from 'sweetalert2';
 import { acceptFollowRequest, denyFollowRequest, removeFollowRequest } from '../api/privacy';
+import { showToast } from '../utils/toast';
 import { getFollowedUsers } from '../api/posts';
+import { FiBookmark } from 'react-icons/fi';
+import { toggleFollow } from '../api/client';
+import { getSocket } from '../services/socketio';
+
+// Conversation Item Component
+function ConversationItem({ 
+    conv, 
+    onPin, 
+    onAcceptRequest,
+    navigate,
+    currentUserHandle,
+    onFollow
+}: { 
+    conv: ConversationSummary; 
+    onPin?: () => void;
+    onAcceptRequest?: () => void;
+    navigate: any;
+    currentUserHandle?: string;
+    onFollow?: (handle: string) => Promise<void>;
+}) {
+    const isCurrentUser = currentUserHandle === conv.otherHandle;
+    const hasStory = conv.hasUnviewedStories || false;
+    const isFollowing = conv.isFollowing || false;
+    const [showFollowCheck, setShowFollowCheck] = React.useState(isFollowing);
+
+    // Show follow checkmark briefly after following
+    React.useEffect(() => {
+        if (isFollowing) {
+            setShowFollowCheck(true);
+        } else {
+            setShowFollowCheck(false);
+        }
+    }, [isFollowing]);
+
+    const handleAvatarClick = (e?: React.MouseEvent) => {
+        if (e) {
+            e.stopPropagation();
+        }
+        if (hasStory) {
+            // Navigate to stories page with state to auto-open this user's stories
+            navigate('/stories', { state: { openUserHandle: conv.otherHandle } });
+        } else {
+            // Navigate to DM conversation
+            navigate(`/messages/${encodeURIComponent(conv.otherHandle)}`);
+        }
+    };
+
+    const handleFollowClick = async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (onFollow) {
+            await onFollow(conv.otherHandle);
+        }
+    };
+
+    const handleConversationClick = () => {
+        navigate(`/messages/${encodeURIComponent(conv.otherHandle)}`);
+    };
+
+    return (
+        <div className="flex items-center gap-3 py-3 px-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors group">
+            {/* Avatar with story/follow - separate from conversation button */}
+            <div className="relative overflow-visible flex-shrink-0">
+                <Avatar
+                    name={conv.otherHandle}
+                    src={getAvatarForHandle(conv.otherHandle)}
+                    size="md"
+                    hasStory={hasStory}
+                    onClick={handleAvatarClick}
+                />
+                {/* + icon overlay on profile picture to follow (TikTok style) */}
+                {!isCurrentUser && onFollow && (isFollowing === false || isFollowing === undefined) && (
+                    <button
+                        onClick={handleFollowClick}
+                        className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-blue-500 hover:bg-blue-600 border-2 border-white dark:border-gray-900 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30"
+                        aria-label="Follow user"
+                    >
+                        <FiPlus className="w-3 h-3 text-white" strokeWidth={2.5} />
+                    </button>
+                )}
+                {/* Checkmark icon when following (replaces + icon) */}
+                {!isCurrentUser && onFollow && isFollowing && showFollowCheck && (
+                    <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-green-500 border-2 border-white dark:border-gray-900 flex items-center justify-center shadow-lg z-30">
+                        <FiCheck className="w-3 h-3 text-white" strokeWidth={3} />
+                    </div>
+                )}
+            </div>
+            {/* Conversation content - clickable to open DM */}
+            <button
+                onClick={handleConversationClick}
+                className="flex items-center gap-3 flex-1 min-w-0 text-left"
+            >
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                        <span className="font-medium truncate">{conv.otherHandle}</span>
+                        {conv.isPinned && (
+                            <FiBookmark className="w-3 h-3 text-blue-500 fill-blue-500 flex-shrink-0" />
+                        )}
+                    </div>
+                    <div className="text-xs text-gray-500 truncate">
+                        {conv.lastMessage?.text || 'Photo'}
+                    </div>
+                </div>
+                <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                    <div className="text-[10px] text-gray-400">
+                        {conv.lastMessage ? timeAgo(conv.lastMessage.timestamp) : ''}
+                    </div>
+                    {conv.unread > 0 && (
+                        <span className="px-1.5 py-0.5 bg-blue-500 text-white text-[10px] rounded-full min-w-[18px] text-center">
+                            {conv.unread > 9 ? '9+' : conv.unread}
+                        </span>
+                    )}
+                </div>
+            </button>
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                {conv.isRequest && onAcceptRequest && (
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onAcceptRequest();
+                        }}
+                        className="p-2 hover:bg-gray-700 rounded-full transition-colors"
+                        title="Accept"
+                    >
+                        <span className="text-lg">✓</span>
+                    </button>
+                )}
+                {onPin && (
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onPin();
+                        }}
+                        className={`p-2 rounded-full transition-colors ${
+                            conv.isPinned 
+                                ? 'text-blue-500 hover:bg-gray-700' 
+                                : 'text-gray-400 hover:bg-gray-700 opacity-0 group-hover:opacity-100'
+                        }`}
+                        title={conv.isPinned ? 'Unpin' : 'Pin conversation'}
+                    >
+                        <FiBookmark className={`w-4 h-4 ${conv.isPinned ? 'fill-current' : ''}`} />
+                    </button>
+                )}
+            </div>
+        </div>
+    );
+}
 
 export default function InboxPage() {
     const navigate = useNavigate();
@@ -33,7 +180,7 @@ export default function InboxPage() {
     const [insights, setInsights] = React.useState<StoryInsight[]>([]);
     const [items, setItems] = React.useState<ConversationSummary[]>([]);
     const [loading, setLoading] = React.useState(true);
-    const [activeTab, setActiveTab] = React.useState<'insights' | 'notifications' | 'questions'>('notifications');
+    const [activeTab, setActiveTab] = React.useState<'insights' | 'notifications' | 'questions' | 'messages'>('notifications');
     const [selectedQuestionInsight, setSelectedQuestionInsight] = React.useState<StoryInsight | null>(null);
     const [questions, setQuestions] = React.useState<Question[]>([]);
     const [questionAvatars, setQuestionAvatars] = React.useState<Record<string, string>>({});
@@ -43,30 +190,39 @@ export default function InboxPage() {
         try {
             // Dynamically import to avoid circular dependency issues
             const { getQuestionsForUser } = await import('../api/questions');
-            const [notifs, storyInsights, conversations, userQuestions] = await Promise.all([
+            const [notifs, storyInsights, conversations, userQuestions, followedUsers] = await Promise.all([
                 getNotifications(user.handle),
                 getStoryInsightsForUser(user.handle),
                 listConversations(user.handle),
                 getQuestionsForUser(user.handle).catch(err => {
                     console.error('Error loading questions:', err);
                     return [];
-                })
+                }),
+                user?.id ? getFollowedUsers(user.id).catch(() => [] as string[]) : Promise.resolve([] as string[])
             ]);
             
+            // Add follow status to conversations
+            const conversationsWithFollowStatus = conversations.map(conv => ({
+                ...conv,
+                isFollowing: (followedUsers as string[]).includes(conv.otherHandle)
+            }));
+            
             // Convert conversations to notifications format so they appear in Notifs tab
-            // Include ALL conversations (both sent and received) so users can see all their DM conversations
+            // Only include conversations where the OTHER person sent the last message (not the user)
             const existingNotifHandles = new Set(notifs.filter(n => n.type === 'dm' || n.type === 'sticker' || n.type === 'reply').map(n => n.fromHandle));
             const conversationNotifications: Notification[] = conversations
                 .filter(conv => {
                     // Only include if:
                     // 1. Has a last message
-                    // 2. Doesn't already have a notification for this handle
+                    // 2. The OTHER person sent the last message (not the user)
+                    // 3. Doesn't already have a notification for this handle
                     if (!conv.lastMessage) return false;
+                    if (conv.lastMessage.senderHandle === user.handle) return false; // User sent it, don't create notification
                     if (existingNotifHandles.has(conv.otherHandle)) return false; // Already has notification
                     return true;
                 })
                 .map(conv => {
-                    // TypeScript: we know lastMessage exists because of the filter above
+                    // TypeScript: we know lastMessage exists and was sent by other person because of the filter above
                     const lastMsg = conv.lastMessage!;
                     return {
                         id: `conv-${conv.otherHandle}-${lastMsg.timestamp || Date.now()}`,
@@ -75,7 +231,7 @@ export default function InboxPage() {
                         toHandle: user.handle,
                         message: lastMsg.text || '',
                         timestamp: lastMsg.timestamp || Date.now(),
-                        read: conv.unread === 0 || lastMsg.senderHandle === user.handle // Mark as read if you sent it
+                        read: conv.unread === 0 // Mark as read if no unread messages
                     };
                 });
             
@@ -84,7 +240,7 @@ export default function InboxPage() {
             
             setNotifications(allNotifications);
             setInsights(storyInsights);
-            setItems(conversations);
+            setItems(conversationsWithFollowStatus);
             setQuestions(userQuestions || []);
             
             // Fetch avatar URLs for question responders
@@ -139,7 +295,26 @@ export default function InboxPage() {
 
         window.addEventListener('notificationsUpdated', onNotificationUpdate as any);
         window.addEventListener('conversationUpdated', onConversationUpdate as any);
-
+        
+        // Also listen to Socket.IO events if connected
+        const socket = getSocket();
+        if (socket) {
+            const handleSocketUpdate = (data: any) => {
+                window.dispatchEvent(new CustomEvent('conversationUpdated', { detail: data }));
+            };
+            socket.on('conversationUpdated', handleSocketUpdate);
+            socket.on('inboxUnreadChanged', (data: any) => {
+                window.dispatchEvent(new CustomEvent('inboxUnreadChanged', { detail: data }));
+            });
+            
+            return () => {
+                window.removeEventListener('notificationsUpdated', onNotificationUpdate as any);
+                window.removeEventListener('conversationUpdated', onConversationUpdate as any);
+                socket.off('conversationUpdated', handleSocketUpdate);
+                socket.off('inboxUnreadChanged');
+            };
+        }
+        
         return () => {
             window.removeEventListener('notificationsUpdated', onNotificationUpdate as any);
             window.removeEventListener('conversationUpdated', onConversationUpdate as any);
@@ -164,6 +339,46 @@ export default function InboxPage() {
             navigate(`/messages/${encodeURIComponent(notif.fromHandle)}`);
         }
     };
+
+    const handleFollow = React.useCallback(async (handle: string) => {
+        if (!user?.handle || !user?.id) return;
+        
+        try {
+            // Try to find a post from this user to update local state
+            const { fetchPostsByUser } = await import('../api/posts');
+            const { getState } = await import('../api/posts');
+            
+            // Update local state first (optimistic update)
+            const s = getState(user.id);
+            const wasFollowing = s.follows[handle] === true;
+            s.follows[handle] = !wasFollowing;
+            
+            // Try to call API
+            try {
+                const result = await toggleFollow(handle);
+                console.log('Toggle follow result:', result);
+                
+                // If API call fails or returns different state, sync it
+                if (result && typeof result.following === 'boolean') {
+                    s.follows[handle] = result.following;
+                }
+            } catch (apiError) {
+                console.warn('API follow failed, using local state:', apiError);
+                // If API fails, we'll keep the optimistic update
+                // This allows offline functionality
+            }
+            
+            // Reload data to update follow status in UI
+            await loadData();
+        } catch (error) {
+            console.error('Error toggling follow:', error);
+            Swal.fire({
+                title: 'Error',
+                text: 'Failed to follow/unfollow user',
+                icon: 'error'
+            });
+        }
+    }, [user, loadData]);
 
     const formatNotificationMessage = (notif: Notification): string => {
         switch (notif.type) {
@@ -262,18 +477,36 @@ export default function InboxPage() {
                 </button>
                 <h1 className="text-xl font-semibold">Notifications</h1>
                 <div className="flex-1" />
-                <button
-                    onClick={async () => {
-                        if (!user?.handle) return;
-                        await seedMockDMs(user.handle);
-                        // Reload conversations
-                        const conversations = await listConversations(user.handle);
-                        setItems(conversations);
-                    }}
-                    className="px-3 py-1.5 text-sm rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-medium transition-colors"
-                >
-                    Add mock DMs
-                </button>
+                <div className="flex gap-2">
+                    <button
+                        onClick={async () => {
+                            if (!user?.handle) return;
+                            await seedMockDMs(user.handle);
+                            // Reload conversations
+                            const conversations = await listConversations(user.handle);
+                            setItems(conversations);
+                        }}
+                        className="px-3 py-1.5 text-sm rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-medium transition-colors"
+                    >
+                        Add mock DMs
+                    </button>
+                    <button
+                        onClick={async () => {
+                            // Seed mock stories for Bob
+                            const { seedMockStoriesForUser } = await import('../api/stories');
+                            await seedMockStoriesForUser('Bob@Ireland', 'user-bob');
+                            showToast('Mock 24hr stories added for Bob');
+                            // Reload conversations to show purple border
+                            if (user?.handle) {
+                                const conversations = await listConversations(user.handle);
+                                setItems(conversations);
+                            }
+                        }}
+                        className="px-3 py-1.5 text-sm rounded-lg bg-pink-600 hover:bg-pink-700 text-white font-medium transition-colors"
+                    >
+                        Add Bob Stories
+                    </button>
+                </div>
             </div>
 
             {/* Tabs */}
@@ -320,9 +553,96 @@ export default function InboxPage() {
                         </span>
                     )}
                 </button>
+                <button
+                    onClick={() => setActiveTab('messages')}
+                    className={`flex-1 py-1.5 text-xs font-medium transition-colors relative whitespace-nowrap flex items-center justify-center gap-1 ${activeTab === 'messages'
+                            ? 'text-blue-500 border-b-2 border-blue-500'
+                            : 'text-gray-500 hover:text-gray-300'
+                        }`}
+                >
+                    <span>Messages</span>
+                    {items && items.filter(c => c.unread > 0).length > 0 && (
+                        <span className="px-1 py-0.5 bg-blue-500 text-white text-[9px] rounded-full min-w-[16px] text-center leading-none">
+                            {items.filter(c => c.unread > 0).reduce((sum, c) => sum + c.unread, 0) > 9 ? '9+' : items.filter(c => c.unread > 0).reduce((sum, c) => sum + c.unread, 0)}
+                        </span>
+                    )}
+                </button>
             </div>
             {loading ? (
                 <div className="text-gray-500">Loading…</div>
+            ) : activeTab === 'messages' ? (
+                items.length === 0 ? (
+                    <div className="text-gray-500 text-center py-8">No messages yet.</div>
+                ) : (
+                    <div className="space-y-1">
+                        {/* Pinned Conversations */}
+                        {items.filter(c => c.isPinned).length > 0 && (
+                            <div className="mb-4">
+                                <div className="text-xs text-gray-400 uppercase tracking-wide mb-2 px-2">Pinned</div>
+                                {items.filter(c => c.isPinned).map(conv => (
+                                    <ConversationItem
+                                        key={conv.otherHandle}
+                                        conv={conv}
+                                        onPin={() => {
+                                            if (user?.handle) {
+                                                unpinConversation(user.handle, conv.otherHandle);
+                                                loadData();
+                                            }
+                                        }}
+                                        onAcceptRequest={() => {
+                                            if (user?.handle) {
+                                                acceptMessageRequest(user.handle, conv.otherHandle);
+                                                loadData();
+                                            }
+                                        }}
+                                        navigate={navigate}
+                                        currentUserHandle={user?.handle}
+                                        onFollow={handleFollow}
+                                    />
+                                ))}
+                            </div>
+                        )}
+                        
+                        {/* Message Requests */}
+                        {items.filter(c => c.isRequest).length > 0 && (
+                            <div className="mb-4">
+                                <div className="text-xs text-gray-400 uppercase tracking-wide mb-2 px-2">Message Requests</div>
+                                {items.filter(c => c.isRequest).map(conv => (
+                                    <ConversationItem
+                                        key={conv.otherHandle}
+                                        conv={conv}
+                                        onAcceptRequest={() => {
+                                            if (user?.handle) {
+                                                acceptMessageRequest(user.handle, conv.otherHandle);
+                                                loadData();
+                                            }
+                                        }}
+                                        navigate={navigate}
+                                        currentUserHandle={user?.handle}
+                                        onFollow={handleFollow}
+                                    />
+                                ))}
+                            </div>
+                        )}
+                        
+                        {/* Regular Conversations */}
+                        {items.filter(c => !c.isPinned && !c.isRequest).map(conv => (
+                            <ConversationItem
+                                key={conv.otherHandle}
+                                conv={conv}
+                                onPin={() => {
+                                    if (user?.handle) {
+                                        pinConversation(user.handle, conv.otherHandle);
+                                        loadData();
+                                    }
+                                }}
+                                navigate={navigate}
+                                currentUserHandle={user?.handle}
+                                onFollow={handleFollow}
+                            />
+                        ))}
+                    </div>
+                )
             ) : activeTab === 'notifications' ? (
                 notifications.length === 0 ? (
                     <div className="text-gray-500 text-center py-8">No notifications yet.</div>

@@ -12,6 +12,46 @@ import { setProfilePrivacy } from '../api/privacy';
 import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMaps';
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
 import { getUnreadTotal } from '../api/messages';
+import { 
+  getNotificationPreferences, 
+  saveNotificationPreferences, 
+  type NotificationPreferences,
+  initializeNotifications
+} from '../services/notifications';
+
+// Notification Toggle Component
+function NotificationToggle({ 
+  label, 
+  description, 
+  enabled, 
+  onChange 
+}: { 
+  label: string; 
+  description: string; 
+  enabled: boolean; 
+  onChange: (enabled: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between py-2">
+      <div className="flex-1 pr-4">
+        <p className="font-medium text-gray-900 dark:text-gray-100 text-sm">{label}</p>
+        <p className="text-xs text-gray-500 dark:text-gray-400">{description}</p>
+      </div>
+      <button
+        onClick={() => onChange(!enabled)}
+        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 ${
+          enabled ? 'bg-brand-600' : 'bg-gray-200 dark:bg-gray-700'
+        }`}
+      >
+        <span
+          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+            enabled ? 'translate-x-5' : 'translate-x-0'
+          }`}
+        />
+      </button>
+    </div>
+  );
+}
 
 export default function ProfilePage() {
   const { user, logout, login } = useAuth();
@@ -36,6 +76,8 @@ export default function ProfilePage() {
   const [unreadCount, setUnreadCount] = React.useState(0);
   const [placesTraveled, setPlacesTraveled] = React.useState<string>(user?.placesTraveled?.join(', ') || '');
   const [showProfilePictureModal, setShowProfilePictureModal] = React.useState(false);
+  const [notificationPrefs, setNotificationPrefs] = React.useState<NotificationPreferences>(getNotificationPreferences());
+  const [isInitializingNotifications, setIsInitializingNotifications] = React.useState(false);
   
   // Location state for cascading dropdowns
   const [national, setNational] = React.useState(user?.national || '');
@@ -1263,16 +1305,182 @@ export default function ProfilePage() {
                   <FiX className="w-6 h-6 text-gray-600 dark:text-gray-400" />
                 </button>
               </div>
-              <div className="p-6 space-y-4">
-                <button
-                  onClick={() => {
-                    logout();
-                    nav('/login');
-                  }}
-                  className="w-full py-3 bg-red-500 text-white font-semibold rounded-xl hover:bg-red-600 transition-colors"
-                >
-                  Logout
-                </button>
+              <div className="p-6 space-y-6">
+                {/* Notification Settings Section */}
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Push Notifications</h3>
+                  
+                  {/* Master Toggle */}
+                  <div className="flex items-center justify-between py-3 border-b border-gray-200 dark:border-gray-700 mb-4">
+                    <div className="flex-1">
+                      <p className="font-medium text-gray-900 dark:text-gray-100">Enable Notifications</p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">Receive push notifications on this device</p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        const newPrefs = { ...notificationPrefs, enabled: !notificationPrefs.enabled };
+                        setNotificationPrefs(newPrefs);
+                        saveNotificationPreferences(newPrefs);
+                        
+                        if (newPrefs.enabled) {
+                          setIsInitializingNotifications(true);
+                          try {
+                            await initializeNotifications();
+                            Swal.fire({
+                              icon: 'success',
+                              title: 'Notifications Enabled',
+                              text: 'You will now receive browser notifications',
+                              confirmButtonColor: '#0095f6',
+                              background: '#262626',
+                              color: '#ffffff',
+                            });
+                          } catch (error) {
+                            console.error('Error initializing notifications:', error);
+                            Swal.fire({
+                              icon: 'error',
+                              title: 'Error',
+                              text: 'Failed to enable notifications. Please check your browser settings.',
+                              confirmButtonColor: '#0095f6',
+                              background: '#262626',
+                              color: '#ffffff',
+                            });
+                          } finally {
+                            setIsInitializingNotifications(false);
+                          }
+                        }
+                      }}
+                      disabled={isInitializingNotifications}
+                      className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 ${
+                        notificationPrefs.enabled ? 'bg-brand-600' : 'bg-gray-200 dark:bg-gray-700'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          notificationPrefs.enabled ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Individual Notification Types */}
+                  {notificationPrefs.enabled && (
+                    <div className="space-y-3">
+                      <NotificationToggle
+                        label="Direct Messages"
+                        description="When someone sends you a message"
+                        enabled={notificationPrefs.directMessages}
+                        onChange={(enabled) => {
+                          const newPrefs = { ...notificationPrefs, directMessages: enabled };
+                          setNotificationPrefs(newPrefs);
+                          saveNotificationPreferences(newPrefs);
+                        }}
+                      />
+                      <NotificationToggle
+                        label="Likes"
+                        description="When someone likes your post"
+                        enabled={notificationPrefs.likes}
+                        onChange={(enabled) => {
+                          const newPrefs = { ...notificationPrefs, likes: enabled };
+                          setNotificationPrefs(newPrefs);
+                          saveNotificationPreferences(newPrefs);
+                        }}
+                      />
+                      <NotificationToggle
+                        label="Comments"
+                        description="When someone comments on your post"
+                        enabled={notificationPrefs.comments}
+                        onChange={(enabled) => {
+                          const newPrefs = { ...notificationPrefs, comments: enabled };
+                          setNotificationPrefs(newPrefs);
+                          saveNotificationPreferences(newPrefs);
+                        }}
+                      />
+                      <NotificationToggle
+                        label="Replies"
+                        description="When someone replies to your comment"
+                        enabled={notificationPrefs.replies}
+                        onChange={(enabled) => {
+                          const newPrefs = { ...notificationPrefs, replies: enabled };
+                          setNotificationPrefs(newPrefs);
+                          saveNotificationPreferences(newPrefs);
+                        }}
+                      />
+                      <NotificationToggle
+                        label="Follows"
+                        description="When someone follows you"
+                        enabled={notificationPrefs.follows}
+                        onChange={(enabled) => {
+                          const newPrefs = { ...notificationPrefs, follows: enabled };
+                          setNotificationPrefs(newPrefs);
+                          saveNotificationPreferences(newPrefs);
+                        }}
+                      />
+                      <NotificationToggle
+                        label="Follow Requests"
+                        description="When someone requests to follow you"
+                        enabled={notificationPrefs.followRequests}
+                        onChange={(enabled) => {
+                          const newPrefs = { ...notificationPrefs, followRequests: enabled };
+                          setNotificationPrefs(newPrefs);
+                          saveNotificationPreferences(newPrefs);
+                        }}
+                      />
+                      <NotificationToggle
+                        label="Story Insights"
+                        description="When you receive story insights"
+                        enabled={notificationPrefs.storyInsights}
+                        onChange={(enabled) => {
+                          const newPrefs = { ...notificationPrefs, storyInsights: enabled };
+                          setNotificationPrefs(newPrefs);
+                          saveNotificationPreferences(newPrefs);
+                        }}
+                      />
+                      <NotificationToggle
+                        label="Questions"
+                        description="When someone answers your question"
+                        enabled={notificationPrefs.questions}
+                        onChange={(enabled) => {
+                          const newPrefs = { ...notificationPrefs, questions: enabled };
+                          setNotificationPrefs(newPrefs);
+                          saveNotificationPreferences(newPrefs);
+                        }}
+                      />
+                      <NotificationToggle
+                        label="Shares"
+                        description="When someone shares your post"
+                        enabled={notificationPrefs.shares}
+                        onChange={(enabled) => {
+                          const newPrefs = { ...notificationPrefs, shares: enabled };
+                          setNotificationPrefs(newPrefs);
+                          saveNotificationPreferences(newPrefs);
+                        }}
+                      />
+                      <NotificationToggle
+                        label="Reclips"
+                        description="When someone reclips your post"
+                        enabled={notificationPrefs.reclips}
+                        onChange={(enabled) => {
+                          const newPrefs = { ...notificationPrefs, reclips: enabled };
+                          setNotificationPrefs(newPrefs);
+                          saveNotificationPreferences(newPrefs);
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Logout Button */}
+                <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+                  <button
+                    onClick={() => {
+                      logout();
+                      nav('/login');
+                    }}
+                    className="w-full py-3 bg-red-500 text-white font-semibold rounded-xl hover:bg-red-600 transition-colors"
+                  >
+                    Logout
+                  </button>
+                </div>
               </div>
             </div>
           </div>
