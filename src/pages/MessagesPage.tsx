@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { FiChevronLeft, FiSend, FiCornerUpLeft, FiCopy, FiMoreHorizontal, FiMapPin, FiEdit3, FiX, FiMic, FiUserPlus, FiPlus, FiCheck } from 'react-icons/fi';
+import { FiChevronLeft, FiSend, FiCornerUpLeft, FiMoreHorizontal, FiMapPin, FiEdit3, FiX, FiMic, FiUserPlus, FiPlus, FiCheck } from 'react-icons/fi';
 import { IoMdPhotos } from 'react-icons/io';
 import { BsEmojiSmile } from 'react-icons/bs';
 import { FaPaperPlane, FaExclamationCircle } from 'react-icons/fa';
@@ -1466,17 +1466,6 @@ export default function MessagesPage() {
         closeContextMenu();
     };
 
-    const handleCopy = () => {
-        if (!contextMenu?.message) return;
-        const textToCopy = contextMenu.message.text || '';
-        if (textToCopy) {
-            navigator.clipboard.writeText(textToCopy).then(() => {
-                // Could show a toast notification here
-            });
-        }
-        closeContextMenu();
-    };
-
     const handleForward = async () => {
         if (!contextMenu?.message || !user?.handle) return;
         
@@ -2111,11 +2100,11 @@ export default function MessagesPage() {
                                                             )}
                                                             {msg.text && (
                                                                 <div>
-                                                                    <p className="text-white text-sm leading-relaxed" style={{ userSelect: 'text' }}>
+                                                                    <p className="text-white text-sm leading-relaxed select-none" style={{ WebkitUserSelect: 'none', userSelect: 'none' }}>
                                                                         {translatedMessages[msg.id] || msg.text}
                                                                     </p>
                                                                     {translatedMessages[msg.id] && (
-                                                                        <p className="text-white/60 text-xs mt-1 italic" style={{ userSelect: 'text' }}>
+                                                                        <p className="text-white/60 text-xs mt-1 italic select-none" style={{ WebkitUserSelect: 'none', userSelect: 'none' }}>
                                                                             Original: {msg.text}
                                                                         </p>
                                                                     )}
@@ -2494,11 +2483,11 @@ export default function MessagesPage() {
                                                                 )}
                                                                 {msg.text && !commentPostId && (
                                                                     <div>
-                                                                        <p className="text-white text-sm leading-relaxed" style={{ userSelect: 'text' }}>
+                                                                        <p className="text-white text-sm leading-relaxed select-none" style={{ WebkitUserSelect: 'none', userSelect: 'none' }}>
                                                                             {translatedMessages[msg.id] || msg.text}
                                                                         </p>
                                                                         {translatedMessages[msg.id] && (
-                                                                            <p className="text-white/60 text-xs mt-1 italic" style={{ userSelect: 'text' }}>
+                                                                            <p className="text-white/60 text-xs mt-1 italic select-none" style={{ WebkitUserSelect: 'none', userSelect: 'none' }}>
                                                                                 Original: {msg.text}
                                                                             </p>
                                                                         )}
@@ -2729,14 +2718,6 @@ export default function MessagesPage() {
                         >
                             <FaPaperPlane className="w-5 h-5" />
                             <span>Forward</span>
-                        </button>
-
-                        <button
-                            onClick={handleCopy}
-                            className="w-full text-left px-4 py-3 hover:bg-gray-800 flex items-center gap-3 text-white"
-                        >
-                            <FiCopy className="w-5 h-5" />
-                            <span>Copy</span>
                         </button>
 
                         <button
