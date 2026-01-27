@@ -610,7 +610,7 @@ export async function fetchStoryGroups(userId: string): Promise<StoryGroup[]> {
 }
 
 // Get stories for a specific user
-export async function fetchUserStories(userId: string, targetUserId: string): Promise<Story[]> {
+export async function fetchUserStories(_viewerUserId: string, targetUserId: string): Promise<Story[]> {
     await delay();
 
     const now = Date.now();
@@ -777,7 +777,7 @@ export async function createStory(
 }
 
 // Mark story as viewed
-export async function markStoryViewed(storyId: string, userId: string): Promise<void> {
+export async function markStoryViewed(storyId: string, _userId: string): Promise<void> {
     await delay();
 
     const story = stories.find(s => s.id === storyId);
@@ -869,7 +869,7 @@ export async function addQuestionAnswer(storyId: string, userId: string, userHan
 }
 
 // Vote on a poll in a story
-export async function voteOnPoll(storyId: string, userId: string, option: 'option1' | 'option2' | 'option3'): Promise<void> {
+export async function voteOnPoll(storyId: string, _userId: string, option: 'option1' | 'option2' | 'option3'): Promise<void> {
     await delay();
 
     const story = stories.find(s => s.id === storyId);

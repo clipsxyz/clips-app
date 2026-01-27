@@ -73,6 +73,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (parsed.handle) {
           connectSocket(parsed.handle);
         }
+        // Initialize Firebase notifications when user is loaded
+        if (parsed.handle) {
+          import('../services/notifications').then(({ initializeNotifications }) => {
+            initializeNotifications();
+          });
+        }
       }
     } catch (error) {
       console.error('Error loading user from localStorage:', error);
@@ -106,6 +112,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Sync privacy setting
     if (u.handle) {
       setProfilePrivacy(u.handle, u.is_private || false);
+      // Connect to Socket.IO when user logs in
+      connectSocket(u.handle);
+      // Initialize Firebase notifications when user logs in
+      import('../services/notifications').then(({ initializeNotifications }) => {
+        initializeNotifications();
+      });
     }
     Sentry.setUser({ id: u.id, username: u.name });
   };

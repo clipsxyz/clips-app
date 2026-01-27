@@ -7,8 +7,8 @@ import { useAuth } from '../context/Auth';
 import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle, voteOnPoll, addQuestionAnswer } from '../api/stories';
 import { appendMessage } from '../api/messages';
 import Swal from 'sweetalert2';
-import { isProfilePrivate, canSendMessage } from '../api/privacy';
-import { getFollowedUsers, getPostById, toggleFollowForPost, getState } from '../api/posts';
+import { isProfilePrivate, canSendMessage, createFollowRequest } from '../api/privacy';
+import { getFollowedUsers, getPostById, toggleFollowForPost, getState, setFollowState } from '../api/posts';
 import { showToast } from '../utils/toast';
 import ScenesModal from '../components/ScenesModal';
 import { getFlagForHandle, getAvatarForHandle } from '../api/users';
@@ -2714,9 +2714,25 @@ export default function StoriesPage() {
                                             const handle = currentGroup.userHandle;
                                             
                                             try {
-                                                // Get current follow status
                                                 const followedUsers = await getFollowedUsers(user.id);
                                                 const isCurrentlyFollowing = followedUsers.includes(handle);
+                                                const profilePrivate = isProfilePrivate(handle);
+                                                
+                                                // Private profile + trying to follow = request only, do not add to follow list
+                                                if (profilePrivate && !isCurrentlyFollowing && user?.handle) {
+                                                    createFollowRequest(user.handle, handle);
+                                                    setFollowState(user.id, handle, false);
+                                                    setIsFollowingStoryUser(false);
+                                                    Swal.fire({
+                                                        title: 'Follow Request Sent',
+                                                        html: '<p style="color:#262626;font-size:14px;">Your follow request has been sent. You will be notified when they accept.</p>',
+                                                        confirmButtonText: 'OK',
+                                                        confirmButtonColor: '#0095f6',
+                                                        background: '#ffffff',
+                                                        width: '360px'
+                                                    });
+                                                    return;
+                                                }
                                                 
                                                 // Call API to toggle follow (handle encoding is done inside toggleFollow)
                                                 console.log('Toggling follow for handle:', handle);
@@ -2766,35 +2782,40 @@ export default function StoriesPage() {
                                                     error?.message?.includes('NetworkError');
                                                 
                                                 if (isConnectionError) {
-                                                    // Backend not available - use local/mock fallback
                                                     console.log('Backend not available, using local state fallback');
+                                                    const userState = getState(user.id);
+                                                    const wasFollowing = userState.follows[handle] === true;
+                                                    const profilePrivate = isProfilePrivate(handle);
+                                                    
+                                                    // Private profile + trying to follow = request only, do not add to follow list
+                                                    if (profilePrivate && !wasFollowing && user?.handle) {
+                                                        createFollowRequest(user.handle, handle);
+                                                        setFollowState(user.id, handle, false);
+                                                        setIsFollowingStoryUser(false);
+                                                        Swal.fire({
+                                                            title: 'Follow Request Sent',
+                                                            html: '<p style="color:#262626;font-size:14px;">Your follow request has been sent. You will be notified when they accept.</p>',
+                                                            confirmButtonText: 'OK',
+                                                            confirmButtonColor: '#0095f6',
+                                                            background: '#ffffff',
+                                                            width: '360px'
+                                                        });
+                                                        return;
+                                                    }
                                                     
                                                     try {
-                                                        // Update local follow state directly
-                                                        const userState = getState(user.id);
-                                                        const wasFollowing = userState.follows[handle] === true;
                                                         userState.follows[handle] = !wasFollowing;
-                                                        
-                                                        // Try to find a post from this user to update via toggleFollowForPost (for consistency)
-                                                        const userPost = currentStory?.sharedFromPost 
-                                                            ? originalPost 
-                                                            : null;
-                                                        
+                                                        const userPost = currentStory?.sharedFromPost ? originalPost : null;
                                                         if (userPost?.id) {
                                                             await toggleFollowForPost(user.id, userPost.id);
                                                         }
-                                                        
-                                                        // Update UI state
                                                         const newFollowingState = !wasFollowing;
                                                         setIsFollowingStoryUser(newFollowingState);
-                                                        
                                                         if (newFollowingState) {
                                                             showToast?.('Following');
                                                         } else {
                                                             showToast?.('Unfollowed');
                                                         }
-                                                        
-                                                        // Dispatch event to update newsfeed
                                                         window.dispatchEvent(new CustomEvent('followToggled', {
                                                             detail: { handle: handle, isFollowing: newFollowingState }
                                                         }));
@@ -3458,7 +3479,25 @@ export default function StoriesPage() {
                             // Mock like handler for scenes
                         }}
                         onFollow={async () => {
-                            // Mock follow handler for scenes
+                            if (!fullPost || !user?.id || !user?.handle) return;
+                            const handle = fullPost.userHandle;
+                            const profilePrivate = isProfilePrivate(handle);
+                            if (profilePrivate) {
+                                createFollowRequest(user.handle, handle);
+                                setFollowState(user.id, handle, false);
+                                await Swal.fire({
+                                    title: 'Follow Request Sent',
+                                    html: '<p style="color:#262626;font-size:14px;">Your follow request has been sent. You will be notified when they accept.</p>',
+                                    confirmButtonText: 'OK',
+                                    confirmButtonColor: '#0095f6',
+                                    background: '#ffffff',
+                                    width: '360px'
+                                });
+                                return false;
+                            }
+                            const userPost = fullPost.id ? await getPostById(fullPost.id) : null;
+                            if (userPost) await toggleFollowForPost(user.id, fullPost.id);
+                            return;
                         }}
                         onShare={async () => {
                             // Mock share handler for scenes

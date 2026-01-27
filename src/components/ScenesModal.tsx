@@ -16,7 +16,7 @@ import { useOnline } from '../hooks/useOnline';
 import { addComment, fetchComments } from '../api/posts';
 import { getCollectionsForPost } from '../api/collections';
 import { isProfilePrivate, canSendMessage, hasPendingFollowRequest, createFollowRequest } from '../api/privacy';
-import { getFollowedUsers } from '../api/posts';
+import { getFollowedUsers, setFollowState } from '../api/posts';
 import Swal from 'sweetalert2';
 import type { Comment } from '../types';
 import { enqueue } from '../utils/mutationQueue';
@@ -131,7 +131,7 @@ type ScenesModalProps = {
     initialMutedState?: boolean | null;
     onClose: (savedTime?: number) => void;
     onLike: () => Promise<void>;
-    onFollow: () => Promise<void>;
+    onFollow: () => Promise<boolean | void>;
     onShare: () => Promise<void>;
     onOpenComments: () => void;
     onReclip: () => Promise<void>;
@@ -748,11 +748,14 @@ export default function ScenesModal({
         if (busy) return;
         setBusy(true);
         try {
-            // Optimistically update UI
-            setIsFollowing(prev => !prev);
-            await onFollow();
+            const res = await onFollow();
+            // If parent returns false (e.g. private profile – request sent, not following), keep Follow state
+            if (typeof res === 'boolean') {
+                setIsFollowing(res);
+            } else {
+                setIsFollowing(prev => !prev);
+            }
         } catch (error) {
-            // Revert on error
             setIsFollowing(post.isFollowing);
             console.error('Error toggling follow:', error);
         } finally {
@@ -1579,16 +1582,8 @@ export default function ScenesModal({
                                             });
                                             
                                             if (result.isConfirmed) {
-                                                // Create follow request
                                                 createFollowRequest(user.handle, post.userHandle);
-                                                
-                                                // Try to follow via API
-                                                try {
-                                                    await onFollow();
-                                                } catch (error) {
-                                                    console.error('Error sending follow request:', error);
-                                                }
-                                                
+                                                if (user?.id) setFollowState(user.id, post.userHandle, false);
                                                 Swal.fire({
                                                     title: 'Follow Request Sent',
                                                     text: 'You will be notified when they accept your request.',
@@ -2054,16 +2049,8 @@ export default function ScenesModal({
                                                         });
                                                         
                                                         if (result.isConfirmed) {
-                                                            // Create follow request
                                                             createFollowRequest(user.handle, post.userHandle);
-                                                            
-                                                            // Try to follow via API
-                                                            try {
-                                                                await onFollow();
-                                                            } catch (error) {
-                                                                console.error('Error sending follow request:', error);
-                                                            }
-                                                            
+                                                            if (user?.id) setFollowState(user.id, post.userHandle, false);
                                                             Swal.fire({
                                                                 title: 'Follow Request Sent',
                                                                 text: 'You will be notified when they accept your request.',

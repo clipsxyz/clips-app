@@ -1,6 +1,5 @@
-// Notification service (Firebase removed - using browser notifications only)
-// Note: Push notifications via Firebase have been removed to fix server startup issues
-import { apiClient } from '../api/client';
+// Notification service with Firebase Cloud Messaging support
+// Firebase imports are loaded dynamically to avoid errors if package not installed
 
 // Notification preferences storage key
 const NOTIFICATION_PREFS_KEY = 'notification_preferences';
@@ -61,8 +60,32 @@ export function saveNotificationPreferences(prefs: NotificationPreferences): voi
 // Sync preferences to backend
 async function syncPreferencesToBackend(prefs: NotificationPreferences): Promise<void> {
   try {
-    // TODO: Implement API endpoint to save notification preferences
-    // await apiClient.updateNotificationPreferences(prefs);
+    const userStr = localStorage.getItem('user');
+    if (!userStr) {
+      return;
+    }
+
+    const userData = JSON.parse(userStr);
+    const userId = userData.id || userData.handle;
+
+    // Call API to save preferences
+    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000/api'}/notifications/preferences`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        userId,
+        userHandle: userData.handle,
+        preferences: prefs,
+      }),
+    });
+
+    if (response.ok) {
+      console.log('Notification preferences synced to backend');
+    } else {
+      console.warn('Failed to sync preferences to backend:', response.statusText);
+    }
   } catch (error) {
     console.error('Error syncing preferences to backend:', error);
   }
@@ -88,33 +111,127 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
   return permission;
 }
 
-// Get FCM token for this device (disabled - Firebase removed)
+// Get FCM token for this device
 export async function getFCMToken(): Promise<string | null> {
-  console.warn('Firebase Cloud Messaging has been removed. Push notifications are not available.');
-  return null;
+  try {
+    // Dynamically import Firebase module
+    const firebaseModule = await import('./firebase').catch(() => null);
+    if (!firebaseModule) {
+      console.warn('Firebase module not available. Run "npm install" to install Firebase package.');
+      return null;
+    }
+
+    const { initializeFirebase, initializeMessaging, getFCMToken: getFirebaseToken } = firebaseModule;
+
+    // Initialize Firebase if not already initialized
+    const firebaseApp = await initializeFirebase();
+    if (!firebaseApp) {
+      console.warn('Firebase not initialized. Check your Firebase configuration or run "npm install" to install Firebase package.');
+      return null;
+    }
+
+    // Initialize messaging
+    await initializeMessaging();
+
+    // Get token
+    const token = await getFirebaseToken();
+    if (token) {
+      // Save token to backend
+      await saveTokenToBackend(token);
+    }
+    return token;
+  } catch (error) {
+    console.error('Error getting FCM token:', error);
+    return null;
+  }
 }
 
 // Save FCM token to backend
 async function saveTokenToBackend(token: string): Promise<void> {
   try {
-    // TODO: Implement API endpoint to save FCM token
-    // await apiClient.saveFCMToken(token);
-    console.log('FCM token saved to backend:', token.substring(0, 20) + '...');
+    // Get current user from localStorage since we can't import useAuth hook here
+    const userStr = localStorage.getItem('user');
+    if (!userStr) {
+      console.warn('No user found. Cannot save FCM token.');
+      return;
+    }
+
+    const userData = JSON.parse(userStr);
+    const userId = userData.id || userData.handle;
+
+    // Call API to save token
+    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000/api'}/notifications/fcm-token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        token,
+        userId,
+        userHandle: userData.handle,
+      }),
+    });
+
+    if (response.ok) {
+      console.log('FCM token saved to backend successfully');
+    } else {
+      console.warn('Failed to save FCM token to backend:', response.statusText);
+    }
   } catch (error) {
     console.error('Error saving FCM token to backend:', error);
   }
 }
 
-// Listen for foreground messages (when app is open) - disabled (Firebase removed)
-export function onForegroundMessage(
+// Listen for foreground messages (when app is open)
+export async function onForegroundMessage(
   callback: (payload: any) => void
-): (() => void) | null {
-  console.warn('Firebase Cloud Messaging has been removed. Foreground message listening is not available.');
-  return null;
+): Promise<(() => void) | null> {
+  try {
+    // Dynamically import Firebase module
+    const firebaseModule = await import('./firebase').catch(() => null);
+    if (!firebaseModule) {
+      console.warn('Firebase module not available. Foreground message listening not available.');
+      return null;
+    }
+
+    const { initializeFirebase, onForegroundMessage: onFirebaseForegroundMessage } = firebaseModule;
+
+    // Initialize Firebase if not already initialized
+    const firebaseApp = await initializeFirebase();
+    if (!firebaseApp) {
+      console.warn('Firebase not initialized. Foreground message listening not available.');
+      return null;
+    }
+
+    // Set up foreground message listener
+    const unsubscribe = await onFirebaseForegroundMessage((payload: { notification?: { title?: string; body?: string; icon?: string }; data?: any }) => {
+      // Show browser notification for foreground messages
+      if (payload.notification) {
+        showBrowserNotification(
+          payload.notification.title || 'New Notification',
+          {
+            body: payload.notification.body,
+            icon: payload.notification.icon || '/icon-192x192.png',
+            badge: '/icon-192x192.png',
+            tag: payload.data?.id || 'notification',
+            data: payload.data || {},
+          }
+        );
+      }
+      
+      // Call the callback
+      callback(payload);
+    });
+
+    return unsubscribe;
+  } catch (error) {
+    console.error('Error setting up foreground message listener:', error);
+    return null;
+  }
 }
 
 // Show browser notification (using native browser API only)
-function showBrowserNotification(title: string, options?: NotificationOptions): void {
+export function showBrowserNotification(title: string, options?: NotificationOptions): void {
   const prefs = getNotificationPreferences();
   if (!prefs.enabled) {
     return;
@@ -129,7 +246,7 @@ function showBrowserNotification(title: string, options?: NotificationOptions): 
   }
 }
 
-// Initialize notifications (call this on app startup) - Browser notifications only
+// Initialize notifications (call this on app startup)
 export async function initializeNotifications(): Promise<void> {
   try {
     const prefs = getNotificationPreferences();
@@ -145,7 +262,58 @@ export async function initializeNotifications(): Promise<void> {
       return;
     }
 
-    console.log('Browser notifications initialized successfully (Firebase push notifications removed)');
+    // Dynamically import Firebase module
+    const firebaseModule = await import('./firebase').catch(() => null);
+    if (!firebaseModule) {
+      console.warn('Firebase module not available. Using browser notifications only. Run "npm install" to install Firebase package.');
+      return;
+    }
+
+    const { initializeFirebase, initializeMessaging } = firebaseModule;
+
+    // Initialize Firebase
+    const firebaseApp = await initializeFirebase();
+    if (!firebaseApp) {
+      console.warn('Firebase initialization failed. Using browser notifications only. Run "npm install" to install Firebase package.');
+      return;
+    }
+
+    // Initialize Firebase Messaging
+    await initializeMessaging();
+
+    // Register service worker for background notifications
+    if ('serviceWorker' in navigator) {
+      try {
+        const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+        console.log('Service Worker registered:', registration);
+      } catch (error) {
+        console.error('Service Worker registration failed:', error);
+      }
+    }
+
+    // Get FCM token
+    const token = await getFCMToken();
+    if (token) {
+      console.log('FCM token obtained successfully');
+    } else {
+      console.warn('FCM token not obtained. Push notifications may not work.');
+    }
+
+    // Set up foreground message listener
+    try {
+      const unsubscribe = await onForegroundMessage((payload: { notification?: { title?: string; body?: string; icon?: string }; data?: any }) => {
+        console.log('Foreground notification received:', payload);
+      });
+      
+      // Cleanup on unmount (if needed)
+      if (unsubscribe) {
+        // Store unsubscribe function for cleanup if needed
+      }
+    } catch (error) {
+      console.warn('Could not set up foreground message listener:', error);
+    }
+
+    console.log('Notifications initialized successfully with Firebase Cloud Messaging');
   } catch (error) {
     console.error('Error initializing notifications:', error);
   }

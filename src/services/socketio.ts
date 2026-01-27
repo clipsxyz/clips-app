@@ -34,7 +34,11 @@ export function connectSocket(userHandle: string): Socket {
     });
 
     socket.on('connect_error', (error) => {
-        console.error('Socket.IO connection error:', error);
+        // Only log if it's not a connection refused error (expected when server is not running)
+        // The app will gracefully fall back to Custom Events
+        if (!error.message?.includes('websocket error') && !error.message?.includes('xhr poll error')) {
+            console.error('Socket.IO connection error:', error);
+        }
     });
 
     return socket;

@@ -403,6 +403,14 @@ export async function getFollowedUsers(userId: string): Promise<string[]> {
   return Object.keys(s.follows).filter(handle => s.follows[handle] === true);
 }
 
+// Explicitly set follow state for a given handle.
+// This keeps getFollowedUsers() and decorateForUser() in sync when follow is
+// toggled from places that don't go through toggleFollowForPost.
+export function setFollowState(userId: string, handle: string, isFollowing: boolean): void {
+  const s = getState(userId);
+  s.follows[handle] = isFollowing;
+}
+
 // compute view for a user
 export function decorateForUser(userId: string, p: Post): Post {
   const s = getState(userId);

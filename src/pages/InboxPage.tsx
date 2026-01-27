@@ -22,11 +22,11 @@ type Question = {
 import { listConversations, seedMockDMs, type ConversationSummary, pinConversation, unpinConversation, acceptMessageRequest } from '../api/messages';
 import { timeAgo } from '../utils/timeAgo';
 import Swal from 'sweetalert2';
-import { acceptFollowRequest, denyFollowRequest, removeFollowRequest } from '../api/privacy';
+import { acceptFollowRequest as acceptFollowRequestLocal, denyFollowRequest as denyFollowRequestLocal, removeFollowRequest } from '../api/privacy';
 import { showToast } from '../utils/toast';
 import { getFollowedUsers } from '../api/posts';
 import { FiBookmark } from 'react-icons/fi';
-import { toggleFollow } from '../api/client';
+import { toggleFollow, acceptFollowRequest, denyFollowRequest } from '../api/client';
 import { getSocket } from '../services/socketio';
 
 // Conversation Item Component
@@ -344,28 +344,192 @@ export default function InboxPage() {
         if (!user?.handle || !user?.id) return;
         
         try {
-            // Try to find a post from this user to update local state
-            const { fetchPostsByUser } = await import('../api/posts');
             const { getState } = await import('../api/posts');
+            const { isProfilePrivate, createFollowRequest, hasPendingFollowRequest } = await import('../api/privacy');
+            const { createNotification } = await import('../api/notifications');
             
-            // Update local state first (optimistic update)
+            // Check if already following
             const s = getState(user.id);
             const wasFollowing = s.follows[handle] === true;
-            s.follows[handle] = !wasFollowing;
             
-            // Try to call API
-            try {
-                const result = await toggleFollow(handle);
-                console.log('Toggle follow result:', result);
-                
-                // If API call fails or returns different state, sync it
-                if (result && typeof result.following === 'boolean') {
-                    s.follows[handle] = result.following;
+            // If already following, just unfollow
+            if (wasFollowing) {
+                s.follows[handle] = false;
+                try {
+                    const result = await toggleFollow(handle);
+                    if (result && typeof result.following === 'boolean') {
+                        s.follows[handle] = result.following;
+                    }
+                } catch (apiError) {
+                    console.warn('API follow failed, using local state:', apiError);
                 }
-            } catch (apiError) {
-                console.warn('API follow failed, using local state:', apiError);
-                // If API fails, we'll keep the optimistic update
-                // This allows offline functionality
+                await loadData();
+                return;
+            }
+            
+            // Check if profile is private
+            const profilePrivate = isProfilePrivate(handle);
+            const hasPending = hasPendingFollowRequest(user.handle, handle);
+            
+            // If profile is private and already has pending request, show message
+            if (profilePrivate && hasPending) {
+                Swal.fire({
+                    title: '',
+                    html: `
+                        <div style="text-align: center; padding: 8px 0;">
+                            <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">
+                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <polyline points="12 6 12 12 16 14"></polyline>
+                                </svg>
+                            </div>
+                                    <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Already Sent</h3>
+                                    <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">You have already sent a follow request to ${handle}. You will be notified when they respond.</p>
+                        </div>
+                    `,
+                    showConfirmButton: true,
+                    confirmButtonText: 'OK',
+                    confirmButtonColor: '#0095f6',
+                    background: '#ffffff',
+                    width: '400px',
+                    padding: '0',
+                    customClass: {
+                        popup: '!rounded-2xl !shadow-xl !border-0',
+                        container: '!p-0',
+                        confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
+                    },
+                    buttonsStyling: false
+                });
+                return;
+            }
+            
+            // If profile is private and not already pending, create follow request
+            if (profilePrivate && !hasPending) {
+                try {
+                    const encodedHandle = encodeURIComponent(handle);
+                    const result = await toggleFollow(encodedHandle);
+                    
+                    if (result.status === 'pending') {
+                        createFollowRequest(user.handle, handle);
+                        
+                        // Create notification
+                        try {
+                            await createNotification({
+                                type: 'follow_request',
+                                fromHandle: user.handle,
+                                toHandle: handle,
+                                message: `${user.handle} wants to follow you`
+                            });
+                        } catch (error) {
+                            console.warn('Failed to create follow request notification:', error);
+                        }
+                        
+                        // Show Instagram-style popup
+                        Swal.fire({
+                            title: '',
+                            html: `
+                                <div style="text-align: center; padding: 8px 0;">
+                                    <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
+                                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                            <circle cx="8.5" cy="7" r="4"></circle>
+                                            <line x1="20" y1="8" x2="20" y2="14"></line>
+                                            <line x1="23" y1="11" x2="17" y2="11"></line>
+                                        </svg>
+                                    </div>
+                                    <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Sent</h3>
+                                    <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Your follow request has been sent. You will be notified when they accept.</p>
+                                </div>
+                            `,
+                            showConfirmButton: true,
+                            confirmButtonText: 'OK',
+                            confirmButtonColor: '#0095f6',
+                            background: '#ffffff',
+                            width: '400px',
+                            padding: '0',
+                            customClass: {
+                                popup: '!rounded-2xl !shadow-xl !border-0',
+                                container: '!p-0',
+                                confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
+                            },
+                            buttonsStyling: false
+                        });
+                        
+                        await loadData();
+                        return;
+                    } else if (result.status === 'accepted' || result.following === true) {
+                        // Public profile - follow immediately
+                        s.follows[handle] = true;
+                    }
+                } catch (apiError: any) {
+                    const isConnectionError = 
+                        apiError?.message === 'CONNECTION_REFUSED' ||
+                        apiError?.name === 'ConnectionRefused' ||
+                        apiError?.message?.includes('Failed to fetch');
+                    
+                    if (isConnectionError && profilePrivate) {
+                        // Mock fallback for private profile
+                        createFollowRequest(user.handle, handle);
+                        
+                        try {
+                            await createNotification({
+                                type: 'follow_request',
+                                fromHandle: user.handle,
+                                toHandle: handle,
+                                message: `${user.handle} wants to follow you`
+                            });
+                        } catch (error) {
+                            console.warn('Failed to create follow request notification:', error);
+                        }
+                        
+                        Swal.fire({
+                            title: '',
+                            html: `
+                                <div style="text-align: center; padding: 8px 0;">
+                                    <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
+                                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                            <circle cx="8.5" cy="7" r="4"></circle>
+                                            <line x1="20" y1="8" x2="20" y2="14"></line>
+                                            <line x1="23" y1="11" x2="17" y2="11"></line>
+                                        </svg>
+                                    </div>
+                                    <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Sent</h3>
+                                    <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Your follow request has been sent. You will be notified when they accept.</p>
+                                </div>
+                            `,
+                            showConfirmButton: true,
+                            confirmButtonText: 'OK',
+                            confirmButtonColor: '#0095f6',
+                            background: '#ffffff',
+                            width: '400px',
+                            padding: '0',
+                            customClass: {
+                                popup: '!rounded-2xl !shadow-xl !border-0',
+                                container: '!p-0',
+                                confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
+                            },
+                            buttonsStyling: false
+                        });
+                        
+                        await loadData();
+                        return;
+                    }
+                    
+                    // For other errors, use optimistic update
+                    s.follows[handle] = !wasFollowing;
+                }
+            } else {
+                // Public profile - follow immediately
+                s.follows[handle] = true;
+                try {
+                    const result = await toggleFollow(handle);
+                    if (result && typeof result.following === 'boolean') {
+                        s.follows[handle] = result.following;
+                    }
+                } catch (apiError) {
+                    console.warn('API follow failed, using local state:', apiError);
+                }
             }
             
             // Reload data to update follow status in UI
@@ -415,8 +579,27 @@ export default function InboxPage() {
         if (!user?.handle || !user?.id) return;
         
         try {
-            // Accept the follow request
-            acceptFollowRequest(notif.fromHandle, user.handle);
+            // Accept the follow request via API
+            const { acceptFollowRequest: acceptFollowRequestAPI } = await import('../api/client');
+            const encodedHandle = encodeURIComponent(notif.fromHandle);
+            
+            try {
+                await acceptFollowRequestAPI(encodedHandle);
+            } catch (apiError: any) {
+                // If API fails, use localStorage fallback
+                const isConnectionError = 
+                    apiError?.message === 'CONNECTION_REFUSED' ||
+                    apiError?.name === 'ConnectionRefused' ||
+                    apiError?.message?.includes('Failed to fetch');
+                
+                if (isConnectionError) {
+                    // Use localStorage fallback
+                    const { acceptFollowRequest: acceptFollowRequestLocal } = await import('../api/privacy');
+                    acceptFollowRequestLocal(notif.fromHandle, user.handle);
+                } else {
+                    throw apiError;
+                }
+            }
             
             // Add to followed users (using the posts API state)
             const { toggleFollowForPost } = await import('../api/posts');
@@ -427,15 +610,48 @@ export default function InboxPage() {
                 await toggleFollowForPost(user.id, userPost.id);
             }
             
+            // Create notification for the requester that their follow request was accepted
+            try {
+                const { createNotification } = await import('../api/notifications');
+                await createNotification({
+                    type: 'follow',
+                    fromHandle: user.handle,
+                    toHandle: notif.fromHandle,
+                    message: `${user.handle} accepted your follow request`
+                });
+            } catch (error) {
+                console.warn('Failed to create follow accepted notification:', error);
+            }
+            
             await deleteNotification(notif.id, user.handle);
             await loadData();
             
             Swal.fire({
-                title: 'Follow Request Accepted',
-                text: `You are now following ${notif.fromHandle}`,
-                icon: 'success',
-                timer: 2000,
-                showConfirmButton: false
+                title: '',
+                html: `
+                    <div style="text-align: center; padding: 8px 0;">
+                        <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                            </svg>
+                        </div>
+                        <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Accepted</h3>
+                        <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">You are now following ${notif.fromHandle}</p>
+                    </div>
+                `,
+                showConfirmButton: true,
+                confirmButtonText: 'OK',
+                confirmButtonColor: '#0095f6',
+                background: '#ffffff',
+                width: '400px',
+                padding: '0',
+                customClass: {
+                    popup: '!rounded-2xl !shadow-xl !border-0',
+                    container: '!p-0',
+                    confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
+                },
+                buttonsStyling: false
             });
         } catch (error) {
             console.error('Error accepting follow request:', error);
@@ -452,7 +668,28 @@ export default function InboxPage() {
         if (!user?.handle) return;
         
         try {
-            denyFollowRequest(notif.fromHandle, user.handle);
+            // Deny the follow request via API
+            const { denyFollowRequest: denyFollowRequestAPI } = await import('../api/client');
+            const encodedHandle = encodeURIComponent(notif.fromHandle);
+            
+            try {
+                await denyFollowRequestAPI(encodedHandle);
+            } catch (apiError: any) {
+                // If API fails, use localStorage fallback
+                const isConnectionError = 
+                    apiError?.message === 'CONNECTION_REFUSED' ||
+                    apiError?.name === 'ConnectionRefused' ||
+                    apiError?.message?.includes('Failed to fetch');
+                
+                if (isConnectionError) {
+                    // Use localStorage fallback
+                    const { denyFollowRequest: denyFollowRequestLocal } = await import('../api/privacy');
+                    denyFollowRequestLocal(notif.fromHandle, user.handle);
+                } else {
+                    throw apiError;
+                }
+            }
+            
             await deleteNotification(notif.id, user.handle);
             await loadData();
         } catch (error) {

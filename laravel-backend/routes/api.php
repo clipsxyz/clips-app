@@ -130,6 +130,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/unread-count', [NotificationController::class, 'unreadCount']);
         Route::post('/{id}/read', [NotificationController::class, 'markRead']);
         Route::post('/mark-all-read', [NotificationController::class, 'markAllRead']);
+        // FCM token and preferences routes
+        Route::post('/fcm-token', [NotificationController::class, 'saveFCMToken']);
+        Route::post('/preferences', [NotificationController::class, 'savePreferences']);
+        Route::get('/preferences/{userHandle}', [NotificationController::class, 'getPreferences']);
     });
 
     // Messages routes

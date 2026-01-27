@@ -5,7 +5,7 @@ import Avatar from '../components/Avatar';
 import { getFlagForHandle } from '../api/users';
 import Flag from '../components/Flag';
 import { useAuth } from '../context/Auth';
-import { fetchPostsPage, toggleFollowForPost, getFollowedUsers, posts as allPosts } from '../api/posts';
+import { fetchPostsPage, toggleFollowForPost, getFollowedUsers, setFollowState, posts as allPosts } from '../api/posts';
 import { userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/stories';
 import { fetchUserProfile, toggleFollow } from '../api/client';
 import type { Post } from '../types';
@@ -52,8 +52,8 @@ export default function ViewProfilePage() {
             return;
         }
         
-        // Decode the handle from URL (in case it was encoded)
-        // React Router may already decode it, but decodeURIComponent is safe to call on already-decoded strings
+        // Decode the handle from URL (in case it was encoded).
+        // React Router may already decode it, but decodeURIComponent is safe on an already-decoded string.
         const decodedHandle = decodeURIComponent(handle);
         console.log('Follow button clicked for:', decodedHandle);
         
@@ -61,18 +61,20 @@ export default function ViewProfilePage() {
             const followedUsers = await getFollowedUsers(user.id);
             const isCurrentlyFollowing = followedUsers.includes(decodedHandle);
             const profilePrivate = isProfilePrivate(decodedHandle);
+            const hasPending = hasPendingFollowRequest(user?.handle || '', decodedHandle);
             
-            console.log('Current follow state:', { isCurrentlyFollowing, profilePrivate });
+            console.log('Current follow state:', { isCurrentlyFollowing, profilePrivate, hasPending });
             
             // Try backend API first, fallback to mock if connection fails
             let result;
             let useMockFallback = false;
             
             try {
-                // Call backend API to toggle follow - encode handle for URL
-                const encodedHandleForAPI = encodeURIComponent(decodedHandle);
-                console.log('Calling toggleFollow with encoded handle:', encodedHandleForAPI);
-                result = await toggleFollow(encodedHandleForAPI);
+                // Call backend API to toggle follow.
+                // NOTE: toggleFollow internally encodes the handle for the URL,
+                // so we must pass the *decoded* handle here to avoid double-encoding.
+                console.log('Calling toggleFollow with decoded handle:', decodedHandle);
+                result = await toggleFollow(decodedHandle);
                 console.log('Toggle follow result:', result);
             } catch (apiError: any) {
                 // Check if it's a connection error (backend not running)
@@ -87,20 +89,71 @@ export default function ViewProfilePage() {
                     console.log('Backend not available, using mock fallback');
                     useMockFallback = true;
                     
-                    // Use mock/local state approach (same as news feed cards)
-                    // Try to update via toggleFollowForPost if we have posts
+                    const newFollowingState = !isCurrentlyFollowing;
+                    
+                    // Private profile + trying to follow = send request only. Do NOT add to follow list.
+                    // User only becomes "following" after Sarah accepts.
+                    if (profilePrivate && newFollowingState && !isCurrentlyFollowing && user?.handle) {
+                        createFollowRequest(user.handle, decodedHandle);
+                        setHasPendingRequest(true);
+                        setIsFollowing(false);
+                        setFollowState(user.id, decodedHandle, false); // never add to follow list until accepted
+                        
+                        try {
+                            const { createNotification } = await import('../api/notifications');
+                            await createNotification({
+                                type: 'follow_request',
+                                fromHandle: user.handle,
+                                toHandle: decodedHandle,
+                                message: `${user.handle} wants to follow you`
+                            });
+                        } catch (error) {
+                            console.warn('Failed to create follow request notification:', error);
+                        }
+                        
+                        Swal.fire({
+                            title: '',
+                            html: `
+                                <div style="text-align: center; padding: 8px 0;">
+                                    <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
+                                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                            <circle cx="8.5" cy="7" r="4"></circle>
+                                            <line x1="20" y1="8" x2="20" y2="14"></line>
+                                            <line x1="23" y1="11" x2="17" y2="11"></line>
+                                        </svg>
+                                    </div>
+                                    <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Sent</h3>
+                                    <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Your follow request has been sent. You will be notified when they accept.</p>
+                                </div>
+                            `,
+                            showConfirmButton: true,
+                            confirmButtonText: 'OK',
+                            confirmButtonColor: '#0095f6',
+                            background: '#ffffff',
+                            width: '400px',
+                            padding: '0',
+                            customClass: {
+                                popup: '!rounded-2xl !shadow-xl !border-0',
+                                container: '!p-0',
+                                confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
+                            },
+                            buttonsStyling: false
+                        });
+                        return;
+                    }
+                    
+                    // Normal follow/unfollow (public, or unfollow): update post state and shared follow state
                     if (posts[0]?.id) {
                         await toggleFollowForPost(user.id, posts[0].id);
                     } else {
-                        // If no posts, find any post from this user in the allPosts array to update state
                         const userPost = allPosts.find(p => p.userHandle === decodedHandle);
                         if (userPost) {
                             await toggleFollowForPost(user.id, userPost.id);
                         }
                     }
+                    setFollowState(user.id, decodedHandle, newFollowingState);
                     
-                    // Toggle local state
-                    const newFollowingState = !isCurrentlyFollowing;
                     setIsFollowing(newFollowingState);
                     setHasPendingRequest(false);
                     
@@ -115,7 +168,40 @@ export default function ViewProfilePage() {
                         detail: { handle: decodedHandle, isFollowing: newFollowingState }
                     }));
                     
-                    // Update stats optimistically (mock doesn't update backend counts)
+                    // Update stats optimistically when using mock fallback
+                    // Increment/decrement followers count based on follow state
+                    if (newFollowingState) {
+                        // User just followed - increment Bob's follower count
+                        setStats(prev => ({
+                            ...prev,
+                            followers: prev.followers + 1
+                        }));
+                        if (profileUser) {
+                            setProfileUser((prev: any) => ({
+                                ...prev,
+                                stats: {
+                                    ...prev.stats,
+                                    followers: (prev.stats?.followers || 0) + 1
+                                }
+                            }));
+                        }
+                    } else {
+                        // User just unfollowed - decrement Bob's follower count
+                        setStats(prev => ({
+                            ...prev,
+                            followers: Math.max(0, prev.followers - 1)
+                        }));
+                        if (profileUser) {
+                            setProfileUser((prev: any) => ({
+                                ...prev,
+                                stats: {
+                                    ...prev.stats,
+                                    followers: Math.max(0, (prev.stats?.followers || 0) - 1)
+                                }
+                            }));
+                        }
+                    }
+                    
                     return; // Exit early since we handled it with mock
                 } else {
                     // Re-throw if it's a different error
@@ -125,7 +211,9 @@ export default function ViewProfilePage() {
             
             // Continue with API result handling if we got here
             
-            // Use the API response to determine the new state
+            // Use the API response to determine the new state.
+            // Backend is expected to return a status of 'unfollowed', 'pending', or 'accepted',
+            // but we also handle a generic "following: true/false" shape.
             if (result.status === 'unfollowed') {
                 // Unfollow
                 // Also update local state for consistency
@@ -133,6 +221,7 @@ export default function ViewProfilePage() {
                     await toggleFollowForPost(user.id, posts[0].id);
                 }
                 setIsFollowing(false);
+                setFollowState(user.id, decodedHandle, false);
                 setHasPendingRequest(false);
                 removeFollowRequest(user.handle, decodedHandle);
                 
@@ -141,18 +230,55 @@ export default function ViewProfilePage() {
                     setCanViewProfileState(false);
                 }
             } else if (result.status === 'pending') {
-                // Private profile - follow request sent
-                createFollowRequest(user.handle, decodedHandle);
-                setHasPendingRequest(true);
+                // Private profile - follow request sent (only if not already pending)
+                if (!hasPending && user?.handle) {
+                    createFollowRequest(user.handle, decodedHandle);
+                    setHasPendingRequest(true);
                 setIsFollowing(false);
-                
-                Swal.fire({
-                    title: 'Follow Request Sent',
-                    text: 'Your follow request has been sent. You will be notified when they accept.',
-                    icon: 'success',
-                    timer: 2000,
-                    showConfirmButton: false
-                });
+                    
+                    // Create notification for the recipient
+                    try {
+                        const { createNotification } = await import('../api/notifications');
+                        await createNotification({
+                            type: 'follow_request',
+                            fromHandle: user.handle,
+                            toHandle: decodedHandle,
+                            message: `${user.handle} wants to follow you`
+                        });
+                    } catch (error) {
+                        console.warn('Failed to create follow request notification:', error);
+                    }
+                    
+                    Swal.fire({
+                        title: '',
+                        html: `
+                            <div style="text-align: center; padding: 8px 0;">
+                                <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                        <circle cx="8.5" cy="7" r="4"></circle>
+                                        <line x1="20" y1="8" x2="20" y2="14"></line>
+                                        <line x1="23" y1="11" x2="17" y2="11"></line>
+                                    </svg>
+                                </div>
+                                <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Sent</h3>
+                                <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Your follow request has been sent. You will be notified when they accept.</p>
+                            </div>
+                        `,
+                        showConfirmButton: true,
+                        confirmButtonText: 'OK',
+                        confirmButtonColor: '#0095f6',
+                        background: '#ffffff',
+                        width: '400px',
+                        padding: '0',
+                        customClass: {
+                            popup: '!rounded-2xl !shadow-xl !border-0',
+                            container: '!p-0',
+                            confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
+                        },
+                        buttonsStyling: false
+                    });
+                }
             } else if (result.status === 'accepted' || result.following === true) {
                 // Public profile - follow immediately
                 // Also update local state for consistency
@@ -160,8 +286,22 @@ export default function ViewProfilePage() {
                     await toggleFollowForPost(user.id, posts[0].id);
                 }
                 setIsFollowing(true);
+                setFollowState(user.id, decodedHandle, true);
                 setHasPendingRequest(false);
                 setCanViewProfileState(true);
+            } else {
+                // Fallback: if backend returned an unexpected shape,
+                // optimistically toggle follow state so the UI still updates.
+                console.warn('toggleFollow: unexpected response shape, applying optimistic toggle', result);
+                const newFollowingState = !isCurrentlyFollowing;
+                setIsFollowing(newFollowingState);
+                setHasPendingRequest(false);
+                setFollowState(user.id, decodedHandle, newFollowingState);
+                if (newFollowingState && profilePrivate) {
+                    setCanViewProfileState(true);
+                } else if (!newFollowingState && profilePrivate) {
+                    setCanViewProfileState(false);
+                }
             }
 
             // Dispatch event to update newsfeed
@@ -248,31 +388,75 @@ export default function ViewProfilePage() {
                 
                 if (user?.id && user?.handle) {
                     const followedUsers = await getFollowedUsers(user.id);
-                    const canView = canViewProfile(user.handle, decodedHandle, followedUsers);
+                    const canView = canViewProfile(user?.handle || '', decodedHandle, followedUsers);
                     const isFollowingUser = followedUsers.includes(decodedHandle);
-                    const hasPending = hasPendingFollowRequest(user.handle, decodedHandle);
+                    const hasPending = hasPendingFollowRequest(user?.handle || '', decodedHandle);
                     
-                    setCanViewProfileState(canView);
-                    setIsFollowing(isFollowingUser);
+                    // Base values from follow list
+                    let effectiveCanView = canView;
+                    let effectiveIsFollowing = isFollowingUser;
+
+                    // If profile is private and there is a pending request but not actually following,
+                    // treat this as "request sent, waiting" – user cannot view yet and is not following.
+                    if (profilePrivate && hasPending && !isFollowingUser) {
+                        effectiveCanView = false;
+                        effectiveIsFollowing = false;
+                    }
+
+                    setCanViewProfileState(effectiveCanView);
+                    setIsFollowing(effectiveIsFollowing);
                     setHasPendingRequest(hasPending);
                     
                     // Show SweetAlert if profile is private and user can't view
                     if (!canView && profilePrivate && decodedHandle !== user.handle) {
                         Swal.fire({
-                            title: 'Private Profile',
-                            text: 'To view this user\'s profile you must be following them.',
-                            icon: 'info',
+                            title: '',
+                            html: `
+                                <div style="text-align: center; padding: 8px 0;">
+                                    <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
+                                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                                        </svg>
+                                    </div>
+                                    <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">This Account is Private</h3>
+                                    <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">To view this user's profile you must be following them.</p>
+                                </div>
+                            `,
                             showCancelButton: true,
                             confirmButtonText: 'Follow',
                             cancelButtonText: 'Cancel',
-                            confirmButtonColor: '#3085d6',
-                            cancelButtonColor: '#d33'
+                            confirmButtonColor: '#0095f6',
+                            cancelButtonColor: '#8e8e8e',
+                            background: '#ffffff',
+                            width: '400px',
+                            padding: '0',
+                            customClass: {
+                                popup: '!rounded-2xl !shadow-xl !border-0',
+                                container: '!p-0',
+                                confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors',
+                                cancelButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-transparent !text-[#8e8e8e] !hover:bg-gray-100 !transition-colors !border-0'
+                            },
+                            buttonsStyling: false
                         }).then(async (result) => {
+                            // Only create follow request if user explicitly clicked "Follow"
+                            // If they clicked "Cancel" (result.isDismissed or !result.isConfirmed), do nothing
                             if (result.isConfirmed && user?.id) {
                                 try {
                                     await handleFollow();
                                 } catch (error) {
                                     console.error('Error following user:', error);
+                                }
+                            } else {
+                                // User clicked Cancel - ensure no follow request is created
+                                // If there's a stale pending request, we should NOT remove it here
+                                // because the user might have created it from a different place (like the + icon)
+                                // We'll just log it for debugging
+                                const hasPending = hasPendingFollowRequest(user?.handle || '', decodedHandle);
+                                if (hasPending) {
+                                    console.log('Note: There is a pending follow request from a previous interaction. User clicked Cancel, so no new request was created. The existing pending request remains.');
+                                } else {
+                                    console.log('User cancelled follow request - no action taken, no pending request exists');
                                 }
                             }
                         });
@@ -489,7 +673,6 @@ export default function ViewProfilePage() {
         return (
             <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
                 <div className="text-center">
-                    <p className="text-xl mb-4">User not found</p>
                     <button
                         onClick={() => navigate(-1)}
                         className="px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700"
@@ -651,11 +834,32 @@ export default function ViewProfilePage() {
                                 const decodedHandle = decodeURIComponent(handle);
                                 // Check if user can message (privacy check)
                                 const followedUsers = await getFollowedUsers(user.id);
-                                if (!canSendMessage(user.handle, decodedHandle, followedUsers)) {
+                                if (!canSendMessage(user?.handle || '', decodedHandle, followedUsers)) {
                                     Swal.fire({
-                                        title: 'Cannot Send Message',
-                                        text: 'You must follow this user to send them a message.',
-                                        icon: 'warning'
+                                        title: '',
+                                        html: `
+                                            <div style="text-align: center; padding: 8px 0;">
+                                                <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(245, 87, 108, 0.3);">
+                                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                                                    </svg>
+                                                </div>
+                                                <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Cannot Send Message</h3>
+                                                <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">You must follow this user to send them a message.</p>
+                                            </div>
+                                        `,
+                                        showConfirmButton: true,
+                                        confirmButtonText: 'OK',
+                                        confirmButtonColor: '#0095f6',
+                                        background: '#ffffff',
+                                        width: '400px',
+                                        padding: '0',
+                                        customClass: {
+                                            popup: '!rounded-2xl !shadow-xl !border-0',
+                                            container: '!p-0',
+                                            confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
+                                        },
+                                        buttonsStyling: false
                                     });
                                     return;
                                 }
@@ -670,11 +874,42 @@ export default function ViewProfilePage() {
                         onClick={(e) => {
                             e.stopPropagation();
                             e.preventDefault();
-                            console.log('Traveled button clicked, placesTraveled:', profileUser?.placesTraveled);
-                            setShowTraveledModal(true);
+                            // Check if user has places traveled
+                            if (!profileUser?.placesTraveled || !Array.isArray(profileUser.placesTraveled) || profileUser.placesTraveled.length === 0) {
+                                const decodedHandle = handle ? decodeURIComponent(handle) : 'This user';
+                                Swal.fire({
+                                    title: '',
+                                    html: `
+                                        <div style="text-align: center; padding: 8px 0;">
+                                            <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
+                                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                                                    <circle cx="12" cy="10" r="3"></circle>
+                                                </svg>
+                                            </div>
+                                            <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">No Places Traveled</h3>
+                                            <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">${decodedHandle} hasn't added any places they've traveled to their profile yet.</p>
+                                        </div>
+                                    `,
+                                    showConfirmButton: true,
+                                    confirmButtonText: 'OK',
+                                    confirmButtonColor: '#0095f6',
+                                    background: '#ffffff',
+                                    width: '400px',
+                                    padding: '0',
+                                    customClass: {
+                                        popup: '!rounded-2xl !shadow-xl !border-0',
+                                        container: '!p-0',
+                                        confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
+                                    },
+                                    buttonsStyling: false
+                                });
+                            } else {
+                                // If they have places traveled, show the modal
+                                setShowTraveledModal(true);
+                            }
                         }}
-                        className="px-4 py-2 rounded-lg bg-gray-800 text-white font-semibold hover:bg-gray-700 transition-colors relative z-20 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                        disabled={!profileUser?.placesTraveled || !Array.isArray(profileUser.placesTraveled) || profileUser.placesTraveled.length === 0}
+                        className="px-4 py-2 rounded-lg bg-gray-800 text-white font-semibold hover:bg-gray-700 transition-colors relative z-20 flex items-center justify-center gap-2"
                         title="Places Traveled"
                     >
                         <FiMapPin className="w-5 h-5" />
@@ -875,7 +1110,7 @@ export default function ViewProfilePage() {
                         <div className="p-6">
                             {profileUser?.placesTraveled && Array.isArray(profileUser.placesTraveled) && profileUser.placesTraveled.length > 0 ? (
                                 <div className="flex flex-col gap-3">
-                                    {profileUser.placesTraveled.map((place, index) => (
+                                    {profileUser.placesTraveled.map((place: any, index: number) => (
                                         <div
                                             key={index}
                                             className="flex items-center gap-3 p-4 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors cursor-pointer"

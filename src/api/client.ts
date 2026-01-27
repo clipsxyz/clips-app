@@ -31,7 +31,7 @@ const API_BASE_URL = getApiBaseUrl();
 console.log('🌐 API Base URL:', API_BASE_URL);
 
 // Helper function to make API requests
-async function apiRequest(endpoint: string, options: RequestInit = {}) {
+export async function apiRequest(endpoint: string, options: RequestInit = {}) {
     const token = localStorage.getItem('authToken');
 
     const config: RequestInit = {

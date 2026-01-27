@@ -2,11 +2,12 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 import { noCache } from './vite-plugin-no-cache'
+import { firebaseSwPlugin } from './vite-plugin-firebase-sw'
 // import basicSsl from '@vitejs/plugin-basic-ssl' // Temporarily disabled to test if HTTPS is causing issues
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react(), noCache()], // Removed basicSsl() - using HTTP instead of HTTPS
+  plugins: [react(), noCache(), firebaseSwPlugin()], // Removed basicSsl() - using HTTP instead of HTTPS
   resolve: {
     alias: {
       '@': resolve(__dirname, './src'),
@@ -63,7 +64,8 @@ export default defineConfig({
     },
     hmr: {
       protocol: 'ws', // Using regular WebSocket (HTTP) instead of wss (HTTPS)
-      host: '0.0.0.0', // Allow HMR from network devices
+      // Use browser host (e.g. localhost) instead of 0.0.0.0 to avoid HMR websocket failures
+      host: 'localhost',
     },
     proxy: {
       '/api': {

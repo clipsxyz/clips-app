@@ -3,96 +3,128 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Notification;
-use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
 class NotificationController extends Controller
 {
     /**
-     * Get notifications for authenticated user
+     * Save FCM token for a user
      */
-    public function index(Request $request): JsonResponse
+    public function saveFCMToken(Request $request)
     {
-        $user = Auth::user();
-        $cursor = $request->get('cursor', 0);
-        $limit = $request->get('limit', 20);
-        $offset = $cursor * $limit;
-
-        $query = Notification::where('user_id', $user->id)
-            ->orderBy('created_at', 'desc');
-
-        // Filter by read status if provided
-        if ($request->has('read')) {
-            $query->where('read', $request->boolean('read'));
-        }
-
-        $notifications = $query->offset($offset)
-            ->limit($limit)
-            ->get();
-
-        $nextCursor = $notifications->count() === $limit ? $cursor + 1 : null;
-
-        return response()->json([
-            'items' => $notifications,
-            'nextCursor' => $nextCursor,
-            'hasMore' => $nextCursor !== null
-        ]);
-    }
-
-    /**
-     * Get unread notification count
-     */
-    public function unreadCount(): JsonResponse
-    {
-        $user = Auth::user();
-        $count = Notification::where('user_id', $user->id)
-            ->where('read', false)
-            ->count();
-
-        return response()->json(['count' => $count]);
-    }
-
-    /**
-     * Mark notification as read
-     */
-    public function markRead(Request $request, string $id): JsonResponse
-    {
-        $validator = Validator::make(['id' => $id], [
-            'id' => 'required|uuid|exists:notifications,id'
+        $validator = Validator::make($request->all(), [
+            'token' => 'required|string',
+            'userId' => 'required|string',
+            'userHandle' => 'required|string',
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 400);
+            return response()->json([
+                'success' => false,
+                'errors' => $validator->errors()
+            ], 422);
         }
 
-        $user = Auth::user();
-        $notification = Notification::where('id', $id)
-            ->where('user_id', $user->id)
-            ->firstOrFail();
+        try {
+            // Store FCM token in database
+            // You can create a migration for this table: fcm_tokens
+            DB::table('fcm_tokens')->updateOrInsert(
+                [
+                    'user_id' => $request->userId,
+                    'user_handle' => $request->userHandle,
+                ],
+                [
+                    'token' => $request->token,
+                    'updated_at' => now(),
+                    'created_at' => now(),
+                ]
+            );
 
-        $notification->markAsRead();
-
-        return response()->json(['success' => true]);
+            return response()->json([
+                'success' => true,
+                'message' => 'FCM token saved successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error saving FCM token: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
-     * Mark all notifications as read
+     * Save notification preferences for a user
      */
-    public function markAllRead(): JsonResponse
+    public function savePreferences(Request $request)
     {
-        $user = Auth::user();
+        $validator = Validator::make($request->all(), [
+            'userId' => 'required|string',
+            'userHandle' => 'required|string',
+            'preferences' => 'required|array',
+        ]);
 
-        Notification::where('user_id', $user->id)
-            ->where('read', false)
-            ->update(['read' => true]);
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors' => $validator->errors()
+            ], 422);
+        }
 
-        return response()->json(['success' => true]);
+        try {
+            // Store notification preferences in database
+            // You can create a migration for this table: notification_preferences
+            DB::table('notification_preferences')->updateOrInsert(
+                [
+                    'user_id' => $request->userId,
+                    'user_handle' => $request->userHandle,
+                ],
+                [
+                    'preferences' => json_encode($request->preferences),
+                    'updated_at' => now(),
+                    'created_at' => now(),
+                ]
+            );
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Notification preferences saved successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error saving preferences: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get notification preferences for a user
+     */
+    public function getPreferences(Request $request, $userHandle)
+    {
+        try {
+            $prefs = DB::table('notification_preferences')
+                ->where('user_handle', $userHandle)
+                ->first();
+
+            if ($prefs) {
+                return response()->json([
+                    'success' => true,
+                    'preferences' => json_decode($prefs->preferences, true)
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'preferences' => null
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error fetching preferences: ' . $e->getMessage()
+            ], 500);
+        }
     }
 }
-
-

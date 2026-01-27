@@ -18,6 +18,7 @@ import {
   type NotificationPreferences,
   initializeNotifications
 } from '../services/notifications';
+import { testBrowserNotification, testNotificationTypes, testImageNotification } from '../utils/testNotifications';
 
 // Notification Toggle Component
 function NotificationToggle({ 
@@ -508,6 +509,10 @@ export default function ProfilePage() {
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
+                // Close other modals first
+                setSettingsOpen(false);
+                setCollectionsOpen(false);
+                // Then open drafts
                 setDraftsOpen(true);
               }}
               className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors relative pointer-events-auto"
@@ -526,6 +531,10 @@ export default function ProfilePage() {
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
+                // Close other modals first
+                setSettingsOpen(false);
+                setDraftsOpen(false);
+                // Then open collections
                 loadCollections(); // Refresh collections before opening
                 setCollectionsOpen(true);
               }}
@@ -545,6 +554,10 @@ export default function ProfilePage() {
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
+                // Close other modals first
+                setCollectionsOpen(false);
+                setDraftsOpen(false);
+                // Then open settings
                 setSettingsOpen(true);
               }}
               className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors pointer-events-auto"
@@ -1308,7 +1321,46 @@ export default function ProfilePage() {
               <div className="p-6 space-y-6">
                 {/* Notification Settings Section */}
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Push Notifications</h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Push Notifications</h3>
+                    {/* Test Notification Buttons */}
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          testBrowserNotification();
+                          Swal.fire({
+                            icon: 'info',
+                            title: 'Test Notification Sent',
+                            text: 'Check your browser for a test notification. Make sure notifications are enabled!',
+                            confirmButtonColor: '#0095f6',
+                            background: '#262626',
+                            color: '#ffffff',
+                          });
+                        }}
+                        className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                        title="Test single notification"
+                      >
+                        🧪 Test
+                      </button>
+                      <button
+                        onClick={() => {
+                          testNotificationTypes();
+                          Swal.fire({
+                            icon: 'info',
+                            title: 'Test Sequence Started',
+                            text: 'You will receive 4 different notification types (DM, Like, Comment, Follow). Watch your notifications!',
+                            confirmButtonColor: '#0095f6',
+                            background: '#262626',
+                            color: '#ffffff',
+                          });
+                        }}
+                        className="px-3 py-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
+                        title="Test multiple notification types"
+                      >
+                        📋 Test All
+                      </button>
+                    </div>
+                  </div>
                   
                   {/* Master Toggle */}
                   <div className="flex items-center justify-between py-3 border-b border-gray-200 dark:border-gray-700 mb-4">

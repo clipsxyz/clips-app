@@ -32,11 +32,27 @@ function savePrivacySettings(settings: PrivacySettings): void {
 }
 
 // Get follow requests from localStorage
-function getFollowRequests(): FollowRequest[] {
+export function getFollowRequests(): FollowRequest[] {
   try {
     const stored = localStorage.getItem(FOLLOW_REQUESTS_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
+    const requests = stored ? JSON.parse(stored) : [];
+    
+    // Filter out any invalid requests (safety check)
+    const validRequests = requests.filter((req: any) => 
+      req && 
+      typeof req.fromHandle === 'string' && 
+      typeof req.toHandle === 'string' && 
+      req.status === 'pending'
+    );
+    
+    // If we filtered out invalid requests, save the cleaned list
+    if (validRequests.length !== requests.length) {
+      saveFollowRequests(validRequests);
+    }
+    
+    return validRequests;
+  } catch (error) {
+    console.error('Error reading follow requests from localStorage:', error);
     return [];
   }
 }
@@ -110,12 +126,44 @@ export function canSendMessage(senderHandle: string, recipientHandle: string, se
 
 // Check if there's a pending follow request
 export function hasPendingFollowRequest(fromHandle: string, toHandle: string): boolean {
+  if (!fromHandle || !toHandle) {
+    console.warn('hasPendingFollowRequest: Invalid parameters', { fromHandle, toHandle });
+    return false;
+  }
+  
   const requests = getFollowRequests();
-  return requests.some(
-    req => req.fromHandle === fromHandle && 
-           req.toHandle === toHandle && 
-           req.status === 'pending'
+  // Filter out any requests older than 30 days (stale cleanup)
+  const now = Date.now();
+  const thirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000);
+  const validRequests = requests.filter(req => {
+    // Remove stale requests older than 30 days
+    if (req.timestamp && req.timestamp < thirtyDaysAgo) {
+      return false;
+    }
+    return true;
+  });
+  
+  // If we filtered out stale requests, save the cleaned list
+  if (validRequests.length !== requests.length) {
+    saveFollowRequests(validRequests);
+  }
+  
+  const matchingRequests = validRequests.filter(
+    req => req.fromHandle === fromHandle && req.toHandle === toHandle && req.status === 'pending'
   );
+  const hasPending = matchingRequests.length > 0;
+  
+  // Debug logging
+  console.log('hasPendingFollowRequest: Check result', {
+    fromHandle,
+    toHandle,
+    hasPending,
+    matchingRequests: matchingRequests.length,
+    totalValidRequests: validRequests.length,
+    allRequests: validRequests.map(r => ({ from: r.fromHandle, to: r.toHandle, status: r.status, age: r.timestamp ? Math.floor((now - r.timestamp) / (1000 * 60 * 60 * 24)) + ' days' : 'unknown' }))
+  });
+  
+  return hasPending;
 }
 
 // Create a follow request
@@ -126,11 +174,20 @@ export function createFollowRequest(fromHandle: string, toHandle: string): void 
     req => !(req.fromHandle === fromHandle && req.toHandle === toHandle)
   );
   
-  filtered.push({
+  const newRequest = {
     fromHandle,
     toHandle,
     timestamp: Date.now(),
-    status: 'pending'
+    status: 'pending' as const
+  };
+  
+  filtered.push(newRequest);
+  
+  console.log('createFollowRequest: Creating new follow request', {
+    fromHandle,
+    toHandle,
+    newRequest,
+    totalRequests: filtered.length
   });
   
   saveFollowRequests(filtered);
@@ -169,7 +226,40 @@ export function removeFollowRequest(fromHandle: string, toHandle: string): void 
   const filtered = requests.filter(
     req => !(req.fromHandle === fromHandle && req.toHandle === toHandle)
   );
+  console.log('removeFollowRequest: Removed follow request', {
+    fromHandle,
+    toHandle,
+    removedCount: requests.length - filtered.length,
+    remainingRequests: filtered.length
+  });
   saveFollowRequests(filtered);
+}
+
+// Clear all follow requests (for debugging/testing)
+export function clearAllFollowRequests(): void {
+  console.log('clearAllFollowRequests: Clearing all follow requests');
+  saveFollowRequests([]);
+}
+
+// Clear stale follow requests (older than specified hours, default 1 hour)
+export function clearStaleFollowRequests(maxAgeHours: number = 1): number {
+  const requests = getFollowRequests();
+  const now = Date.now();
+  const maxAge = maxAgeHours * 60 * 60 * 1000;
+  const validRequests = requests.filter(req => {
+    if (req.timestamp && req.timestamp < (now - maxAge)) {
+      return false; // Stale request
+    }
+    return true;
+  });
+  
+  const removedCount = requests.length - validRequests.length;
+  if (removedCount > 0) {
+    console.log(`clearStaleFollowRequests: Removed ${removedCount} stale follow requests (older than ${maxAgeHours} hour(s))`);
+    saveFollowRequests(validRequests);
+  }
+  
+  return removedCount;
 }
 
 

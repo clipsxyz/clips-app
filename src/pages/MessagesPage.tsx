@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { FiChevronLeft, FiSend, FiCornerUpLeft, FiCopy, FiMoreHorizontal, FiMapPin, FiEdit3, FiX, FiMic, FiUserPlus } from 'react-icons/fi';
+import { FiChevronLeft, FiSend, FiCornerUpLeft, FiCopy, FiMoreHorizontal, FiMapPin, FiEdit3, FiX, FiMic, FiUserPlus, FiPlus, FiCheck } from 'react-icons/fi';
 import { IoMdPhotos } from 'react-icons/io';
 import { BsEmojiSmile } from 'react-icons/bs';
 import { FaPaperPlane, FaExclamationCircle } from 'react-icons/fa';
@@ -9,13 +9,15 @@ import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { fetchConversation, appendMessage, editMessage, type ChatMessage, markConversationRead, deleteConversation, blockUser, muteConversation, unmuteConversation, isConversationMuted } from '../api/messages';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
-import { isStoryMediaActive, wasEverAStory, userHasUnviewedStoriesByHandle } from '../api/stories';
-import { getPostById } from '../api/posts';
+import { isStoryMediaActive, wasEverAStory, userHasUnviewedStoriesByHandle, userHasStoriesByHandle } from '../api/stories';
+import { getPostById, getFollowedUsers, getState } from '../api/posts';
+import { toggleFollow, fetchUserProfile } from '../api/client';
 import type { Post } from '../types';
 import Flag from '../components/Flag';
 import { timeAgo } from '../utils/timeAgo';
 import { showToast } from '../utils/toast';
 import { getSocket } from '../services/socketio';
+import Swal from 'sweetalert2';
 
 interface MessageUI extends ChatMessage {
     isFromMe: boolean;
@@ -408,7 +410,12 @@ export default function MessagesPage() {
     const [loading, setLoading] = useState(true);
     const [otherUserAvatar, setOtherUserAvatar] = useState<string | undefined>(undefined);
     const [hasUnviewedStories, setHasUnviewedStories] = useState(false);
+    const [isFollowing, setIsFollowing] = useState(false);
+    const [isFollowLoading, setIsFollowLoading] = useState(false);
+    const [hasStories, setHasStories] = useState(false);
+    const [showFollowCheck, setShowFollowCheck] = useState(false);
     const [sharedPosts, setSharedPosts] = useState<Record<string, Post>>({});
+    const [otherUserPlacesTraveled, setOtherUserPlacesTraveled] = useState<string[] | undefined>(undefined);
     const fileInputRef = React.useRef<HTMLInputElement>(null);
     const listRef = React.useRef<HTMLDivElement>(null);
 
@@ -727,19 +734,30 @@ export default function MessagesPage() {
         loadAvatar();
     }, [handle, user?.id]);
 
-    // Check for unviewed stories
+    // Check for unviewed stories, stories status, and follow status
     React.useEffect(() => {
-        async function checkStories() {
-            if (!handle || !user?.handle) return;
+        async function checkStoriesAndFollow() {
+            if (!handle || !user?.handle || !user?.id) return;
             try {
+                // Check unviewed stories
                 const hasUnviewed = await userHasUnviewedStoriesByHandle(handle);
                 setHasUnviewedStories(hasUnviewed);
+                
+                // Check if user has any stories (viewed or unviewed)
+                const hasStoriesActive = await userHasStoriesByHandle(handle);
+                setHasStories(hasStoriesActive);
+                
+                // Check follow status
+                const followedUsers = await getFollowedUsers(user.id);
+                const following = followedUsers.includes(handle);
+                setIsFollowing(following);
+                setShowFollowCheck(following);
             } catch (error) {
-                console.error('Error checking stories:', error);
+                console.error('Error checking stories/follow status:', error);
             }
         }
 
-        checkStories();
+        checkStoriesAndFollow();
 
         // Listen for stories viewed event
         const handleStoriesViewed = (event: CustomEvent) => {
@@ -753,7 +771,24 @@ export default function MessagesPage() {
         return () => {
             window.removeEventListener('storiesViewed', handleStoriesViewed as EventListener);
         };
-    }, [handle, user?.handle]);
+    }, [handle, user?.handle, user?.id]);
+
+    // Show the follow checkmark briefly after following, then hide it
+    React.useEffect(() => {
+        let timer: ReturnType<typeof setTimeout>;
+        if (user?.handle && handle && handle !== user.handle && isFollowing) {
+            setShowFollowCheck(true);
+            timer = setTimeout(() => {
+                setShowFollowCheck(false);
+            }, 2500);
+        } else {
+            setShowFollowCheck(false);
+        }
+
+        return () => {
+            if (timer) clearTimeout(timer);
+        };
+    }, [isFollowing, handle, user?.handle]);
 
     // Check if conversation is muted
     React.useEffect(() => {
@@ -1673,20 +1708,120 @@ export default function MessagesPage() {
                     </button>
                     {handle && (
                         <div className="flex items-center ml-3 flex-1">
-                            <Avatar
-                                src={otherUserAvatar}
-                                name={handle}
-                                size="sm"
-                                hasStory={hasUnviewedStories}
-                                className="cursor-pointer"
-                                onClick={() => {
-                                    if (hasUnviewedStories) {
-                                        navigate('/stories', { state: { openUserHandle: handle } });
-                                    } else {
-                                        navigate(`/user/${encodeURIComponent(handle)}`);
-                                    }
-                                }}
-                            />
+                            <div className="relative overflow-visible flex-shrink-0">
+                                <Avatar
+                                    src={otherUserAvatar}
+                                    name={handle}
+                                    size="sm"
+                                    hasStory={hasUnviewedStories}
+                                    className="cursor-pointer"
+                                    onClick={() => {
+                                        if (hasUnviewedStories || hasStories) {
+                                            navigate('/stories', { state: { openUserHandle: handle } });
+                                        } else {
+                                            navigate(`/user/${encodeURIComponent(handle)}`);
+                                        }
+                                    }}
+                                />
+                                {/* + icon overlay on profile picture to follow (TikTok style) */}
+                                {user?.handle && handle !== user.handle && (isFollowing === false || isFollowing === undefined) && (
+                                    <button
+                                        onClick={async (e) => {
+                                            e.stopPropagation();
+                                            if (isFollowLoading || !user?.id) return;
+                                            setIsFollowLoading(true);
+                                            
+                                            try {
+                                                // Check if profile is private and has pending request
+                                                const { isProfilePrivate, hasPendingFollowRequest } = await import('../api/privacy');
+                                                const profilePrivate = isProfilePrivate(handle);
+                                                const hasPending = hasPendingFollowRequest(user.handle, handle);
+                                                
+                                                // If profile is private and already has pending request, show message
+                                                if (profilePrivate && hasPending) {
+                                                    Swal.fire({
+                                                        title: '',
+                                                        html: `
+                                                            <div style="text-align: center; padding: 8px 0;">
+                                                                <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">
+                                                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                                        <circle cx="12" cy="12" r="10"></circle>
+                                                                        <polyline points="12 6 12 12 16 14"></polyline>
+                                                                    </svg>
+                                                                </div>
+                                                                <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Already Sent</h3>
+                                                                <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">You have already sent a follow request to ${handle}. You will be notified when they respond.</p>
+                                                            </div>
+                                                        `,
+                                                        showConfirmButton: true,
+                                                        confirmButtonText: 'OK',
+                                                        confirmButtonColor: '#0095f6',
+                                                        background: '#ffffff',
+                                                        width: '400px',
+                                                        padding: '0',
+                                                        customClass: {
+                                                            popup: '!rounded-2xl !shadow-xl !border-0',
+                                                            container: '!p-0',
+                                                            confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
+                                                        },
+                                                        buttonsStyling: false
+                                                    });
+                                                    setIsFollowLoading(false);
+                                                    return;
+                                                }
+                                                
+                                                // Update local state first (optimistic update)
+                                                const s = getState(user.id);
+                                                const wasFollowing = s.follows[handle] === true;
+                                                const newFollowingState = !wasFollowing;
+                                                s.follows[handle] = newFollowingState;
+                                                
+                                                // Update UI immediately
+                                                setIsFollowing(newFollowingState);
+                                                
+                                                // Try to call API
+                                                try {
+                                                    const result = await toggleFollow(handle);
+                                                    console.log('Toggle follow result:', result);
+                                                    
+                                                    // If API call succeeds and returns different state, sync it
+                                                    if (result && typeof result.following === 'boolean') {
+                                                        s.follows[handle] = result.following;
+                                                        setIsFollowing(result.following);
+                                                    }
+                                                    
+                                                    showToast(newFollowingState ? 'Following' : 'Unfollowed');
+                                                } catch (apiError) {
+                                                    console.warn('API follow failed, using local state:', apiError);
+                                                    // If API fails, keep the optimistic update
+                                                    // This allows offline functionality
+                                                    showToast(newFollowingState ? 'Following' : 'Unfollowed');
+                                                }
+                                            } catch (error) {
+                                                console.error('Error toggling follow:', error);
+                                                // Revert optimistic update on unexpected error
+                                                const s = getState(user.id);
+                                                const currentState = s.follows[handle] === true;
+                                                setIsFollowing(currentState);
+                                                showToast('Failed to update follow status');
+                                            } finally {
+                                                setIsFollowLoading(false);
+                                            }
+                                        }}
+                                        disabled={isFollowLoading}
+                                        className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-blue-500 hover:bg-blue-600 border-2 border-white dark:border-gray-900 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30"
+                                        aria-label="Follow user"
+                                    >
+                                        <FiPlus className="w-3 h-3 text-white" strokeWidth={2.5} />
+                                    </button>
+                                )}
+                                {/* Checkmark icon when following (replaces + icon) */}
+                                {user?.handle && handle !== user.handle && isFollowing && showFollowCheck && (
+                                    <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-green-500 border-2 border-white dark:border-gray-900 flex items-center justify-center shadow-lg z-30">
+                                        <FiCheck className="w-3 h-3 text-white" strokeWidth={3} />
+                                    </div>
+                                )}
+                            </div>
                             <div className="ml-3 flex-1">
                                 <div className="flex items-center gap-2">
                                     <button
@@ -1703,18 +1838,50 @@ export default function MessagesPage() {
                         </div>
                     )}
                     <div className="flex items-center gap-2">
-                        {/* Gazetteer Logo */}
-                        <div className="p-2 flex items-center justify-center">
-                            <img 
-                                src="/gazetteer logo 1/gazetteer logo 1.jpg" 
-                                alt="Gazetteer Logo" 
-                                className="w-8 h-8 object-contain"
-                                style={{ 
-                                    filter: 'brightness(0) invert(1)',
-                                    mixBlendMode: 'normal'
+                        {/* Location Icon Button */}
+                        {handle && (
+                            <button
+                                className="p-2 hover:bg-gray-900 rounded-full transition-colors"
+                                onClick={() => {
+                                    // Check if user has places traveled
+                                    if (!otherUserPlacesTraveled || otherUserPlacesTraveled.length === 0) {
+                                        Swal.fire({
+                                            title: '',
+                                            html: `
+                                                <div style="text-align: center; padding: 8px 0;">
+                                                    <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
+                                                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                                                            <circle cx="12" cy="10" r="3"></circle>
+                                                        </svg>
+                                                    </div>
+                                                    <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">No Places Traveled</h3>
+                                                    <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">${handle} hasn't added any places they've traveled to their profile yet.</p>
+                                                </div>
+                                            `,
+                                            showConfirmButton: true,
+                                            confirmButtonText: 'OK',
+                                            confirmButtonColor: '#0095f6',
+                                            background: '#ffffff',
+                                            width: '400px',
+                                            padding: '0',
+                                            customClass: {
+                                                popup: '!rounded-2xl !shadow-xl !border-0',
+                                                container: '!p-0',
+                                                confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
+                                            },
+                                            buttonsStyling: false
+                                        });
+                                    } else {
+                                        // If they have places traveled, navigate to their profile
+                                        navigate(`/user/${encodeURIComponent(handle)}`);
+                                    }
                                 }}
-                            />
-                        </div>
+                                title="View places traveled"
+                            >
+                                <FiMapPin className="w-6 h-6" />
+                            </button>
+                        )}
                         <button
                             className="p-2 hover:bg-gray-900 rounded-full transition-colors"
                             onClick={() => setShowChatInfo(true)}
@@ -1847,9 +2014,23 @@ export default function MessagesPage() {
                                                 }
                                                 
                                                 return (
-                                                    <div className="flex flex-col items-end gap-1 max-w-[75%]">
-                                                        <div
-                                                            className="bg-[#0095f6] rounded-2xl rounded-tr-sm px-4 py-2.5 break-words cursor-pointer select-none shadow-sm relative"
+                                                    <div className="flex items-start gap-2 max-w-[75%] ml-auto">
+                                                        {msg.senderAvatar && (
+                                                            <Avatar
+                                                                src={msg.senderAvatar}
+                                                                name={msg.senderHandle}
+                                                                size="sm"
+                                                                className="flex-shrink-0 order-2 cursor-pointer"
+                                                                onClick={() => {
+                                                                    if (user?.handle) {
+                                                                        navigate(`/user/${encodeURIComponent(user.handle)}`);
+                                                                    }
+                                                                }}
+                                                            />
+                                                        )}
+                                                        <div className="flex flex-col items-end gap-1 flex-1 min-w-0 order-1">
+                                                            <div
+                                                                className="bg-[#0095f6] rounded-2xl rounded-tr-sm px-4 py-2.5 break-words cursor-pointer select-none shadow-sm relative"
                                                             style={{
                                                                 maxWidth: '100%',
                                                                 wordBreak: 'break-word',
@@ -1961,23 +2142,24 @@ export default function MessagesPage() {
                                                                     ))}
                                                                 </div>
                                                             )}
-                                                        </div>
-                                                        {/* Read receipt and timestamp */}
-                                                        <div className="flex items-center gap-1.5 px-1">
-                                                            <span className="text-[10px] text-gray-400">
-                                                                {formatTimestamp(msg.timestamp)}
-                                                            </span>
-                                                            {msg.edited && (
-                                                                <span className="text-[10px] text-gray-500 italic">edited</span>
-                                                            )}
-                                                            {/* Read receipt - double checkmark (sent), filled (delivered), blue (read) */}
-                                                            <div className="flex items-center">
-                                                                <svg className={`w-3.5 h-3.5 ${msg.read ? 'text-blue-400' : 'text-gray-400'}`} fill="currentColor" viewBox="0 0 20 20">
-                                                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                                                </svg>
-                                                                <svg className={`w-3.5 h-3.5 -ml-1.5 ${msg.read ? 'text-blue-400' : 'text-gray-400'}`} fill="currentColor" viewBox="0 0 20 20">
-                                                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                                                </svg>
+                                                            </div>
+                                                            {/* Read receipt and timestamp */}
+                                                            <div className="flex items-center gap-1.5 px-1">
+                                                                <span className="text-[10px] text-gray-400">
+                                                                    {formatTimestamp(msg.timestamp)}
+                                                                </span>
+                                                                {msg.edited && (
+                                                                    <span className="text-[10px] text-gray-500 italic">edited</span>
+                                                                )}
+                                                                {/* Read receipt - double checkmark (sent), filled (delivered), blue (read) */}
+                                                                <div className="flex items-center">
+                                                                    <svg className={`w-3.5 h-3.5 ${msg.read ? 'text-blue-400' : 'text-gray-400'}`} fill="currentColor" viewBox="0 0 20 20">
+                                                                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                                    </svg>
+                                                                    <svg className={`w-3.5 h-3.5 -ml-1.5 ${msg.read ? 'text-blue-400' : 'text-gray-400'}`} fill="currentColor" viewBox="0 0 20 20">
+                                                                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                                    </svg>
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     </div>
