@@ -743,8 +743,18 @@ function PostHeader({ post, onFollow, isOverlaid = false, onMenuClick }: {
     }
   };
 
-  // Check if this is a reclipped post
-  const isReclippedPost = post.isReclipped && post.originalUserHandle;
+  // Check if this is a reclipped post **by the current user**.
+  // We only show the "reclipped" label when BOTH:
+  // - the post is marked as reclipped AND
+  // - local state says YOU reclipped it (userReclipped === true)
+  // This prevents the UI from claiming you reclipped something when only the backend
+  // or seed data says it's a reclip for someone else.
+  const isReclippedPost =
+    !!post.isReclipped &&
+    !!post.originalUserHandle &&
+    !!user?.handle &&
+    post.userHandle === user.handle &&
+    post.userReclipped === true;
 
   // Source of truth for follow state on feed cards:
   // read it directly from the shared follow state so the + / check
@@ -795,29 +805,17 @@ function PostHeader({ post, onFollow, isOverlaid = false, onMenuClick }: {
             {/* + icon overlay on profile picture to follow (TikTok style) */}
             {!isCurrentUser && onFollow && !isFollowingThisUser && (
               <button
+                type="button"
                 onClick={async (e) => {
                   e.stopPropagation();
                   e.preventDefault();
                   if (onFollow) {
-                    await onFollow();
-                  }
-                }}
-                onTouchStart={(e) => {
-                  e.stopPropagation();
-                  // Don't call preventDefault - React touch events are passive
-                  // Use setTimeout to ensure the touch event completes before async operation
-                  setTimeout(async () => {
-                    if (onFollow) {
-                      try {
-                        await onFollow();
-                      } catch (error) {
-                        console.error('Error in onFollow from touch:', error);
-                      }
+                    try {
+                      await onFollow();
+                    } catch (error) {
+                      console.error('Error in onFollow from click:', error);
                     }
-                  }, 0);
-                }}
-                onTouchEnd={(e) => {
-                  e.stopPropagation();
+                  }
                 }}
                 className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-blue-500 hover:bg-blue-600 border-2 border-white dark:border-gray-900 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30"
                 style={{ 
@@ -4327,9 +4325,10 @@ function FeedPageWrapper() {
                     // Don't update isFollowing to true - keep it false for pending request
                     updateOne(p.id, post => ({ ...post, isFollowing: false }));
                   } else if (result.status === 'accepted' || result.following === true) {
-                    // Public profile - follow immediately
-                    const updated = await toggleFollowForPost(userId, p.id);
-                    updateOne(p.id, _post => ({ ...updated }));
+                    // Public profile - follow immediately (backend is authoritative)
+                    const newFollowingState = true;
+                    setFollowState(userId, p.userHandle, newFollowingState);
+                    updateOne(p.id, post => ({ ...post, isFollowing: newFollowingState }));
                   }
                 } catch (apiError: any) {
                   const isConnectionError = 
@@ -4436,8 +4435,29 @@ function FeedPageWrapper() {
                 }
               } else {
                 // Public profile - follow immediately
-                const updated = await toggleFollowForPost(userId, p.id);
-                updateOne(p.id, _post => ({ ...updated }));
+                try {
+                  // First try the backend API so Laravel posts (which aren't in the mock posts array)
+                  // correctly toggle follow state.
+                  const result = await toggleFollow(p.userHandle);
+                  const newFollowingState =
+                    result?.status === 'accepted' || result?.following === true;
+
+                  setFollowState(userId, p.userHandle, newFollowingState);
+                  updateOne(p.id, post => ({ ...post, isFollowing: newFollowingState }));
+                } catch (apiError: any) {
+                  const isConnectionError =
+                    apiError?.message === 'CONNECTION_REFUSED' ||
+                    apiError?.name === 'ConnectionRefused' ||
+                    apiError?.message?.includes('Failed to fetch');
+
+                  if (isConnectionError) {
+                    // Backend not available – fall back to mock follow toggling
+                    const updated = await toggleFollowForPost(userId, p.id);
+                    updateOne(p.id, _post => ({ ...updated }));
+                  } else {
+                    throw apiError;
+                  }
+                }
                 // Do not clear/refetch here: it wipes the optimistic update and makes the green tick flash back to +.
               }
             }}
@@ -4655,31 +4675,125 @@ function FeedPageWrapper() {
               }));
             }}
             onFollow={async () => {
-              const { isProfilePrivate } = await import('./api/privacy');
-              const { createFollowRequest } = await import('./api/privacy');
+              const { isProfilePrivate, createFollowRequest, hasPendingFollowRequest } = await import('./api/privacy');
+              const { toggleFollow } = await import('./api/client');
+              const { createNotification } = await import('./api/notifications');
+
               const profilePrivate = isProfilePrivate(p.userHandle);
+
+              // Private profile: create/request-only flow for this secondary feed as well
               if (profilePrivate && user?.handle) {
+                const hasPending = hasPendingFollowRequest(user.handle, p.userHandle);
+                if (hasPending) {
+                  const Swal = (await import('sweetalert2')).default;
+                  await Swal.fire({
+                    title: '',
+                    html: `
+                      <div style="text-align: center; padding: 8px 0;">
+                        <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">
+                          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                          </svg>
+                        </div>
+                        <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Already Sent</h3>
+                        <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">You have already sent a follow request to ${p.userHandle}. You will be notified when they respond.</p>
+                      </div>
+                    `,
+                    showConfirmButton: true,
+                    confirmButtonText: 'OK',
+                    confirmButtonColor: '#0095f6',
+                    background: '#ffffff',
+                    width: '400px',
+                    padding: '0',
+                    customClass: {
+                      popup: '!rounded-2xl !shadow-xl !border-0',
+                      container: '!p-0',
+                      confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
+                    },
+                    buttonsStyling: false
+                  });
+                  return;
+                }
+
+                // Create new follow request (local + optional notification)
                 createFollowRequest(user.handle, p.userHandle);
                 setFollowState(userId, p.userHandle, false);
+                try {
+                  await createNotification({
+                    type: 'follow_request',
+                    fromHandle: user.handle,
+                    toHandle: p.userHandle,
+                    message: `${user.handle} wants to follow you`
+                  });
+                } catch {
+                  // non-fatal
+                }
                 const Swal = (await import('sweetalert2')).default;
                 await Swal.fire({
-                  title: 'Follow Request Sent',
-                  html: `<p style="color:#262626;font-size:14px;">Your follow request has been sent. You will be notified when they accept.</p>`,
+                  title: '',
+                  html: `
+                    <div style="text-align: center; padding: 8px 0;">
+                      <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                          <circle cx="8.5" cy="7" r="4"></circle>
+                          <line x1="20" y1="8" x2="20" y2="14"></line>
+                          <line x1="23" y1="11" x2="17" y2="11"></line>
+                        </svg>
+                      </div>
+                      <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Sent</h3>
+                      <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Your follow request has been sent. You will be notified when they accept.</p>
+                    </div>
+                  `,
+                  showConfirmButton: true,
                   confirmButtonText: 'OK',
                   confirmButtonColor: '#0095f6',
                   background: '#ffffff',
-                  width: '360px'
+                  width: '400px',
+                  padding: '0',
+                  customClass: {
+                    popup: '!rounded-2xl !shadow-xl !border-0',
+                    container: '!p-0',
+                    confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
+                  },
+                  buttonsStyling: false
                 });
                 return false;
               }
+
+              // PUBLIC PROFILES
               if (!online) {
+                // Pure offline: toggle in shared follow state and UI
                 updateOne(p.id, post => ({ ...post, isFollowing: !post.isFollowing }));
                 setFollowState(userId, p.userHandle, !p.isFollowing);
                 await enqueue({ type: 'follow', postId: p.id, userId });
                 return;
               }
-              const updated = await toggleFollowForPost(userId, p.id);
-              updateOne(p.id, _post => ({ ...updated }));
+
+              try {
+                // Use backend as source of truth
+                const result = await toggleFollow(p.userHandle);
+                const newFollowingState =
+                  result?.status === 'accepted' || result?.following === true;
+
+                setFollowState(userId, p.userHandle, newFollowingState);
+                updateOne(p.id, post => ({ ...post, isFollowing: newFollowingState }));
+              } catch (apiError: any) {
+                const isConnectionError =
+                  apiError?.message === 'CONNECTION_REFUSED' ||
+                  apiError?.name === 'ConnectionRefused' ||
+                  apiError?.message?.includes('Failed to fetch');
+
+                if (isConnectionError) {
+                  // Backend not available – fall back to mock follow toggling
+                  const updated = await toggleFollowForPost(userId, p.id);
+                  updateOne(p.id, _post => ({ ...updated }));
+                } else {
+                  throw apiError;
+                }
+              }
+
               if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
                 setPages([]);
                 setCursor(0);

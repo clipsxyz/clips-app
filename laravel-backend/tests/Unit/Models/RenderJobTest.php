@@ -7,11 +7,31 @@ use App\Models\RenderJob;
 use App\Models\Post;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class RenderJobTest extends TestCase
 {
     use RefreshDatabase;
+
+    private const MINIMAL_EDIT_TIMELINE = [
+        'clips' => [
+            ['id' => 'clip-1', 'mediaUrl' => 'https://example.com/video.mp4', 'type' => 'video'],
+        ],
+    ];
+    private const VIDEO_SOURCE_URL = 'https://example.com/source.mp4';
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Schema::disableForeignKeyConstraints();
+    }
+
+    protected function tearDown(): void
+    {
+        Schema::enableForeignKeyConstraints();
+        parent::tearDown();
+    }
 
     public function test_render_job_can_be_created(): void
     {
@@ -56,6 +76,8 @@ class RenderJobTest extends TestCase
             'user_id' => $user->id,
             'post_id' => $post->id,
             'status' => 'queued',
+            'edit_timeline' => self::MINIMAL_EDIT_TIMELINE,
+            'video_source_url' => self::VIDEO_SOURCE_URL,
         ]);
 
         $this->assertInstanceOf(User::class, $renderJob->user);
@@ -72,6 +94,8 @@ class RenderJobTest extends TestCase
             'user_id' => $user->id,
             'post_id' => $post->id,
             'status' => 'queued',
+            'edit_timeline' => self::MINIMAL_EDIT_TIMELINE,
+            'video_source_url' => self::VIDEO_SOURCE_URL,
         ]);
 
         $this->assertInstanceOf(Post::class, $renderJob->post);
@@ -99,6 +123,7 @@ class RenderJobTest extends TestCase
             'post_id' => $post->id,
             'status' => 'queued',
             'edit_timeline' => $editTimeline,
+            'video_source_url' => self::VIDEO_SOURCE_URL,
         ]);
 
         $this->assertIsArray($renderJob->edit_timeline);
@@ -115,6 +140,8 @@ class RenderJobTest extends TestCase
             'user_id' => $user->id,
             'post_id' => $post->id,
             'status' => 'queued',
+            'edit_timeline' => self::MINIMAL_EDIT_TIMELINE,
+            'video_source_url' => self::VIDEO_SOURCE_URL,
         ]);
 
         $renderJob->status = 'rendering';

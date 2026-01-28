@@ -8,15 +8,19 @@ This directory contains PHPUnit tests for the Laravel backend.
 ```bash
 cd laravel-backend
 php vendor/bin/phpunit
+# or
+composer test
 ```
 
 ### Run specific test suite
 ```bash
 # Run only unit tests
 php vendor/bin/phpunit tests/Unit
+composer test:unit
 
 # Run only feature tests
 php vendor/bin/phpunit tests/Feature
+composer test:feature
 ```
 
 ### Run specific test file
@@ -27,7 +31,10 @@ php vendor/bin/phpunit tests/Unit/Models/RenderJobTest.php
 ### Run with coverage
 ```bash
 php vendor/bin/phpunit --coverage-html coverage
+# or
+composer test:coverage
 ```
+This writes an HTML report to `coverage/`. You need a coverage driver (Xdebug or PCOV) enabled in PHP; otherwise you'll see "No code coverage driver available". **See [COVERAGE.md](../COVERAGE.md)** for step-by-step setup (enable driver, generate report, open `coverage/index.html`).
 
 ## Test Structure
 
@@ -44,12 +51,26 @@ php vendor/bin/phpunit --coverage-html coverage
 ## Test Files
 
 ### Unit Tests
-- `Unit/Models/RenderJobTest.php` - Tests for RenderJob model
-- `Unit/Jobs/ProcessRenderJobTest.php` - Tests for video rendering job
+- `Unit/Models/PostTest.php` - Post scopes and helpers
+- `Unit/Models/MusicTest.php` - Music scopes and helpers
+- `Unit/Models/RenderJobTest.php` - RenderJob model
+- `Unit/Models/UserTest.php` - User helpers (canViewProfile, hasLikedPost, hasBookmarked, etc.)
+- `Unit/Models/StoryTest.php` - Story scopes and helpers
+- `Unit/Models/CommentTest.php` - Comment scopes (topLevel) and helpers (isReply, isLikedBy)
+- `Unit/Models/CollectionTest.php` - Collection scopes (public, private, forUser) and containsPost
+- `Unit/Models/NotificationTest.php` - Notification scopes (unread, byType, forUser) and markAsRead
+- `Unit/Jobs/ProcessRenderJobTest.php` - Video rendering job
 
 ### Feature Tests
-- `Feature/PostControllerTest.php` - Tests for post creation and retrieval
-- `Feature/RenderJobApiTest.php` - Tests for render job status API
+- `Feature/AuthControllerTest.php` - Register, login, me, invalid credentials
+- `Feature/PostControllerTest.php` - Post creation, feed, single post, validation
+- `Feature/RenderJobApiTest.php` - Render job status API
+- `Feature/NotificationControllerTest.php` - FCM token and notification preferences
+- `Feature/StoryControllerTest.php` - Story create, view, reaction, reply
+- `Feature/CommentControllerTest.php` - Comments: get, add, reply, toggle like
+- `Feature/UserControllerTest.php` - User profile (public, private, 401)
+- `Feature/CollectionControllerTest.php` - Collections: list, create, validate
+- `Feature/SearchControllerTest.php` - Unified search (q, types, users/posts)
 
 ## Factories
 
@@ -57,11 +78,12 @@ Factories are located in `database/factories/`:
 - `UserFactory.php` - Creates test users
 - `PostFactory.php` - Creates test posts
 - `RenderJobFactory.php` - Creates test render jobs
+- `StoryFactory.php` - Creates test stories (use `forUser($user)` when overriding user)
 
 ## Configuration
 
 Test configuration is in `phpunit.xml`:
-- Uses SQLite in-memory database for speed
+- Uses file-based SQLite (`database/testing.sqlite`) for tests
 - Sets up test environment variables
 - Configures test suites and coverage
 

@@ -28,6 +28,19 @@ interface MessageUI extends ChatMessage {
     read?: boolean;
 }
 
+// Helper to parse places from a bio string.
+// Matches the behavior on the profile page so "places in my bio"
+// are treated as traveled locations.
+function parsePlacesFromBio(bio: string): string[] {
+    if (!bio || typeof bio !== 'string') return [];
+    const parts = bio
+        .split(/[,;\n.]|\s+and\s+|\s*[-–—]\s*|:\s*/i)
+        .map((p) => p.trim())
+        .filter((p) => p.length >= 2);
+    if (parts.length === 0 && bio.trim().length >= 2) return [bio.trim()];
+    return [...new Set(parts)];
+}
+
 // Helper function to parse question messages
 function parseQuestionMessage(text: string | undefined): { question: string; answer: string } | null {
     if (!text || !text.startsWith('QUESTION:')) return null;
@@ -732,6 +745,54 @@ export default function MessagesPage() {
         }
 
         loadAvatar();
+    }, [handle, user?.id]);
+
+    // Load "places traveled" for the other user so the DM header
+    // location icon behaves like the profile page:
+    // - If they have explicit places_traveled, use that.
+    // - Otherwise, derive places from their bio text.
+    // - For mock users like Bob, fall back to the same hard‑coded list
+    //   used on the profile page so behavior is consistent.
+    React.useEffect(() => {
+        async function loadOtherUserPlaces() {
+            if (!handle || !user?.id) {
+                setOtherUserPlacesTraveled(undefined);
+                return;
+            }
+
+            try {
+                let places: string[] = [];
+
+                try {
+                    const profile = await fetchUserProfile(handle, user.id);
+
+                    // 1) Try explicit places_traveled / placesTraveled from API
+                    const apiPlaces =
+                        (profile as any).places_traveled ||
+                        (profile as any).placesTraveled;
+                    if (Array.isArray(apiPlaces) && apiPlaces.length > 0) {
+                        places = apiPlaces;
+                    } else if (typeof (profile as any).bio === 'string') {
+                        // 2) Derive from bio text (same parsing as profile page)
+                        places = parsePlacesFromBio((profile as any).bio);
+                    }
+                } catch (error) {
+                    console.warn('Failed to fetch profile for places traveled in DMs:', error);
+                }
+
+                // 3) Mock fallback for Bob@Ireland (match ViewProfilePage behavior)
+                if ((!places || places.length === 0) && handle === 'Bob@Ireland') {
+                    places = ['Cork', 'Galway', 'Belfast', 'London', 'Paris'];
+                }
+
+                setOtherUserPlacesTraveled(places && places.length > 0 ? places : []);
+            } catch (error) {
+                console.error('Error loading other user places traveled:', error);
+                setOtherUserPlacesTraveled([]);
+            }
+        }
+
+        loadOtherUserPlaces();
     }, [handle, user?.id]);
 
     // Check for unviewed stories, stories status, and follow status
@@ -1832,7 +1893,7 @@ export default function MessagesPage() {
                             <button
                                 className="p-2 hover:bg-gray-900 rounded-full transition-colors"
                                 onClick={() => {
-                                    // Check if user has places traveled
+                                    // If no places traveled, show the "No Places Traveled" card
                                     if (!otherUserPlacesTraveled || otherUserPlacesTraveled.length === 0) {
                                         Swal.fire({
                                             title: '',
@@ -1862,8 +1923,40 @@ export default function MessagesPage() {
                                             buttonsStyling: false
                                         });
                                     } else {
-                                        // If they have places traveled, navigate to their profile
-                                        navigate(`/user/${encodeURIComponent(handle)}`);
+                                        // Show a places traveled card (SweetAlert) using the same data
+                                        const placesHtml = otherUserPlacesTraveled
+                                            .map(place => `<li style="padding: 6px 0; border-bottom: 1px solid #f3f4f6;">${place}</li>`)
+                                            .join('');
+
+                                        Swal.fire({
+                                            title: '',
+                                            html: `
+                                                <div style="text-align: left; padding: 8px 0;">
+                                                    <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3);">
+                                                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                                                            <circle cx="12" cy="10" r="3"></circle>
+                                                        </svg>
+                                                    </div>
+                                                    <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 12px 0; text-align: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Places Traveled</h3>
+                                                    <ul style="list-style: none; margin: 0; padding: 0 4px 0 4px; max-height: 260px; overflow-y: auto;">
+                                                        ${placesHtml}
+                                                    </ul>
+                                                </div>
+                                            `,
+                                            showConfirmButton: true,
+                                            confirmButtonText: 'OK',
+                                            confirmButtonColor: '#0095f6',
+                                            background: '#ffffff',
+                                            width: '400px',
+                                            padding: '0',
+                                            customClass: {
+                                                popup: '!rounded-2xl !shadow-xl !border-0',
+                                                container: '!p-0',
+                                                confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
+                                            },
+                                            buttonsStyling: false
+                                        });
                                     }
                                 }}
                                 title="View places traveled"

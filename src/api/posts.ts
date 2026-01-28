@@ -37,7 +37,7 @@ function getUserLocationFromHandle(userHandle: string): { local: string; regiona
 
   // Extract location from handle (check after @ symbol)
   const afterAt = handleLower.split('@')[1] || '';
-  
+
   if (afterAt.includes('finglas')) {
     return { local: 'Finglas', regional: 'Dublin', national: 'Ireland' };
   } else if (afterAt.includes('artane')) {
@@ -59,7 +59,7 @@ function getUserLocationFromHandle(userHandle: string): { local: string; regiona
   } else if (afterAt.includes('sydney')) {
     return { local: 'Sydney', regional: 'NSW', national: 'Australia' };
   }
-  
+
   // Fallback: check entire handle (for backward compatibility)
   if (handleLower.includes('finglas')) {
     return { local: 'Finglas', regional: 'Dublin', national: 'Ireland' };
@@ -138,11 +138,11 @@ if (!postsInitialized) {
       ...location
     } as Post;
   });
-  
+
   // Load user-created posts from localStorage
   const userCreatedPosts = getPostsFromStorage();
   console.log('📂 Loaded', userCreatedPosts.length, 'user-created posts from localStorage');
-  
+
   // Merge: user-created posts first (newest), then JSON posts
   posts = [...userCreatedPosts, ...jsonPosts];
   postsInitialized = true;
@@ -163,7 +163,7 @@ if (!postsInitialized) {
 
   // Add mock posts for test user from Artane
   const artaneNow = Date.now();
-  
+
   // Add mock posts for another user (Bob@Ireland) so they appear in Ireland feed for testing
   const bobPosts: Post[] = [
     {
@@ -201,7 +201,7 @@ if (!postsInitialized) {
       userNational: 'Ireland'
     } as Post
   ];
-  
+
   const artanePosts: Post[] = [
     {
       id: `artane-post-1-${artaneNow}-${Math.random().toString(36).substr(2, 9)}`,
@@ -439,7 +439,7 @@ export function decorateForUser(userId: string, p: Post): Post {
 function transformLaravelPost(response: any): Post {
   const finalVideoUrl = response.final_video_url || response.finalVideoUrl;
   const originalMediaUrl = response.media_url || response.mediaUrl || '';
-  
+
   return {
     id: response.id,
     userHandle: response.user_handle || response.userHandle,
@@ -484,11 +484,11 @@ function transformLaravelPost(response: any): Post {
 export async function fetchPostsPage(tab: string, cursor: number | null, limit = 5, userId = 'me', userLocal = '', userRegional = '', userNational = '', currentUserHandle = ''): Promise<Page> {
   // Try Laravel API first, fallback to mock if it fails
   const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
-  
+
   if (useLaravelAPI) {
     try {
       const t = tab.toLowerCase();
-      
+
       // Map frontend tab names to Laravel filter values
       let filter: string;
       if (t === 'discover') {
@@ -503,13 +503,47 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
         // Custom location - use as-is (Laravel will handle it via byLocation scope)
         filter = tab.charAt(0).toUpperCase() + tab.slice(1).toLowerCase();
       }
-      
+
       const apiCursor = cursor ?? 0;
       const response = await apiClient.fetchPostsPage(apiCursor, limit, filter, userId !== 'me' ? userId : undefined);
-      
+
       // Transform Laravel response to frontend format
-      const transformedItems = response.items.map((item: any) => transformLaravelPost(item));
-      
+      let transformedItems: Post[] = response.items.map((item: any) => transformLaravelPost(item));
+
+      // Tighten "Following" (discover) feed on the frontend as well so it only shows:
+      // - Original posts from people you actually follow
+      // - Reclips which YOU created (your handle is the reclipper)
+      // This avoids confusing cases where the backend might return extra items.
+      if (t === 'discover') {
+        const stateUserId = userId || 'me';
+        const userState = getState(stateUserId);
+        const follows = userState.follows || {};
+        const anyFollowing = Object.values(follows).some(v => v === true);
+
+        transformedItems = transformedItems.filter((p) => {
+          const isFollowing = follows[p.userHandle] === true;
+          const isReclipped = (p as any).isReclipped;
+          // Treat as "my reclip" ONLY when local state says I reclipped it
+          const isMyReclip =
+            !!currentUserHandle &&
+            p.userHandle === currentUserHandle &&
+            (p as any).userReclipped === true;
+
+          // If user follows nobody yet: show ONLY their own reclips (if any), otherwise nothing.
+          if (!anyFollowing) {
+            return isReclipped && isMyReclip;
+          }
+
+          // Reclipped posts: only show if you follow the reclipper OR you are the reclipper
+          if (isReclipped) {
+            return isFollowing || isMyReclip;
+          }
+
+          // Original posts: only show if you follow the author
+          return isFollowing;
+        });
+      }
+
       return {
         items: transformedItems,
         nextCursor: response.nextCursor
@@ -522,7 +556,7 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       // Fall through to mock implementation
     }
   }
-  
+
   // Mock implementation (fallback)
   try {
     // Reload posts from localStorage to get latest user-created posts
@@ -536,7 +570,7 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       posts = [...userCreatedPosts, ...jsonPosts];
       console.log('📂 Reloaded posts from localStorage:', userCreatedPosts.length, 'user posts +', jsonPosts.length, 'JSON posts =', posts.length, 'total');
     }
-    
+
     await delay();
     const t = tab.toLowerCase();
 
@@ -558,52 +592,29 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       if (p.isReclipped && t !== 'discover') {
         return false;
       }
-      
+
       if (t === 'discover') {
         const userState = getState(userId);
-        const isFollowing = userState.follows[p.userHandle] === true;
-        
-        // For reclipped posts: show them if you follow the reclipper OR if you are the reclipper
-        // This ensures you can see your own reclipped posts even if nobody follows you
+        const follows = userState.follows || {};
+        const anyFollowing = Object.values(follows).some(v => v === true);
+        const isFollowing = follows[p.userHandle] === true;
+        // "My reclip" only when local state says I reclipped it
+        const isMyReclip =
+          !!currentUserHandle &&
+          p.userHandle === currentUserHandle &&
+          p.userReclipped === true;
+
+        // If user follows nobody yet: show ONLY their own reclips (if any), otherwise nothing.
+        if (!anyFollowing) {
+          return p.isReclipped && isMyReclip;
+        }
+
+        // Reclipped posts: show if you follow the reclipper OR you are the reclipper
         if (p.isReclipped) {
-          const isMyReclip = p.userHandle === currentUserHandle;
-          const shouldShow = isFollowing || isMyReclip;
-          
-          // Debug logging for reclipped posts
-          if (p.originalUserHandle?.includes('Sarah') || p.originalUserHandle?.includes('sarah') || p.userHandle === currentUserHandle) {
-            console.log('FOLLOWING FEED - RECLIPPED POST:', {
-              postId: p.id.substring(0, 30),
-              isReclipped: p.isReclipped,
-              userHandle: p.userHandle,
-              originalUserHandle: p.originalUserHandle,
-              currentUserHandle,
-              isMyReclip,
-              isFollowing,
-              shouldShow
-            });
-          }
-          
-          return shouldShow;
+          return isFollowing || isMyReclip;
         }
-        
-        // For non-reclipped posts: only show if you follow the author
-        // IMPORTANT: Only show original posts from people you follow
-        // Do NOT show original posts from people you don't follow, even if you reclipped one of their posts
-        
-        // Debug: Log what we're checking for Sarah's posts
-        if (p.userHandle.includes('Sarah') || p.userHandle.includes('sarah')) {
-          console.log('FOLLOWING FEED - ORIGINAL POST:', {
-            postId: p.id.substring(0, 30),
-            isReclipped: p.isReclipped,
-            userHandle: p.userHandle,
-            currentUserHandle,
-            isFollowing,
-            followsState: userState.follows,
-            willShow: isFollowing
-          });
-        }
-        
-        // Only show if you follow the author (for non-reclipped posts)
+
+        // Non‑reclipped posts: only show if you follow the author
         return isFollowing;
       }
 
@@ -669,12 +680,12 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       const userLocalLower = (p.userLocal || '').toLowerCase();
       const userRegionalLower = (p.userRegional || '').toLowerCase();
       const userNationalLower = (p.userNational || '').toLowerCase();
-      
+
       // Match against local, regional, or national
       if (tabLower === userLocalLower || tabLower === userRegionalLower || tabLower === userNationalLower) {
         return true;
       }
-      
+
       // Legacy hardcoded checks for backward compatibility
       if (t === 'finglas' && p.userLocal === 'Finglas') {
         return true;
@@ -768,7 +779,7 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
 export async function toggleLike(userId: string, id: string): Promise<Post> {
   // Try Laravel API first, fallback to mock if it fails
   const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
-  
+
   if (useLaravelAPI) {
     try {
       const response = await apiClient.toggleLike(id);
@@ -781,7 +792,7 @@ export async function toggleLike(userId: string, id: string): Promise<Post> {
       // Fall through to mock implementation
     }
   }
-  
+
   // Mock implementation (fallback)
   await delay(150);
   const s = getState(userId);
@@ -810,7 +821,7 @@ export async function toggleFollowForPost(userId: string, id: string): Promise<P
   const wasFollowing = s.follows[p.userHandle] === true;
   // Set to true if not following, false if following
   s.follows[p.userHandle] = !wasFollowing;
-  
+
   // Debug: Log the state after update
   console.log('FOLLOW STATE UPDATED:', {
     userId,
@@ -818,14 +829,14 @@ export async function toggleFollowForPost(userId: string, id: string): Promise<P
     nowFollowing: s.follows[p.userHandle],
     allFollows: Object.keys(s.follows).filter(h => s.follows[h] === true)
   });
-  
+
   return decorateForUser(userId, p);
 }
 
 export async function incrementViews(userId: string, id: string): Promise<Post> {
   // Try Laravel API first, fallback to mock if it fails
   const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
-  
+
   if (useLaravelAPI) {
     try {
       const response = await apiClient.incrementView(id);
@@ -838,7 +849,7 @@ export async function incrementViews(userId: string, id: string): Promise<Post> 
       // Fall through to mock implementation
     }
   }
-  
+
   // Mock implementation (fallback)
   await delay(100);
   const p = posts.find(x => x.id === id);
@@ -911,7 +922,7 @@ export function wasViewedRecently(userId: string, postId: string, timeWindowMs: 
 export async function incrementShares(userId: string, id: string): Promise<Post> {
   // Try Laravel API first, fallback to mock if it fails
   const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
-  
+
   if (useLaravelAPI) {
     try {
       const response = await apiClient.sharePost(id);
@@ -924,7 +935,7 @@ export async function incrementShares(userId: string, id: string): Promise<Post>
       // Fall through to mock implementation
     }
   }
-  
+
   // Mock implementation (fallback)
   await delay(100);
   const p = posts.find(x => x.id === id);
@@ -939,7 +950,7 @@ export async function incrementShares(userId: string, id: string): Promise<Post>
 export async function incrementReclips(userId: string, id: string): Promise<Post> {
   // Try Laravel API first, fallback to mock if it fails
   const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
-  
+
   if (useLaravelAPI) {
     try {
       const response = await apiClient.reclipPost(id);
@@ -952,7 +963,7 @@ export async function incrementReclips(userId: string, id: string): Promise<Post
       // Fall through to mock implementation
     }
   }
-  
+
   // Mock implementation (fallback)
   await delay(100);
   const p = posts.find(x => x.id === id);
@@ -1010,7 +1021,7 @@ export async function reclipPost(userId: string, originalPostId: string, userHan
 
   // Add to posts array
   posts.push(reclippedPost);
-  
+
   // Save to localStorage for persistence
   savePostsToStorage(posts);
 
@@ -1045,7 +1056,7 @@ export async function fetchPostsByUser(userHandle: string, limit = 30): Promise<
 export async function addComment(postId: string, userHandle: string, text: string): Promise<Comment> {
   // Try Laravel API first, fallback to mock if it fails
   const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
-  
+
   if (useLaravelAPI) {
     try {
       const response = await apiClient.addComment(postId, text);
@@ -1067,11 +1078,11 @@ export async function addComment(postId: string, userHandle: string, text: strin
       // Fall through to mock implementation
     }
   }
-  
+
   // Mock implementation (fallback)
   await delay(300);
   console.log('addComment called:', { postId, userHandle, text, postsCount: posts.length });
-  
+
   const comment: Comment = {
     id: crypto.randomUUID(),
     postId,
@@ -1085,26 +1096,26 @@ export async function addComment(postId: string, userHandle: string, text: strin
 
   // Update post comment count
   const post = posts.find(p => p.id === postId);
-  console.log('Post lookup result:', { 
-    postId, 
-    found: !!post, 
-    postUserHandle: post?.userHandle, 
+  console.log('Post lookup result:', {
+    postId,
+    found: !!post,
+    postUserHandle: post?.userHandle,
     commenterHandle: userHandle,
     isOwnPost: post?.userHandle === userHandle
   });
-  
+
   if (post) {
     post.stats.comments += 1;
-    
+
     // Send DM to post owner with comment notification (only if not commenting on own post)
     if (post.userHandle !== userHandle) {
       // Dynamically import to avoid circular dependency
       const { appendMessage } = await import('./messages');
-      console.log('Sending comment notification DM:', { 
-        from: userHandle, 
-        to: post.userHandle, 
-        postId, 
-        commentText: text 
+      console.log('Sending comment notification DM:', {
+        from: userHandle,
+        to: post.userHandle,
+        postId,
+        commentText: text
       });
       try {
         await appendMessage(userHandle, post.userHandle, {
@@ -1213,7 +1224,7 @@ export async function createPost(
 ): Promise<Post> {
   // Use real Laravel API
   const { createPost: createPostAPI } = await import('./client');
-  
+
   try {
     const response = await createPostAPI({
       text: text || undefined,
@@ -1239,7 +1250,7 @@ export async function createPost(
     // Transform Laravel response to frontend Post format
     const finalVideoUrl = response.final_video_url || response.finalVideoUrl;
     const originalMediaUrl = response.media_url || response.mediaUrl || imageUrl || '';
-    
+
     const transformedPost = {
       id: response.id,
       userHandle: response.user_handle || response.userHandle,
@@ -1279,7 +1290,7 @@ export async function createPost(
       // Include renderJobId for PiP tracking
       renderJobId: response.render_job_id || response.renderJobId,
     } as Post & { renderJobId?: string };
-    
+
     return transformedPost;
   } catch (error: any) {
     console.error('Error creating post via API:', error);
@@ -1289,15 +1300,15 @@ export async function createPost(
       status: error?.status,
       response: error?.response
     });
-    
+
     // Check if it's a connection error - if so, use mock fallback
-    const isConnectionError = 
+    const isConnectionError =
       error?.name === 'ConnectionRefused' ||
       error?.message?.includes('CONNECTION_REFUSED') ||
       error?.message?.includes('Failed to fetch') ||
       error?.message?.includes('NetworkError') ||
       (error?.name === 'TypeError' && error?.message?.includes('fetch'));
-    
+
     if (isConnectionError) {
       console.log('⚠️ API connection failed, using mock fallback for post creation');
       console.log('This is normal when backend is not running or not accessible from your device');
@@ -1308,13 +1319,13 @@ export async function createPost(
       console.error('❌ API error (not connection):', error);
       throw error;
     }
-    
+
     // Helper function to convert blob URL to data URL for persistence
     async function convertBlobToDataUrl(blobUrl: string): Promise<string> {
       if (!blobUrl.startsWith('blob:')) {
         return blobUrl; // Not a blob URL, return as-is
       }
-      
+
       try {
         console.log('Converting blob URL to data URL for persistence:', blobUrl.substring(0, 50));
         const response = await fetch(blobUrl);
@@ -1337,151 +1348,151 @@ export async function createPost(
         return blobUrl; // Fallback to original (will fail later, but at least we tried)
       }
     }
-    
+
     // Debug: Log taggedUsers parameter
     console.log('createPost function - received taggedUsers parameter:', taggedUsers, 'type:', typeof taggedUsers, 'isArray:', Array.isArray(taggedUsers), 'length:', taggedUsers?.length);
 
-  console.log('Creating post with:', {
-    userId,
-    userHandle,
-    text,
-    location,
-    imageUrl,
-    mediaType,
-    imageText,
-    caption,
-    userLocal,
-    userRegional,
-    userNational
-  });
+    console.log('Creating post with:', {
+      userId,
+      userHandle,
+      text,
+      location,
+      imageUrl,
+      mediaType,
+      imageText,
+      caption,
+      userLocal,
+      userRegional,
+      userNational
+    });
 
-  // Get location from user data if provided, otherwise infer from handle
-  const locationData = userLocal && userRegional && userNational
-    ? { userLocal, userRegional, userNational }
-    : getUserLocationFromHandle(userHandle);
+    // Get location from user data if provided, otherwise infer from handle
+    const locationData = userLocal && userRegional && userNational
+      ? { userLocal, userRegional, userNational }
+      : getUserLocationFromHandle(userHandle);
 
-  const postCreatedAt = Date.now(); // Epoch timestamp in milliseconds
+    const postCreatedAt = Date.now(); // Epoch timestamp in milliseconds
 
-  // Convert blob URLs to data URLs for persistence
-  // Only convert if we have a valid blob URL (not empty/undefined)
-  // For videos, keep blob URLs as-is (like stories) to avoid memory issues on mobile
-  let persistentImageUrl = imageUrl;
-  if (imageUrl && imageUrl.trim() !== '' && imageUrl.startsWith('blob:')) {
-    // For videos, skip conversion to avoid memory issues on mobile
-    // Videos can be stored as blob URLs and will work fine
-    if (mediaType === 'video') {
-      console.log('Keeping video as blob URL (skipping conversion for mobile compatibility)');
-      persistentImageUrl = imageUrl; // Keep blob URL for videos
-    } else {
-      // For images, convert to data URL
-      try {
-        persistentImageUrl = await convertBlobToDataUrl(imageUrl);
-      } catch (error) {
-        console.error('Failed to convert blob URL, using original:', error);
-        persistentImageUrl = imageUrl; // Fallback to original
+    // Convert blob URLs to data URLs for persistence
+    // Only convert if we have a valid blob URL (not empty/undefined)
+    // For videos, keep blob URLs as-is (like stories) to avoid memory issues on mobile
+    let persistentImageUrl = imageUrl;
+    if (imageUrl && imageUrl.trim() !== '' && imageUrl.startsWith('blob:')) {
+      // For videos, skip conversion to avoid memory issues on mobile
+      // Videos can be stored as blob URLs and will work fine
+      if (mediaType === 'video') {
+        console.log('Keeping video as blob URL (skipping conversion for mobile compatibility)');
+        persistentImageUrl = imageUrl; // Keep blob URL for videos
+      } else {
+        // For images, convert to data URL
+        try {
+          persistentImageUrl = await convertBlobToDataUrl(imageUrl);
+        } catch (error) {
+          console.error('Failed to convert blob URL, using original:', error);
+          persistentImageUrl = imageUrl; // Fallback to original
+        }
       }
     }
-  }
 
-  // Convert blob URLs in mediaItems to data URLs
-  // For videos, keep blob URLs as-is (like stories) to avoid memory issues on mobile
-  let persistentMediaItems = mediaItems;
-  if (mediaItems && mediaItems.length > 0) {
-    persistentMediaItems = await Promise.all(
-      mediaItems.map(async (item) => {
-        if (item.url && item.url.trim() !== '' && item.url.startsWith('blob:')) {
-          // For videos, skip conversion to avoid memory issues on mobile
-          if (item.type === 'video') {
-            console.log('Keeping video in mediaItems as blob URL (skipping conversion for mobile compatibility)');
-            return item; // Keep blob URL for videos
-          } else {
-            // For images and text, convert to data URL
-            try {
-              const dataUrl = await convertBlobToDataUrl(item.url);
-              return { ...item, url: dataUrl };
-            } catch (error) {
-              console.error('Failed to convert blob URL in mediaItems, using original:', error);
-              return item; // Fallback to original
+    // Convert blob URLs in mediaItems to data URLs
+    // For videos, keep blob URLs as-is (like stories) to avoid memory issues on mobile
+    let persistentMediaItems = mediaItems;
+    if (mediaItems && mediaItems.length > 0) {
+      persistentMediaItems = await Promise.all(
+        mediaItems.map(async (item) => {
+          if (item.url && item.url.trim() !== '' && item.url.startsWith('blob:')) {
+            // For videos, skip conversion to avoid memory issues on mobile
+            if (item.type === 'video') {
+              console.log('Keeping video in mediaItems as blob URL (skipping conversion for mobile compatibility)');
+              return item; // Keep blob URL for videos
+            } else {
+              // For images and text, convert to data URL
+              try {
+                const dataUrl = await convertBlobToDataUrl(item.url);
+                return { ...item, url: dataUrl };
+              } catch (error) {
+                console.error('Failed to convert blob URL in mediaItems, using original:', error);
+                return item; // Fallback to original
+              }
             }
           }
-        }
-        return item;
-      })
-    );
-  }
+          return item;
+        })
+      );
+    }
 
-  // If mediaItems provided, use that; otherwise fall back to single mediaUrl
-  // Only create mediaItems if we have actual media (not for text-only posts)
-  const finalMediaItems = persistentMediaItems && persistentMediaItems.length > 0
-    ? persistentMediaItems
-    : persistentImageUrl && persistentImageUrl.trim() !== ''
-      ? [{ url: persistentImageUrl, type: mediaType || 'image' }]
-      : undefined;
+    // If mediaItems provided, use that; otherwise fall back to single mediaUrl
+    // Only create mediaItems if we have actual media (not for text-only posts)
+    const finalMediaItems = persistentMediaItems && persistentMediaItems.length > 0
+      ? persistentMediaItems
+      : persistentImageUrl && persistentImageUrl.trim() !== ''
+        ? [{ url: persistentImageUrl, type: mediaType || 'image' }]
+        : undefined;
 
-  const newPost: Post = {
-    id: `${crypto.randomUUID()}-${postCreatedAt}`,
-    userHandle,
-    locationLabel: location || 'Unknown Location',
-    tags: [],
-    // Only set mediaUrl if we have actual media (not empty string for text-only posts)
-    mediaUrl: persistentImageUrl && persistentImageUrl.trim() !== '' ? persistentImageUrl : undefined,
-    finalVideoUrl: undefined, // Will be set when render job completes
-    mediaType: mediaType || undefined, // Keep for backward compatibility
-    mediaItems: finalMediaItems, // New: support multiple media items (with persistent URLs)
-    text: text || undefined, // Store the text content
-    imageText: imageText || undefined, // Store the image text overlay
-    caption: caption || undefined, // Store the caption for image/video posts
-    createdAt: postCreatedAt, // Epoch timestamp in milliseconds
-    stats: {
-      likes: 0,
-      views: 0,
-      comments: 0,
-      shares: 0,
-      reclips: 0
-    },
-    isBookmarked: false,
-    isFollowing: false,
-    userLiked: false,
-    stickers: stickers || undefined, // Store stickers
-    templateId: templateId || undefined, // Store template ID
-    bannerText: bannerText || undefined, // Store news ticker banner text
-    textStyle: textStyle || undefined, // Store text style for text-only posts
-    taggedUsers: taggedUsers || undefined, // Store tagged users
-    videoCaptionsEnabled: videoCaptionsEnabled || undefined, // Store video captions enabled state
-    videoCaptionText: videoCaptionText || undefined, // Store video caption text
-    subtitlesEnabled: subtitlesEnabled || undefined, // Store video subtitles enabled state
-    subtitleText: subtitleText || undefined, // Store video subtitle text
-    ...locationData
-  };
+    const newPost: Post = {
+      id: `${crypto.randomUUID()}-${postCreatedAt}`,
+      userHandle,
+      locationLabel: location || 'Unknown Location',
+      tags: [],
+      // Only set mediaUrl if we have actual media (not empty string for text-only posts)
+      mediaUrl: persistentImageUrl && persistentImageUrl.trim() !== '' ? persistentImageUrl : undefined,
+      finalVideoUrl: undefined, // Will be set when render job completes
+      mediaType: mediaType || undefined, // Keep for backward compatibility
+      mediaItems: finalMediaItems, // New: support multiple media items (with persistent URLs)
+      text: text || undefined, // Store the text content
+      imageText: imageText || undefined, // Store the image text overlay
+      caption: caption || undefined, // Store the caption for image/video posts
+      createdAt: postCreatedAt, // Epoch timestamp in milliseconds
+      stats: {
+        likes: 0,
+        views: 0,
+        comments: 0,
+        shares: 0,
+        reclips: 0
+      },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      stickers: stickers || undefined, // Store stickers
+      templateId: templateId || undefined, // Store template ID
+      bannerText: bannerText || undefined, // Store news ticker banner text
+      textStyle: textStyle || undefined, // Store text style for text-only posts
+      taggedUsers: taggedUsers || undefined, // Store tagged users
+      videoCaptionsEnabled: videoCaptionsEnabled || undefined, // Store video captions enabled state
+      videoCaptionText: videoCaptionText || undefined, // Store video caption text
+      subtitlesEnabled: subtitlesEnabled || undefined, // Store video subtitles enabled state
+      subtitleText: subtitleText || undefined, // Store video subtitle text
+      ...locationData
+    };
 
-  // Add to posts array (at the beginning for newest first)
-  posts.unshift(newPost);
-  
-  // Save to localStorage for persistence
-  savePostsToStorage(posts);
+    // Add to posts array (at the beginning for newest first)
+    posts.unshift(newPost);
 
-  console.log('📝 Post created and added to posts array. Total posts:', posts.length);
-  console.log('📝 New post mediaUrl:', newPost.mediaUrl?.substring(0, 50) || 'undefined', 'isBlob:', newPost.mediaUrl?.startsWith('blob:'), 'isData:', newPost.mediaUrl?.startsWith('data:'));
-  console.log('📝 New post mediaItems:', newPost.mediaItems?.map(item => ({
-    type: item.type,
-    urlType: item.url?.startsWith('blob:') ? 'blob' : item.url?.startsWith('data:') ? 'data' : 'http',
-    urlPreview: item.url?.substring(0, 50)
-  })));
-  console.log('📝 New post:', {
-    id: newPost.id.substring(0, 30),
-    mediaType: newPost.mediaType,
-    hasMediaUrl: !!newPost.mediaUrl,
-    hasMediaItems: !!newPost.mediaItems && newPost.mediaItems.length > 0,
-    taggedUsers: newPost.taggedUsers,
-    templateId: newPost.templateId
-  });
+    // Save to localStorage for persistence
+    savePostsToStorage(posts);
 
-  // Verify the post in the array has taggedUsers
-  const postInArray = posts[0];
-  console.log('Post in array [0] taggedUsers:', postInArray?.taggedUsers);
-  console.log('Post in array [0] templateId:', postInArray?.templateId);
+    console.log('📝 Post created and added to posts array. Total posts:', posts.length);
+    console.log('📝 New post mediaUrl:', newPost.mediaUrl?.substring(0, 50) || 'undefined', 'isBlob:', newPost.mediaUrl?.startsWith('blob:'), 'isData:', newPost.mediaUrl?.startsWith('data:'));
+    console.log('📝 New post mediaItems:', newPost.mediaItems?.map(item => ({
+      type: item.type,
+      urlType: item.url?.startsWith('blob:') ? 'blob' : item.url?.startsWith('data:') ? 'data' : 'http',
+      urlPreview: item.url?.substring(0, 50)
+    })));
+    console.log('📝 New post:', {
+      id: newPost.id.substring(0, 30),
+      mediaType: newPost.mediaType,
+      hasMediaUrl: !!newPost.mediaUrl,
+      hasMediaItems: !!newPost.mediaItems && newPost.mediaItems.length > 0,
+      taggedUsers: newPost.taggedUsers,
+      templateId: newPost.templateId
+    });
 
-  return decorateForUser(userId, newPost);
+    // Verify the post in the array has taggedUsers
+    const postInArray = posts[0];
+    console.log('Post in array [0] taggedUsers:', postInArray?.taggedUsers);
+    console.log('Post in array [0] templateId:', postInArray?.templateId);
+
+    return decorateForUser(userId, newPost);
   }
 }
 

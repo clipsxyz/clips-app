@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Str;
 
 class Post extends Model
 {
@@ -11,6 +12,15 @@ class Post extends Model
 
     protected $keyType = 'string';
     public $incrementing = false;
+
+    protected static function booted(): void
+    {
+        static::creating(function (Post $model) {
+            if (empty($model->id)) {
+                $model->id = (string) Str::uuid();
+            }
+        });
+    }
 
     protected $fillable = [
         'user_id',

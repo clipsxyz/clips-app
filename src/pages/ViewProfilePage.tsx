@@ -20,6 +20,39 @@ import {
 import Swal from 'sweetalert2';
 import ShareProfileModal from '../components/ShareProfileModal';
 
+/** Parse place names from bio text. Splits on comma, semicolon, newline, "and", " - ", ":", ". " */
+function parsePlacesFromBio(bio: string): string[] {
+    if (!bio || typeof bio !== 'string') return [];
+    const parts = bio
+        .split(/[,;\n.]|\s+and\s+|\s*[-–—]\s*|:\s*/i)
+        .map((p) => p.trim())
+        .filter((p) => p.length >= 2);
+    if (parts.length === 0 && bio.trim().length >= 2) return [bio.trim()];
+    return [...new Set(parts)];
+}
+
+/** Resolve places for the location icon. Uses Travel Info lists first, then parses BOTH profile and auth bios so "places in my bio" always counts. */
+function getEffectivePlacesTraveled(profileUser: any, authUser: any): string[] {
+    const fromProfileList = Array.isArray(profileUser?.placesTraveled) && profileUser.placesTraveled.length > 0
+        ? profileUser.placesTraveled
+        : [];
+    if (fromProfileList.length > 0) return fromProfileList;
+
+    const fromAuthList = Array.isArray(authUser?.placesTraveled) && authUser.placesTraveled.length > 0
+        ? authUser.placesTraveled
+        : [];
+    if (fromAuthList.length > 0) return fromAuthList;
+
+    // Always parse BOTH bios so we never miss "places in my bio" (Auth user or profile)
+    const profileBio = typeof profileUser?.bio === 'string' ? profileUser.bio : '';
+    const authBio = typeof authUser?.bio === 'string' ? authUser.bio : '';
+    const fromProfileBio = parsePlacesFromBio(profileBio);
+    const fromAuthBio = parsePlacesFromBio(authBio);
+    const merged = [...fromProfileBio, ...fromAuthBio];
+    const deduped = [...new Set(merged)];
+    return deduped;
+}
+
 export default function ViewProfilePage() {
     const navigate = useNavigate();
     const { handle } = useParams<{ handle: string }>();
@@ -35,6 +68,7 @@ export default function ViewProfilePage() {
     const [hasPendingRequest, setHasPendingRequest] = React.useState(false);
     const [profileIsPrivate, setProfileIsPrivate] = React.useState(false);
     const [showTraveledModal, setShowTraveledModal] = React.useState(false);
+    const [placesForTravelModal, setPlacesForTravelModal] = React.useState<string[]>([]);
     const [showProfileMenu, setShowProfileMenu] = React.useState(false);
     const [showQRCodeModal, setShowQRCodeModal] = React.useState(false);
     const [showShareProfileModal, setShowShareProfileModal] = React.useState(false);
@@ -323,7 +357,7 @@ export default function ViewProfilePage() {
 
                 // Update profileUser state if it exists
                 if (profileUser) {
-                    setProfileUser(prev => ({
+                    setProfileUser((prev: any) => ({
                         ...prev,
                         stats: {
                             ...prev.stats,
@@ -537,6 +571,12 @@ export default function ViewProfilePage() {
                     placesTraveled = ['Dublin', 'Iceland', 'Japan', 'Egypt', 'Morocco', 'Spain', 'Italy', 'Greece', 'Thailand'];
                 }
 
+                // Mock data for test user Bob@Ireland
+                if (decodedHandle === 'Bob@Ireland') {
+                    bio = 'Based in Ireland. Love hiking and photography. Traveled to Cork, Galway, Belfast, London, Paris.';
+                    placesTraveled = ['Cork', 'Galway', 'Belfast', 'London', 'Paris'];
+                }
+
                 // Calculate total likes and views from all posts
                 const totalLikes = uniquePosts.reduce((sum, post) => sum + (post.stats?.likes || 0), 0);
                 const totalViews = uniquePosts.reduce((sum, post) => sum + (post.stats?.views || 0), 0);
@@ -559,8 +599,10 @@ export default function ViewProfilePage() {
                     if (userProfileData.social_links && !socialLinks) {
                         socialLinks = userProfileData.social_links;
                     }
-                    // Get placesTraveled from API if available
-                    if ((userProfileData as any).places_traveled) {
+                    // Get placesTraveled from API only when viewing someone else's profile.
+                    // For own profile, keep user.placesTraveled from Auth (saved in Profile → Travel Info);
+                    // the API may not return or persist it, and overwriting would show "No places traveled" incorrectly.
+                    if (decodedHandle !== user?.handle && (userProfileData as any).places_traveled) {
                         placesTraveled = (userProfileData as any).places_traveled;
                     }
                 } catch (error: any) {
@@ -576,6 +618,12 @@ export default function ViewProfilePage() {
                         console.error('Error fetching user profile data:', error);
                     }
                     // Fallback to 0 if API call fails - local data will be used instead
+                }
+
+                // If no dedicated "Places traveled" list, derive places from bio (e.g. "Paris, London, Tokyo" or "I've been to Dublin and Cork")
+                if ((!placesTraveled || placesTraveled.length === 0) && bio) {
+                    const fromBio = parsePlacesFromBio(bio);
+                    if (fromBio.length > 0) placesTraveled = fromBio;
                 }
 
                 // Always create profile data, even if no posts found
@@ -874,8 +922,20 @@ export default function ViewProfilePage() {
                         onClick={(e) => {
                             e.stopPropagation();
                             e.preventDefault();
-                            // Check if user has places traveled
-                            if (!profileUser?.placesTraveled || !Array.isArray(profileUser.placesTraveled) || profileUser.placesTraveled.length === 0) {
+                            // Resolve places: Travel Info lists, then BOTH profile + auth bios (so "places in my bio" always counts)
+                            let effectivePlaces = getEffectivePlacesTraveled(profileUser, user);
+                            // Fallback: saved user bio from localStorage — split on commas only
+                            if (!effectivePlaces?.length) {
+                                try {
+                                    const u = JSON.parse(localStorage.getItem('user') || '{}');
+                                    const bio = (u?.bio ?? '').trim();
+                                    if (bio) {
+                                        const fromBio = bio.split(',').map((s: string) => s.trim()).filter(Boolean);
+                                        if (fromBio.length) effectivePlaces = fromBio;
+                                    }
+                                } catch (_) {}
+                            }
+                            if (!effectivePlaces || effectivePlaces.length === 0) {
                                 const decodedHandle = handle ? decodeURIComponent(handle) : 'This user';
                                 Swal.fire({
                                     title: '',
@@ -905,7 +965,7 @@ export default function ViewProfilePage() {
                                     buttonsStyling: false
                                 });
                             } else {
-                                // If they have places traveled, show the modal
+                                setPlacesForTravelModal(effectivePlaces);
                                 setShowTraveledModal(true);
                             }
                         }}
@@ -1108,9 +1168,9 @@ export default function ViewProfilePage() {
                         
                         {/* Places List */}
                         <div className="p-6">
-                            {profileUser?.placesTraveled && Array.isArray(profileUser.placesTraveled) && profileUser.placesTraveled.length > 0 ? (
+                            {placesForTravelModal && placesForTravelModal.length > 0 ? (
                                 <div className="flex flex-col gap-3">
-                                    {profileUser.placesTraveled.map((place: any, index: number) => (
+                                    {placesForTravelModal.map((place: string, index: number) => (
                                         <div
                                             key={index}
                                             className="flex items-center gap-3 p-4 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors cursor-pointer"

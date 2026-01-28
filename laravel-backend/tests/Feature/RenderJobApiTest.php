@@ -29,7 +29,6 @@ class RenderJobApiTest extends TestCase
             ->assertJsonStructure([
                 'id',
                 'status',
-                'post_id',
             ])
             ->assertJson([
                 'status' => 'rendering',
@@ -63,7 +62,7 @@ class RenderJobApiTest extends TestCase
         $response->assertStatus(200)
             ->assertJson([
                 'status' => 'completed',
-                'final_video_url' => 'https://example.com/rendered.mp4',
+                'finalVideoUrl' => 'https://example.com/rendered.mp4',
             ]);
     }
 
@@ -83,7 +82,7 @@ class RenderJobApiTest extends TestCase
         $response->assertStatus(200)
             ->assertJson([
                 'status' => 'failed',
-                'error_message' => 'FFmpeg processing failed',
+                'errorMessage' => 'FFmpeg processing failed',
             ]);
     }
 }

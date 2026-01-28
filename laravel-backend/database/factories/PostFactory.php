@@ -14,7 +14,6 @@ class PostFactory extends Factory
     public function definition(): array
     {
         $user = User::factory()->create();
-        
         return [
             'id' => (string) Str::uuid(),
             'user_id' => $user->id,

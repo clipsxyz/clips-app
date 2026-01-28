@@ -14,13 +14,10 @@ class RenderJobFactory extends Factory
 
     public function definition(): array
     {
-        $user = User::factory()->create();
-        $post = Post::factory()->create(['user_id' => $user->id]);
-
         return [
             'id' => (string) Str::uuid(),
-            'user_id' => $user->id,
-            'post_id' => $post->id,
+            'user_id' => User::factory(),
+            'post_id' => Post::factory(),
             'status' => 'queued',
             'edit_timeline' => [
                 'clips' => [

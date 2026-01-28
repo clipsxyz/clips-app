@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Str;
 
 class Comment extends Model
 {
@@ -11,6 +12,15 @@ class Comment extends Model
 
     protected $keyType = 'string';
     public $incrementing = false;
+
+    protected static function booted(): void
+    {
+        static::creating(function (Comment $model) {
+            if (empty($model->id)) {
+                $model->id = (string) Str::uuid();
+            }
+        });
+    }
 
     protected $fillable = [
         'post_id',
