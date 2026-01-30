@@ -4014,23 +4014,25 @@ function FeedPageWrapper() {
   const flat = React.useMemo(() => {
     const flattened = pages.flat();
 
-    // Always remove duplicates first, before any other processing
-    const uniquePosts = flattened.filter((p, i) => flattened.findIndex(other => other.id === p.id) === i);
+    // Dedupe by id (normalize to string so 123 and "123" are the same). Prefer the copy with isBoosted so "Sponsored" shows.
+    const idKey = (p: Post) => String(p.id);
+    const bestByKey = new Map<string, Post>();
+    for (const p of flattened) {
+      const key = idKey(p);
+      const existing = bestByKey.get(key);
+      if (!existing || (p.isBoosted && !existing.isBoosted)) bestByKey.set(key, p);
+    }
+    const seen = new Set<string>();
+    const uniquePosts = flattened.filter((p) => {
+      const key = idKey(p);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).map((p) => bestByKey.get(idKey(p))!);
 
-    const duplicateIDs = flattened.filter((p, i) => flattened.findIndex(other => other.id === p.id) !== i).map(p => p.id);
-
-    console.log('Flattening pages:', {
-      pagesCount: pages.length,
-      totalPosts: flattened.length,
-      uniquePosts: uniquePosts.length,
-      postIDs: uniquePosts.map(p => p.id),
-      duplicateIDs: duplicateIDs,
-      textPosts: uniquePosts.filter(p => p.text && !p.mediaUrl).length
-    });
-
-    if (duplicateIDs.length > 0) {
-      console.error('DUPLICATE POSTS DETECTED AND REMOVED:', duplicateIDs);
-      console.log('Text posts after deduplication:', uniquePosts.filter(p => p.text && !p.mediaUrl).map(p => ({ id: p.id, text: p.text?.substring(0, 50) + '...' })));
+    const duplicateCount = flattened.length - uniquePosts.length;
+    if (duplicateCount > 0) {
+      console.warn('Feed deduped by id: removed', duplicateCount, 'duplicate(s); prefer Sponsored copy when same id.');
     }
 
     // Merge posts and ads, sort by epoch time (createdAt) - newest first

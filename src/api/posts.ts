@@ -89,6 +89,42 @@ function getUserLocationFromHandle(userHandle: string): { local: string; regiona
   return { local: '', regional: '', national: '' };
 }
 
+/**
+ * Shared location lists for all feeds worldwide.
+ * Rule: every location feed (city, region, country) shows only posts from authors whose
+ * userLocal / userRegional / userNational matches that place. Same logic everywhere.
+ */
+const LOCATION_COUNTRIES = new Set([
+  'ireland', 'uk', 'united kingdom', 'england', 'scotland', 'wales', 'france', 'spain', 'portugal', 'germany',
+  'netherlands', 'belgium', 'italy', 'switzerland', 'austria', 'poland', 'czech republic', 'hungary', 'greece',
+  'romania', 'sweden', 'norway', 'denmark', 'finland', 'russia', 'turkey', 'japan', 'china', 'south korea',
+  'australia', 'new zealand', 'usa', 'united states', 'canada', 'mexico', 'brazil', 'argentina', 'chile',
+  'colombia', 'india', 'indonesia', 'thailand', 'vietnam', 'malaysia', 'singapore', 'philippines', 'south africa',
+  'egypt', 'nigeria', 'morocco', 'israel', 'uae', 'saudi arabia'
+]);
+const LOCATION_CITIES = new Set([
+  // Ireland
+  'dublin', 'cork', 'galway', 'limerick', 'waterford', 'kilkenny', 'belfast',
+  // UK & Europe
+  'london', 'manchester', 'birmingham', 'edinburgh', 'glasgow', 'liverpool', 'bristol', 'leeds',
+  'paris', 'lyon', 'marseille', 'berlin', 'munich', 'hamburg', 'frankfurt', 'cologne',
+  'madrid', 'barcelona', 'valencia', 'rome', 'milan', 'naples', 'florence', 'venice',
+  'amsterdam', 'rotterdam', 'brussels', 'vienna', 'lisbon', 'porto', 'prague', 'budapest',
+  'warsaw', 'krakow', 'bucharest', 'athens', 'dublin', 'zurich', 'geneva',
+  'copenhagen', 'stockholm', 'oslo', 'helsinki', 'reykjavik', 'tallinn', 'riga', 'vilnius',
+  'moscow', 'saint petersburg', 'istanbul', 'ankara',
+  // Americas
+  'new york', 'los angeles', 'chicago', 'houston', 'phoenix', 'philadelphia', 'san antonio', 'san diego',
+  'san francisco', 'boston', 'seattle', 'miami', 'atlanta', 'denver', 'washington', 'toronto', 'vancouver',
+  'montreal', 'calgary', 'mexico city', 'guadalajara', 'monterrey', 'são paulo', 'rio de janeiro',
+  'buenos aires', 'lima', 'bogotá', 'bogota', 'santiago', 'caracas',
+  // Asia Pacific
+  'tokyo', 'osaka', 'kyoto', 'yokohama', 'nagoya', 'seoul', 'busan', 'beijing', 'shanghai', 'guangzhou',
+  'shenzhen', 'hong kong', 'taipei', 'singapore', 'bangkok', 'kuala lumpur', 'jakarta', 'manila',
+  'ho chi minh city', 'hanoi', 'mumbai', 'delhi', 'bangalore', 'chennai', 'kolkata',
+  'sydney', 'melbourne', 'brisbane', 'perth', 'auckland', 'wellington', 'christchurch'
+]);
+
 // Storage key for posts
 const POSTS_STORAGE_KEY = 'clips_app_posts';
 
@@ -322,7 +358,26 @@ if (!postsInitialized) {
     userNational: 'Ireland',
   } as Post;
 
-  posts = [...posts, ...artanePosts, ...bobPosts, avaBoostedPost];
+  // Normal (non-sponsored) mock post from Ava@galway
+  const avaNormalPost: Post = {
+    id: `ava-normal-${artaneNow - 3600000}-galway`,
+    userHandle: 'Ava@galway',
+    locationLabel: 'Galway City, Ireland',
+    tags: [],
+    mediaUrl: 'https://images.unsplash.com/photo-1519689680058-324335c77eba?w=800',
+    mediaType: 'image',
+    caption: 'Morning walk around Galway — love this city! ☕️',
+    createdAt: artaneNow - 3600000, // 1 hour ago
+    stats: { likes: 42, views: 156, comments: 6, shares: 2, reclips: 0 },
+    isBookmarked: false,
+    isFollowing: false,
+    userLiked: false,
+    userLocal: 'Galway City',
+    userRegional: 'Galway',
+    userNational: 'Ireland',
+  } as Post;
+
+  posts = [...posts, ...artanePosts, ...bobPosts, avaBoostedPost, avaNormalPost];
 
   // Activate boost for Ava's post so it appears as Sponsored in Dublin (regional) feed
   activateBoost(avaBoostedPost.id, 'ava-mock-user', 'regional', 5).catch(() => { });
@@ -584,8 +639,31 @@ function getMockScenesVideoPosts(): Post[] {
   ];
 }
 
+/** Ava's normal (non-sponsored) mock post for Ireland feed. Stable id for dedupe. */
+function getAvaNormalPost(): Post {
+  const ts = Date.now() - 3600000;
+  return {
+    id: 'ava-normal-ireland-demo',
+    userHandle: 'Ava@galway',
+    locationLabel: 'Galway City, Ireland',
+    tags: [],
+    mediaUrl: 'https://images.unsplash.com/photo-1519689680058-324335c77eba?w=800',
+    mediaType: 'image',
+    caption: 'Morning walk around Galway — love this city! ☕️',
+    createdAt: ts,
+    stats: { likes: 42, views: 156, comments: 6, shares: 2, reclips: 0 },
+    isBookmarked: false,
+    isFollowing: false,
+    userLiked: false,
+    userLocal: 'Galway City',
+    userRegional: 'Galway',
+    userNational: 'Ireland',
+  } as Post;
+}
+
 /**
  * Map feed tab to boost feed type for promoted posts. Returns null for discover (no boosted injection).
+ * Uses shared worldwide location lists.
  */
 function tabToBoostFeedType(tab: string): BoostFeedType | null {
   const t = tab.toLowerCase();
@@ -593,12 +671,54 @@ function tabToBoostFeedType(tab: string): BoostFeedType | null {
   if (t === 'ireland') return 'national';
   if (t === 'dublin') return 'regional';
   if (t === 'finglas') return 'local';
-  // Custom location: infer from query (countries → national, cities → regional, else local)
-  const countries = new Set(['ireland', 'uk', 'france', 'spain', 'usa', 'australia', 'germany', 'canada']);
-  const cities = new Set(['dublin', 'london', 'paris', 'cork', 'galway', 'new york', 'sydney']);
-  if (countries.has(t)) return 'national';
-  if (cities.has(t)) return 'regional';
+  if (LOCATION_COUNTRIES.has(t)) return 'national';
+  if (LOCATION_CITIES.has(t)) return 'regional';
   return 'local';
+}
+
+/** Deduplicate feed items by post id so the same post never appears twice. Normalize id to string so 123 and "123" are the same. When duplicates exist, keep the copy that has isBoosted so "Sponsored" shows. */
+function dedupeItemsById(items: Post[]): Post[] {
+  const idKey = (p: Post) => String(p.id);
+  const byId = new Map<string, Post>();
+  for (const p of items) {
+    const key = idKey(p);
+    const existing = byId.get(key);
+    if (!existing || (p.isBoosted && !existing.isBoosted)) byId.set(key, p);
+  }
+  const seen = new Set<string>();
+  return items.filter(p => {
+    const key = idKey(p);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).map(p => byId.get(idKey(p))!);
+}
+
+/** Returns true if the post's AUTHOR location matches the feed tab (for location feeds only). Same rule worldwide: author's local/regional/national must match the place. */
+function postMatchesLocationTab(p: Post, tab: string): boolean {
+  const t = tab.toLowerCase();
+  const predefinedTabs = ['finglas', 'dublin', 'ireland', 'discover'];
+  if (predefinedTabs.includes(t)) {
+    const userLocalLower = (p.userLocal || '').toLowerCase();
+    const userRegionalLower = (p.userRegional || '').toLowerCase();
+    const userNationalLower = (p.userNational || '').toLowerCase();
+    if (t === 'finglas') return userLocalLower === 'finglas';
+    if (t === 'dublin') return userRegionalLower === 'dublin';
+    if (t === 'ireland') return userNationalLower === 'ireland';
+    return false;
+  }
+  const query = t.trim().toLowerCase();
+  const normalize = (v?: string) => (v || '').trim().toLowerCase();
+  const local = normalize(p.userLocal);
+  const regional = normalize(p.userRegional);
+  const national = normalize(p.userNational);
+  if (LOCATION_COUNTRIES.has(query)) {
+    return national === query || (query === 'uk' && (national === 'united kingdom' || national === 'uk')) || (query === 'usa' && (national === 'usa' || national === 'united states'));
+  }
+  if (LOCATION_CITIES.has(query)) {
+    return regional === query;
+  }
+  return local === query;
 }
 
 export async function fetchPostsPage(tab: string, cursor: number | null, limit = 5, userId = 'me', userLocal = '', userRegional = '', userNational = '', currentUserHandle = ''): Promise<Page> {
@@ -667,12 +787,43 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       }
 
       // Prepend mock Sarah/Bob video posts on first page for Scenes testing (dev)
-      // Do NOT add them to the Following feed – that feed must only show posts from people the user follows
+      // Only add mock posts whose AUTHOR location matches this feed – e.g. Sarah (Dublin) only in Dublin, Bob (Galway) only in Galway/Ireland
       const isFirstPage = cursor === null || cursor === 0;
-      const mockVideoPosts = (isFirstPage && t !== 'discover') ? getMockScenesVideoPosts() : [];
+      const allMockVideo = (isFirstPage && t !== 'discover') ? getMockScenesVideoPosts() : [];
+      const mockVideoPosts = allMockVideo.filter(p => postMatchesLocationTab(p, t));
       const existingIds = new Set(transformedItems.map(p => p.id));
       const dedupedMock = mockVideoPosts.filter(p => !existingIds.has(p.id));
-      const items = [...dedupedMock, ...transformedItems];
+      let items = [...dedupedMock, ...transformedItems];
+
+      // Inject Ava's normal (non-sponsored) mock post on Ireland feed first page when using API
+      if (t === 'ireland' && isFirstPage && !existingIds.has('ava-normal-ireland-demo')) {
+        const avaNormal = getAvaNormalPost();
+        const stateUserId = userId || 'me';
+        const decorated = decorateForUser(stateUserId, { ...avaNormal, isBoosted: false, boostFeedType: undefined });
+        items = [decorated, ...items];
+      }
+
+      // Mark any post in the active boosted list so "Sponsored" shows (location feeds and Following feed)
+      const feedTypeApi = tabToBoostFeedType(t);
+      let boostedSetApi = new Set<string>();
+      if (feedTypeApi) {
+        const ids = await getActiveBoostedPostIds(feedTypeApi);
+        boostedSetApi = new Set(ids);
+      } else if (t === 'discover') {
+        const [localIds, regionalIds, nationalIds] = await Promise.all([
+          getActiveBoostedPostIds('local'),
+          getActiveBoostedPostIds('regional'),
+          getActiveBoostedPostIds('national')
+        ]);
+        boostedSetApi = new Set([...localIds, ...regionalIds, ...nationalIds]);
+      }
+      if (boostedSetApi.size > 0) {
+        items = items.map(p =>
+          boostedSetApi.has(p.id)
+            ? { ...p, isBoosted: true as const, boostFeedType: p.boostFeedType ?? feedTypeApi ?? 'regional' }
+            : p
+        );
+      }
 
       return {
         items,
@@ -692,9 +843,9 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
     // Reload posts from localStorage to get latest user-created posts
     // This ensures posts created in this session are included
     const userCreatedPosts = getPostsFromStorage();
-    // Get JSON/seed posts (include Ava boosted demo so it stays in the array for promoted feed)
+    // Get JSON/seed posts (include Ava boosted + Ava normal mock so they stay in the array)
     const jsonPosts = posts.filter(p =>
-      p.id.startsWith('post-post-') || p.id.startsWith('artane-post-') || p.id.startsWith('bob-post-') || p.id.startsWith('ava-boosted-demo-')
+      p.id.startsWith('post-post-') || p.id.startsWith('artane-post-') || p.id.startsWith('bob-post-') || p.id.startsWith('ava-boosted-demo-') || p.id.startsWith('ava-normal-')
     );
     // Merge: user-created posts first (newest), then existing JSON posts
     // Only update if we have user-created posts to avoid overwriting with empty array
@@ -718,9 +869,11 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       totalPosts: posts.length
     });
 
+    // Feed rules (by design):
+    // - Location tabs (Dublin, Ireland, Finglas, etc.): show posts by AUTHOR LOCATION only (who posted from that place). No follow check.
+    // - Following (Discover): show ONLY posts from people you follow (and your own reclips). Location does not matter.
     const filtered = posts.filter(p => {
       // Exclude reclipped posts from location-based feeds - they should only appear in Following feed
-      // Reclipped posts should only show in the "discover" (Following) feed for users who follow the reclipper
       if (p.isReclipped && t !== 'discover') {
         return false;
       }
@@ -765,17 +918,9 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       // Check if this is a custom location search (not one of the predefined tabs)
       const predefinedTabs = ['finglas', 'dublin', 'ireland', 'discover'];
       if (!predefinedTabs.includes(t)) {
-        // Custom location search – map query to scope: national (country), regional (city), local (town)
+        // Custom location search – worldwide: show only posts from authors in this place (same rule as predefined tabs)
         const query = t.trim().toLowerCase();
         console.log('=== CUSTOM LOCATION FILTER FOR:', query, '===');
-
-        // Minimal lookups; can be expanded or sourced from backend later
-        const countries = new Set([
-          'ireland', 'uk', 'united kingdom', 'england', 'scotland', 'wales', 'france', 'spain', 'portugal', 'germany', 'netherlands', 'belgium', 'australia', 'usa', 'united states', 'canada'
-        ]);
-        const cities = new Set([
-          'dublin', 'london', 'paris', 'madrid', 'rome', 'berlin', 'amsterdam', 'lisbon', 'vienna', 'prague', 'budapest', 'copenhagen', 'stockholm', 'oslo', 'helsinki', 'zurich', 'new york', 'toronto', 'vancouver', 'mexico city', 'tokyo', 'seoul', 'beijing', 'shanghai', 'hong kong', 'singapore', 'sydney', 'melbourne', 'auckland'
-        ]);
 
         const normalize = (v?: string) => (v || '').trim().toLowerCase();
         const local = normalize(p.userLocal);
@@ -783,14 +928,11 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
         const national = normalize(p.userNational);
 
         let match = false;
-        if (countries.has(query)) {
-          // National match
+        if (LOCATION_COUNTRIES.has(query)) {
           match = national === query || (query === 'uk' && (national === 'united kingdom' || national === 'uk')) || (query === 'usa' && (national === 'usa' || national === 'united states'));
-        } else if (cities.has(query)) {
-          // Regional (city) match
+        } else if (LOCATION_CITIES.has(query)) {
           match = regional === query;
         } else {
-          // Treat as local (town) match
           match = local === query;
         }
 
@@ -848,14 +990,20 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
     })));
 
     // Sort by newest first using explicit createdAt epoch timestamps
-    const sorted = filtered.slice().sort((a, b) => {
-      // Use explicit createdAt timestamp (epoch in milliseconds)
+    let sorted = filtered.slice().sort((a, b) => {
       const tsA = a.createdAt || 0;
       const tsB = b.createdAt || 0;
-
-      // Sort descending: newest first (larger timestamp = newer)
       return tsB - tsA;
     });
+
+    // Guarantee Ava's normal mock post appears in Ireland feed (mock path) if not already in list
+    if (t === 'ireland') {
+      const hasAvaNormal = sorted.some(p => p.id.startsWith('ava-normal-') && p.userHandle === 'Ava@galway');
+      if (!hasAvaNormal) {
+        const avaNormal = getAvaNormalPost();
+        sorted = [avaNormal, ...sorted];
+      }
+    }
 
     // Debug: log the sorted order
     console.log('Sorted posts (first 3):', sorted.slice(0, 3).map((p, i) => ({
@@ -868,8 +1016,9 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
 
     const start = cursor ?? 0;
     const isFirstPage = start === 0;
-    // Do not add mock Sarah/Bob posts to the Following feed – only show posts from people the user follows
-    const mockVideoPosts = (isFirstPage && t !== 'discover') ? getMockScenesVideoPosts() : [];
+    // Only add mock Sarah/Bob posts whose AUTHOR location matches this feed – e.g. Sarah (Dublin) only in Dublin, not in Galway
+    const allMockVideo = (isFirstPage && t !== 'discover') ? getMockScenesVideoPosts() : [];
+    const mockVideoPosts = allMockVideo.filter(p => postMatchesLocationTab(p, t));
     const existingIdsInSorted = new Set(sorted.map(p => p.id));
     const dedupedMock = mockVideoPosts.filter(p => !existingIdsInSorted.has(p.id));
     const sortedWithMock = dedupedMock.length > 0 ? [...dedupedMock, ...sorted] : sorted;
@@ -907,16 +1056,36 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
     });
 
     // Instagram-style: inject paid boosted posts into the feed (one every 5 organic)
+    // Only show a boosted post in a location feed if the AUTHOR's location matches that tab (e.g. Ava boosted for regional → show in Galway, not Dublin)
     const feedType = tabToBoostFeedType(tab);
     let items = slice;
+    let boostedIdsSet: Set<string> = new Set();
     if (feedType) {
       const boostedIds = await getActiveBoostedPostIds(feedType);
+      boostedIdsSet = new Set(boostedIds);
+    } else if (t === 'discover') {
+      const [localIds, regionalIds, nationalIds] = await Promise.all([
+        getActiveBoostedPostIds('local'),
+        getActiveBoostedPostIds('regional'),
+        getActiveBoostedPostIds('national')
+      ]);
+      boostedIdsSet = new Set([...localIds, ...regionalIds, ...nationalIds]);
+    }
+    if (feedType) {
       const existingIds = new Set(slice.map(p => p.id));
       const boostedPosts: Post[] = [];
-      for (const id of boostedIds) {
+      const tabLower = tab.toLowerCase();
+      for (const id of Array.from(boostedIdsSet)) {
         if (existingIds.has(id)) continue;
         const p = await getPostById(id);
         if (!p) continue;
+        // Only inject into this tab if the post author's location matches the tab
+        const authorRegional = (p.userRegional || '').toLowerCase();
+        const authorNational = (p.userNational || '').toLowerCase();
+        const authorLocal = (p.userLocal || '').toLowerCase();
+        const matchesTab =
+          tabLower === authorRegional || tabLower === authorNational || tabLower === authorLocal;
+        if (!matchesTab) continue;
         const decorated = decorateForUser(userId, { ...p, isBoosted: true, boostFeedType: feedType });
         boostedPosts.push(decorated);
       }
@@ -936,6 +1105,24 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
         items = merged;
       }
     }
+    // Mark any post that is in the active boosted list so "Sponsored" shows (location feeds and Following feed)
+    if (boostedIdsSet.size > 0) {
+      items = items.map(p =>
+        boostedIdsSet.has(p.id)
+          ? { ...p, isBoosted: true as const, boostFeedType: p.boostFeedType ?? feedType ?? 'regional' }
+          : p
+      );
+    }
+    // Guarantee Ava's normal post appears in Ireland feed first page (mock path)
+    if (t === 'ireland' && isFirstPage) {
+      const hasAvaNormalInItems = items.some(p => p.id.startsWith('ava-normal-') && p.userHandle === 'Ava@galway');
+      if (!hasAvaNormalInItems) {
+        const avaNormal = getAvaNormalPost();
+        const decorated = decorateForUser(userId, { ...avaNormal, isBoosted: false, boostFeedType: undefined });
+        items = [decorated, ...items];
+      }
+    }
+    items = dedupeItemsById(items);
 
     const next = start + slice.length < sortedWithMock.length ? start + slice.length : null;
 
