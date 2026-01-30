@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle } from 'react-icons/fi';
+import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiSend, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from './constants';
 import TopBar from './components/TopBar';
@@ -14,11 +14,11 @@ import { useAuth } from './context/Auth';
 import { getFlagForHandle, getAvatarForHandle } from './api/users';
 import Flag from './components/Flag';
 import { useOnline } from './hooks/useOnline';
-import { getUnreadTotal } from './api/messages';
+import { getUnreadTotal, appendMessage } from './api/messages';
 import { getUnreadNotificationCount } from './api/notifications';
 import { getStoryInsightsForUser } from './api/stories';
-import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, deletePost } from './api/posts';
-import { updatePost } from './api/client';
+import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, getFollowState, deletePost } from './api/posts';
+import { updatePost, checkFollowsMe } from './api/client';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory } from './api/stories';
 import { enqueue, drain } from './utils/mutationQueue';
 import { timeAgo } from './utils/timeAgo';
@@ -667,9 +667,10 @@ function BoostButton({ postId, onBoost }: { postId: string; onBoost: () => Promi
   );
 }
 
-function PostHeader({ post, onFollow, isOverlaid = false, onMenuClick }: {
+function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick }: {
   post: Post;
   onFollow?: () => Promise<void>;
+  onOpenDM?: (handle: string) => void;
   isOverlaid?: boolean;
   onMenuClick?: () => void;
 }) {
@@ -762,12 +763,33 @@ function PostHeader({ post, onFollow, isOverlaid = false, onMenuClick }: {
   const isFollowingThisUser = React.useMemo(() => {
     try {
       const s = getState(userId);
-      return !!s.follows[post.userHandle];
+      return getFollowState(s.follows, post.userHandle);
     } catch {
       // Fallback to whatever the post says if getState fails for any reason
       return !!post.isFollowing;
     }
   }, [userId, post.userHandle, post.isFollowing]);
+
+  // Mutual follow = both follow each other → show DM icon (use feed data or check-follows-me API)
+  const authorFollowsYou = post.authorFollowsYou === true;
+  const [followsMeFromApi, setFollowsMeFromApi] = React.useState<boolean | null>(null);
+  React.useEffect(() => {
+    if (!isFollowingThisUser || authorFollowsYou) return;
+    const handle = post.userHandle;
+    const cached = (window as any).__followsMeCache?.[handle];
+    if (cached === true || cached === false) {
+      setFollowsMeFromApi(cached);
+      return;
+    }
+    checkFollowsMe(handle)
+      .then((r) => {
+        (window as any).__followsMeCache = (window as any).__followsMeCache || {};
+        (window as any).__followsMeCache[handle] = r.follows_me;
+        setFollowsMeFromApi(r.follows_me);
+      })
+      .catch(() => setFollowsMeFromApi(false));
+  }, [isFollowingThisUser, authorFollowsYou, post.userHandle]);
+  const isMutualFollow = isFollowingThisUser && (authorFollowsYou || followsMeFromApi === true);
 
   // Text colors based on whether header is overlaid on media
   const textColorClass = isOverlaid
@@ -827,8 +849,28 @@ function PostHeader({ post, onFollow, isOverlaid = false, onMenuClick }: {
                 <FiPlus className="w-3 h-3 text-white" strokeWidth={2.5} />
               </button>
             )}
-            {/* Checkmark icon when following (replaces + icon) */}
-            {!isCurrentUser && onFollow && isFollowingThisUser && (
+            {/* DM icon only when mutual follow (both follow each other) */}
+            {!isCurrentUser && isMutualFollow && onOpenDM && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  onOpenDM(post.userHandle);
+                }}
+                className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-white border-2 border-gray-200 dark:border-gray-700 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30 hover:bg-gray-50 dark:hover:bg-gray-100"
+                style={{ 
+                  touchAction: 'manipulation',
+                  WebkitTapHighlightColor: 'transparent',
+                  pointerEvents: 'auto'
+                }}
+                aria-label="Message user"
+              >
+                <FiSend className="w-3 h-3 text-red-500" strokeWidth={2.5} />
+              </button>
+            )}
+            {/* Green tick when we follow them but they don't follow us */}
+            {!isCurrentUser && onFollow && isFollowingThisUser && !isMutualFollow && (
               <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-green-500 border-2 border-white dark:border-gray-900 flex items-center justify-center shadow-lg z-30">
                 <FiCheck className="w-3 h-3 text-white" strokeWidth={3} />
               </div>
@@ -2946,7 +2988,7 @@ function BoostMetrics({ post, isOpen }: { post: Post; isOpen: boolean }) {
   );
 }
 
-export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare, onOpenComments, onView, onReclip, onOpenScenes, showBoostIcon, onBoost, onDelete, priority = false }: {
+export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare, onOpenComments, onView, onReclip, onOpenScenes, showBoostIcon, onBoost, onDelete, onOpenDM, priority = false }: {
   post: Post;
   onLike: () => Promise<void>;
   onFollow?: () => Promise<void>;
@@ -2958,6 +3000,8 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   showBoostIcon?: boolean;
   onBoost?: () => Promise<void>;
   onDelete?: () => Promise<void>;
+  /** Open in-feed DM compose sheet (mutual follow only). */
+  onOpenDM?: (handle: string) => void;
   priority?: boolean;
 }) {
   const { user } = useAuth();
@@ -3068,7 +3112,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   return (
     <article ref={articleRef} aria-labelledby={titleId} className="mx-0 mb-6 overflow-hidden border-0 border-b border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out]" style={{ backgroundColor: '#030712' }}>
       {/* Show PostHeader normally for text-only posts */}
-      {isTextOnly && <PostHeader post={post} onFollow={onFollow} isOverlaid={false} onMenuClick={() => setMenuOpen(true)} />}
+      {isTextOnly && <PostHeader post={post} onFollow={onFollow} onOpenDM={onOpenDM} isOverlaid={false} onMenuClick={() => setMenuOpen(true)} />}
       <TagRow tags={post.tags} />
       {post.isBoosted && (
         <div className="px-4 pt-2 pb-1.5 flex items-center gap-2">
@@ -3085,7 +3129,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         {hasMedia && (
           <div className="absolute top-0 left-0 right-0 z-20 pointer-events-none">
             <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
-              <PostHeader post={post} onFollow={onFollow} isOverlaid={true} onMenuClick={() => setMenuOpen(true)} />
+              <PostHeader post={post} onFollow={onFollow} onOpenDM={onOpenDM} isOverlaid={true} onMenuClick={() => setMenuOpen(true)} />
             </div>
           </div>
         )}
@@ -3461,6 +3505,11 @@ function FeedPageWrapper() {
   const [selectedPostForBoost, setSelectedPostForBoost] = React.useState<Post | null>(null);
   const [unreadCount, setUnreadCount] = React.useState(0);
   const [hasInbox, setHasInbox] = React.useState(false);
+  // In-feed DM sheet (TikTok-style: compose without leaving feed)
+  const [dmSheetOpen, setDmSheetOpen] = React.useState(false);
+  const [dmSheetRecipientHandle, setDmSheetRecipientHandle] = React.useState<string | null>(null);
+  const [dmSheetMessage, setDmSheetMessage] = React.useState('');
+  const dmSheetInputRef = React.useRef<HTMLTextAreaElement | null>(null);
 
   // Internal state for Following feed (separate from tabs)
   const [showFollowingFeed, setShowFollowingFeed] = React.useState(false);
@@ -4029,7 +4078,7 @@ function FeedPageWrapper() {
             const userId = user?.id ?? 'anon';
             const userState = getState(userId);
             return pages.flat().filter(p => {
-              const isFollowing = userState.follows[p.userHandle] === true;
+              const isFollowing = getFollowState(userState.follows, p.userHandle);
               if (!isFollowing) return false;
               // Check if this post's media was from a story
               return p.mediaUrl && wasEverAStory(p.mediaUrl);
@@ -4506,21 +4555,47 @@ function FeedPageWrapper() {
 
                   setFollowState(userId, p.userHandle, newFollowingState);
                   updateOne(p.id, post => ({ ...post, isFollowing: newFollowingState }));
+
+                  // Refetch discover feed so the new follow's posts appear in Following tab
+                  if (newFollowingState && (showFollowingFeed || currentFilter.toLowerCase() === 'discover')) {
+                    setPages([]);
+                    setCursor(0);
+                    setEnd(false);
+                    setError(null);
+                    requestTokenRef.current++;
+                  }
                 } catch (apiError: any) {
                   const isConnectionError =
                     apiError?.message === 'CONNECTION_REFUSED' ||
                     apiError?.name === 'ConnectionRefused' ||
                     apiError?.message?.includes('Failed to fetch');
+                  const is404 = apiError?.status === 404;
 
                   if (isConnectionError) {
                     // Backend not available – fall back to mock follow toggling
-                    const updated = await toggleFollowForPost(userId, p.id);
-                    updateOne(p.id, _post => ({ ...updated }));
+                    try {
+                      const updated = await toggleFollowForPost(userId, p.id);
+                      updateOne(p.id, _post => ({ ...updated }));
+                    } catch {
+                      setFollowState(userId, p.userHandle, true);
+                      updateOne(p.id, post => ({ ...post, isFollowing: true }));
+                    }
+                  } else if (is404 || apiError?.status >= 400) {
+                    // User not found (404) or other API error – update local state so + turns to check
+                    // (e.g. feed shows Bob@Ireland but backend only has bob@finglas)
+                    setFollowState(userId, p.userHandle, true);
+                    updateOne(p.id, post => ({ ...post, isFollowing: true }));
+                    if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
+                      setPages([]);
+                      setCursor(0);
+                      setEnd(false);
+                      setError(null);
+                      requestTokenRef.current++;
+                    }
                   } else {
                     throw apiError;
                   }
                 }
-                // Do not clear/refetch here: it wipes the optimistic update and makes the green tick flash back to +.
               }
             }}
             onShare={async () => {
@@ -4665,9 +4740,94 @@ function FeedPageWrapper() {
                 });
               }
             } : undefined}
+            onOpenDM={user?.handle ? (handle) => {
+              setDmSheetRecipientHandle(handle);
+              setDmSheetMessage('');
+              setDmSheetOpen(true);
+              setTimeout(() => dmSheetInputRef.current?.focus(), 100);
+            } : undefined}
           />
         );
       })}
+
+      {/* In-feed DM compose sheet (TikTok-style overlay) */}
+      {dmSheetOpen && dmSheetRecipientHandle && user?.handle && (
+        <div
+          className="fixed inset-0 z-[100] flex flex-col justify-end"
+          role="dialog"
+          aria-label="Message"
+        >
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => {
+              setDmSheetOpen(false);
+              setDmSheetRecipientHandle(null);
+              setDmSheetMessage('');
+            }}
+            aria-hidden="true"
+          />
+          <div
+            className="relative z-10 bg-[#0f172a] dark:bg-[#0f172a] rounded-t-2xl shadow-xl border-t border-gray-700/50 flex flex-col max-h-[70vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700/50">
+              <span className="text-sm font-medium text-gray-300">Message {dmSheetRecipientHandle}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setDmSheetOpen(false);
+                  setDmSheetRecipientHandle(null);
+                  setDmSheetMessage('');
+                }}
+                className="p-2 rounded-full hover:bg-gray-700/50 text-gray-400 hover:text-white transition-colors"
+                aria-label="Close"
+              >
+                <FiX className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 flex gap-3 items-end">
+              <textarea
+                ref={dmSheetInputRef}
+                value={dmSheetMessage}
+                onChange={(e) => setDmSheetMessage(e.target.value)}
+                placeholder={`Message ${dmSheetRecipientHandle}. It's j...`}
+                className="flex-1 min-h-[44px] max-h-32 px-4 py-3 rounded-xl bg-gray-800 border border-gray-600 text-white placeholder-gray-500 resize-none focus:outline-none focus:ring-2 focus:ring-[#0095f6] focus:border-transparent"
+                rows={2}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    const text = dmSheetMessage.trim();
+                    if (text && user?.handle) {
+                      appendMessage(user.handle, dmSheetRecipientHandle!, { text }).then(() => {
+                        setDmSheetMessage('');
+                        setDmSheetOpen(false);
+                        setDmSheetRecipientHandle(null);
+                      }).catch((err) => console.error('Send DM failed:', err));
+                    }
+                  }
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const text = dmSheetMessage.trim();
+                  if (!text || !user?.handle) return;
+                  appendMessage(user.handle, dmSheetRecipientHandle!, { text }).then(() => {
+                    setDmSheetMessage('');
+                    setDmSheetOpen(false);
+                    setDmSheetRecipientHandle(null);
+                  }).catch((err) => console.error('Send DM failed:', err));
+                }}
+                disabled={!dmSheetMessage.trim()}
+                className="flex-shrink-0 w-11 h-11 rounded-full bg-[#0095f6] hover:bg-[#0084d4] disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center text-white transition-colors"
+                aria-label="Send message"
+              >
+                <FiSend className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {loading && (
         <div className="px-4 py-6 animate-pulse">

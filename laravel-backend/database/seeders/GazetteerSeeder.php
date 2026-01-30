@@ -73,10 +73,49 @@ class GazetteerSeeder extends Seeder
                 'location_regional' => 'Dublin',
                 'location_national' => 'Ireland',
             ],
+            [
+                'username' => 'barry_cork',
+                'email' => 'barry@example.com',
+                'password' => Hash::make('password123'),
+                'display_name' => 'Barry',
+                'handle' => 'barry@cork',
+                'location_local' => 'Cork City',
+                'location_regional' => 'Cork',
+                'location_national' => 'Ireland',
+            ],
+            [
+                'username' => 'ava_cork',
+                'email' => 'ava@example.com',
+                'password' => Hash::make('password123'),
+                'display_name' => 'Ava',
+                'handle' => 'Ava@Cork',
+                'location_local' => 'Cork City',
+                'location_regional' => 'Cork',
+                'location_national' => 'Ireland',
+            ],
+            [
+                'username' => 'ava_galway',
+                'email' => 'ava.galway@example.com',
+                'password' => Hash::make('password123'),
+                'display_name' => 'Ava',
+                'handle' => 'Ava@galway',
+                'location_local' => 'Galway City',
+                'location_regional' => 'Galway',
+                'location_national' => 'Ireland',
+            ],
         ];
 
         foreach ($users as $userData) {
             User::create($userData);
+        }
+
+        // Ava@galway follows Barry (so when Barry follows Ava back they are mutual → DM icon)
+        $barry = User::whereRaw('LOWER(handle) = ?', ['barry@cork'])->first();
+        $ava = User::whereRaw('LOWER(handle) = ?', ['ava@galway'])->first();
+        if ($barry && $ava) {
+            $barry->followers()->attach($ava->id, ['status' => 'accepted']);
+            $ava->increment('following_count');
+            $barry->increment('followers_count');
         }
 
         // Create sample posts
@@ -84,6 +123,7 @@ class GazetteerSeeder extends Seeder
         $bob = User::where('handle', 'bob@finglas')->first();
         $charlie = User::where('handle', 'charlie@ireland')->first();
         $darragh = User::where('handle', 'darraghdublin')->first();
+        $ava = User::where('handle', 'Ava@Cork')->first();
 
         // Regular post with tagged users
         $post1 = Post::create([
@@ -160,6 +200,20 @@ class GazetteerSeeder extends Seeder
         $post4->taggedUsers()->attach([
             $alice->id => ['user_handle' => $alice->handle],
         ]);
+
+        // Mock post from Ava (Ireland national feed – visible to barry@cork)
+        if ($ava) {
+            Post::create([
+                'user_id' => $ava->id,
+                'user_handle' => $ava->handle,
+                'text_content' => 'Sunny day in Cork – perfect for a walk by the Lee! 🌞',
+                'location_label' => 'Cork City',
+                'likes_count' => 4,
+                'views_count' => 60,
+                'comments_count' => 0,
+            ]);
+            $ava->increment('posts_count');
+        }
 
         // Create sample comments with replies
         $phoenixPost = Post::where('text_content', 'LIKE', '%Phoenix Park%')->first();

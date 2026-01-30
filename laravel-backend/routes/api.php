@@ -2,6 +2,9 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
+use App\Models\User;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\PostController;
 use App\Http\Controllers\Api\CommentController;
@@ -60,6 +63,51 @@ Route::prefix('upload')->group(function () {
     Route::post('/multiple', [UploadController::class, 'multiple']);
 });
 
+// Dev helper: make Ava@galway follow Barry so mutual-follow DM icon can be tested (open in browser)
+Route::get('/dev/ava-follows-barry', function () {
+    $barry = User::whereRaw('LOWER(handle) LIKE ?', ['%barry%'])->first();
+    $ava = User::whereRaw('LOWER(handle) = ?', ['ava@galway'])->first();
+    if (!$ava) {
+        $ava = User::firstOrCreate(
+            ['handle' => 'Ava@galway'],
+            [
+                'username' => 'ava_galway',
+                'email' => 'ava.galway@example.com',
+                'password' => Hash::make('password123'),
+                'display_name' => 'Ava',
+                'location_local' => 'Galway City',
+                'location_regional' => 'Galway',
+                'location_national' => 'Ireland',
+            ]
+        );
+    }
+    if (!$barry || !$ava || $barry->id === $ava->id) {
+        return response()->json([
+            'ok' => false,
+            'message' => 'Need a user with "barry" in handle (e.g. Barry@Cork). Create Barry@Cork in the app first.',
+            'handles' => User::pluck('handle')->toArray(),
+        ], 400);
+    }
+    $alreadyFollows = $barry->followers()->where('follower_id', $ava->id)->exists();
+    if ($alreadyFollows) {
+        return response()->json([
+            'ok' => true,
+            'message' => "Ava ({$ava->handle}) already follows Barry ({$barry->handle}). As Barry, follow Ava back to see the DM icon (mutual follow).",
+            'barry' => $barry->handle,
+            'ava' => $ava->handle,
+        ]);
+    }
+    $barry->followers()->attach($ava->id, ['status' => 'accepted']);
+    $ava->increment('following_count');
+    $barry->increment('followers_count');
+    return response()->json([
+        'ok' => true,
+        'message' => "Ava ({$ava->handle}) now follows Barry ({$barry->handle}). As Barry@Cork, follow Ava@galway back in the app – then you'll see the DM icon (mutual follow).",
+        'barry' => $barry->handle,
+        'ava' => $ava->handle,
+    ]);
+});
+
 // Public posts routes (allow viewing posts without auth)
 Route::prefix('posts')->group(function () {
     Route::get('/', [PostController::class, 'index']); // Public - anyone can view feed
@@ -116,6 +164,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Users routes
     Route::prefix('users')->group(function () {
+        Route::get('/check-follows-me', [UserController::class, 'checkFollowsMe']);
         Route::get('/{handle}', [UserController::class, 'show']);
         Route::post('/{handle}/follow', [UserController::class, 'toggleFollow']);
         Route::post('/{handle}/follow/accept', [UserController::class, 'acceptFollowRequest']);

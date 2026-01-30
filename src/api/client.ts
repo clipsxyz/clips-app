@@ -122,6 +122,12 @@ export async function fetchPost(postId: string, userId?: string) {
     return apiRequest(`/posts/${postId}?${params}`);
 }
 
+/** Check if the user with the given handle follows the current viewer (for mutual-follow DM icon). Requires auth. */
+export async function checkFollowsMe(handle: string): Promise<{ follows_me: boolean }> {
+    const params = new URLSearchParams({ handle });
+    return apiRequest(`/users/check-follows-me?${params}`);
+}
+
 export async function createPost(postData: {
     text?: string;
     location?: string;

@@ -14,6 +14,32 @@ use Illuminate\Support\Facades\Validator;
 class UserController extends Controller
 {
     /**
+     * Check if the given user (by handle) follows the current viewer. Used for mutual-follow DM icon.
+     * GET /api/users/check-follows-me?handle=Ava@galway
+     */
+    public function checkFollowsMe(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->query(), [
+            'handle' => 'required|string',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+        $handle = $request->query('handle');
+        $other = User::whereRaw('LOWER(handle) = ?', [strtolower($handle)])->first();
+        $viewer = Auth::user();
+        if (!$viewer || !$other) {
+            return response()->json(['follows_me' => false]);
+        }
+        $followsMe = DB::table('user_follows')
+            ->where('follower_id', $other->id)
+            ->where('following_id', $viewer->id)
+            ->where('status', 'accepted')
+            ->exists();
+        return response()->json(['follows_me' => $followsMe]);
+    }
+
+    /**
      * Get user profile
      */
     public function show(Request $request, string $handle): JsonResponse
@@ -92,11 +118,12 @@ class UserController extends Controller
 
     /**
      * Follow/Unfollow user
+     * Handle is resolved case-insensitively so "bob@cork" and "Bob@Cork" both work.
      */
     public function toggleFollow(Request $request, string $handle): JsonResponse
     {
         $validator = Validator::make(['handle' => $handle], [
-            'handle' => 'required|string|exists:users,handle'
+            'handle' => 'required|string'
         ]);
 
         if ($validator->fails()) {
@@ -104,7 +131,11 @@ class UserController extends Controller
         }
 
         $follower = Auth::user();
-        $following = User::where('handle', $handle)->firstOrFail();
+        $following = User::whereRaw('LOWER(handle) = ?', [strtolower($handle)])->first();
+
+        if (!$following) {
+            return response()->json(['error' => 'User not found'], 404);
+        }
 
         if ($follower->id === $following->id) {
             return response()->json(['error' => 'Cannot follow yourself'], 400);

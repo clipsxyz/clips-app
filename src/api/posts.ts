@@ -420,6 +420,26 @@ const delay = (ms = 250) => new Promise(r => setTimeout(r, ms));
 
 export type Page = { items: Post[]; nextCursor: number | null };
 
+/** Case-insensitive lookup so "Bob@Cork" and "bob@cork" are treated as the same user. */
+export function getFollowState(follows: Record<string, boolean>, handle: string): boolean {
+  const lower = handle.toLowerCase();
+  const key = Object.keys(follows).find(k => k.toLowerCase() === lower);
+  return key ? !!follows[key] : false;
+}
+
+/** Set follow state; merges with existing key if same handle (case-insensitive) to avoid duplicates. */
+function setFollowStateKey(follows: Record<string, boolean>, handle: string, isFollowing: boolean): void {
+  const lower = handle.toLowerCase();
+  const existingKey = Object.keys(follows).find(k => k.toLowerCase() === lower);
+  if (existingKey) {
+    if (isFollowing) follows[existingKey] = true;
+    else delete follows[existingKey];
+    return;
+  }
+  if (isFollowing) follows[handle] = true;
+  else delete follows[handle];
+}
+
 // Get list of user handles that the current user follows
 export async function getFollowedUsers(userId: string): Promise<string[]> {
   await delay();
@@ -432,7 +452,7 @@ export async function getFollowedUsers(userId: string): Promise<string[]> {
 // toggled from places that don't go through toggleFollowForPost.
 export function setFollowState(userId: string, handle: string, isFollowing: boolean): void {
   const s = getState(userId);
-  s.follows[handle] = isFollowing;
+  setFollowStateKey(s.follows, handle, isFollowing);
 }
 
 // compute view for a user
@@ -442,7 +462,7 @@ export function decorateForUser(userId: string, p: Post): Post {
     ...p,
     userLiked: !!s.likes[p.id],
     isBookmarked: !!s.bookmarks[p.id],
-    isFollowing: !!s.follows[p.userHandle],
+    isFollowing: getFollowState(s.follows, p.userHandle),
     userReclipped: !!s.reclips[p.id],
     // Explicitly preserve taggedUsers, textStyle, stickers, etc.
     taggedUsers: p.taggedUsers || undefined, // Preserve taggedUsers even if empty array
@@ -487,6 +507,7 @@ function transformLaravelPost(response: any): Post {
     },
     isBookmarked: response.is_bookmarked || false,
     isFollowing: response.is_following || false,
+    authorFollowsYou: response.author_follows_you ?? response.authorFollowsYou ?? false,
     userLiked: response.user_liked || false,
     userReclipped: response.user_reclipped || false,
     stickers: response.stickers,
@@ -604,7 +625,9 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       }
 
       const apiCursor = cursor ?? 0;
-      const response = await apiClient.fetchPostsPage(apiCursor, limit, filter, userId !== 'me' ? userId : undefined);
+      // Only send userId if it looks like a UUID (backend requires uuid|exists:users,id)
+      const uuidLike = typeof userId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
+      const response = await apiClient.fetchPostsPage(apiCursor, limit, filter, uuidLike ? userId : undefined);
 
       // Transform Laravel response to frontend format
       let transformedItems: Post[] = response.items.map((item: any) => transformLaravelPost(item));
@@ -620,7 +643,7 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
         const anyFollowing = Object.values(follows).some(v => v === true);
 
         transformedItems = transformedItems.filter((p) => {
-          const isFollowing = follows[p.userHandle] === true;
+          const isFollowing = getFollowState(follows, p.userHandle);
           const isReclipped = (p as any).isReclipped;
           // Treat as "my reclip" ONLY when local state says I reclipped it
           const isMyReclip =
@@ -706,7 +729,7 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
         const userState = getState(userId);
         const follows = userState.follows || {};
         const anyFollowing = Object.values(follows).some(v => v === true);
-        const isFollowing = follows[p.userHandle] === true;
+        const isFollowing = getFollowState(follows, p.userHandle);
         // "My reclip" only when local state says I reclipped it
         const isMyReclip =
           !!currentUserHandle &&
@@ -730,7 +753,7 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       if (t.toLowerCase() === 'clips') {
         // Clips tab: Show stories (posts that were originally stories) from people you follow
         const userState = getState(userId);
-        const isFollowing = userState.follows[p.userHandle] === true;
+        const isFollowing = getFollowState(userState.follows, p.userHandle);
         if (!isFollowing) return false;
         // Check if this post's media was from a story
         if (p.mediaUrl && wasEverAStory(p.mediaUrl)) {
@@ -1000,15 +1023,14 @@ export async function toggleFollowForPost(userId: string, id: string): Promise<P
     throw new Error('Post not found');
   }
   const s = getState(userId);
-  const wasFollowing = s.follows[p.userHandle] === true;
-  // Set to true if not following, false if following
-  s.follows[p.userHandle] = !wasFollowing;
+  const wasFollowing = getFollowState(s.follows, p.userHandle);
+  setFollowStateKey(s.follows, p.userHandle, !wasFollowing);
 
   // Debug: Log the state after update
   console.log('FOLLOW STATE UPDATED:', {
     userId,
     userHandle: p.userHandle,
-    nowFollowing: s.follows[p.userHandle],
+    nowFollowing: getFollowState(s.follows, p.userHandle),
     allFollows: Object.keys(s.follows).filter(h => s.follows[h] === true)
   });
 
@@ -1461,6 +1483,7 @@ export async function createPost(
       },
       isBookmarked: response.is_bookmarked || false,
       isFollowing: response.is_following || false,
+      authorFollowsYou: response.author_follows_you ?? response.authorFollowsYou ?? false,
       userLiked: response.user_liked || false,
       stickers: response.stickers || stickers || undefined,
       templateId: response.template_id || response.templateId || templateId || undefined,

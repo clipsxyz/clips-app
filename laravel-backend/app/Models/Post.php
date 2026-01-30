@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class Post extends Model
@@ -183,6 +184,16 @@ class Post extends Model
     public function isFollowingAuthor(User $user)
     {
         return $this->user->followers()->where('follower_id', $user->id)->exists();
+    }
+
+    /** Whether the post author follows the given viewer (for mutual follow / DM icon). Only accepted follows count. */
+    public function authorFollowsViewer(User $user)
+    {
+        return DB::table('user_follows')
+            ->where('follower_id', $this->user_id)
+            ->where('following_id', $user->id)
+            ->where('status', 'accepted')
+            ->exists();
     }
 
     // Notifications relationship

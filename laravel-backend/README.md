@@ -71,6 +71,18 @@ All 14 migration files are in `database/migrations/`:
 
 - `database/seeders/GazetteerSeeder.php` - Seeds sample users, posts, and comments
 
+## 🚀 Running the server
+
+From the `laravel-backend` folder:
+
+```powershell
+# Windows PowerShell (use ; not &&)
+cd laravel-backend
+php artisan serve
+```
+
+Server runs at **http://127.0.0.1:8000**.
+
 ## 🚀 Running Migrations and Seeders
 
 ```bash

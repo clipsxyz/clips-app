@@ -4,11 +4,36 @@ import { useAuth } from '../context/Auth';
 import { FiMapPin, FiUser, FiGlobe, FiCamera, FiX } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMaps';
+import { loginUser } from '../api/client';
+
+const LOCAL_REGISTRATIONS_KEY = 'gazetteer_local_registrations';
+
+type PageMode = 'signup' | 'login';
+
+function getLocalRegistrations(): Record<string, { password: string; userData: any }> {
+  try {
+    const s = localStorage.getItem(LOCAL_REGISTRATIONS_KEY);
+    return s ? JSON.parse(s) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveLocalRegistration(email: string, password: string, userData: any) {
+  const reg = getLocalRegistrations();
+  reg[email.toLowerCase().trim()] = { password, userData };
+  localStorage.setItem(LOCAL_REGISTRATIONS_KEY, JSON.stringify(reg));
+}
 
 export default function LoginPage() {
   const { login } = useAuth();
   const nav = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [mode, setMode] = React.useState<PageMode>('signup');
+  const [loginError, setLoginError] = React.useState('');
+  const [loginLoading, setLoginLoading] = React.useState(false);
+  const [loginEmail, setLoginEmail] = React.useState('');
+  const [loginPassword, setLoginPassword] = React.useState('');
   
   // Get step from URL parameter, default to 1 - use URL as source of truth
   const stepFromUrl = parseInt(searchParams.get('step') || '1', 10);
@@ -191,6 +216,7 @@ export default function LoginPage() {
       avatarUrl: profilePicture // Include profile picture
     };
 
+    saveLocalRegistration(email.trim(), password, userData);
     login(userData);
     nav('/profile', { replace: true });
   }
@@ -218,9 +244,135 @@ export default function LoginPage() {
     );
   }
 
+  async function handleLoginSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setLoginError('');
+    if (!loginEmail.trim() || !loginPassword) {
+      setLoginError('Please enter email and password');
+      return;
+    }
+    setLoginLoading(true);
+    try {
+      const res = await loginUser(loginEmail.trim(), loginPassword);
+      const token = (res as { token?: string }).token;
+      const apiUser = (res as { user?: any }).user;
+      if (token) localStorage.setItem('authToken', token);
+      if (apiUser) {
+        const userData = {
+          name: apiUser.display_name || apiUser.name || apiUser.username || '',
+          email: apiUser.email || '',
+          handle: apiUser.handle || '',
+          local: apiUser.location_local || '',
+          regional: apiUser.location_regional || '',
+          national: apiUser.location_national || '',
+          avatarUrl: apiUser.avatar_url,
+          is_private: apiUser.is_private || false,
+        };
+        login(userData);
+        nav('/feed', { replace: true });
+      }
+    } catch (err: any) {
+      const isConnectionError =
+        err?.message === 'CONNECTION_REFUSED' ||
+        err?.name === 'ConnectionRefused' ||
+        err?.message?.includes('Failed to fetch');
+      const is401 = err?.status === 401;
+
+      // Fallback: if backend is down or invalid credentials, try local (mock) registrations from sign-up
+      const key = loginEmail.trim().toLowerCase();
+      const localReg = getLocalRegistrations();
+      const stored = localReg[key];
+      if (stored && stored.password === loginPassword) {
+        login(stored.userData);
+        nav('/feed', { replace: true });
+        return;
+      }
+      // Also try current user in localStorage (e.g. signed up before we stored localRegistrations)
+      try {
+        const savedUser = localStorage.getItem('user');
+        if (savedUser) {
+          const u = JSON.parse(savedUser);
+          if (u?.email?.toLowerCase() === key && u?.password === loginPassword) {
+            login(u);
+            nav('/feed', { replace: true });
+            return;
+          }
+        }
+      } catch (_) {}
+
+      if (isConnectionError) {
+        setLoginError('Backend unavailable. Use Sign up to create an account, or log in with one you created here.');
+      } else {
+        setLoginError('Invalid email or password.');
+      }
+    } finally {
+      setLoginLoading(false);
+    }
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center py-8 px-4 sm:px-6 lg:px-8" style={{ backgroundColor: '#000000' }}>
       <div className="w-full max-w-md">
+        {/* Sign up / Log in toggle */}
+        <div className="flex justify-center gap-6 mb-4">
+          <button
+            type="button"
+            onClick={() => { setMode('signup'); setLoginError(''); }}
+            className={`text-sm font-medium transition-colors ${mode === 'signup' ? 'text-blue-500' : 'text-gray-400 hover:text-gray-300'}`}
+          >
+            Sign up
+          </button>
+          <button
+            type="button"
+            onClick={() => { setMode('login'); setLoginError(''); }}
+            className={`text-sm font-medium transition-colors ${mode === 'login' ? 'text-blue-500' : 'text-gray-400 hover:text-gray-300'}`}
+          >
+            Log in
+          </button>
+        </div>
+
+        {mode === 'login' ? (
+          <form onSubmit={handleLoginSubmit} className="border border-gray-700 rounded-lg shadow-sm flex flex-col px-10 py-10" style={{ backgroundColor: '#000000' }}>
+            <div className="text-center mb-6">
+              <h1 className="text-3xl font-light mb-2 tracking-tight text-white">Gazetteer</h1>
+              <p className="text-sm text-gray-400">Log in to your account</p>
+            </div>
+            <div className="space-y-3">
+              <input
+                type="email"
+                value={loginEmail}
+                onChange={e => setLoginEmail(e.target.value)}
+                placeholder="Email"
+                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                autoComplete="email"
+              />
+              <input
+                type="password"
+                value={loginPassword}
+                onChange={e => setLoginPassword(e.target.value)}
+                placeholder="Password"
+                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                autoComplete="current-password"
+              />
+              {loginError && <p className="text-xs text-red-500">{loginError}</p>}
+            </div>
+            <div className="mt-6 space-y-3">
+              <button
+                type="submit"
+                disabled={loginLoading}
+                className="w-full px-4 py-2 bg-blue-500 text-white rounded-sm hover:bg-blue-600 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loginLoading ? 'Logging in…' : 'Log in'}
+              </button>
+              <p className="text-xs text-center text-gray-400">
+                Don&apos;t have an account?{' '}
+                <button type="button" onClick={() => setMode('signup')} className="text-blue-500 hover:underline font-medium">
+                  Sign up
+                </button>
+              </p>
+            </div>
+          </form>
+        ) : (
         <form onSubmit={step === 1 ? handleLocationSubmit : step === 2 ? handleAccountSubmit : handleProfilePictureSubmit} className="border border-gray-700 rounded-lg shadow-sm flex flex-col" style={{ minHeight: '600px', backgroundColor: '#000000' }}>
           {/* Header */}
           <div className="flex-shrink-0 px-10 pt-10 pb-6">
@@ -548,6 +700,12 @@ export default function LoginPage() {
             )}
 
             <p className="text-xs text-center text-gray-400 mt-4">
+              Already have an account?{' '}
+              <button type="button" onClick={() => setMode('login')} className="text-blue-500 hover:underline font-medium">
+                Log in
+              </button>
+            </p>
+            <p className="text-xs text-center text-gray-500 mt-1">
               {step === 1 
                 ? 'By signing up, you agree to the terms and conditions and community guidelines'
                 : 'By signing up, you agree to connect with your local community'
@@ -556,6 +714,7 @@ export default function LoginPage() {
           </div>
         </div>
       </form>
+        )}
       </div>
     </div>
   );

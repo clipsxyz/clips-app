@@ -12,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Laravel\Sanctum\PersonalAccessToken;
 use Illuminate\Support\Str;
 
 class PostController extends Controller
@@ -25,7 +26,7 @@ class PostController extends Controller
             'cursor' => 'integer|min:0',
             'limit' => 'integer|min:1|max:50',
             'filter' => 'string|in:Finglas,Dublin,Ireland,Following',
-            'userId' => 'uuid|exists:users,id'
+            'userId' => 'nullable|uuid|exists:users,id'
         ]);
 
         if ($validator->fails()) {
@@ -35,7 +36,21 @@ class PostController extends Controller
         $cursor = $request->get('cursor', 0);
         $limit = $request->get('limit', 10);
         $filter = $request->get('filter', 'Dublin');
+        // Viewer: query param first, then Auth (protected routes), then Bearer token (public feed on mobile)
         $userId = $request->get('userId');
+        if ($userId === null && Auth::check()) {
+            $userId = Auth::id();
+        }
+        if ($userId === null && $request->bearerToken()) {
+            try {
+                $token = PersonalAccessToken::findToken($request->bearerToken());
+                if ($token && $token->tokenable) {
+                    $userId = $token->tokenable->id;
+                }
+            } catch (\Throwable $e) {
+                // ignore
+            }
+        }
         $offset = $cursor * $limit;
 
         $query = Post::notReclipped()
@@ -68,7 +83,9 @@ class PostController extends Controller
         $posts = $query->orderBy('created_at', 'desc')
             ->offset($offset)
             ->limit($limit)
-            ->get();
+            ->get()
+            ->unique('id')
+            ->values();
 
         // Transform posts to include user-specific data
         $userModel = $userId ? User::find($userId) : null;
@@ -82,11 +99,13 @@ class PostController extends Controller
                 $postData['user_liked'] = $post->isLikedBy($userModel);
                 $postData['is_bookmarked'] = $post->isBookmarkedBy($userModel);
                 $postData['is_following'] = $post->isFollowingAuthor($userModel);
+                $postData['author_follows_you'] = $post->authorFollowsViewer($userModel);
                 $postData['user_reclipped'] = $post->isReclippedBy($userModel);
             } else {
                 $postData['user_liked'] = false;
                 $postData['is_bookmarked'] = false;
                 $postData['is_following'] = false;
+                $postData['author_follows_you'] = false;
                 $postData['user_reclipped'] = false;
             }
 
@@ -147,11 +166,13 @@ class PostController extends Controller
             $postData['user_liked'] = $post->isLikedBy($userModel);
             $postData['is_bookmarked'] = $post->isBookmarkedBy($userModel);
             $postData['is_following'] = $post->isFollowingAuthor($userModel);
+            $postData['author_follows_you'] = $post->authorFollowsViewer($userModel);
             $postData['user_reclipped'] = $post->isReclippedBy($userModel);
         } else {
             $postData['user_liked'] = false;
             $postData['is_bookmarked'] = false;
             $postData['is_following'] = false;
+            $postData['author_follows_you'] = false;
             $postData['user_reclipped'] = false;
         }
 

@@ -38,7 +38,7 @@ export type Post = {
   mediaUrl?: string; // Optional for text-only posts (deprecated, use mediaItems for carousel)
   finalVideoUrl?: string; // Final rendered video URL from backend (after processing)
   mediaType?: 'image' | 'video'; // New field to distinguish media types (deprecated, use mediaItems for carousel)
-  mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<{ type: string; intensity?: number; duration?: number; startTime?: number; [key: string]: any }>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; // Multiple media items for carousel with effects/templates, including text-only clips
+  mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<{ type: string; intensity?: number; duration?: number; startTime?: number;[key: string]: any }>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; // Multiple media items for carousel with effects/templates, including text-only clips
   text?: string; // Text content of the post (maps to text_content in DB)
   text_content?: string; // Backend field
   imageText?: string; // Text overlay on images
@@ -48,6 +48,8 @@ export type Post = {
   stats: { likes: number; views: number; comments: number; shares: number; reclips: number };
   isBookmarked: boolean;
   isFollowing: boolean;
+  /** True when the post author follows the current user (mutual follow → show DM icon). */
+  authorFollowsYou?: boolean;
   userLiked: boolean;
   userReclipped?: boolean;
   // Backend stat fields

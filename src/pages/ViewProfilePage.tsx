@@ -87,13 +87,14 @@ export default function ViewProfilePage() {
         }
         
         // Decode the handle from URL (in case it was encoded).
-        // React Router may already decode it, but decodeURIComponent is safe on an already-decoded string.
+        // Use canonical handle from profile when available so API and follow state stay in sync (e.g. Bob@Cork vs bob@cork).
         const decodedHandle = decodeURIComponent(handle);
-        console.log('Follow button clicked for:', decodedHandle);
+        const handleToUse = profileUser?.handle || decodedHandle;
+        console.log('Follow button clicked for:', decodedHandle, 'using handle:', handleToUse);
         
         try {
             const followedUsers = await getFollowedUsers(user.id);
-            const isCurrentlyFollowing = followedUsers.includes(decodedHandle);
+            const isCurrentlyFollowing = followedUsers.some(h => h.toLowerCase() === handleToUse.toLowerCase());
             const profilePrivate = isProfilePrivate(decodedHandle);
             const hasPending = hasPendingFollowRequest(user?.handle || '', decodedHandle);
             
@@ -128,10 +129,10 @@ export default function ViewProfilePage() {
                     // Private profile + trying to follow = send request only. Do NOT add to follow list.
                     // User only becomes "following" after Sarah accepts.
                     if (profilePrivate && newFollowingState && !isCurrentlyFollowing && user?.handle) {
-                        createFollowRequest(user.handle, decodedHandle);
+                        createFollowRequest(user.handle, handleToUse);
                         setHasPendingRequest(true);
                         setIsFollowing(false);
-                        setFollowState(user.id, decodedHandle, false); // never add to follow list until accepted
+                        setFollowState(user.id, handleToUse, false); // never add to follow list until accepted
                         
                         try {
                             const { createNotification } = await import('../api/notifications');
@@ -181,12 +182,12 @@ export default function ViewProfilePage() {
                     if (posts[0]?.id) {
                         await toggleFollowForPost(user.id, posts[0].id);
                     } else {
-                        const userPost = allPosts.find(p => p.userHandle === decodedHandle);
+                        const userPost = allPosts.find(p => p.userHandle?.toLowerCase() === handleToUse.toLowerCase());
                         if (userPost) {
                             await toggleFollowForPost(user.id, userPost.id);
                         }
                     }
-                    setFollowState(user.id, decodedHandle, newFollowingState);
+                    setFollowState(user.id, handleToUse, newFollowingState);
                     
                     setIsFollowing(newFollowingState);
                     setHasPendingRequest(false);
@@ -199,7 +200,7 @@ export default function ViewProfilePage() {
                     
                     // Dispatch event to update newsfeed
                     window.dispatchEvent(new CustomEvent('followToggled', {
-                        detail: { handle: decodedHandle, isFollowing: newFollowingState }
+                        detail: { handle: handleToUse, isFollowing: newFollowingState }
                     }));
                     
                     // Update stats optimistically when using mock fallback
@@ -255,9 +256,9 @@ export default function ViewProfilePage() {
                     await toggleFollowForPost(user.id, posts[0].id);
                 }
                 setIsFollowing(false);
-                setFollowState(user.id, decodedHandle, false);
+                setFollowState(user.id, handleToUse, false);
                 setHasPendingRequest(false);
-                removeFollowRequest(user.handle, decodedHandle);
+                removeFollowRequest(user.handle, handleToUse);
                 
                 // If profile was private, user can no longer view
                 if (profilePrivate) {
@@ -266,7 +267,7 @@ export default function ViewProfilePage() {
             } else if (result.status === 'pending') {
                 // Private profile - follow request sent (only if not already pending)
                 if (!hasPending && user?.handle) {
-                    createFollowRequest(user.handle, decodedHandle);
+                    createFollowRequest(user.handle, handleToUse);
                     setHasPendingRequest(true);
                 setIsFollowing(false);
                     
@@ -276,7 +277,7 @@ export default function ViewProfilePage() {
                         await createNotification({
                             type: 'follow_request',
                             fromHandle: user.handle,
-                            toHandle: decodedHandle,
+                            toHandle: handleToUse,
                             message: `${user.handle} wants to follow you`
                         });
                     } catch (error) {
@@ -340,12 +341,12 @@ export default function ViewProfilePage() {
 
             // Dispatch event to update newsfeed
             window.dispatchEvent(new CustomEvent('followToggled', {
-                detail: { handle: decodedHandle, isFollowing: !isCurrentlyFollowing }
+                detail: { handle: handleToUse, isFollowing: !isCurrentlyFollowing }
             }));
 
             // Refresh profile data to update counts
             try {
-                const userProfileData = await fetchUserProfile(decodedHandle, user?.id);
+                const userProfileData = await fetchUserProfile(handleToUse, user?.id);
                 const followingCount = userProfileData.following_count || 0;
                 const followersCount = userProfileData.followers_count || 0;
                 
@@ -424,7 +425,7 @@ export default function ViewProfilePage() {
                 if (user?.id && user?.handle) {
                     const followedUsers = await getFollowedUsers(user.id);
                     const canView = canViewProfile(user?.handle || '', decodedHandle, followedUsers);
-                    const isFollowingUser = followedUsers.includes(decodedHandle);
+                    const isFollowingUser = followedUsers.some(h => h.toLowerCase() === decodedHandle.toLowerCase());
                     const hasPending = hasPendingFollowRequest(user?.handle || '', decodedHandle);
                     
                     // Base values from follow list
