@@ -368,7 +368,7 @@ export default function StickerOverlayComponent({
                 userSelect: 'none', // Prevent text selection
                 WebkitTouchCallout: 'none', // Disable iOS callout menu
                 WebkitUserSelect: 'none', // Disable iOS text selection
-                WebkitUserDrag: 'none' // Prevent dragging on WebKit
+                ...({ WebkitUserDrag: 'none' } as React.CSSProperties) // Prevent dragging on WebKit
             }}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}

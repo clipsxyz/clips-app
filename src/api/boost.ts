@@ -100,6 +100,21 @@ export async function getActiveBoost(postId: string): Promise<BoostedPost | null
 }
 
 /**
+ * Get post IDs that have an active boost for a given feed type (for promoting in feed).
+ * Instagram-style: boosted posts are injected into the feed in the matching location tier.
+ *
+ * @param feedType - local | regional | national
+ * @returns Array of post IDs that are currently boosted for this feed type
+ */
+export async function getActiveBoostedPostIds(feedType: BoostFeedType): Promise<string[]> {
+    const now = Date.now();
+    const active = boostedPosts.filter(
+        bp => bp.isActive && bp.expiresAt > now && bp.feedType === feedType
+    );
+    return active.map(bp => bp.postId);
+}
+
+/**
  * Get all active boosts for a user
  * Filters out expired boosts using epoch time
  * 

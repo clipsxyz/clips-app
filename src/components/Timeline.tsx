@@ -24,7 +24,7 @@ export default function Timeline({
     onClipSelect,
     onSplitClip,
     onReorderClips,
-    onTrimClip,
+    onTrimClip: _onTrimClip,
     onDeleteClip
 }: TimelineProps) {
     const timelineRef = React.useRef<HTMLDivElement>(null);
@@ -40,7 +40,7 @@ export default function Timeline({
         onTimeChange(time);
     };
 
-    const handleClipDragStart = (e: React.DragEvent, clipId: string, index: number) => {
+    const handleClipDragStart = (e: React.DragEvent, clipId: string, _index: number) => {
         setDraggedClipId(clipId);
         e.dataTransfer.effectAllowed = 'move';
     };

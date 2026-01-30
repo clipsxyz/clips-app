@@ -152,7 +152,6 @@ export function testImageNotification(): void {
     body: 'Bob@Dublin posted a new story',
     icon: '/icon-192x192.png',
     badge: '/icon-192x192.png',
-    image: 'https://via.placeholder.com/400x300?text=Story+Preview',
     tag: 'test-story',
     data: {
       type: 'story',

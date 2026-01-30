@@ -32,8 +32,8 @@ function CommentItem({
     onLikeComment,
     onLikeReply,
     onReply,
-    userId,
-    postId
+    userId: _userId,
+    postId: _postId
 }: {
     comment: Comment;
     onLikeComment: (commentId: string) => Promise<void>;

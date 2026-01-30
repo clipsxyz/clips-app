@@ -607,8 +607,8 @@ export default function CreatePage() {
                     const clipDuration = Math.min(trimEnd - trimStart, 90); // Enforce 90s max
                     
                     // Get speed and reverse values from locationState
-                    const speed = locationState?.speed ?? 1.0;
-                    const reverse = locationState?.reverse ?? false;
+                    const speed = (locationState as { speed?: number })?.speed ?? 1.0;
+                    const reverse = (locationState as { reverse?: boolean })?.reverse ?? false;
                     
                     // Include stickers as overlays with timing
                     const overlays = (stickers || []).map(sticker => ({

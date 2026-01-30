@@ -374,7 +374,13 @@ export default function InboxPage() {
             // If profile is private and already has pending request, show message
             if (profilePrivate && hasPending) {
                 Swal.fire({
-                    title: '',
+                    title: 'Gazetteer says',
+                    customClass: {
+                        title: 'gazetteer-shimmer',
+                        popup: '!rounded-2xl !shadow-xl !border-0',
+                        container: '!p-0',
+                        confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
+                    },
                     html: `
                         <div style="text-align: center; padding: 8px 0;">
                             <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">
@@ -393,11 +399,6 @@ export default function InboxPage() {
                     background: '#ffffff',
                     width: '400px',
                     padding: '0',
-                    customClass: {
-                        popup: '!rounded-2xl !shadow-xl !border-0',
-                        container: '!p-0',
-                        confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                    },
                     buttonsStyling: false
                 });
                 return;
@@ -426,7 +427,7 @@ export default function InboxPage() {
                         
                         // Show Instagram-style popup
                         Swal.fire({
-                            title: '',
+                            title: 'Gazetteer says',
                             html: `
                                 <div style="text-align: center; padding: 8px 0;">
                                     <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
@@ -483,7 +484,13 @@ export default function InboxPage() {
                         }
                         
                         Swal.fire({
-                            title: '',
+                            title: 'Gazetteer says',
+                            customClass: {
+                                title: 'gazetteer-shimmer',
+                                popup: '!rounded-2xl !shadow-xl !border-0',
+                                container: '!p-0',
+                                confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
+                            },
                             html: `
                                 <div style="text-align: center; padding: 8px 0;">
                                     <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
@@ -504,11 +511,6 @@ export default function InboxPage() {
                             background: '#ffffff',
                             width: '400px',
                             padding: '0',
-                            customClass: {
-                                popup: '!rounded-2xl !shadow-xl !border-0',
-                                container: '!p-0',
-                                confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                            },
                             buttonsStyling: false
                         });
                         
@@ -537,8 +539,8 @@ export default function InboxPage() {
         } catch (error) {
             console.error('Error toggling follow:', error);
             Swal.fire({
-                title: 'Error',
-                text: 'Failed to follow/unfollow user',
+                title: 'Gazetteer says',
+                html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Failed to follow/unfollow user</p>`,
                 icon: 'error'
             });
         }
@@ -627,7 +629,7 @@ export default function InboxPage() {
             await loadData();
             
             Swal.fire({
-                title: '',
+                title: 'Gazetteer says',
                 html: `
                     <div style="text-align: center; padding: 8px 0;">
                         <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);">
@@ -695,8 +697,8 @@ export default function InboxPage() {
         } catch (error) {
             console.error('Error denying follow request:', error);
             Swal.fire({
-                title: 'Error',
-                text: 'Failed to deny follow request',
+                title: 'Gazetteer says',
+                html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Failed to deny follow request</p>`,
                 icon: 'error'
             });
         }

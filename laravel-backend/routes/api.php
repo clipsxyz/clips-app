@@ -79,6 +79,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('posts')->group(function () {
         Route::post('/', [PostController::class, 'store']);
         Route::put('/{id}', [PostController::class, 'update']);
+        Route::delete('/{id}', [PostController::class, 'destroy']);
         Route::post('/{id}/like', [PostController::class, 'toggleLike']);
         Route::post('/{id}/share', [PostController::class, 'share']);
         Route::post('/{id}/reclip', [PostController::class, 'reclip']);

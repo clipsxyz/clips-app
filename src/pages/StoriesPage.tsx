@@ -2724,8 +2724,8 @@ export default function StoriesPage() {
                                                     setFollowState(user.id, handle, false);
                                                     setIsFollowingStoryUser(false);
                                                     Swal.fire({
-                                                        title: 'Follow Request Sent',
-                                                        html: '<p style="color:#262626;font-size:14px;">Your follow request has been sent. You will be notified when they accept.</p>',
+                                                        title: '',
+                                                        html: '<p style="font-size: 12px; color: #6b7280; margin: 0 0 10px 0; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;">Gazetteer says</p><p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Follow Request Sent</p><p style="color:#262626;font-size:14px;">Your follow request has been sent. You will be notified when they accept.</p>',
                                                         confirmButtonText: 'OK',
                                                         confirmButtonColor: '#0095f6',
                                                         background: '#ffffff',
@@ -2746,8 +2746,8 @@ export default function StoriesPage() {
                                                 } else if (result.status === 'pending') {
                                                     setIsFollowingStoryUser(false);
                                                     Swal.fire({
-                                                        title: 'Follow Request Sent',
-                                                        text: 'Your follow request has been sent.',
+                                                        title: 'Gazetteer says',
+                                                        html: '<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Follow Request Sent</p><p style="margin: 0;">Your follow request has been sent.</p>',
                                                         icon: 'success',
                                                         timer: 2000,
                                                         showConfirmButton: false
@@ -2793,8 +2793,8 @@ export default function StoriesPage() {
                                                         setFollowState(user.id, handle, false);
                                                         setIsFollowingStoryUser(false);
                                                         Swal.fire({
-                                                            title: 'Follow Request Sent',
-                                                            html: '<p style="color:#262626;font-size:14px;">Your follow request has been sent. You will be notified when they accept.</p>',
+                                                            title: 'Gazetteer says',
+                                                            html: '<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Follow Request Sent</p><p style="color:#262626;font-size:14px;">Your follow request has been sent. You will be notified when they accept.</p>',
                                                             confirmButtonText: 'OK',
                                                             confirmButtonColor: '#0095f6',
                                                             background: '#ffffff',
@@ -3486,8 +3486,8 @@ export default function StoriesPage() {
                                 createFollowRequest(user.handle, handle);
                                 setFollowState(user.id, handle, false);
                                 await Swal.fire({
-                                    title: 'Follow Request Sent',
-                                    html: '<p style="color:#262626;font-size:14px;">Your follow request has been sent. You will be notified when they accept.</p>',
+                                    title: 'Gazetteer says',
+                                    html: '<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Follow Request Sent</p><p style="color:#262626;font-size:14px;">Your follow request has been sent. You will be notified when they accept.</p>',
                                     confirmButtonText: 'OK',
                                     confirmButtonColor: '#0095f6',
                                     background: '#ffffff',

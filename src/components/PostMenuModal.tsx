@@ -126,8 +126,8 @@ export default function PostMenuModal({
 
     const menuItems: MenuItem[] = isCurrentUser
         ? [
-            // Own posts (removed Share and Boost - already in top row)
-            { icon: FiTrash2, label: 'Delete', action: onDelete, danger: true },
+            // Own posts – only show Delete when handler is provided (user can delete own posts)
+            ...(onDelete ? [{ icon: FiTrash2, label: 'Delete', action: onDelete, danger: true }] : []),
             { icon: FiEdit3, label: 'Edit', action: onEdit },
             { icon: FiCopy, label: 'Copy Link', action: handleCopyLink },
             { icon: FiArchive, label: 'Archive', action: onArchive },

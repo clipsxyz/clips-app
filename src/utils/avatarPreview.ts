@@ -12,8 +12,8 @@
  */
 export async function generateAvatarPreview(
     avatarId: string,
-    width: number = 200,
-    height: number = 200
+    _width: number = 200,
+    _height: number = 200
 ): Promise<string> {
     // For now, use placeholder images that match the vision
     // TODO: Replace with actual high-quality avatar images

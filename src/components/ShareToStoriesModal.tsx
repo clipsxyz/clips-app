@@ -190,6 +190,12 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
           </div>
         </div>
 
+        {/* Title: Gazetteer says – purple/baby blue shimmer (wrapper centres inline-block) */}
+        <div className="flex justify-center mb-2">
+          <p className="gazetteer-shimmer text-xs font-semibold uppercase tracking-wider">
+            Gazetteer says
+          </p>
+        </div>
         {/* Text */}
         <p className="text-center text-gray-900 dark:text-gray-100 text-lg font-medium mb-6">
           Share this post to your stories

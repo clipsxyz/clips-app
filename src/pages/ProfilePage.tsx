@@ -139,7 +139,12 @@ export default function ProfilePage() {
 
   React.useEffect(() => {
     if (user?.socialLinks) {
-      setSocialLinks(user.socialLinks);
+      setSocialLinks({
+        website: user.socialLinks.website ?? '',
+        x: user.socialLinks.x ?? '',
+        instagram: user.socialLinks.instagram ?? '',
+        tiktok: user.socialLinks.tiktok ?? ''
+      });
     }
   }, [user?.socialLinks]);
 
@@ -344,8 +349,10 @@ export default function ProfilePage() {
       }
 
       Swal.fire({
-        title: newPrivacyState ? 'Profile Set to Private' : 'Profile Set to Public',
+        title: '',
           html: `
+          <p style="font-size: 12px; color: #6b7280; margin: 0 0 10px 0; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;">Gazetteer says</p>
+          <p style="font-weight: 600; font-size: 1.1em; margin: 0 0 12px 0;">${newPrivacyState ? 'Profile Set to Private' : 'Profile Set to Public'}</p>
           <div style="text-align: center; padding: 20px 0;">
             <p style="color: #ffffff; font-size: 14px; line-height: 20px; margin: 0;">
               ${newPrivacyState 
@@ -1077,8 +1084,8 @@ export default function ProfilePage() {
                       onClick={() => {
                         if (!national || !regional || !local) {
                           Swal.fire({
-                            title: 'Missing Information',
-                            text: 'Please fill in all location fields (National, Regional, and Local)',
+                            title: 'Gazetteer says',
+                            html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Missing Information</p><p style="margin: 0;">Please fill in all location fields (National, Regional, and Local)</p>`,
                             icon: 'warning',
                             confirmButtonColor: '#0095f6',
                             background: '#262626',
@@ -1231,7 +1238,7 @@ export default function ProfilePage() {
                               {new Date(draft.createdAt).toLocaleDateString()}
                             </p>
                             <p className="text-gray-900 dark:text-gray-100 line-clamp-2">
-                              {draft.text || 'No text'}
+                              {draft.caption || 'No text'}
                             </p>
                           </div>
                           <button
@@ -1347,8 +1354,8 @@ export default function ProfilePage() {
                           testNotificationTypes();
                           Swal.fire({
                             icon: 'info',
-                            title: 'Test Sequence Started',
-                            text: 'You will receive 4 different notification types (DM, Like, Comment, Follow). Watch your notifications!',
+                            title: '',
+                            html: `<p style="font-size: 12px; color: #6b7280; margin: 0 0 10px 0; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;">Gazetteer says</p><p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Test Sequence Started</p><p style="margin: 0;">You will receive 4 different notification types (DM, Like, Comment, Follow). Watch your notifications!</p>`,
                             confirmButtonColor: '#0095f6',
                             background: '#262626',
                             color: '#ffffff',
@@ -1390,8 +1397,8 @@ export default function ProfilePage() {
                             console.error('Error initializing notifications:', error);
                             Swal.fire({
                               icon: 'error',
-                              title: 'Error',
-                              text: 'Failed to enable notifications. Please check your browser settings.',
+                              title: 'Gazetteer says',
+                              html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Failed to enable notifications. Please check your browser settings.</p>`,
                               confirmButtonColor: '#0095f6',
                               background: '#262626',
                               color: '#ffffff',

@@ -186,7 +186,7 @@ export default function TemplateEditorPage() {
     
     // Ref callback to scroll immediately when element is rendered
     const postDetailsRefCallback = React.useCallback((node: HTMLDivElement | null) => {
-        postDetailsRef.current = node;
+        (postDetailsRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
         if (node && currentStep === 'details') {
             // Scroll immediately when element is rendered - use multiple methods
             const scrollIt = () => {
@@ -552,8 +552,8 @@ export default function TemplateEditorPage() {
                 if (files.length === 0) {
                     Swal.fire({
                         icon: 'info',
-                        title: 'No files selected',
-                        text: 'Please select a video or image file.',
+                        title: 'Gazetteer says',
+                        html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">No files selected</p><p style="margin: 0;">Please select a video or image file.</p>`,
                         timer: 3000,
                         showConfirmButton: false
                     });
@@ -564,16 +564,16 @@ export default function TemplateEditorPage() {
                 const file = files[0] as File;
                 const fakeEvent = {
                     target: { files: [file] }
-                } as React.ChangeEvent<HTMLInputElement>;
-                handleMediaSelect(clipId, fakeEvent);
+                };
+                handleMediaSelect(clipId, fakeEvent as unknown as React.ChangeEvent<HTMLInputElement>);
             } else {
                 // React Native: Use native picker
                 const results = await pickFiles(platformType);
                 if (results.length === 0) {
                     Swal.fire({
                         icon: 'info',
-                        title: 'No files selected',
-                        text: 'Please select a video or image file.',
+                        title: 'Gazetteer says',
+                        html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">No files selected</p><p style="margin: 0;">Please select a video or image file.</p>`,
                         timer: 3000,
                         showConfirmButton: false
                     });
@@ -634,8 +634,8 @@ export default function TemplateEditorPage() {
             console.error('Error selecting platform files:', error);
             Swal.fire({
                 icon: 'error',
-                title: 'Error',
-                text: 'Failed to select files. Please try again.',
+                title: 'Gazetteer says',
+                html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Failed to select files. Please try again.</p>`,
                 timer: 2000,
                 showConfirmButton: false
             });
@@ -1418,8 +1418,8 @@ export default function TemplateEditorPage() {
                                                             if (filtered.length === 0) {
                                                                 Swal.fire({
                                                                     icon: 'warning',
-                                                                    title: 'No matching files',
-                                                                    text: `No ${platformType === 'tiktok' ? 'TikTok' : platformType === 'instagram' ? 'Instagram' : 'YouTube Shorts'} videos found. Please select files with matching filenames.`,
+                                                                    title: 'Gazetteer says',
+                                                                    html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">No matching files</p><p style="margin: 0;">No ${platformType === 'tiktok' ? 'TikTok' : platformType === 'instagram' ? 'Instagram' : 'YouTube Shorts'} videos found. Please select files with matching filenames.</p>`,
                                                                     timer: 3000,
                                                                     showConfirmButton: false
                                                                 });
@@ -1429,7 +1429,7 @@ export default function TemplateEditorPage() {
                                                             // Use first filtered file
                                                             const fakeEvent = {
                                                                 target: { files: [filtered[0]] }
-                                                            } as React.ChangeEvent<HTMLInputElement>;
+                                                            } as unknown as React.ChangeEvent<HTMLInputElement>;
                                                             handleMediaSelect(currentClip?.id || '', fakeEvent);
                                                         } else {
                                                             handleMediaSelect(currentClip?.id || '', e);

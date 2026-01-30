@@ -21,6 +21,7 @@ export default defineConfig({
   root: '.',
   optimizeDeps: {
     force: true, // Force re-optimization
+    include: ['firebase/app', 'firebase/messaging'],
     // Exclude React Native dependencies from optimization (not needed for web)
     exclude: [
       'react-native',

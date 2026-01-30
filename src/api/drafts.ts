@@ -10,6 +10,8 @@ export interface Draft {
   caption?: string;
   location?: string;
   tags?: string[];
+  trimStart?: number;
+  trimEnd?: number;
 }
 
 const DRAFTS_KEY = 'user_drafts';

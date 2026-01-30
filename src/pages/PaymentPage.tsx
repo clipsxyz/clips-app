@@ -25,18 +25,25 @@ export default function PaymentPage() {
     const [cvv, setCvv] = React.useState('');
     const [isProcessing, setIsProcessing] = React.useState(false);
 
-    // Redirect if no state
+    // Redirect if no state or if post is not owned by current user (only user-created posts can be boosted)
     React.useEffect(() => {
         if (!state) {
             navigate('/boost');
+            return;
         }
-    }, [state, navigate]);
+        if (!user?.handle || state.post.userHandle !== user.handle || state.post.originalUserHandle) {
+            navigate('/boost');
+        }
+    }, [state, user?.handle, navigate]);
 
     if (!state) {
         return null;
     }
 
     const { post, feedType, price } = state;
+
+    // Only the post creator can boost (no reclips, no other users' posts)
+    const canBoostThisPost = user?.handle && post.userHandle === user.handle && !post.originalUserHandle;
 
     const formatCardNumber = (value: string) => {
         const v = value.replace(/\s+/g, '').replace(/[^0-9]/gi, '');
@@ -76,13 +83,17 @@ export default function PaymentPage() {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (!canBoostThisPost) {
+            navigate('/boost');
+            return;
+        }
         setIsProcessing(true);
 
         try {
             // Simulate payment processing
             await new Promise(resolve => setTimeout(resolve, 2000));
 
-            // Activate boost with epoch time tracking
+            // Activate boost with epoch time tracking (only for user-created posts; canBoostThisPost already enforced)
             if (user?.id) {
                 await activateBoost(post.id, user.id, feedType, price);
             }
@@ -92,8 +103,9 @@ export default function PaymentPage() {
             // Show SweetAlert popup
             const result = await Swal.fire({
                 icon: 'success',
-                title: 'Payment Complete!',
+                title: 'Gazetteer says',
                 html: `
+                    <p style="font-weight: 600; font-size: 1.25em; margin: 0 0 1rem 0;">Payment Complete!</p>
                     <p style="margin: 1rem 0; color: #374151;">Your payment is complete and your post is boosted for <strong>6 hours</strong> in the <strong>${getFeedTypeLabel(feedType)}</strong>.</p>
                     <p style="margin-top: 1rem; color: #6B7280; font-size: 0.9rem;">Thank you for using our boost service!</p>
                 `,
@@ -112,13 +124,11 @@ export default function PaymentPage() {
                 allowEscapeKey: false
             });
 
-            // Redirect based on user choice
+            // Redirect based on user choice (pass feedType so feed can show Sponsored label)
             if (result.isConfirmed) {
-                // User clicked "Back to Newsfeed"
-                navigate('/feed', { state: { boostSuccess: true, postId: post.id } });
+                navigate('/feed', { state: { boostSuccess: true, postId: post.id, feedType } });
             } else {
-                // User clicked "Stay on Boost Page" or closed
-                navigate('/boost', { state: { boostSuccess: true, postId: post.id } });
+                navigate('/boost', { state: { boostSuccess: true, postId: post.id, feedType } });
             }
         } catch (error) {
             console.error('Payment error:', error);

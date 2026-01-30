@@ -349,6 +349,26 @@ class PostController extends Controller
     }
 
     /**
+     * Delete post. Only the post owner can delete.
+     */
+    public function destroy(string $id): JsonResponse
+    {
+        $user = Auth::user();
+        $post = Post::find($id);
+
+        if (!$post) {
+            return response()->json(['error' => 'Post not found'], 404);
+        }
+
+        if ($post->user_id !== $user->id) {
+            return response()->json(['error' => 'You can only delete your own posts'], 403);
+        }
+
+        $post->delete();
+        return response()->json(['success' => true]);
+    }
+
+    /**
      * Toggle like on post
      */
     public function toggleLike(Request $request, string $id): JsonResponse

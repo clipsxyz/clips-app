@@ -9,7 +9,7 @@ const getApiBaseUrl = () => {
     // Check if frontend is using HTTPS
     const isHttps = window.location.protocol === 'https:';
     const protocol = isHttps ? 'https' : 'http';
-    
+
     // If accessing from a different host (like phone on network), use IP address
     const hostname = window.location.hostname;
     if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
@@ -161,6 +161,12 @@ export async function updatePost(postId: string, postData: {
     return apiRequest(`/posts/${postId}`, {
         method: 'PUT',
         body: JSON.stringify(postData),
+    });
+}
+
+export async function deletePost(postId: string) {
+    return apiRequest(`/posts/${postId}`, {
+        method: 'DELETE',
     });
 }
 

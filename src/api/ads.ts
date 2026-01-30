@@ -204,7 +204,7 @@ export function shouldShowAd(ad: Ad): boolean {
  * @param userId - User ID who saw the ad
  * @returns Updated ad with impression tracked
  */
-export async function trackAdImpression(adId: string, userId: string): Promise<Ad> {
+export async function trackAdImpression(adId: string, _userId: string): Promise<Ad> {
     const ad = ads.find(a => a.id === adId);
     if (!ad) {
         throw new Error(`Ad not found: ${adId}`);
@@ -232,7 +232,7 @@ export async function trackAdImpression(adId: string, userId: string): Promise<A
  * @param userId - User ID who clicked
  * @returns Updated ad with click tracked
  */
-export async function trackAdClick(adId: string, userId: string): Promise<Ad> {
+export async function trackAdClick(adId: string, _userId: string): Promise<Ad> {
     const ad = ads.find(a => a.id === adId);
     if (!ad) {
         throw new Error(`Ad not found: ${adId}`);
@@ -263,7 +263,7 @@ export async function trackAdClick(adId: string, userId: string): Promise<Ad> {
  */
 export async function trackAdConversion(
     adId: string,
-    userId: string,
+    _userId: string,
     clickTime?: number
 ): Promise<Ad> {
     const ad = ads.find(a => a.id === adId);

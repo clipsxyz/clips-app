@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiCamera, FiMapPin, FiX, FiImage, FiType, FiPalette, FiMaximize2, FiHome, FiSmile, FiSettings, FiUser, FiPlus, FiLink } from 'react-icons/fi';
+import { FiCamera, FiMapPin, FiX, FiImage, FiType, FiSliders, FiMaximize2, FiHome, FiSmile, FiSettings, FiUser, FiPlus, FiLink } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { createStory } from '../api/stories';
@@ -34,7 +34,7 @@ function TaggedUserOverlay({
     containerWidth,
     containerHeight,
     isModalOpen = false,
-    containerRef
+    containerRef: _containerRef
 }: TaggedUserOverlayProps) {
     const [isDragging, setIsDragging] = React.useState(false);
     const [isResizing, setIsResizing] = React.useState(false);
@@ -274,7 +274,7 @@ function TaggedUserOverlay({
                 userSelect: 'none', // Prevent text selection
                 WebkitTouchCallout: 'none', // Disable iOS callout menu
                 WebkitUserSelect: 'none', // Disable iOS text selection
-                WebkitUserDrag: 'none' // Prevent dragging on WebKit
+                ...({ WebkitUserDrag: 'none' } as React.CSSProperties) // Prevent dragging on WebKit
             }}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
@@ -773,6 +773,7 @@ export default function ClipPage() {
   const [questionPrompt, setQuestionPrompt] = React.useState('Ask me anything');
   const [replyToQuestion, setReplyToQuestion] = React.useState<{
     question?: string;
+    questionId?: string;
     response: string;
     responderHandle: string;
   } | null>(null);
@@ -1319,7 +1320,8 @@ export default function ClipPage() {
                 : background,
               backgroundImage: background.includes('gradient') 
                 ? background 
-                : undefined
+                : undefined,
+              touchAction: 'pan-y' // Allow vertical scrolling but prevent horizontal interference
             }}
             onClick={(e) => {
               // Deselect GIF overlay and tagged users when clicking on background
@@ -1347,7 +1349,6 @@ export default function ClipPage() {
                 setSelectedTaggedUser(null);
               }
             }}
-            style={{ touchAction: 'pan-y' }} // Allow vertical scrolling but prevent horizontal interference
           >
             {/* Text Display Area */}
             <div 
@@ -1639,7 +1640,7 @@ export default function ClipPage() {
             <UserTaggingModal
               isOpen={showUserTagging}
               onClose={() => setShowUserTagging(false)}
-              onSelectUser={(handle, displayName) => {
+              onSelectUser={(handle, _displayName) => {
                 if (!taggedUsers.some(tu => tu.handle === handle)) {
                   const newTaggedUser = {
                     handle,
@@ -2592,7 +2593,7 @@ export default function ClipPage() {
           <UserTaggingModal
             isOpen={showTagUserCard}
             onClose={() => setShowTagUserCard(false)}
-            onSelectUser={(handle, displayName) => {
+            onSelectUser={(handle, _displayName) => {
               if (!taggedUsers.some(tu => tu.handle === handle)) {
                 const newTaggedUser = {
                   handle,

@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle } from 'react-icons/fi';
@@ -18,7 +17,7 @@ import { useOnline } from './hooks/useOnline';
 import { getUnreadTotal } from './api/messages';
 import { getUnreadNotificationCount } from './api/notifications';
 import { getStoryInsightsForUser } from './api/stories';
-import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState } from './api/posts';
+import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, deletePost } from './api/posts';
 import { updatePost } from './api/client';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory } from './api/stories';
 import { enqueue, drain } from './utils/mutationQueue';
@@ -864,26 +863,18 @@ function PostHeader({ post, onFollow, isOverlaid = false, onMenuClick }: {
         <div className="relative z-10 flex flex-col items-end gap-2">
           {/* Location and 3 dots - side by side */}
           <div className="flex items-center gap-2">
-            {/* Location Button - White banner with camera icon */}
+            {/* Story location - display only (where story was captured), not a feed filter */}
             {post.locationLabel && post.locationLabel !== 'Unknown Location' && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  // Navigate to feed with this location
-                  window.dispatchEvent(new CustomEvent('locationChange', {
-                    detail: { location: post.locationLabel }
-                  }));
-                  navigate(`/feed?location=${encodeURIComponent(post.locationLabel)}`);
-                }}
+              <span
                 title={post.locationLabel}
-                className={`px-2 py-1 rounded-full text-[10px] font-medium transition-all active:scale-[.98] flex items-center gap-1.5 max-w-[120px] ${isOverlaid
-                  ? 'bg-white/50 backdrop-blur-sm text-gray-800 hover:bg-white/60'
-                  : 'bg-white/50 backdrop-blur-sm text-gray-800 hover:bg-white/60'
+                className={`px-2 py-1 rounded-full text-[10px] font-medium flex items-center gap-1.5 max-w-[120px] pointer-events-none select-none ${isOverlaid
+                  ? 'bg-white/50 backdrop-blur-sm text-gray-800'
+                  : 'bg-white/50 backdrop-blur-sm text-gray-800'
                   }`}
               >
                 <span className="truncate whitespace-nowrap">{post.locationLabel}</span>
                 <FiCamera className="w-2.5 h-2.5 text-gray-800 flex-shrink-0" />
-              </button>
+              </span>
             )}
             {/* 3-dot menu button - no background, vertical dots */}
             {onMenuClick && (
@@ -1319,6 +1310,8 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   const [isMuted, setIsMuted] = React.useState(true);
   const [isPaused, setIsPaused] = React.useState(false);
   const [isViewInScenesExpanded, setIsViewInScenesExpanded] = React.useState(true);
+  const [showMuteButton, setShowMuteButton] = React.useState(true); // show when scroll onto card, hide after 2s; one tap brings back
+  const muteButtonHideTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [progress, setProgress] = React.useState(0); // 0..1 for video progress
   const [aspectRatio, setAspectRatio] = React.useState<number | null>(null); // width/height ratio
   const [tapPosition, setTapPosition] = React.useState<{ x: number; y: number } | null>(null);
@@ -1438,30 +1431,33 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     if (!postId || currentItem?.type !== 'video') return;
     
     const handleResume = (e: CustomEvent) => {
-      if (videoRef.current && e.detail?.time !== null && e.detail?.time !== undefined) {
-        const resumeTime = e.detail.time;
-        // Update saved time
+      try {
+        const v = videoRef.current;
+        if (!v || e.detail?.time == null) return;
+        const resumeTime = Number(e.detail.time);
+        if (!Number.isFinite(resumeTime)) return;
         videoTimesMap.set(postId, resumeTime);
-        // Set video time
-        if (resumeTime < videoRef.current.duration) {
-          videoRef.current.currentTime = resumeTime;
-          // Resume playback if video is in view (check with intersection observer)
+        const duration = Number(v.duration);
+        if (Number.isFinite(duration) && resumeTime < duration) {
+          v.currentTime = resumeTime;
           const checkAndPlay = () => {
-            if (videoRef.current && videoRef.current.paused) {
-              // Check if video is in viewport
-              const rect = videoRef.current.getBoundingClientRect();
-              const isInView = rect.top < window.innerHeight && rect.bottom > 0;
-              if (isInView) {
-                videoRef.current.play().catch(console.error);
-                setIsPlaying(true);
+            try {
+              const v2 = videoRef.current;
+              if (v2?.paused) {
+                const rect = v2.getBoundingClientRect();
+                const isInView = rect.top < window.innerHeight && rect.bottom > 0;
+                if (isInView) {
+                  v2.play().catch(() => {});
+                  setIsPlaying(true);
+                }
               }
-            }
+            } catch (_) {}
           };
-          // Try immediately
           checkAndPlay();
-          // Also try after a short delay to ensure element is ready
           setTimeout(checkAndPlay, 200);
         }
+      } catch (err) {
+        console.warn('Resume video handler error:', err);
       }
     };
     
@@ -1495,52 +1491,68 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     };
   }, [postId, currentItem?.type]);
 
-  // Intersection Observer for auto-play
+  // Intersection Observer for auto-play (wrapped in try/catch for mobile – avoids "Something went wrong" on phone)
   React.useEffect(() => {
-    if (currentItem?.type === 'video' && videoRef.current) {
+    if (currentItem?.type !== 'video' || !videoRef.current) return;
+    const videoEl = videoRef.current;
+    try {
       observerRef.current = new IntersectionObserver(
         (entries) => {
           entries.forEach((entry) => {
-            if (entry.isIntersecting) {
-              // Video is in view - play it
-              if (videoRef.current) {
-                // Restore saved time if available
-                if (postId && videoTimesMap) {
-                  const savedTime = videoTimesMap.get(postId);
-                  if (savedTime !== undefined && savedTime > 0 && savedTime < videoRef.current.duration) {
-                    videoRef.current.currentTime = savedTime;
+            try {
+              if (entry.isIntersecting) {
+                const v = videoRef.current;
+                if (v) {
+                  const duration = Number(v.duration);
+                  const validDuration = Number.isFinite(duration) && duration > 0;
+                  if (postId && videoTimesMap && validDuration) {
+                    const savedTime = videoTimesMap.get(postId);
+                    if (savedTime !== undefined && savedTime > 0 && savedTime < duration) {
+                      v.currentTime = savedTime;
+                    }
                   }
+                  v.play().catch((err) => {
+                    console.warn('Video play failed (e.g. mobile autoplay):', err);
+                  });
+                  setIsPlaying(true);
                 }
-                // Regular videos play muted
-                videoRef.current.play().catch((error) => {
-                  console.error('Error playing video:', error);
-                });
-                setIsPlaying(true);
-              }
-            } else {
-              // Video is out of view - pause it
-              if (videoRef.current) {
-                // Save current time before pausing
-                if (postId && videoTimesMap) {
-                  videoTimesMap.set(postId, videoRef.current.currentTime);
+                setShowMuteButton(true);
+                if (muteButtonHideTimerRef.current) clearTimeout(muteButtonHideTimerRef.current);
+                muteButtonHideTimerRef.current = setTimeout(() => {
+                  setShowMuteButton(false);
+                  muteButtonHideTimerRef.current = null;
+                }, 2000);
+              } else {
+                const v = videoRef.current;
+                if (v) {
+                  if (postId && videoTimesMap) {
+                    videoTimesMap.set(postId, v.currentTime);
+                  }
+                  v.pause();
+                  setIsPlaying(false);
+                  setShowControls(false);
                 }
-                videoRef.current.pause();
-                setIsPlaying(false);
-                setShowControls(false); // Don't show controls when auto-paused by scrolling
+                if (muteButtonHideTimerRef.current) clearTimeout(muteButtonHideTimerRef.current);
+                muteButtonHideTimerRef.current = null;
+                setShowMuteButton(false);
               }
+            } catch (err) {
+              console.warn('IntersectionObserver callback error (mobile):', err);
             }
           });
         },
-        { threshold: 0.5 } // Play when 50% of video is visible
+        { threshold: 0.5 }
       );
-
-      observerRef.current.observe(videoRef.current);
+      observerRef.current.observe(videoEl);
+    } catch (err) {
+      console.warn('IntersectionObserver setup error:', err);
     }
 
     return () => {
       if (observerRef.current) {
         observerRef.current.disconnect();
       }
+      if (muteButtonHideTimerRef.current) clearTimeout(muteButtonHideTimerRef.current);
     };
   }, [currentItem?.type, postId]);
 
@@ -1694,33 +1706,14 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       singleTapTimer.current = setTimeout(() => {
         // Only process single tap if no second tap came within threshold
         if (!isProcessingDoubleTap.current) {
-          // For feed videos, single tap should NOT control play/pause anymore.
-          // Only double-tap likes and the dedicated mute button affect video.
-          if (currentItem?.type !== 'video' && onOpenScenes) {
-            // For non-videos, single tap opens scenes
-            // Check if the click was on an interactive element (button, link, etc.)
-            // We want to open scenes unless clicking on a real button/link
-            const target = e?.target as HTMLElement;
-            const mediaContainer = mediaContainerRef.current;
-
-            // Check if target is within the media container
-            if (mediaContainer && (target === mediaContainer || mediaContainer.contains(target))) {
-              // Check if clicking on a real interactive element (button or link)
-              // Exclude the media container itself (which has role="button" for accessibility)
-              const clickedButton = target.closest('button');
-              const clickedLink = target.closest('a');
-              const isRealButton = clickedButton && clickedButton !== (mediaContainer as any);
-              const isRealLink = clickedLink && clickedLink !== (mediaContainer as any);
-
-              // Check if click originated from PostHeader (which is absolutely positioned over media)
-              const postHeader = target.closest('[class*="PostHeader"], [class*="postHeader"], [class*="relative flex items-start justify-between"]');
-              const isFromPostHeader = postHeader !== null;
-
-              // Only open scenes if NOT clicking on a real button, link, or PostHeader
-              if (!isRealButton && !isRealLink && !isFromPostHeader) {
-                onOpenScenes();
-              }
-            }
+          // For feed videos: single tap shows the mute button again (then it hides after 2s)
+          if (currentItem?.type === 'video') {
+            setShowMuteButton(true);
+            if (muteButtonHideTimerRef.current) clearTimeout(muteButtonHideTimerRef.current);
+            muteButtonHideTimerRef.current = setTimeout(() => {
+              setShowMuteButton(false);
+              muteButtonHideTimerRef.current = null;
+            }, 2000);
           }
         }
         singleTapTimer.current = null;
@@ -1732,23 +1725,33 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   }
 
   function handleTouchEnd(e: React.TouchEvent) {
-    e.preventDefault(); // Prevent default touch behavior
+    try {
+      e.preventDefault(); // Can throw on mobile if listener is passive
+    } catch (_) {
+      // Ignore – some mobile browsers don't allow preventDefault in passive touch
+    }
     touchHandled.current = true;
-    handleTap(e);
-    // Prevent click event from firing after touch
+    try {
+      handleTap(e);
+    } catch (err) {
+      console.warn('Media handleTap error (touch):', err);
+    }
     setTimeout(() => {
       touchHandled.current = false;
     }, 400);
   }
 
   function handleClick(e: React.MouseEvent) {
-    // Prevent click if touch was already handled
     if (touchHandled.current) {
       e.preventDefault();
       e.stopPropagation();
       return;
     }
-    handleTap(e);
+    try {
+      handleTap(e);
+    } catch (err) {
+      console.warn('Media handleTap error (click):', err);
+    }
   }
 
   // Set loading to false after timeout (fallback if image doesn't load)
@@ -1762,12 +1765,24 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     }
   }, [currentItem?.type, isLoading]);
 
-  // Cleanup timers and reset state on unmount or media change
+  // When switching to a video (e.g. carousel), show mute button for 2s
   React.useEffect(() => {
+    if (currentItem?.type === 'video') {
+      setShowMuteButton(true);
+      if (muteButtonHideTimerRef.current) clearTimeout(muteButtonHideTimerRef.current);
+      muteButtonHideTimerRef.current = setTimeout(() => {
+        setShowMuteButton(false);
+        muteButtonHideTimerRef.current = null;
+      }, 2000);
+    }
     return () => {
       if (singleTapTimer.current) {
         clearTimeout(singleTapTimer.current);
         singleTapTimer.current = null;
+      }
+      if (muteButtonHideTimerRef.current) {
+        clearTimeout(muteButtonHideTimerRef.current);
+        muteButtonHideTimerRef.current = null;
       }
       // Reset double tap processing state
       isProcessingDoubleTap.current = false;
@@ -1777,9 +1792,9 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     };
   }, [currentIndex]); // Reset when switching media items
 
-  // Retract "View in Scenes" button after 2 seconds
+  // Retract "View in Scenes" button after 2 seconds (for both video and image)
   React.useEffect(() => {
-    if (currentItem?.type === 'video' && onOpenScenes && !isLoading) {
+    if ((currentItem?.type === 'video' || currentItem?.type === 'image') && onOpenScenes && !isLoading) {
       setIsViewInScenesExpanded(true);
       const timer = setTimeout(() => {
         setIsViewInScenesExpanded(false);
@@ -2084,8 +2099,8 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                 </div>
               )}
 
-              {/* Mute/Unmute Button - Center of video (always visible) */}
-              {!isLoading && !hasError && currentItem.type === 'video' && (
+              {/* Mute/Unmute Button - Center of video (show when scroll onto card, hide after 2s; one tap brings back) */}
+              {!isLoading && !hasError && currentItem.type === 'video' && showMuteButton && (
                 <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none" style={{ touchAction: 'auto' }}>
                   <button
                     onClick={(e) => {
@@ -2111,8 +2126,8 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                 </div>
               )}
 
-              {/* View in Scenes Button - Bottom right of video (kept below bottom nav z-index) */}
-              {!isLoading && !hasError && currentItem.type === 'video' && onOpenScenes && (
+              {/* View in Scenes Button - Bottom right for video and image (kept below bottom nav z-index) */}
+              {!isLoading && !hasError && (currentItem.type === 'video' || currentItem.type === 'image') && onOpenScenes && (
                 <div className="absolute bottom-4 right-4 z-20 pointer-events-auto" style={{ touchAction: 'auto' }}>
                   <button
                     onClick={(e) => {
@@ -2165,8 +2180,8 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                 </div>
               )}
 
-              {/* Paused Overlay - Mute Button Only (no play/pause control) */}
-              {isPaused && currentItem.type === 'video' && (
+              {/* Paused Overlay - Mute Button Only (no play/pause control); same show/hide as center mute */}
+              {isPaused && currentItem.type === 'video' && showMuteButton && (
                 <div className="absolute inset-0 flex items-center justify-center z-40 pointer-events-none">
                   <div className="flex flex-col items-center gap-3">
                     {/* Centered Mute Button */}
@@ -2642,8 +2657,9 @@ function EngagementBar({
     
     // Show confirmation modal
     const result = await Swal.fire({
-      title: 'Reshare this to followers?',
+      title: 'Gazetteer says',
       html: `
+        <p style="color: #ffffff; font-size: 18px; font-weight: 600; margin: 0 0 12px 0;">Reshare this to followers?</p>
         <div style="text-align: center; padding: 20px 0;">
           <p style="color: #ffffff; font-size: 14px; line-height: 20px; margin: 0;">
             This post will be shared to your followers in their Following feed.
@@ -2930,7 +2946,7 @@ function BoostMetrics({ post, isOpen }: { post: Post; isOpen: boolean }) {
   );
 }
 
-export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare, onOpenComments, onView, onReclip, onOpenScenes, showBoostIcon, onBoost, priority = false }: {
+export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare, onOpenComments, onView, onReclip, onOpenScenes, showBoostIcon, onBoost, onDelete, priority = false }: {
   post: Post;
   onLike: () => Promise<void>;
   onFollow?: () => Promise<void>;
@@ -2941,6 +2957,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   onOpenScenes: () => void;
   showBoostIcon?: boolean;
   onBoost?: () => Promise<void>;
+  onDelete?: () => Promise<void>;
   priority?: boolean;
 }) {
   const { user } = useAuth();
@@ -3012,7 +3029,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
     };
   }, [post.id, user?.id]);
 
-  // Track views when post comes into viewport
+  // Track views when post comes into viewport (try/catch so mobile errors don't crash app)
   React.useEffect(() => {
     if (hasBeenViewed) return;
 
@@ -3021,16 +3038,24 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         entries.forEach((entry) => {
           if (entry.isIntersecting && !hasBeenViewed) {
             setHasBeenViewed(true);
-            observer.disconnect(); // Disconnect immediately after first view
-            onView();
+            observer.disconnect();
+            try {
+              onView();
+            } catch (err) {
+              console.warn('onView error:', err);
+            }
           }
         });
       },
-      { threshold: 0.5 } // Trigger when 50% of post is visible
+      { threshold: 0.5 }
     );
 
     if (articleRef.current) {
-      observer.observe(articleRef.current);
+      try {
+        observer.observe(articleRef.current);
+      } catch (err) {
+        console.warn('View observer observe error:', err);
+      }
     }
 
     return () => observer.disconnect();
@@ -3045,6 +3070,16 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
       {/* Show PostHeader normally for text-only posts */}
       {isTextOnly && <PostHeader post={post} onFollow={onFollow} isOverlaid={false} onMenuClick={() => setMenuOpen(true)} />}
       <TagRow tags={post.tags} />
+      {post.isBoosted && (
+        <div className="px-4 pt-2 pb-1.5 flex items-center gap-2">
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-500/20 text-amber-400 border border-amber-500/40">
+            Sponsored
+          </span>
+          {post.boostFeedType && (
+            <span className="text-xs text-gray-500 dark:text-gray-400 capitalize">· {post.boostFeedType} boost</span>
+          )}
+        </div>
+      )}
       <div className="relative w-full overflow-hidden" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
         {/* PostHeader overlaid on media for posts with media */}
         {hasMedia && (
@@ -3206,10 +3241,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
               // TODO: Implement not interested
               console.log('Not interested in post:', post.id);
             }}
-            onDelete={async () => {
-              // TODO: Implement delete
-              console.log('Delete post:', post.id);
-            }}
+            onDelete={onDelete}
             onEdit={() => {
               setMenuOpen(false);
               setEditModalOpen(true);
@@ -3616,12 +3648,12 @@ function FeedPageWrapper() {
   React.useEffect(() => {
     if (!online) return;
     drain(async (m) => {
-      if (m.type === 'like') await toggleLike(m.userId, m.postId);
-      if (m.type === 'follow') await toggleFollowForPost(m.userId, m.postId);
-      if (m.type === 'comment') await addComment(m.postId, m.userId, m.text!);
-      if (m.type === 'view') await incrementViews(m.userId, m.postId);
-      if (m.type === 'share') await incrementShares(m.userId, m.postId);
-      if (m.type === 'reclip') await reclipPost(m.userId, m.postId, m.userHandle!);
+      if (m.type === 'like' && m.postId) await toggleLike(m.userId, m.postId);
+      if (m.type === 'follow' && m.postId) await toggleFollowForPost(m.userId, m.postId);
+      if (m.type === 'comment' && m.postId) await addComment(m.postId, m.userId, m.text!);
+      if (m.type === 'view' && m.postId) await incrementViews(m.userId, m.postId);
+      if (m.type === 'share' && m.postId) await incrementShares(m.userId, m.postId);
+      if (m.type === 'reclip' && m.postId) await reclipPost(m.userId, m.postId, m.userHandle!);
     });
   }, [online]);
 
@@ -3879,8 +3911,15 @@ function FeedPageWrapper() {
     setPages(cur => {
       const updated = cur.map(group => group.map(p => {
         if (p.id === id) {
-          console.log('Updating post:', id, 'from likes:', p.stats.likes, 'to:', updater({ ...p }).stats.likes);
-          return updater({ ...p });
+          const next = updater({ ...p });
+          // Preserve boost label so it doesn't disappear after like/follow/view (API doesn't return these)
+          const preserved = {
+            ...next,
+            isBoosted: next.isBoosted ?? p.isBoosted,
+            boostFeedType: next.boostFeedType ?? p.boostFeedType
+          };
+          console.log('Updating post:', id, 'from likes:', p.stats.likes, 'to:', preserved.stats.likes);
+          return preserved;
         }
         return p;
       }));
@@ -3895,6 +3934,14 @@ function FeedPageWrapper() {
       return updated;
     });
   }
+
+  // When returning from payment after boosting, mark the post so the Sponsored label shows (incl. text-only posts)
+  React.useEffect(() => {
+    const state = routerLocation.state as { boostSuccess?: boolean; postId?: string; feedType?: 'local' | 'regional' | 'national' } | null;
+    if (routerLocation.pathname !== '/feed' || !state?.boostSuccess || !state.postId || !state.feedType) return;
+    updateOne(state.postId, p => ({ ...p, isBoosted: true, boostFeedType: state.feedType! }));
+    navigate('/feed', { replace: true, state: {} });
+  }, [routerLocation.pathname, routerLocation.state]);
 
   // Fetch ads when filter changes
   React.useEffect(() => {
@@ -4084,19 +4131,29 @@ function FeedPageWrapper() {
             onLike={async () => {
               console.log('Like button clicked for post:', p.id, 'userLiked:', p.userLiked);
               if (!online) {
-                // Optimistically toggle icon only when offline; don't change counts
                 updateOne(p.id, post => ({ ...post, userLiked: !post.userLiked }));
                 await enqueue({ type: 'like', postId: p.id, userId });
                 return;
               }
-              // Use server as source of truth to avoid double increments
-              const updated = await toggleLike(userId, p.id);
-              updateOne(p.id, _post => ({ ...updated }));
-              // Notify EngagementBar with authoritative values
-              window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
-                detail: { liked: updated.userLiked, likes: updated.stats.likes }
-              }));
-              console.log('Like event dispatched for post:', p.id, 'with', { liked: updated.userLiked, likes: updated.stats.likes });
+              const nextLiked = !p.userLiked;
+              const nextLikes = p.stats.likes + (nextLiked ? 1 : -1);
+              try {
+                const updated = await toggleLike(userId, p.id);
+                updateOne(p.id, _post => ({ ...updated }));
+                window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
+                  detail: { liked: updated.userLiked, likes: updated.stats.likes }
+                }));
+              } catch (err) {
+                console.warn('Like failed, updating UI optimistically:', err);
+                updateOne(p.id, post => ({
+                  ...post,
+                  userLiked: nextLiked,
+                  stats: { ...post.stats, likes: Math.max(0, nextLikes) }
+                }));
+                window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
+                  detail: { liked: nextLiked, likes: Math.max(0, nextLikes) }
+                }));
+              }
             }}
             onFollow={async () => {
           if (!online) {
@@ -4198,7 +4255,13 @@ function FeedPageWrapper() {
                 // Already has a pending request - show message
                 const Swal = (await import('sweetalert2')).default;
                 Swal.fire({
-                  title: '',
+                  title: 'Gazetteer says',
+                  customClass: {
+                    title: 'gazetteer-shimmer',
+                    popup: '!rounded-2xl !shadow-xl !border-0',
+                    container: '!p-0',
+                    confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
+                  },
                   html: `
                     <div style="text-align: center; padding: 8px 0;">
                       <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">
@@ -4217,11 +4280,6 @@ function FeedPageWrapper() {
                   background: '#ffffff',
                   width: '400px',
                   padding: '0',
-                  customClass: {
-                    popup: '!rounded-2xl !shadow-xl !border-0',
-                    container: '!p-0',
-                    confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                  },
                   buttonsStyling: false
                 });
                 return;
@@ -4239,7 +4297,13 @@ function FeedPageWrapper() {
                   console.warn('Found pending request on double-check, showing pending message instead of creating new request');
                   const Swal = (await import('sweetalert2')).default;
                   Swal.fire({
-                    title: '',
+                    title: 'Gazetteer says',
+                    customClass: {
+                      title: 'gazetteer-shimmer',
+                      popup: '!rounded-2xl !shadow-xl !border-0',
+                      container: '!p-0',
+                      confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
+                    },
                     html: `
                       <div style="text-align: center; padding: 8px 0;">
                         <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">
@@ -4258,11 +4322,6 @@ function FeedPageWrapper() {
                     background: '#ffffff',
                     width: '400px',
                     padding: '0',
-                    customClass: {
-                      popup: '!rounded-2xl !shadow-xl !border-0',
-                      container: '!p-0',
-                      confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                    },
                     buttonsStyling: false
                   });
                   return;
@@ -4278,7 +4337,7 @@ function FeedPageWrapper() {
                     console.log('API returned pending status, creating follow request in localStorage');
                     createFollowRequest(user.handle, p.userHandle);
                     
-                    // Create notification
+                    // Create notification - show Follow Request Sent popup
                     try {
                       await createNotification({
                         type: 'follow_request',
@@ -4293,7 +4352,13 @@ function FeedPageWrapper() {
                     // Show Instagram-style popup
                     const Swal = (await import('sweetalert2')).default;
                     Swal.fire({
-                      title: '',
+                      title: 'Gazetteer says',
+                      customClass: {
+                        title: 'gazetteer-shimmer',
+                        popup: '!rounded-2xl !shadow-xl !border-0',
+                        container: '!p-0',
+                        confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
+                      },
                       html: `
                         <div style="text-align: center; padding: 8px 0;">
                           <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
@@ -4314,11 +4379,6 @@ function FeedPageWrapper() {
                       background: '#ffffff',
                       width: '400px',
                       padding: '0',
-                      customClass: {
-                        popup: '!rounded-2xl !shadow-xl !border-0',
-                        container: '!p-0',
-                        confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                      },
                       buttonsStyling: false
                     });
                     
@@ -4344,7 +4404,13 @@ function FeedPageWrapper() {
                       console.log('Mock fallback: Found pending request on recheck, showing pending message');
                       const Swal = (await import('sweetalert2')).default;
                       Swal.fire({
-                        title: '',
+                        title: 'Gazetteer says',
+                        customClass: {
+                          title: 'gazetteer-shimmer',
+                          popup: '!rounded-2xl !shadow-xl !border-0',
+                          container: '!p-0',
+                          confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
+                        },
                         html: `
                           <div style="text-align: center; padding: 8px 0;">
                             <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">
@@ -4363,11 +4429,6 @@ function FeedPageWrapper() {
                         background: '#ffffff',
                         width: '400px',
                         padding: '0',
-                        customClass: {
-                          popup: '!rounded-2xl !shadow-xl !border-0',
-                          container: '!p-0',
-                          confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                        },
                         buttonsStyling: false
                       });
                       return;
@@ -4396,7 +4457,13 @@ function FeedPageWrapper() {
                       
                       const Swal = (await import('sweetalert2')).default;
                       Swal.fire({
-                        title: '',
+                        title: 'Gazetteer says',
+                        customClass: {
+                          title: 'gazetteer-shimmer',
+                          popup: '!rounded-2xl !shadow-xl !border-0',
+                          container: '!p-0',
+                          confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
+                        },
                         html: `
                           <div style="text-align: center; padding: 8px 0;">
                             <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
@@ -4417,11 +4484,6 @@ function FeedPageWrapper() {
                         background: '#ffffff',
                         width: '400px',
                         padding: '0',
-                        customClass: {
-                          popup: '!rounded-2xl !shadow-xl !border-0',
-                          container: '!p-0',
-                          confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                        },
                         buttonsStyling: false
                       });
                       
@@ -4467,16 +4529,21 @@ function FeedPageWrapper() {
             }}
             onOpenComments={() => handleOpenComments(p.id)}
             onView={async () => {
+              // Skip view tracking for frontend-only mock posts (mock-scenes-*) – they don't exist in the API
+              if (p.id.startsWith('mock-scenes-')) return;
               if (!online) {
                 await enqueue({ type: 'view', postId: p.id, userId });
                 return;
               }
-              // Use server as source of truth to avoid double increments
-              const updated = await incrementViews(userId, p.id);
-              updateOne(p.id, _post => ({ ...updated }));
-
-              // Notify EngagementBar to update view count
-              window.dispatchEvent(new CustomEvent(`viewAdded-${p.id}`));
+              try {
+                const updated = await incrementViews(userId, p.id);
+                // Don't overwrite feed state with dummy post when API/post not found (would break UI)
+                if (updated.userHandle === 'Unknown') return;
+                updateOne(p.id, _post => ({ ...updated }));
+                window.dispatchEvent(new CustomEvent(`viewAdded-${p.id}`));
+              } catch (err) {
+                console.warn('incrementViews error:', err);
+              }
             }}
             onReclip={async () => {
               // Prevent users from reclipping their own posts
@@ -4538,11 +4605,66 @@ function FeedPageWrapper() {
               // Dispatch event to pause feed video smoothly
               window.dispatchEvent(new CustomEvent(`scenesOpening-${p.id}`));
             }}
-            showBoostIcon={user?.handle === p.userHandle}
-            onBoost={async () => {
+            showBoostIcon={user?.handle === p.userHandle && !p.originalUserHandle}
+            onBoost={user?.handle === p.userHandle && !p.originalUserHandle ? async () => {
               setSelectedPostForBoost(p);
               setBoostModalOpen(true);
-            }}
+            } : undefined}
+            onDelete={user?.handle === p.userHandle && !p.originalUserHandle ? async () => {
+              const result = await Swal.fire({
+                title: 'Gazetteer says',
+                html: `
+                  <div style="text-align: center; padding: 8px 0;">
+                    <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);">
+                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        <line x1="10" y1="11" x2="10" y2="17"></line>
+                        <line x1="14" y1="11" x2="14" y2="17"></line>
+                      </svg>
+                    </div>
+                    <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Delete post?</h3>
+                    <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">This can't be undone.</p>
+                  </div>
+                `,
+                showCancelButton: true,
+                confirmButtonText: 'Delete',
+                cancelButtonText: 'Cancel',
+                confirmButtonColor: '#dc2626',
+                cancelButtonColor: '#6b7280',
+                background: '#ffffff',
+                width: '400px',
+                padding: '0',
+                customClass: {
+                  popup: '!rounded-2xl !shadow-xl !border-0',
+                  container: '!p-0',
+                  confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#dc2626] !hover:bg-[#b91c1c] !text-white !transition-colors',
+                  cancelButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#f3f4f6] !hover:bg-[#e5e7eb] !text-[#374151] !transition-colors'
+                },
+                buttonsStyling: false
+              });
+              if (!result.isConfirmed) return;
+              try {
+                await deletePost(userId, p.id, user?.handle);
+                setPages(cur => cur.map(group => group.filter(x => x.id !== p.id)));
+              } catch (err) {
+                console.error('Delete post failed:', err);
+                await Swal.fire({
+                  title: 'Gazetteer says',
+                  html: `
+                    <div style="text-align: center; padding: 8px 0;">
+                      <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0;">Could not delete post</h3>
+                      <p style="font-size: 14px; color: #8e8e8e; margin: 0;">${err instanceof Error ? err.message : 'Please try again.'}</p>
+                    </div>
+                  `,
+                  confirmButtonText: 'OK',
+                  background: '#ffffff',
+                  width: '400px',
+                  customClass: { popup: '!rounded-2xl !shadow-xl !border-0', confirmButton: '!rounded-lg !px-6 !py-2 !bg-[#0095f6] !hover:bg-[#0084d4] !text-white' },
+                  buttonsStyling: false
+                });
+              }
+            } : undefined}
           />
         );
       })}
@@ -4611,10 +4733,10 @@ function FeedPageWrapper() {
             setSelectedPostForBoost(null);
           }}
           onSelect={(feedType, price) => {
-            // Navigate to payment page with boost details
-            navigate('/boost-payment', {
+            // Navigate to payment page with full post (same as Boost page) so PaymentPage can boost
+            navigate('/payment', {
               state: {
-                postId: selectedPostForBoost.id,
+                post: selectedPostForBoost,
                 feedType,
                 price
               }
@@ -4653,26 +4775,37 @@ function FeedPageWrapper() {
               if (!online) {
                 const optimisticPost = { ...p, userLiked: !p.userLiked };
                 updateOne(p.id, post => ({ ...post, userLiked: !post.userLiked }));
-                // Update selectedPostForScenes if this post is currently open in Scenes
                 if (selectedPostForScenes?.id === p.id) {
                   setSelectedPostForScenes(optimisticPost);
                 }
-                // Dispatch event for ScenesModal to update state
                 window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
                   detail: { liked: optimisticPost.userLiked, likes: p.stats.likes }
                 }));
                 await enqueue({ type: 'like', postId: p.id, userId });
                 return;
               }
-              const updated = await toggleLike(userId, p.id);
-              updateOne(p.id, _post => ({ ...updated }));
-              // Update selectedPostForScenes if this post is currently open in Scenes
-              if (selectedPostForScenes?.id === p.id) {
-                setSelectedPostForScenes(updated);
+              const nextLiked = !p.userLiked;
+              const nextLikes = p.stats.likes + (nextLiked ? 1 : -1);
+              try {
+                const updated = await toggleLike(userId, p.id);
+                updateOne(p.id, _post => ({ ...updated }));
+                if (selectedPostForScenes?.id === p.id) {
+                  setSelectedPostForScenes(updated);
+                }
+                window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
+                  detail: { liked: updated.userLiked, likes: updated.stats.likes }
+                }));
+              } catch (err) {
+                console.warn('Like failed, updating UI optimistically:', err);
+                const optimistic = { ...p, userLiked: nextLiked, stats: { ...p.stats, likes: Math.max(0, nextLikes) } };
+                updateOne(p.id, _ => optimistic);
+                if (selectedPostForScenes?.id === p.id) {
+                  setSelectedPostForScenes(optimistic);
+                }
+                window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
+                  detail: { liked: nextLiked, likes: Math.max(0, nextLikes) }
+                }));
               }
-              window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
-                detail: { liked: updated.userLiked, likes: updated.stats.likes }
-              }));
             }}
             onFollow={async () => {
               const { isProfilePrivate, createFollowRequest, hasPendingFollowRequest } = await import('./api/privacy');
@@ -4687,7 +4820,7 @@ function FeedPageWrapper() {
                 if (hasPending) {
                   const Swal = (await import('sweetalert2')).default;
                   await Swal.fire({
-                    title: '',
+                    title: 'Gazetteer says',
                     html: `
                       <div style="text-align: center; padding: 8px 0;">
                         <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">
@@ -4713,7 +4846,7 @@ function FeedPageWrapper() {
                     },
                     buttonsStyling: false
                   });
-                  return;
+                  return false; // not following yet – request pending
                 }
 
                 // Create new follow request (local + optional notification)
@@ -4729,10 +4862,11 @@ function FeedPageWrapper() {
                 } catch {
                   // non-fatal
                 }
-                const Swal = (await import('sweetalert2')).default;
-                await Swal.fire({
-                  title: '',
-                  html: `
+                try {
+                  const Swal = (await import('sweetalert2')).default;
+                  await Swal.fire({
+                    title: 'Gazetteer says',
+                    html: `
                     <div style="text-align: center; padding: 8px 0;">
                       <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
                         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -4746,20 +4880,23 @@ function FeedPageWrapper() {
                       <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Your follow request has been sent. You will be notified when they accept.</p>
                     </div>
                   `,
-                  showConfirmButton: true,
-                  confirmButtonText: 'OK',
-                  confirmButtonColor: '#0095f6',
-                  background: '#ffffff',
-                  width: '400px',
-                  padding: '0',
-                  customClass: {
-                    popup: '!rounded-2xl !shadow-xl !border-0',
-                    container: '!p-0',
-                    confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                  },
-                  buttonsStyling: false
-                });
-                return false;
+                    showConfirmButton: true,
+                    confirmButtonText: 'OK',
+                    confirmButtonColor: '#0095f6',
+                    background: '#ffffff',
+                    width: '400px',
+                    padding: '0',
+                    customClass: {
+                      popup: '!rounded-2xl !shadow-xl !border-0',
+                      container: '!p-0',
+                      confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
+                    },
+                    buttonsStyling: false
+                  });
+                } catch {
+                  // ensure we still return false if Swal fails
+                }
+                return false; // not following yet – request sent, awaiting acceptance
               }
 
               // PUBLIC PROFILES
@@ -4807,6 +4944,7 @@ function FeedPageWrapper() {
               setShareModalOpen(true);
             }}
             onOpenComments={() => handleOpenComments(p.id)}
+            onBoost={user?.handle === p.userHandle && !p.originalUserHandle ? () => { setSelectedPostForBoost(p); setBoostModalOpen(true); } : undefined}
             onReclip={async () => {
               // Prevent users from reclipping their own posts
               if (p.userHandle === user?.handle) {
@@ -4904,7 +5042,7 @@ function BoostPageWrapper() {
   const [unreadCount, setUnreadCount] = React.useState(0);
   const [hasInbox, setHasInbox] = React.useState(false);
 
-  // Load user's posts
+  // Load user's posts – only posts the user created (exclude reclipped posts)
   React.useEffect(() => {
     async function loadUserPosts() {
       if (!user?.handle) return;
@@ -4913,8 +5051,9 @@ function BoostPageWrapper() {
       setError(null);
       try {
         const userPosts = await fetchPostsByUser(user.handle, 50);
-        // Decorate posts for the current user
-        const decorated = userPosts.map(p => decorateForUser(userId, p));
+        // Boost page: only show posts the user created, not reclips (reclips have originalUserHandle set)
+        const createdOnly = userPosts.filter(p => !p.originalUserHandle);
+        const decorated = createdOnly.map(p => decorateForUser(userId, p));
         setPosts(decorated);
       } catch (err) {
         console.error('Error loading user posts:', err);
@@ -4931,11 +5070,12 @@ function BoostPageWrapper() {
   const location = useLocation();
   React.useEffect(() => {
     const handleBoostSuccess = () => {
-      // Reload posts to update boost status
+      // Reload posts to update boost status (only posts the user created, not reclips)
       if (user?.handle) {
         fetchPostsByUser(user.handle, 50)
           .then(userPosts => {
-            const decorated = userPosts.map(p => decorateForUser(userId, p));
+            const createdOnly = userPosts.filter(p => !p.originalUserHandle);
+            const decorated = createdOnly.map(p => decorateForUser(userId, p));
             setPosts(decorated);
           })
           .catch(console.error);
@@ -4971,7 +5111,11 @@ function BoostPageWrapper() {
   };
 
   function updateOne(id: string, updater: (p: Post) => Post) {
-    setPosts(cur => cur.map(p => p.id === id ? updater({ ...p }) : p));
+    setPosts(cur => cur.map(p => {
+      if (p.id !== id) return p;
+      const next = updater({ ...p });
+      return { ...next, isBoosted: next.isBoosted ?? p.isBoosted, boostFeedType: next.boostFeedType ?? p.boostFeedType };
+    }));
   }
 
   // Not logged in
@@ -5034,11 +5178,25 @@ function BoostPageWrapper() {
                 await enqueue({ type: 'like', postId: p.id, userId });
                 return;
               }
-              const updated = await toggleLike(userId, p.id);
-              updateOne(p.id, _post => ({ ...updated }));
-              window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
-                detail: { liked: updated.userLiked, likes: updated.stats.likes }
-              }));
+              const nextLiked = !p.userLiked;
+              const nextLikes = p.stats.likes + (nextLiked ? 1 : -1);
+              try {
+                const updated = await toggleLike(userId, p.id);
+                updateOne(p.id, _post => ({ ...updated }));
+                window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
+                  detail: { liked: updated.userLiked, likes: updated.stats.likes }
+                }));
+              } catch (err) {
+                console.warn('Like failed, updating UI optimistically:', err);
+                updateOne(p.id, post => ({
+                  ...post,
+                  userLiked: nextLiked,
+                  stats: { ...post.stats, likes: Math.max(0, nextLikes) }
+                }));
+                window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
+                  detail: { liked: nextLiked, likes: Math.max(0, nextLikes) }
+                }));
+              }
             }}
             onShare={async () => {
               setSelectedPostForShare(p);
@@ -5046,16 +5204,19 @@ function BoostPageWrapper() {
             }}
             onOpenComments={() => handleOpenComments(p.id)}
             onView={async () => {
+              if (p.id.startsWith('mock-scenes-')) return;
               if (!online) {
                 await enqueue({ type: 'view', postId: p.id, userId });
                 return;
               }
-              // Use server as source of truth to avoid double increments
-              const updated = await incrementViews(userId, p.id);
-              updateOne(p.id, _post => ({ ...updated }));
-
-              // Notify EngagementBar to update view count
-              window.dispatchEvent(new CustomEvent(`viewAdded-${p.id}`));
+              try {
+                const updated = await incrementViews(userId, p.id);
+                if (updated.userHandle === 'Unknown') return;
+                updateOne(p.id, _post => ({ ...updated }));
+                window.dispatchEvent(new CustomEvent(`viewAdded-${p.id}`));
+              } catch (err) {
+                console.warn('incrementViews error:', err);
+              }
             }}
             onReclip={async () => {
               // Users can't reclip their own posts
@@ -5064,6 +5225,61 @@ function BoostPageWrapper() {
             onOpenScenes={() => {
               setSelectedPostForScenes(p);
               setScenesOpen(true);
+            }}
+            onDelete={async () => {
+              const result = await Swal.fire({
+                  title: 'Gazetteer says',
+                  html: `
+                  <div style="text-align: center; padding: 8px 0;">
+                    <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);">
+                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        <line x1="10" y1="11" x2="10" y2="17"></line>
+                        <line x1="14" y1="11" x2="14" y2="17"></line>
+                      </svg>
+                    </div>
+                    <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Delete post?</h3>
+                    <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">This can't be undone.</p>
+                  </div>
+                `,
+                showCancelButton: true,
+                confirmButtonText: 'Delete',
+                cancelButtonText: 'Cancel',
+                confirmButtonColor: '#dc2626',
+                cancelButtonColor: '#6b7280',
+                background: '#ffffff',
+                width: '400px',
+                padding: '0',
+                customClass: {
+                  popup: '!rounded-2xl !shadow-xl !border-0',
+                  container: '!p-0',
+                  confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#dc2626] !hover:bg-[#b91c1c] !text-white !transition-colors',
+                  cancelButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#f3f4f6] !hover:bg-[#e5e7eb] !text-[#374151] !transition-colors'
+                },
+                buttonsStyling: false
+              });
+              if (!result.isConfirmed) return;
+              try {
+                await deletePost(userId, p.id, user?.handle);
+                setPosts(cur => cur.filter(x => x.id !== p.id));
+              } catch (err) {
+                console.error('Delete post failed:', err);
+                await Swal.fire({
+                  title: 'Gazetteer says',
+                  html: `
+                    <div style="text-align: center; padding: 8px 0;">
+                      <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0;">Could not delete post</h3>
+                      <p style="font-size: 14px; color: #8e8e8e; margin: 0;">${err instanceof Error ? err.message : 'Please try again.'}</p>
+                    </div>
+                  `,
+                  confirmButtonText: 'OK',
+                  background: '#ffffff',
+                  width: '400px',
+                  customClass: { popup: '!rounded-2xl !shadow-xl !border-0', confirmButton: '!rounded-lg !px-6 !py-2 !bg-[#0095f6] !hover:bg-[#0084d4] !text-white' },
+                  buttonsStyling: false
+                });
+              }
             }}
           />
         ))
@@ -5103,11 +5319,24 @@ function BoostPageWrapper() {
               await enqueue({ type: 'like', postId: selectedPostForScenes.id, userId });
               return;
             }
-            const updated = await toggleLike(userId, selectedPostForScenes.id);
-            updateOne(selectedPostForScenes.id, _post => ({ ...updated }));
-            window.dispatchEvent(new CustomEvent(`likeToggled-${selectedPostForScenes.id}`, {
-              detail: { liked: updated.userLiked, likes: updated.stats.likes }
-            }));
+            const nextLiked = !selectedPostForScenes.userLiked;
+            const nextLikes = selectedPostForScenes.stats.likes + (nextLiked ? 1 : -1);
+            try {
+              const updated = await toggleLike(userId, selectedPostForScenes.id);
+              updateOne(selectedPostForScenes.id, _post => ({ ...updated }));
+              setSelectedPostForScenes(updated);
+              window.dispatchEvent(new CustomEvent(`likeToggled-${selectedPostForScenes.id}`, {
+                detail: { liked: updated.userLiked, likes: updated.stats.likes }
+              }));
+            } catch (err) {
+              console.warn('Like failed, updating UI optimistically:', err);
+              const optimistic = { ...selectedPostForScenes, userLiked: nextLiked, stats: { ...selectedPostForScenes.stats, likes: Math.max(0, nextLikes) } };
+              updateOne(selectedPostForScenes.id, _ => optimistic);
+              setSelectedPostForScenes(optimistic);
+              window.dispatchEvent(new CustomEvent(`likeToggled-${selectedPostForScenes.id}`, {
+                detail: { liked: nextLiked, likes: Math.max(0, nextLikes) }
+              }));
+            }
           }}
           onFollow={async () => {
             // User's own posts, so no follow action needed
@@ -5117,6 +5346,7 @@ function BoostPageWrapper() {
             setShareModalOpen(true);
           }}
           onOpenComments={() => handleOpenComments(selectedPostForScenes.id)}
+          onBoost={() => { setSelectedPostForBoost(selectedPostForScenes); setBoostModalOpen(true); }}
           onReclip={async () => {
             // Users can't reclip their own posts
             console.log('Cannot reclip your own post');

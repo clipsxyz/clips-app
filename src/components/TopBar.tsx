@@ -12,7 +12,7 @@ type TopBarProps = {
   onLocationChange?: (location: string) => void;
 };
 
-export default function TopBar({ activeTab, onLocationChange }: TopBarProps) {
+export default function TopBar({ activeTab: _activeTab, onLocationChange }: TopBarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();

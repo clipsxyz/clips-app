@@ -37,7 +37,7 @@ export function drawAvatar(
     avatarId: string,
     analysis: AudioAnalysis,
     animationParams: ReturnType<typeof import('./audioAnalysis').getAnimationParams>,
-    progress: number,
+    _progress: number,
     time: number
 ) {
     // Draw background scene (cityscape through window)
@@ -241,10 +241,10 @@ function drawImageMatchingCharacter(
  */
 function drawOrangeHoodie(
     ctx: CanvasRenderingContext2D,
-    style: AvatarStyle,
+    _style: AvatarStyle,
     size: number,
     time: number,
-    animationParams: ReturnType<typeof import('./audioAnalysis').getAnimationParams>
+    _animationParams: ReturnType<typeof import('./audioAnalysis').getAnimationParams>
 ) {
     const bodyWidth = size * 0.85;
     const bodyHeight = size * 1.4;
@@ -379,7 +379,7 @@ function drawProfessionalHead(ctx: CanvasRenderingContext2D, style: AvatarStyle,
  */
 function drawCurlyBrownHair(
     ctx: CanvasRenderingContext2D,
-    style: AvatarStyle,
+    _style: AvatarStyle,
     size: number,
     time: number
 ) {
@@ -637,7 +637,7 @@ function drawExpressiveHands(
     style: AvatarStyle,
     size: number,
     time: number,
-    animationParams: ReturnType<typeof import('./audioAnalysis').getAnimationParams>
+    _animationParams: ReturnType<typeof import('./audioAnalysis').getAnimationParams>
 ) {
     const handY = size * 0.5;
     const handX = size * 0.58;
@@ -755,8 +755,8 @@ function drawProfessionalSparkles(
     ctx: CanvasRenderingContext2D,
     centerX: number,
     centerY: number,
-    width: number,
-    height: number,
+    _width: number,
+    _height: number,
     time: number
 ) {
     const sparkleCount = 20;

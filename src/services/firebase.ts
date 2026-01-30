@@ -28,7 +28,9 @@ async function loadFirebaseModules() {
   }
 
   try {
+    // @ts-expect-error - firebase may not be installed; types resolved at runtime
     firebaseAppModule = await import('firebase/app');
+    // @ts-expect-error - firebase may not be installed; types resolved at runtime
     firebaseMessagingModule = await import('firebase/messaging');
     return { firebaseAppModule, firebaseMessagingModule };
   } catch (error) {

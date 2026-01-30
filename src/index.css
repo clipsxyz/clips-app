@@ -220,9 +220,12 @@ video {
 }
 
 @keyframes borderPulse {
-  0%, 100% {
+
+  0%,
+  100% {
     box-shadow: 0 0 0 0 var(--glow-color, rgba(96, 165, 250, 0.6));
   }
+
   50% {
     box-shadow: 0 0 8px 2px var(--glow-color, rgba(96, 165, 250, 0.8));
   }
@@ -418,6 +421,7 @@ video {
   0% {
     stroke-dashoffset: 420;
   }
+
   100% {
     stroke-dashoffset: -420;
   }
@@ -642,6 +646,36 @@ video {
   padding: 0 !important;
 }
 
+/* Gazetteer says – purple/baby blue gradient + shimmer (private/follow Swals & share-to-stories) */
+@keyframes gazetteerShimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+.gazetteer-shimmer {
+  background: linear-gradient(90deg, #7c3aed 0%, #38bdf8 25%, #93c5fd 50%, #7c3aed 75%, #38bdf8 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: gazetteerShimmer 5s linear infinite;
+  display: inline-block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gazetteer-shimmer {
+    animation: none;
+    background: linear-gradient(90deg, #7c3aed, #93c5fd);
+    background-size: 100% 100%;
+  }
+}
+
 /* Passport shimmer effect - same as news feed tabs */
 .passport-shimmer {
   background: linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%);
@@ -661,19 +695,26 @@ video {
 }
 
 @keyframes tooltipExtend {
-  0%, 100% {
+
+  0%,
+  100% {
     opacity: 0;
     transform: translateX(-10px) translateY(-50%) scale(0.8);
   }
-  10%, 40% {
+
+  10%,
+  40% {
     opacity: 1;
     transform: translateX(0) translateY(-50%) scale(1);
   }
+
   50% {
     opacity: 1;
     transform: translateX(0) translateY(-50%) scale(1);
   }
-  60%, 90% {
+
+  60%,
+  90% {
     opacity: 0;
     transform: translateX(-10px) translateY(-50%) scale(0.8);
   }

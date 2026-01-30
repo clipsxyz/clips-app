@@ -320,7 +320,7 @@ function getCountryCode(countryName: string): string {
     'Lebanon': 'lb', 'Kyrgyzstan': 'kg', 'Turkmenistan': 'tm', 'Singapore': 'sg',
     'Oman': 'om', 'Palestine': 'ps', 'Kuwait': 'kw', 'Georgia': 'ge', 'Mongolia': 'mn',
     'Armenia': 'am', 'Qatar': 'qa', 'Bahrain': 'bh', 'Timor-Leste': 'tl', 'Bhutan': 'bt',
-    'Maldives': 'mv', 'Brunei': 'bn', 'Iran': 'ir', 'Syria': 'sy', 'Turkey': 'tr',
+    'Maldives': 'mv', 'Brunei': 'bn', 'Iran': 'ir', 'Syria': 'sy',
     
     // Africa
     'Nigeria': 'ng', 'Ethiopia': 'et', 'Egypt': 'eg', 'South Africa': 'za', 'Kenya': 'ke',

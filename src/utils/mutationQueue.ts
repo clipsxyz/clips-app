@@ -3,11 +3,15 @@ import { db } from './db';
 type Mutation = {
   id: string;
   at: number;
-  type: 'like' | 'bookmark' | 'follow' | 'comment' | 'view' | 'share' | 'reclip';
-  postId: string;
+  type: 'like' | 'bookmark' | 'follow' | 'comment' | 'view' | 'share' | 'reclip' | 'commentLike' | 'replyLike' | 'reply';
+  postId?: string;
   userId: string;
   text?: string;
   userHandle?: string;
+  commentId?: string;
+  parentCommentId?: string;
+  replyId?: string;
+  parentId?: string;
 };
 
 const QKEY = 'mutations';

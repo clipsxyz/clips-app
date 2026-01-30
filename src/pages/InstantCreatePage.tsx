@@ -196,8 +196,8 @@ export default function InstantCreatePage() {
             console.error('Stream init error:', e);
             Swal.fire({
                 icon: 'error',
-                title: 'Camera Access Failed',
-                text: e.name === 'NotAllowedError' ? 'Please allow camera access in your browser settings' : `Error: ${e.message || e.name || 'Unknown error'}`,
+                title: 'Gazetteer says',
+                html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Camera Access Failed</p><p style="margin: 0;">${e.name === 'NotAllowedError' ? 'Please allow camera access in your browser settings' : `Error: ${e.message || e.name || 'Unknown error'}`}</p>`,
                 confirmButtonColor: '#8B5CF6',
             });
         }
@@ -908,8 +908,8 @@ export default function InstantCreatePage() {
                     if (duration > MAX_VIDEO_SECONDS) {
                         Swal.fire({
                             icon: 'warning',
-                            title: 'Video too long',
-                            text: `Videos created here must be ${MAX_VIDEO_SECONDS} seconds or less. Please record or select a shorter clip.`,
+                            title: 'Gazetteer says',
+                            html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Video too long</p><p style="margin: 0;">Videos created here must be ${MAX_VIDEO_SECONDS} seconds or less. Please record or select a shorter clip.</p>`,
                             confirmButtonText: 'OK'
                         });
                         setPreviewUrl(null);
@@ -1116,8 +1116,10 @@ export default function InstantCreatePage() {
         } catch (error) {
             console.error('Error saving draft:', error);
             Swal.fire({
-                title: 'Failed to Save',
+                title: '',
                 html: `
+                  <p style="font-size: 12px; color: #6b7280; margin: 0 0 10px 0; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;">Gazetteer says</p>
+                  <p style="font-weight: 600; font-size: 1.1em; margin: 0 0 12px 0;">Failed to Save</p>
                   <div style="text-align: center; padding: 20px 0;">
                     <p style="color: #ffffff; font-size: 14px; line-height: 20px; margin: 0;">
                       There was an error saving your draft. Please try again.
@@ -1726,8 +1728,8 @@ export default function InstantCreatePage() {
                                 console.error('Error loading TikTok template:', error);
                                 Swal.fire({
                                     icon: 'error',
-                                    title: 'Error',
-                                    text: 'Failed to load TikTok template',
+                                    title: 'Gazetteer says',
+                                    html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Failed to load TikTok template</p>`,
                                     timer: 2000,
                                     showConfirmButton: false
                                 });
@@ -1763,8 +1765,8 @@ export default function InstantCreatePage() {
                                 console.error('Error loading Instagram template:', error);
                                 Swal.fire({
                                     icon: 'error',
-                                    title: 'Error',
-                                    text: 'Failed to load Instagram template',
+                                    title: '',
+                                    html: `<p style="font-size: 12px; color: #6b7280; margin: 0 0 10px 0; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;">Gazetteer says</p><p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Failed to load Instagram template</p>`,
                                     timer: 2000,
                                     showConfirmButton: false
                                 });
@@ -1790,8 +1792,8 @@ export default function InstantCreatePage() {
                                 } else {
                                     Swal.fire({
                                         icon: 'error',
-                                        title: 'Error',
-                                        text: 'Could not load YouTube Shorts template',
+                                        title: 'Gazetteer says',
+                                        html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Could not load YouTube Shorts template</p>`,
                                         timer: 2000,
                                         showConfirmButton: false
                                     });
@@ -1800,8 +1802,8 @@ export default function InstantCreatePage() {
                                 console.error('Error loading YouTube Shorts template:', error);
                                 Swal.fire({
                                     icon: 'error',
-                                    title: 'Error',
-                                    text: 'Failed to load YouTube Shorts template',
+                                    title: '',
+                                    html: `<p style="font-size: 12px; color: #6b7280; margin: 0 0 10px 0; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;">Gazetteer says</p><p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Failed to load YouTube Shorts template</p>`,
                                     timer: 2000,
                                     showConfirmButton: false
                                 });
@@ -1853,8 +1855,8 @@ export default function InstantCreatePage() {
                                 console.error('Error loading Gazetteer template:', error);
                                 Swal.fire({
                                     icon: 'error',
-                                    title: 'Error',
-                                    text: 'Failed to load Gazetteer template',
+                                    title: 'Gazetteer says',
+                                    html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Failed to load Gazetteer template</p>`,
                                     timer: 2000,
                                     showConfirmButton: false
                                 });
@@ -2415,8 +2417,8 @@ export default function InstantCreatePage() {
                                                 setShowMusicCard(false);
                                                 Swal.fire({
                                                     icon: 'success',
-                                                    title: 'Music Selected!',
-                                                    text: `"${track.title}" by ${track.artist || 'Unknown'}`,
+                                                    title: '',
+                                                    html: `<p style="font-size: 12px; color: #6b7280; margin: 0 0 10px 0; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;">Gazetteer says</p><p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Music Selected!</p><p style="margin: 0;">"${track.title}" by ${track.artist || 'Unknown'}</p>`,
                                                     confirmButtonColor: '#fbbf24',
                                                     background: '#1f2937',
                                                     color: '#fff',
@@ -2474,8 +2476,8 @@ export default function InstantCreatePage() {
                                                 console.error('Failed to load music library:', error);
                                                 Swal.fire({
                                                     icon: 'error',
-                                                    title: 'Load Failed',
-                                                    text: error.message || 'Failed to load music library.',
+                                                    title: '',
+                                                    html: `<p style="font-size: 12px; color: #6b7280; margin: 0 0 10px 0; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;">Gazetteer says</p><p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Load Failed</p><p style="margin: 0;">${error.message || 'Failed to load music library.'}</p>`,
                                                     confirmButtonColor: '#fbbf24',
                                                     background: '#1f2937',
                                                     color: '#fff'
@@ -2533,8 +2535,8 @@ export default function InstantCreatePage() {
                                         console.error('Error loading Gazetteer template:', error);
                                         Swal.fire({
                                             icon: 'error',
-                                            title: 'Error',
-                                            text: 'Failed to load Gazetteer template',
+                                            title: 'Gazetteer says',
+                                            html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Failed to load Gazetteer template</p>`,
                                             timer: 2000,
                                             showConfirmButton: false
                                         });
@@ -2796,8 +2798,8 @@ export default function InstantCreatePage() {
                                     console.error('Error loading video:', file.name, err);
                                     Swal.fire({
                                         icon: 'error',
-                                        title: 'Error Loading Video',
-                                        text: `Could not load "${file.name}". Please try a different file.`,
+                                        title: '',
+                                        html: `<p style="font-size: 12px; color: #6b7280; margin: 0 0 10px 0; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;">Gazetteer says</p><p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error Loading Video</p><p style="margin: 0;">Could not load "${file.name}". Please try a different file.</p>`,
                                         confirmButtonText: 'OK'
                                     });
                                     resolve();
@@ -2927,8 +2929,8 @@ export default function InstantCreatePage() {
                             console.warn('File type not supported:', file.type);
                             Swal.fire({
                                 icon: 'info',
-                                title: 'File Type Not Supported',
-                                text: `"${file.name}" is not a supported file type. Please select a video or image file.`,
+                                title: 'Gazetteer says',
+                                html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">File Type Not Supported</p><p style="margin: 0;">"${file.name}" is not a supported file type. Please select a video or image file.</p>`,
                                 confirmButtonText: 'OK'
                             });
                         }

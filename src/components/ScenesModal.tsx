@@ -135,6 +135,8 @@ type ScenesModalProps = {
     onShare: () => Promise<void>;
     onOpenComments: () => void;
     onReclip: () => Promise<void>;
+    /** Only for posts the current user created (not reclips). When provided, Boost menu option is shown. */
+    onBoost?: () => void;
 };
 
 export default function ScenesModal({
@@ -147,7 +149,8 @@ export default function ScenesModal({
     onFollow,
     onShare,
     onOpenComments,
-    onReclip
+    onReclip,
+    onBoost
 }: ScenesModalProps) {
     const [liked, setLiked] = React.useState(post.userLiked);
     const [likes, setLikes] = React.useState(post.stats.likes);
@@ -762,6 +765,10 @@ export default function ScenesModal({
             setBusy(false);
         }
     }
+
+    // Private user + pending follow request = show "Requested" instead of "Follow" or "Following"
+    const isPrivateProfile = isProfilePrivate(post.userHandle);
+    const hasPendingRequest = Boolean(user?.handle && isPrivateProfile && hasPendingFollowRequest(user.handle, post.userHandle));
 
     function handleShare() {
         console.log('Share clicked in ScenesModal, opening ShareModal, current state:', shareModalOpen);
@@ -1545,8 +1552,10 @@ export default function ScenesModal({
                                             // Show SweetAlert explaining they need to follow
                                             if (hasPending) {
                                                 await Swal.fire({
-                                                    title: 'Follow Request Pending',
+                                                    title: 'Gazetteer says',
+                                                    customClass: { title: 'gazetteer-shimmer' },
                                                     html: `
+                                                        <p style="font-weight: 600; font-size: 1.1em; margin: 0 0 12px 0;">Follow Request Pending</p>
                                                         <div style="text-align: center; padding: 10px 0;">
                                                             <p style="color: #ffffff; font-size: 14px; line-height: 20px; margin: 0 0 20px 0;">
                                                                 This user has a private profile. You have already sent a follow request. Once they accept, you'll be able to send them a message.
@@ -1585,8 +1594,9 @@ export default function ScenesModal({
                                                 createFollowRequest(user.handle, post.userHandle);
                                                 if (user?.id) setFollowState(user.id, post.userHandle, false);
                                                 Swal.fire({
-                                                    title: 'Follow Request Sent',
-                                                    text: 'You will be notified when they accept your request.',
+                                                    title: 'Gazetteer says',
+                                                    customClass: { title: 'gazetteer-shimmer' },
+                                                    html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Follow Request Sent</p><p style="color: #ffffff; font-size: 14px; margin: 0;">You will be notified when they accept your request.</p>`,
                                                     icon: 'success',
                                                     timer: 2000,
                                                     showConfirmButton: false,
@@ -1707,7 +1717,7 @@ export default function ScenesModal({
                                                 </div>
                                             )}
                                         </div>
-                                        {!isFollowing && (
+                                        {!isFollowing && !hasPendingRequest && (
                                             <button
                                                 onClick={handleFollow}
                                                 disabled={busy}
@@ -1715,6 +1725,11 @@ export default function ScenesModal({
                                             >
                                                 {busy ? 'Following...' : 'Follow'}
                                             </button>
+                                        )}
+                                        {!isFollowing && hasPendingRequest && (
+                                            <span className="px-4 py-1.5 bg-white/20 text-white text-sm font-semibold rounded-md cursor-default" aria-label="Follow request sent">
+                                                Requested
+                                            </span>
                                         )}
                                         {isFollowing && (
                                             <button
@@ -1889,7 +1904,7 @@ export default function ScenesModal({
                                                     </div>
                                                 )}
                                             </div>
-                                            {!isFollowing && (
+                                            {!isFollowing && !hasPendingRequest && (
                                                 <button
                                                     onClick={handleFollow}
                                                     disabled={busy}
@@ -1897,6 +1912,11 @@ export default function ScenesModal({
                                                 >
                                                     {busy ? 'Following...' : 'Follow'}
                                                 </button>
+                                            )}
+                                            {!isFollowing && hasPendingRequest && (
+                                                <span className="px-4 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-sm font-semibold rounded-md cursor-default" aria-label="Follow request sent">
+                                                    Requested
+                                                </span>
                                             )}
                                             {isFollowing && (
                                                 <button
@@ -2012,8 +2032,10 @@ export default function ScenesModal({
                                                         // Show SweetAlert explaining they need to follow
                                                         if (hasPending) {
                                                             await Swal.fire({
-                                                                title: 'Follow Request Pending',
+                                                                title: 'Gazetteer says',
+                                                                customClass: { title: 'gazetteer-shimmer' },
                                                                 html: `
+                                                                    <p style="font-weight: 600; font-size: 1.1em; margin: 0 0 12px 0;">Follow Request Pending</p>
                                                                     <div style="text-align: center; padding: 10px 0;">
                                                                         <p style="color: #ffffff; font-size: 14px; line-height: 20px; margin: 0 0 20px 0;">
                                                                             This user has a private profile. You have already sent a follow request. Once they accept, you'll be able to send them a message.
@@ -2052,8 +2074,9 @@ export default function ScenesModal({
                                                             createFollowRequest(user.handle, post.userHandle);
                                                             if (user?.id) setFollowState(user.id, post.userHandle, false);
                                                             Swal.fire({
-                                                                title: 'Follow Request Sent',
-                                                                text: 'You will be notified when they accept your request.',
+                                                                title: 'Gazetteer says',
+                                                                customClass: { title: 'gazetteer-shimmer' },
+                                                                html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Follow Request Sent</p><p style="color: #ffffff; font-size: 14px; margin: 0;">You will be notified when they accept your request.</p>`,
                                                                 icon: 'success',
                                                                 timer: 2000,
                                                                 showConfirmButton: false,
@@ -2142,9 +2165,7 @@ export default function ScenesModal({
                     onArchive={async () => {
                         console.log('Archive post from Scenes:', post.id);
                     }}
-                    onBoost={() => {
-                        console.log('Boost post from Scenes:', post.id);
-                    }}
+                    onBoost={onBoost}
                     onReclip={onReclip}
                     onTurnOnNotifications={() => {
                         console.log('Turn on notifications for post from Scenes:', post.id);

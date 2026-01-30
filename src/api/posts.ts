@@ -2,6 +2,8 @@ import raw from '../data/posts.json';
 import type { Post, Comment, StickerOverlay } from '../types';
 import * as apiClient from './client';
 import { wasEverAStory } from './stories';
+import { getActiveBoostedPostIds, activateBoost } from './boost';
+import type { BoostFeedType } from '../components/BoostSelectionModal';
 
 /**
  * MOCK API - TO SWAP WITH REAL BACKEND
@@ -301,7 +303,29 @@ if (!postsInitialized) {
     }
   ];
 
-  posts = [...posts, ...artanePosts, ...bobPosts];
+  // Mock post from Ava@galway that is boosted (so you can see "Sponsored" in the feed)
+  const avaBoostedPost: Post = {
+    id: `ava-boosted-demo-${artaneNow - 7200000}-galway`,
+    userHandle: 'Ava@galway',
+    locationLabel: 'Galway, Ireland',
+    tags: [],
+    mediaUrl: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=800',
+    mediaType: 'image',
+    caption: 'Sunset by the Corrib — boosted post so you can see how Sponsored looks in the feed! 🌅',
+    createdAt: artaneNow - 7200000, // 2 hours ago
+    stats: { likes: 128, views: 892, comments: 24, shares: 12, reclips: 8 },
+    isBookmarked: false,
+    isFollowing: false,
+    userLiked: false,
+    userLocal: 'Galway',
+    userRegional: 'Galway',
+    userNational: 'Ireland',
+  } as Post;
+
+  posts = [...posts, ...artanePosts, ...bobPosts, avaBoostedPost];
+
+  // Activate boost for Ava's post so it appears as Sponsored in Dublin (regional) feed
+  activateBoost(avaBoostedPost.id, 'ava-mock-user', 'regional', 5).catch(() => { });
 } else {
   console.log('Posts array already initialized, length:', posts.length);
 }
@@ -481,6 +505,81 @@ function transformLaravelPost(response: any): Post {
   } as Post;
 }
 
+/** Mock Sarah and Bob video posts for Scenes testing – always merged into first page of feed when in dev. */
+function getMockScenesVideoPosts(): Post[] {
+  const now = Date.now();
+  return [
+    {
+      id: 'mock-scenes-sarah-1',
+      userHandle: 'Sarah@Artane',
+      locationLabel: 'Artane, Dublin',
+      tags: [],
+      mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+      mediaType: 'video',
+      caption: 'Stunning views from Howth Hill looking back towards Dublin',
+      createdAt: now - 7200000,
+      stats: { likes: 67, views: 445, comments: 8, shares: 4, reclips: 2 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Artane',
+      userRegional: 'Dublin',
+      userNational: 'Ireland'
+    },
+    {
+      id: 'mock-scenes-sarah-2',
+      userHandle: 'Sarah@Artane',
+      locationLabel: 'Dublin City Centre',
+      tags: [],
+      mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+      mediaType: 'video',
+      caption: 'Walking through the vibrant streets of Dublin',
+      createdAt: now - 86400000,
+      stats: { likes: 89, views: 678, comments: 15, shares: 7, reclips: 5 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Artane',
+      userRegional: 'Dublin',
+      userNational: 'Ireland'
+    },
+    {
+      id: 'mock-scenes-bob-1',
+      userHandle: 'Bob@Ireland',
+      locationLabel: 'Galway, Ireland',
+      tags: [],
+      mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+      mediaType: 'video',
+      caption: 'Amazing sunset over Galway Bay!',
+      createdAt: now - 9000000,
+      stats: { likes: 56, views: 289, comments: 11, shares: 2, reclips: 1 },
+      isBookmarked: false,
+      isFollowing: false,
+      userLiked: false,
+      userLocal: 'Galway',
+      userRegional: 'Galway',
+      userNational: 'Ireland'
+    }
+  ];
+}
+
+/**
+ * Map feed tab to boost feed type for promoted posts. Returns null for discover (no boosted injection).
+ */
+function tabToBoostFeedType(tab: string): BoostFeedType | null {
+  const t = tab.toLowerCase();
+  if (t === 'discover') return null;
+  if (t === 'ireland') return 'national';
+  if (t === 'dublin') return 'regional';
+  if (t === 'finglas') return 'local';
+  // Custom location: infer from query (countries → national, cities → regional, else local)
+  const countries = new Set(['ireland', 'uk', 'france', 'spain', 'usa', 'australia', 'germany', 'canada']);
+  const cities = new Set(['dublin', 'london', 'paris', 'cork', 'galway', 'new york', 'sydney']);
+  if (countries.has(t)) return 'national';
+  if (cities.has(t)) return 'regional';
+  return 'local';
+}
+
 export async function fetchPostsPage(tab: string, cursor: number | null, limit = 5, userId = 'me', userLocal = '', userRegional = '', userNational = '', currentUserHandle = ''): Promise<Page> {
   // Try Laravel API first, fallback to mock if it fails
   const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
@@ -544,8 +643,16 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
         });
       }
 
+      // Prepend mock Sarah/Bob video posts on first page for Scenes testing (dev)
+      // Do NOT add them to the Following feed – that feed must only show posts from people the user follows
+      const isFirstPage = cursor === null || cursor === 0;
+      const mockVideoPosts = (isFirstPage && t !== 'discover') ? getMockScenesVideoPosts() : [];
+      const existingIds = new Set(transformedItems.map(p => p.id));
+      const dedupedMock = mockVideoPosts.filter(p => !existingIds.has(p.id));
+      const items = [...dedupedMock, ...transformedItems];
+
       return {
-        items: transformedItems,
+        items,
         nextCursor: response.nextCursor
       };
     } catch (error: any) {
@@ -562,8 +669,10 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
     // Reload posts from localStorage to get latest user-created posts
     // This ensures posts created in this session are included
     const userCreatedPosts = getPostsFromStorage();
-    // Get JSON posts (those that start with 'post-post-', 'artane-post-', or 'bob-post-')
-    const jsonPosts = posts.filter(p => p.id.startsWith('post-post-') || p.id.startsWith('artane-post-') || p.id.startsWith('bob-post-'));
+    // Get JSON/seed posts (include Ava boosted demo so it stays in the array for promoted feed)
+    const jsonPosts = posts.filter(p =>
+      p.id.startsWith('post-post-') || p.id.startsWith('artane-post-') || p.id.startsWith('bob-post-') || p.id.startsWith('ava-boosted-demo-')
+    );
     // Merge: user-created posts first (newest), then existing JSON posts
     // Only update if we have user-created posts to avoid overwriting with empty array
     if (userCreatedPosts.length > 0 || posts.length === 0) {
@@ -735,7 +844,14 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
     })));
 
     const start = cursor ?? 0;
-    const slice = sorted.slice(start, start + limit).map(p => {
+    const isFirstPage = start === 0;
+    // Do not add mock Sarah/Bob posts to the Following feed – only show posts from people the user follows
+    const mockVideoPosts = (isFirstPage && t !== 'discover') ? getMockScenesVideoPosts() : [];
+    const existingIdsInSorted = new Set(sorted.map(p => p.id));
+    const dedupedMock = mockVideoPosts.filter(p => !existingIdsInSorted.has(p.id));
+    const sortedWithMock = dedupedMock.length > 0 ? [...dedupedMock, ...sorted] : sorted;
+
+    const slice = sortedWithMock.slice(start, start + limit).map(p => {
       // Debug: Log ALL properties of post before decoration, especially for template posts
       if (p.templateId) {
         console.log('fetchPostsPage - template post BEFORE decorateForUser:', {
@@ -766,10 +882,42 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       }
       return decorated;
     });
-    const next = start + slice.length < sorted.length ? start + slice.length : null;
 
-    console.log('Returning page with:', { itemsCount: slice.length, nextCursor: next });
-    return { items: slice, nextCursor: next };
+    // Instagram-style: inject paid boosted posts into the feed (one every 5 organic)
+    const feedType = tabToBoostFeedType(tab);
+    let items = slice;
+    if (feedType) {
+      const boostedIds = await getActiveBoostedPostIds(feedType);
+      const existingIds = new Set(slice.map(p => p.id));
+      const boostedPosts: Post[] = [];
+      for (const id of boostedIds) {
+        if (existingIds.has(id)) continue;
+        const p = await getPostById(id);
+        if (!p) continue;
+        const decorated = decorateForUser(userId, { ...p, isBoosted: true, boostFeedType: feedType });
+        boostedPosts.push(decorated);
+      }
+      if (boostedPosts.length > 0) {
+        const merged: Post[] = [];
+        let o = 0, b = 0;
+        while (o < slice.length || b < boostedPosts.length) {
+          const insertBoostedAt = merged.length === 1 || ((merged.length - 1) % 5 === 0 && merged.length >= 1);
+          if (b < boostedPosts.length && insertBoostedAt) {
+            merged.push(boostedPosts[b++]);
+          } else if (o < slice.length) {
+            merged.push(slice[o++]);
+          } else {
+            merged.push(boostedPosts[b++]);
+          }
+        }
+        items = merged;
+      }
+    }
+
+    const next = start + slice.length < sortedWithMock.length ? start + slice.length : null;
+
+    console.log('Returning page with:', { itemsCount: items.length, nextCursor: next });
+    return { items, nextCursor: next };
   } catch (error) {
     console.error('Error in fetchPostsPage:', error);
     throw error;
@@ -796,11 +944,45 @@ export async function toggleLike(userId: string, id: string): Promise<Post> {
   // Mock implementation (fallback)
   await delay(150);
   const s = getState(userId);
-  const p = posts.find(x => x.id === id)!;
+  const p = posts.find(x => x.id === id);
+  if (!p) {
+    // Post not in mock (e.g. feed from API); caller should do optimistic update
+    throw new Error('Post not found');
+  }
   const was = !!s.likes[id];
   s.likes[id] = !was;
   p.stats.likes += was ? -1 : 1;
   return decorateForUser(userId, p);
+}
+
+/**
+ * Delete a post. Only the post owner can delete (enforced by UI and backend).
+ * Mock: removes from in-memory posts and localStorage.
+ */
+export async function deletePost(_userId: string, postId: string, userHandle?: string): Promise<void> {
+  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+
+  if (useLaravelAPI) {
+    try {
+      await apiClient.deletePost(postId);
+      return;
+    } catch (error: any) {
+      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
+        console.warn('Laravel API delete failed, falling back to mock:', error);
+      }
+      // Fall through to mock
+    }
+  }
+
+  await delay(200);
+  const p = posts.find(x => x.id === postId);
+  if (!p) return;
+  // Mock: only allow deleting own posts (userHandle must match)
+  if (userHandle != null && p.userHandle !== userHandle) {
+    throw new Error('You can only delete your own posts');
+  }
+  posts = posts.filter(x => x.id !== postId);
+  savePostsToStorage(posts);
 }
 
 export async function toggleBookmark(userId: string, id: string): Promise<Post> {
@@ -834,7 +1016,12 @@ export async function toggleFollowForPost(userId: string, id: string): Promise<P
 }
 
 export async function incrementViews(userId: string, id: string): Promise<Post> {
-  // Try Laravel API first, fallback to mock if it fails
+  // Frontend-only mock posts (e.g. mock-scenes-*) don't exist in the API – skip to avoid 500
+  if (id.startsWith('mock-scenes-')) {
+    await delay(0);
+    return { id, userHandle: 'Unknown', locationLabel: '', tags: [], createdAt: Date.now(), stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 }, isBookmarked: false, isFollowing: false, userLiked: false };
+  }
+
   const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
 
   if (useLaravelAPI) {
@@ -1309,14 +1496,22 @@ export async function createPost(
       error?.message?.includes('NetworkError') ||
       (error?.name === 'TypeError' && error?.message?.includes('fetch'));
 
+    // Also fall back to mock when backend requires auth but user isn't logged in (e.g. no token)
+    const isAuthError =
+      error?.message?.includes('Authentication required') ||
+      error?.message?.includes('Unauthenticated') ||
+      error?.status === 401;
+
     if (isConnectionError) {
       console.log('⚠️ API connection failed, using mock fallback for post creation');
       console.log('This is normal when backend is not running or not accessible from your device');
-      // Fallback to mock for now if API fails
+      await delay(500);
+    } else if (isAuthError) {
+      console.log('⚠️ API requires authentication, using mock fallback for post creation');
       await delay(500);
     } else {
-      // For other errors (validation, auth, etc), re-throw so user sees the error
-      console.error('❌ API error (not connection):', error);
+      // For other errors (validation, etc), re-throw so user sees the error
+      console.error('❌ API error (not connection/auth):', error);
       throw error;
     }
 

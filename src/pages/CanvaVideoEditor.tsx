@@ -91,8 +91,8 @@ export default function CanvaVideoEditor() {
                 console.error('Failed to load FFmpeg:', error);
                 Swal.fire({
                     icon: 'error',
-                    title: 'FFmpeg Load Error',
-                    text: 'Failed to load video processing library. Please refresh the page.',
+                    title: 'Gazetteer says',
+                    html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">FFmpeg Load Error</p><p style="margin: 0;">Failed to load video processing library. Please refresh the page.</p>`,
                 });
             }
         };
@@ -174,7 +174,7 @@ export default function CanvaVideoEditor() {
                     clip.trimEnd = video.duration;
                     resolve();
                 });
-                video.addEventListener('error', resolve);
+                video.addEventListener('error', () => resolve());
             });
 
             newClips.push(clip);
@@ -504,7 +504,8 @@ export default function CanvaVideoEditor() {
 
             // Read output
             const data = await ffmpeg.readFile('output.mp4');
-            const blob = new Blob([data], { type: 'video/mp4' });
+            const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : (data as Uint8Array);
+            const blob = new Blob([bytes as BlobPart], { type: 'video/mp4' });
 
             // Convert to data URL for local persistence
             const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -518,8 +519,8 @@ export default function CanvaVideoEditor() {
             if (dataUrl.length > 50 * 1024 * 1024) {
                 Swal.fire({
                     icon: 'warning',
-                    title: 'File Too Large',
-                    text: 'Video is too large for local storage. Please start the backend server to upload.',
+                    title: 'Gazetteer says',
+                    html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">File Too Large</p><p style="margin: 0;">Video is too large for local storage. Please start the backend server to upload.</p>`,
                 });
                 setIsExporting(false);
                 return;
@@ -562,8 +563,8 @@ export default function CanvaVideoEditor() {
             console.error('Export error:', error);
             Swal.fire({
                 icon: 'error',
-                title: 'Export Failed',
-                text: error?.message || 'Failed to export video',
+                title: 'Gazetteer says',
+                html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Export Failed</p><p style="margin: 0;">${error?.message || 'Failed to export video'}</p>`,
             });
         } finally {
             setIsExporting(false);

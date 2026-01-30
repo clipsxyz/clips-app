@@ -77,8 +77,8 @@ export default function ViewProfilePage() {
         if (!user?.id || !handle || !user?.handle) {
             console.error('Missing required data for follow:', { userId: user?.id, handle, userHandle: user?.handle });
             Swal.fire({
-                title: 'Error',
-                text: 'Unable to follow user. Please try again.',
+                title: 'Gazetteer says',
+                html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Unable to follow user. Please try again.</p>`,
                 icon: 'error',
                 timer: 2000,
                 showConfirmButton: false
@@ -146,7 +146,7 @@ export default function ViewProfilePage() {
                         }
                         
                         Swal.fire({
-                            title: '',
+                            title: 'Gazetteer says',
                             html: `
                                 <div style="text-align: center; padding: 8px 0;">
                                     <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
@@ -284,7 +284,7 @@ export default function ViewProfilePage() {
                     }
                     
                     Swal.fire({
-                        title: '',
+                        title: 'Gazetteer says',
                         html: `
                             <div style="text-align: center; padding: 8px 0;">
                                 <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
@@ -382,8 +382,9 @@ export default function ViewProfilePage() {
             
             if (isConnectionError) {
                 Swal.fire({
-                    title: 'Backend Server Not Running',
+                    title: 'Gazetteer says',
                     html: `
+                        <p style="font-weight: 600; font-size: 1.1em; margin: 0 0 12px 0;">Backend Server Not Running</p>
                         <p>The Laravel backend server is not running.</p>
                         <p style="margin-top: 10px; font-size: 14px;">To enable the follow feature:</p>
                         <ol style="text-align: left; margin-top: 10px; font-size: 14px;">
@@ -398,8 +399,8 @@ export default function ViewProfilePage() {
                 });
             } else {
                 Swal.fire({
-                    title: 'Error',
-                    text: error?.message || 'Failed to follow user. Please try again.',
+                    title: 'Gazetteer says',
+                    html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">${error?.message || 'Failed to follow user. Please try again.'}</p>`,
                     icon: 'error',
                     timer: 3000,
                     showConfirmButton: false
@@ -444,7 +445,14 @@ export default function ViewProfilePage() {
                     // Show SweetAlert if profile is private and user can't view
                     if (!canView && profilePrivate && decodedHandle !== user.handle) {
                         Swal.fire({
-                            title: '',
+                            title: 'Gazetteer says',
+                            customClass: {
+                                title: 'gazetteer-shimmer',
+                                popup: '!rounded-2xl !shadow-xl !border-0',
+                                container: '!p-0',
+                                confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors',
+                                cancelButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-transparent !text-[#8e8e8e] !hover:bg-gray-100 !transition-colors !border-0'
+                            },
                             html: `
                                 <div style="text-align: center; padding: 8px 0;">
                                     <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
@@ -465,12 +473,6 @@ export default function ViewProfilePage() {
                             background: '#ffffff',
                             width: '400px',
                             padding: '0',
-                            customClass: {
-                                popup: '!rounded-2xl !shadow-xl !border-0',
-                                container: '!p-0',
-                                confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors',
-                                cancelButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-transparent !text-[#8e8e8e] !hover:bg-gray-100 !transition-colors !border-0'
-                            },
                             buttonsStyling: false
                         }).then(async (result) => {
                             // Only create follow request if user explicitly clicked "Follow"
@@ -884,7 +886,7 @@ export default function ViewProfilePage() {
                                 const followedUsers = await getFollowedUsers(user.id);
                                 if (!canSendMessage(user?.handle || '', decodedHandle, followedUsers)) {
                                     Swal.fire({
-                                        title: '',
+                                        title: 'Gazetteer says',
                                         html: `
                                             <div style="text-align: center; padding: 8px 0;">
                                                 <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(245, 87, 108, 0.3);">
@@ -938,7 +940,7 @@ export default function ViewProfilePage() {
                             if (!effectivePlaces || effectivePlaces.length === 0) {
                                 const decodedHandle = handle ? decodeURIComponent(handle) : 'This user';
                                 Swal.fire({
-                                    title: '',
+                                    title: 'Gazetteer says',
                                     html: `
                                         <div style="text-align: center; padding: 8px 0;">
                                             <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
