@@ -108,7 +108,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       is_private: userData.is_private || false
     };
     setUser(u);
-    localStorage.setItem('user', JSON.stringify(u));
+    // Strip large base64 avatar when saving to localStorage to avoid quota exceeded
+    const toStore = { ...u };
+    if (typeof toStore.avatarUrl === 'string' && toStore.avatarUrl.length > 2000) {
+      toStore.avatarUrl = undefined;
+    }
+    localStorage.setItem('user', JSON.stringify(toStore));
     // Sync privacy setting
     if (u.handle) {
       setProfilePrivacy(u.handle, u.is_private || false);

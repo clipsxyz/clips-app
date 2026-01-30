@@ -31,6 +31,7 @@ export default function LoginPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [mode, setMode] = React.useState<PageMode>('signup');
   const [loginError, setLoginError] = React.useState('');
+  const [signupError, setSignupError] = React.useState('');
   const [loginLoading, setLoginLoading] = React.useState(false);
   const [loginEmail, setLoginEmail] = React.useState('');
   const [loginPassword, setLoginPassword] = React.useState('');
@@ -42,6 +43,7 @@ export default function LoginPage() {
   // Helper function to update step (updates both state and URL)
   const updateStep = React.useCallback((newStep: number) => {
     if (newStep >= 1 && newStep <= 3) {
+      setSignupError('');
       setSearchParams({ step: newStep.toString() });
     }
   }, [setSearchParams]);
@@ -200,25 +202,32 @@ export default function LoginPage() {
 
   function handleProfilePictureSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setSignupError('');
 
-    // Create user with complete data including profile picture
     const userData = {
       name: name.trim(),
       email: email.trim(),
-      password: password, // In real app, this would be hashed
-      age: age ? parseInt(age) : undefined, // Age is optional
+      password: password,
+      age: age ? parseInt(age) : undefined,
       interests: interests,
       local: local,
       regional: regional,
       national: national,
-      handle: `${name.trim()}@${regional}`, // Generate handle like "Barry@Dublin"
+      handle: `${name.trim()}@${regional}`,
       countryFlag: countryFlag.trim(),
-      avatarUrl: profilePicture // Include profile picture
+      avatarUrl: profilePicture,
     };
 
-    saveLocalRegistration(email.trim(), password, userData);
-    login(userData);
-    nav('/profile', { replace: true });
+    try {
+      // Save for local login later – omit large base64 to avoid localStorage quota
+      const userDataForStorage = { ...userData, avatarUrl: undefined };
+      saveLocalRegistration(email.trim(), password, userDataForStorage);
+      login(userData);
+      nav('/profile', { replace: true });
+    } catch (err: any) {
+      console.error('Sign up error:', err);
+      setSignupError(err?.message || 'Something went wrong. Try again or use a smaller profile photo.');
+    }
   }
 
   function handleProfilePictureSelect(event: React.ChangeEvent<HTMLInputElement>) {
@@ -317,7 +326,7 @@ export default function LoginPage() {
         <div className="flex justify-center gap-6 mb-4">
           <button
             type="button"
-            onClick={() => { setMode('signup'); setLoginError(''); }}
+            onClick={() => { setMode('signup'); setLoginError(''); setSignupError(''); }}
             className={`text-sm font-medium transition-colors ${mode === 'signup' ? 'text-blue-500' : 'text-gray-400 hover:text-gray-300'}`}
           >
             Sign up
@@ -632,6 +641,9 @@ export default function LoginPage() {
 
         {step === 3 && (
           <>
+            {signupError && (
+              <p className="text-sm text-red-500 text-center py-2">{signupError}</p>
+            )}
             {/* Step 3: Profile Picture - Instagram Style */}
             <div className="text-center py-4">
               {/* Current Avatar Preview */}
