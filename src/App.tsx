@@ -2748,51 +2748,51 @@ function EngagementBar({
   }
 
   return (
-    <div className="px-4 pb-4 pt-3 border-t" style={{ borderColor: '#030712' }}>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-6">
+    <div className="px-2 sm:px-4 pb-4 pt-3 border-t" style={{ borderColor: '#030712' }}>
+      <div className="flex items-center justify-between min-w-0">
+        <div className="flex items-center justify-between min-w-0 flex-1 w-full">
           {/* Like */}
           <button
             ref={likeButtonRef}
-            className="flex items-center gap-2 transition-opacity hover:opacity-70 active:opacity-50"
+            className="flex items-center gap-1 sm:gap-2 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0"
             onClick={likeClick}
             aria-pressed={liked}
             aria-label={liked ? 'Unlike' : 'Like'}
             title={liked ? 'Unlike' : 'Like'}
           >
             {liked ? (
-              <AiFillHeart className="w-5 h-5 text-purple-500" />
+              <AiFillHeart className="w-4 h-4 sm:w-5 sm:h-5 text-purple-500" />
             ) : (
-              <FiHeart className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+              <FiHeart className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600 dark:text-gray-400" />
             )}
-            <span className="text-sm text-gray-700 dark:text-gray-300">{likes}</span>
+            <span className="text-xs sm:text-sm text-gray-700 dark:text-gray-300">{likes}</span>
           </button>
 
           {/* Views */}
-          <div className="flex items-center gap-2">
-            <FiEye className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-            <span className="text-sm text-gray-700 dark:text-gray-300">{views}</span>
+          <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+            <FiEye className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600 dark:text-gray-400" />
+            <span className="text-xs sm:text-sm text-gray-700 dark:text-gray-300">{views}</span>
           </div>
 
           {/* Comments */}
           <button
-            className="flex items-center gap-2 transition-opacity hover:opacity-70 active:opacity-50"
+            className="flex items-center gap-1 sm:gap-2 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0"
             onClick={onOpenComments}
             aria-label="Comments"
             title="Comments"
           >
-            <FiMessageSquare className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-            <span className="text-sm text-gray-700 dark:text-gray-300">{comments}</span>
+            <FiMessageSquare className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600 dark:text-gray-400" />
+            <span className="text-xs sm:text-sm text-gray-700 dark:text-gray-300">{comments}</span>
           </button>
 
           {/* Share to Stories */}
           <button
-            className="flex items-center gap-2 transition-opacity hover:opacity-70 active:opacity-50"
+            className="flex items-center gap-1 sm:gap-2 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0"
             onClick={shareClick}
             aria-label="Share post to stories"
             title="Share post to stories"
           >
-            <div className="relative w-5 h-5">
+            <div className="relative w-4 h-4 sm:w-5 sm:h-5">
               <div className="absolute inset-0 rounded-full bg-gray-600 dark:bg-gray-400"></div>
               <svg
                 className="absolute inset-0 w-full h-full"
@@ -2829,25 +2829,35 @@ function EngagementBar({
                 />
               </svg>
             </div>
-            <span className="text-sm text-gray-700 dark:text-gray-300">{shares}</span>
+            <span className="text-xs sm:text-sm text-gray-700 dark:text-gray-300">{shares}</span>
           </button>
 
           {/* Reclip */}
           <button
-            className={`flex items-center gap-2 transition-opacity hover:opacity-70 active:opacity-50 ${post.userHandle === currentUserHandle ? 'opacity-30 cursor-not-allowed' : ''}`}
+            className={`flex items-center gap-1 sm:gap-2 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0 ${post.userHandle === currentUserHandle ? 'opacity-30 cursor-not-allowed' : ''}`}
             onClick={reclipClick}
             disabled={post.userHandle === currentUserHandle}
             aria-label={post.userHandle === currentUserHandle ? "Cannot reclip your own post" : "Reclip post"}
             title={post.userHandle === currentUserHandle ? "Cannot reclip your own post" : "Reclip post"}
           >
-            <FiRepeat className={`w-5 h-5 ${userReclipped ? 'text-green-500' : 'text-gray-600 dark:text-gray-400'}`} />
-            <span className="text-sm text-gray-700 dark:text-gray-300">{reclips}</span>
+            <FiRepeat className={`w-4 h-4 sm:w-5 sm:h-5 ${userReclipped ? 'text-green-500' : 'text-gray-600 dark:text-gray-400'}`} />
+            <span className="text-xs sm:text-sm text-gray-700 dark:text-gray-300">{reclips}</span>
+          </button>
+
+          {/* Share (paper airplane) - opens share sheet with DM list + WhatsApp etc */}
+          <button
+            className="flex items-center gap-1 sm:gap-2 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0"
+            onClick={() => _onShare?.()}
+            aria-label="Share post"
+            title="Share post"
+          >
+            <FiSend className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600 dark:text-gray-400" />
           </button>
 
           {/* Metrics (only on boost page for boosted posts) */}
           {showMetricsIcon && onToggleMetrics && (
             <button
-              className="flex items-center gap-2 transition-opacity hover:opacity-70 active:opacity-50"
+              className="flex items-center gap-1 sm:gap-2 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0"
               onClick={onToggleMetrics}
               aria-label="Toggle metrics"
               title="View metrics"

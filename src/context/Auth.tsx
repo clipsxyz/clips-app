@@ -3,6 +3,9 @@ import * as Sentry from '@sentry/react';
 import { User } from '../types';
 import { setProfilePrivacy, initializePrivateMockUser } from '../api/privacy';
 import { connectSocket, disconnectSocket } from '../services/socketio';
+import { db } from '../utils/db';
+
+const AVATAR_KEY = (id: string) => `clips_app_avatar_${id}`;
 type AuthCtx = { user: User | null; login: (userData: any) => void; logout: () => void };
 const Ctx = React.createContext<AuthCtx | null>(null);
 
@@ -40,9 +43,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const parsed = JSON.parse(s);
       // Handle backward compatibility for old user format
+      let userToSet: User;
       if (parsed && !parsed.local) {
-        // Old format - create new format with defaults
-        const convertedUser: User = {
+        // Old format - create new format with defaults; keep bio/socialLinks/placesTraveled if present
+        userToSet = {
           id: parsed.id || parsed.name?.toLowerCase() || 'me',
           name: parsed.name || 'Me',
           email: parsed.email || '',
@@ -55,30 +59,54 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           handle: `${parsed.name || 'User'}@Unknown`,
           countryFlag: parsed.countryFlag || undefined,
           avatarUrl: parsed.avatarUrl || undefined,
+          bio: parsed.bio || undefined,
+          socialLinks: parsed.socialLinks || undefined,
           placesTraveled: parsed.placesTraveled || undefined,
           is_private: parsed.is_private || false
         };
-        setUser(convertedUser);
-        // Sync privacy setting
-        if (convertedUser.handle) {
-          setProfilePrivacy(convertedUser.handle, convertedUser.is_private || false);
+        setUser(userToSet);
+        if (userToSet.handle) {
+          setProfilePrivacy(userToSet.handle, userToSet.is_private || false);
         }
       } else {
-        setUser(parsed);
-        // Sync privacy setting
+        userToSet = parsed;
+        setUser(userToSet);
         if (parsed.handle) {
           setProfilePrivacy(parsed.handle, parsed.is_private || false);
         }
-        // Connect to Socket.IO when user is loaded
         if (parsed.handle) {
-          connectSocket(parsed.handle);
+          try {
+            connectSocket(parsed.handle);
+          } catch (e) {
+            console.warn('Socket connect skipped:', e);
+          }
         }
-        // Initialize Firebase notifications when user is loaded
         if (parsed.handle) {
           import('../services/notifications').then(({ initializeNotifications }) => {
             initializeNotifications();
           });
         }
+        // Restore profile pic from IndexedDB (survives refresh on phone)
+        if (!userToSet.avatarUrl) {
+          db.get(AVATAR_KEY(userToSet.id))
+            .then((avatarUrl: string | undefined) => {
+              if (avatarUrl) {
+                setUser((prev) => (prev && prev.id === userToSet.id ? { ...prev, avatarUrl } : prev));
+              }
+            })
+            .catch(() => {});
+        }
+        return;
+      }
+      // For converted (old-format) user: restore profile pic from IndexedDB if missing
+      if (!userToSet.avatarUrl) {
+        db.get(AVATAR_KEY(userToSet.id))
+          .then((avatarUrl: string | undefined) => {
+            if (avatarUrl) {
+              setUser((prev) => (prev && prev.id === userToSet.id ? { ...prev, avatarUrl } : prev));
+            }
+          })
+          .catch(() => {});
       }
     } catch (error) {
       console.error('Error loading user from localStorage:', error);
@@ -108,17 +136,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       is_private: userData.is_private || false
     };
     setUser(u);
-    // Strip large base64 avatar when saving to localStorage to avoid quota exceeded
+    // Persist large base64 avatar in IndexedDB (survives refresh); strip from localStorage to avoid quota exceeded
     const toStore = { ...u };
     if (typeof toStore.avatarUrl === 'string' && toStore.avatarUrl.length > 2000) {
+      db.set(AVATAR_KEY(u.id), toStore.avatarUrl).catch(() => {});
       toStore.avatarUrl = undefined;
     }
     localStorage.setItem('user', JSON.stringify(toStore));
     // Sync privacy setting
     if (u.handle) {
       setProfilePrivacy(u.handle, u.is_private || false);
-      // Connect to Socket.IO when user logs in
-      connectSocket(u.handle);
+      try {
+        connectSocket(u.handle);
+      } catch (e) {
+        console.warn('Socket connect skipped:', e);
+      }
       // Initialize Firebase notifications when user logs in
       import('../services/notifications').then(({ initializeNotifications }) => {
         initializeNotifications();

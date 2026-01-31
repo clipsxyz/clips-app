@@ -10,8 +10,9 @@ import { useAuth } from '../context/Auth';
 import { fetchConversation, appendMessage, editMessage, type ChatMessage, markConversationRead, deleteConversation, blockUser, muteConversation, unmuteConversation, isConversationMuted } from '../api/messages';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
 import { isStoryMediaActive, wasEverAStory, userHasUnviewedStoriesByHandle, userHasStoriesByHandle } from '../api/stories';
-import { getPostById, getFollowedUsers, getState } from '../api/posts';
+import { getPostById, getFollowedUsers, getState, toggleLike } from '../api/posts';
 import { toggleFollow, fetchUserProfile } from '../api/client';
+import ScenesModal from '../components/ScenesModal';
 import type { Post } from '../types';
 import Flag from '../components/Flag';
 import { timeAgo } from '../utils/timeAgo';
@@ -23,7 +24,7 @@ interface MessageUI extends ChatMessage {
     isFromMe: boolean;
     senderAvatar?: string;
     reactions?: { emoji: string; users: string[] }[];
-    replyTo?: { messageId: string; text: string; senderHandle: string; imageUrl?: string };
+    replyTo?: { messageId: string; text: string; senderHandle: string; imageUrl?: string; mediaType?: 'image' | 'video' };
     edited?: boolean;
     read?: boolean;
 }
@@ -242,8 +243,71 @@ function CommentCard({ post, commentText, commenterHandle }: { post: Post; comme
     );
 }
 
+// Compact preview when post is not yet loaded: fetch to show MP4/image thumbnail, tap to view in Scenes
+function SharedPostPreviewCard({ postId, onTap, userId }: { postId: string; onTap: () => void; userId?: string }) {
+    const [previewPost, setPreviewPost] = useState<Post | null>(null);
+    React.useEffect(() => {
+        let cancelled = false;
+        getPostById(postId, userId).then(post => {
+            if (!cancelled && post) setPreviewPost(post);
+        }).catch(() => {});
+        return () => { cancelled = true; };
+    }, [postId, userId]);
+
+    const hasMedia = previewPost?.mediaUrl && previewPost.mediaUrl.trim() !== '' && !previewPost.mediaUrl.startsWith('data:');
+    const isVideo = previewPost?.mediaType === 'video';
+
+    return (
+        <button
+            type="button"
+            onClick={onTap}
+            aria-label="View post in Scenes"
+            data-post-id={postId}
+            className="w-full max-w-md rounded-2xl overflow-hidden bg-gray-800 border border-gray-600 shadow-lg flex flex-col hover:bg-gray-750 active:opacity-90 transition-opacity min-h-[100px]"
+        >
+            {hasMedia ? (
+                <div className="w-full flex flex-col">
+                    <div className="relative w-full aspect-video bg-black">
+                        {isVideo ? (
+                            <video
+                                src={previewPost!.mediaUrl}
+                                className="w-full h-full object-cover"
+                                muted
+                                playsInline
+                                preload="metadata"
+                                disablePictureInPicture
+                            />
+                        ) : (
+                            <img src={previewPost!.mediaUrl} alt="" className="w-full h-full object-cover" />
+                        )}
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                            <div className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center">
+                                <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+                                    <path d="M8 5v14l11-7L8 5z" />
+                                </svg>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="w-full bg-sky-600 px-3 py-3 flex items-center justify-center border-t-2 border-sky-500">
+                        <span className="text-white text-base font-bold">Tap to view in Scenes</span>
+                    </div>
+                </div>
+            ) : (
+                <div className="p-6 flex flex-col items-center justify-center gap-3">
+                    <div className="w-12 h-12 rounded-full bg-gray-700 flex items-center justify-center">
+                        <svg className="w-6 h-6 text-gray-400" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+                            <path d="M8 5v14l11-7L8 5z" />
+                        </svg>
+                    </div>
+                    <span className="text-white text-base font-semibold">Tap to view in Scenes</span>
+                </div>
+            )}
+        </button>
+    );
+}
+
 // Component to render shared post card (matching ScenesModal format exactly - Twitter card style)
-function SharedPostCard({ post }: { post: Post }) {
+function SharedPostCard({ post, onTap }: { post: Post; onTap?: (post: Post) => void }) {
     // More strict check: text-only means no real mediaUrl (or empty string), no mediaItems (or empty array), and has text
     // Exclude data:image URLs (generated images) and check for real media
     const hasRealMediaUrl = post.mediaUrl && post.mediaUrl.trim() !== '' && !post.mediaUrl.startsWith('data:image');
@@ -252,17 +316,7 @@ function SharedPostCard({ post }: { post: Post }) {
     // This matches ScenesModal behavior for shared text-only posts
     const isTextOnly = !!post.text && !hasRealMediaUrl && !hasMediaItems;
     
-    console.log('SharedPostCard rendering:', { 
-        postId: post.id, 
-        isTextOnly, 
-        hasRealMediaUrl,
-        mediaUrl: post.mediaUrl,
-        hasMediaItems,
-        mediaItemsCount: post.mediaItems?.length || 0,
-        hasText: !!post.text,
-        text: post.text?.substring(0, 50)
-    });
-    
+    const cardContent = (() => {
     // Always show text-only posts as white Twitter card (matching ScenesModal)
     // Force white background regardless of dark mode - use !important via inline styles
     if (isTextOnly || (post.text && !hasMediaItems)) {
@@ -358,13 +412,14 @@ function SharedPostCard({ post }: { post: Post }) {
         );
     }
     
-    // For posts with media, show a simple preview with forced white background
+    // For posts with media, show a simple preview (video = static frame, tap opens Scenes)
+    const isVideo = post.mediaType === 'video';
     return (
         <div 
             className="w-full max-w-sm rounded-2xl overflow-hidden border shadow-lg mt-2"
             style={{
-                backgroundColor: '#ffffff', // Force white background
-                borderColor: '#e5e7eb' // Light gray border
+                backgroundColor: '#ffffff',
+                borderColor: '#e5e7eb'
             }}
         >
             <div className="p-4" style={{ backgroundColor: '#ffffff' }}>
@@ -380,17 +435,39 @@ function SharedPostCard({ post }: { post: Post }) {
                     <p className="text-sm line-clamp-2" style={{ color: '#374151' }}>{post.text}</p>
                 )}
                 {post.mediaUrl && (
-                    <div className="mt-2 rounded-lg overflow-hidden">
-                        {post.mediaType === 'video' ? (
-                            <video src={post.mediaUrl} className="w-full h-auto max-h-48 object-cover" controls />
+                    <div className="mt-2 rounded-lg overflow-hidden bg-black">
+                        {isVideo ? (
+                            <video
+                                src={post.mediaUrl}
+                                className="w-full h-auto max-h-48 object-cover"
+                                muted
+                                playsInline
+                                preload="metadata"
+                                disablePictureInPicture
+                            />
                         ) : (
                             <img src={post.mediaUrl} alt="Post media" className="w-full h-auto max-h-48 object-cover" />
                         )}
                     </div>
                 )}
             </div>
+            {onTap && (
+                <div className="w-full bg-sky-600 px-3 py-2.5 flex items-center justify-center border-t border-sky-500 rounded-b-2xl">
+                    <span className="text-white text-sm font-bold">Tap to view in Scenes</span>
+                </div>
+            )}
         </div>
     );
+    })();
+
+    if (onTap) {
+        return (
+            <button type="button" onClick={() => onTap(post)} className="w-full block text-left rounded-2xl overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500">
+                {cardContent}
+            </button>
+        );
+    }
+    return cardContent;
 }
 
 export default function MessagesPage() {
@@ -402,24 +479,54 @@ export default function MessagesPage() {
     const [storyActiveByUrl, setStoryActiveByUrl] = useState<Record<string, boolean>>({});
     const [messageText, setMessageText] = useState('');
     
-    // Store sharePostId from location.state so we can include it when sending
+    // Store sharePostId from location.state (only used if we don't direct-send)
     const [pendingSharePostId, setPendingSharePostId] = React.useState<string | null>(null);
-    
-    // Check if we're coming from ShareModal with a post to share
+    const sharedPostSentRef = React.useRef(false);
+
+    // Direct share to DM (Instagram/TikTok style): send the post immediately when opening the conversation
     React.useEffect(() => {
-        const state = location.state as any;
-        if (state?.sharePostUrl && handle) {
-            // Auto-fill the message input with the post URL
-            setMessageText(state.sharePostUrl);
-            // Store the postId so we can include it in the message
-            if (state.sharePostId) {
-                setPendingSharePostId(state.sharePostId);
+        const state = location.state as { sharePostUrl?: string; sharePostId?: string } | null;
+        if (!state?.sharePostUrl || !handle || !user?.handle) return;
+        if (sharedPostSentRef.current) return;
+
+        sharedPostSentRef.current = true;
+
+        (async () => {
+            try {
+                await appendMessage(user.handle!, handle, {
+                    text: state.sharePostUrl!,
+                    postId: state.sharePostId ?? undefined
+                });
+                // Refresh conversation so the new message appears in the feed
+                const items = await fetchConversation(user.handle!, handle);
+                const sorted = [...items].sort((a, b) => a.timestamp - b.timestamp);
+                const mapped: MessageUI[] = sorted.map(m => ({
+                    ...m,
+                    isFromMe: m.senderHandle === user.handle,
+                    senderAvatar: m.senderHandle === user.handle ? (user.avatarUrl || getAvatarForHandle(user.handle!)) : getAvatarForHandle(handle),
+                    replyTo: m.replyTo
+                }));
+                setMessages(mapped);
+                if (state.sharePostId) {
+                    try {
+                        const post = await getPostById(state.sharePostId, user?.id);
+                        if (post) setSharedPosts(prev => ({ ...prev, [state.sharePostId!]: post }));
+                    } catch (_) { /* ignore */ }
+                }
+                // Clear state so placeholder doesn't show and effect won't re-run
+                navigate(location.pathname, { replace: true, state: {} });
+                const shortHandle = handle.includes('@') ? handle : `@${handle}`;
+                showToast?.(`Shared with ${shortHandle}`);
+                setTimeout(scrollToBottom, 100);
+            } catch (e) {
+                console.error('Direct share failed:', e);
+                sharedPostSentRef.current = false;
+                showToast?.('Failed to share. You can paste the link and send.');
+                setMessageText(state.sharePostUrl!);
+                if (state.sharePostId) setPendingSharePostId(state.sharePostId);
             }
-            // Clear the state to prevent re-triggering
-            window.history.replaceState({ ...state, sharePostUrl: null, sharePostId: null }, '');
-            showToast?.('Post link ready to send!');
-        }
-    }, [location.state, handle]);
+        })();
+    }, [location.state, handle, user?.handle, location.pathname, navigate]);
     const [loading, setLoading] = useState(true);
     const [otherUserAvatar, setOtherUserAvatar] = useState<string | undefined>(undefined);
     const [hasUnviewedStories, setHasUnviewedStories] = useState(false);
@@ -440,8 +547,10 @@ export default function MessagesPage() {
     } | null>(null);
     const longPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // Sticker picker state
+    // Sticker picker state (when opened from long-press "Add sticker", we capture this message as screenshot and put sticker on it)
     const [showStickerPicker, setShowStickerPicker] = useState(false);
+    const [messageForSticker, setMessageForSticker] = useState<MessageUI | null>(null);
+    const messageForStickerRef = React.useRef<MessageUI | null>(null);
     
     // Message reactions state (messageId -> { emoji: string, users: string[] }[])
     const [messageReactions, setMessageReactions] = useState<Record<string, { emoji: string; users: string[] }[]>>({});
@@ -479,6 +588,28 @@ export default function MessagesPage() {
     
     // Vanish mode state
     const [vanishMode, setVanishMode] = useState(false);
+    
+    // Image compose: after picking an image, user can add caption before sending
+    const [imageCompose, setImageCompose] = useState<{ imageUrl: string; caption: string } | null>(null);
+    // Scenes modal: tap shared post in DM to open fullscreen, close returns to DM
+    const [scenesOpen, setScenesOpen] = useState(false);
+    const [selectedPostForScenes, setSelectedPostForScenes] = useState<Post | null>(null);
+
+    const openScenesForPost = (post: Post) => {
+        setSelectedPostForScenes(post);
+        setScenesOpen(true);
+    };
+    const openScenesForPostId = (postId: string) => {
+        getPostById(postId, user?.id).then(post => {
+            if (post) {
+                setSharedPosts(prev => ({ ...prev, [postId]: post }));
+                setSelectedPostForScenes(post);
+                setScenesOpen(true);
+            } else {
+                showToast?.('Could not load post');
+            }
+        }).catch(() => showToast?.('Could not load post'));
+    };
     
     // Start voice recording
     const handleStartRecording = async () => {
@@ -958,8 +1089,7 @@ export default function MessagesPage() {
             // Fetch all detected posts
             Promise.all(Array.from(postIds).map(async (postId) => {
                 try {
-                    console.log('Fetching post:', postId);
-                    const post = await getPostById(postId);
+                    const post = await getPostById(postId, user?.id);
                     if (post) {
                         console.log('Successfully fetched post:', {
                             postId: post.id,
@@ -1204,14 +1334,9 @@ export default function MessagesPage() {
         const postId = pendingSharePostId || extractPostId(messageText);
         
         if (postId && !sharedPosts[postId]) {
-            // Fetch the post immediately so it can be displayed
-            getPostById(postId).then(post => {
-                if (post) {
-                    setSharedPosts(prev => ({ ...prev, [postId]: post }));
-                }
-            }).catch(error => {
-                console.error('Failed to fetch shared post:', error);
-            });
+            getPostById(postId, user?.id).then(post => {
+                if (post) setSharedPosts(prev => ({ ...prev, [postId]: post }));
+            }).catch(() => {});
         }
 
         // Set flag to prevent auto-scroll during message sending
@@ -1240,13 +1365,20 @@ export default function MessagesPage() {
             const sorted = [...prev, tempMessage].sort((a, b) => a.timestamp - b.timestamp);
             return sorted;
         });
-        // Store replyTo data before clearing replyingTo state
-        const replyToData = replyingTo ? {
-            messageId: replyingTo.id,
-            text: replyingTo.text || '',
-            senderHandle: replyingTo.senderHandle,
-            imageUrl: replyingTo.imageUrl
-        } : undefined;
+        // Store replyTo data before clearing replyingTo state (use shared post thumbnail for screenshot when replying to shared post)
+        const replyToData = replyingTo ? (() => {
+            const replyPostId = replyingTo.postId || extractPostId(replyingTo.text || '');
+            const replyPost = replyPostId ? sharedPosts[replyPostId] : null;
+            const thumbnailUrl = replyingTo.imageUrl || replyPost?.mediaUrl;
+            const mediaType = replyPost?.mediaType;
+            return {
+                messageId: replyingTo.id,
+                text: replyingTo.text || '',
+                senderHandle: replyingTo.senderHandle,
+                imageUrl: thumbnailUrl,
+                ...(mediaType && { mediaType })
+            };
+        })() : undefined;
         
         setMessageText('');
         setPendingSharePostId(null); // Clear pending postId
@@ -1307,7 +1439,115 @@ export default function MessagesPage() {
     const handleSendSticker = async (sticker: string) => {
         if (!user?.handle || !handle) return;
 
-        // Create temporary message for optimistic update
+        // Use ref first (set synchronously when opening picker) so we don't lose the message to state timing
+        const targetMessage = messageForStickerRef.current ?? messageForSticker;
+        messageForStickerRef.current = null;
+        setShowStickerPicker(false);
+        setMessageForSticker(null);
+
+        const sendStickerAsImage = (imageUrl: string) => {
+            const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+            const tempMessage: MessageUI = {
+                id: tempId,
+                senderHandle: user.handle,
+                imageUrl,
+                timestamp: Date.now(),
+                isFromMe: true,
+                senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle),
+                isSystemMessage: false
+            };
+            setMessages(prev => {
+                const sorted = [...prev, tempMessage].sort((a, b) => a.timestamp - b.timestamp);
+                return sorted;
+            });
+            setTimeout(() => scrollToBottom(), 100);
+            appendMessage(user.handle, handle, { imageUrl }).then((realMessage) => {
+                setMessages(prev => {
+                    const filtered = prev.filter(m => m.id !== tempId);
+                    const existingIndex = filtered.findIndex(m => m.id === realMessage.id);
+                    if (existingIndex >= 0) {
+                        const updated = [...filtered];
+                        updated[existingIndex] = {
+                            ...realMessage,
+                            isFromMe: true,
+                            senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle),
+                            imageUrl: realMessage.imageUrl || updated[existingIndex].imageUrl
+                        };
+                        return updated;
+                    }
+                    return [...filtered, { ...realMessage, isFromMe: true, senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle), imageUrl: realMessage.imageUrl }].sort((a, b) => a.timestamp - b.timestamp);
+                });
+            }).catch(() => {});
+        };
+
+        // If opened from long-press "Add sticker": try screenshot first, then fallback to sticker-on-card image
+        if (targetMessage) {
+            const sel = (id: string) => document.querySelector(`[data-message-bubble-id="${id}"]`) || document.querySelector(`[data-message-id="${id}"]`);
+            const el = sel(targetMessage.id) as HTMLElement | null;
+            if (el) {
+                try {
+                    await new Promise(r => setTimeout(r, 200));
+                    const target = sel(targetMessage.id) as HTMLElement | null;
+                    if (target && target.offsetWidth > 0 && target.offsetHeight > 0) {
+                        const html2canvas = (await import('html2canvas')).default;
+                        const shot = await html2canvas(target, {
+                            useCORS: true,
+                            allowTaint: true,
+                            scale: Math.min(2, window.devicePixelRatio || 2),
+                            backgroundColor: '#1f2937',
+                            logging: false,
+                            width: target.offsetWidth,
+                            height: target.offsetHeight,
+                            windowWidth: target.scrollWidth,
+                            windowHeight: target.scrollHeight
+                        });
+                        const ctx = shot.getContext('2d');
+                        if (ctx) {
+                            const fontSize = Math.max(48, Math.min(shot.width, shot.height) * 0.2);
+                            ctx.font = `${fontSize}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+                            ctx.textAlign = 'center';
+                            ctx.textBaseline = 'middle';
+                            ctx.fillText(sticker, shot.width / 2, shot.height / 2);
+                        }
+                        sendStickerAsImage(shot.toDataURL('image/png'));
+                        return;
+                    }
+                } catch (err) {
+                    console.warn('Sticker-on-screenshot failed, using card fallback:', err);
+                }
+            }
+            // Fallback: sticker on a card image (no html2canvas or element not found)
+            try {
+                const w = 400, h = 280;
+                const canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                    const r = 16;
+                    ctx.beginPath();
+                    ctx.moveTo(r, 0); ctx.lineTo(w - r, 0); ctx.quadraticCurveTo(w, 0, w, r);
+                    ctx.lineTo(w, h - r); ctx.quadraticCurveTo(w, h, w - r, h);
+                    ctx.lineTo(r, h); ctx.quadraticCurveTo(0, h, 0, h - r);
+                    ctx.lineTo(0, r); ctx.quadraticCurveTo(0, 0, r, 0);
+                    ctx.closePath();
+                    const grad = ctx.createLinearGradient(0, 0, w, h);
+                    grad.addColorStop(0, '#3b82f6');
+                    grad.addColorStop(1, '#1d4ed8');
+                    ctx.fillStyle = grad;
+                    ctx.fill();
+                    const fontSize = Math.max(72, Math.min(w, h) * 0.25);
+                    ctx.font = `${fontSize}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(sticker, w / 2, h / 2);
+                    sendStickerAsImage(canvas.toDataURL('image/png'));
+                    return;
+                }
+            } catch (_) {}
+        }
+
+        // Default: send sticker as text (emoji message)
         const tempMessage: MessageUI = {
             id: `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
             senderHandle: user.handle,
@@ -1317,19 +1557,11 @@ export default function MessagesPage() {
             senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle),
             isSystemMessage: false
         };
-
-        // Add message immediately to state
         setMessages(prev => {
             const sorted = [...prev, tempMessage].sort((a, b) => a.timestamp - b.timestamp);
             return sorted;
         });
-        setShowStickerPicker(false);
-
-        // Scroll to bottom immediately
         setTimeout(() => scrollToBottom(), 100);
-
-        // Then send to API (will update state again via event)
-        // Notifications are created automatically in appendMessage
         await appendMessage(user.handle, handle, { text: sticker });
     };
 
@@ -1346,83 +1578,72 @@ export default function MessagesPage() {
             fileInputRef.current.value = '';
         }
 
-        // For demo, create a data URL
         const reader = new FileReader();
         reader.onloadend = () => {
             const imageUrl = reader.result as string;
             if (!user?.handle || !handle) return;
-
-            const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-            
-            // Optimistically add message to state immediately for instant UI update
-            const tempMessage: MessageUI = {
-                id: tempId,
-                senderHandle: user.handle,
-                imageUrl: imageUrl,
-                timestamp: Date.now(),
-                isFromMe: true,
-                senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle),
-                isSystemMessage: false
-            };
-
-            // Add message immediately to state
-            setMessages(prev => {
-                const sorted = [...prev, tempMessage].sort((a, b) => a.timestamp - b.timestamp);
-                return sorted;
-            });
-
-            // Scroll to bottom immediately
-            setTimeout(() => scrollToBottom(), 100);
-
-            // Set flag to prevent auto-scroll during image sending
-            isSendingMessageRef.current = true;
-
-            // Then send to API - when the real message comes back, replace the temp one
-            appendMessage(user.handle, handle, { imageUrl }).then((realMessage) => {
-                // Replace temp message with real one to avoid duplicates
-                setMessages(prev => {
-                    // Remove temp message
-                    const filtered = prev.filter(m => m.id !== tempId);
-                    
-                    // Check if real message already exists (from conversationUpdated event)
-                    const existingIndex = filtered.findIndex(m => m.id === realMessage.id);
-                    
-                    if (existingIndex >= 0) {
-                        // Update existing message to ensure all fields are correct
-                        const updated = [...filtered];
-                        updated[existingIndex] = {
-                            ...realMessage,
-                            isFromMe: true,
-                            senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle),
-                            imageUrl: realMessage.imageUrl || updated[existingIndex].imageUrl
-                        };
-                        // Clear sending flag after a short delay to allow DOM to settle
-                        setTimeout(() => {
-                            isSendingMessageRef.current = false;
-                        }, 200);
-                        return updated;
-                    }
-                    
-                    // If not found, add new message
-                    const newMessage: MessageUI = {
-                        ...realMessage,
-                        isFromMe: true,
-                        senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle)
-                    };
-                    const sorted = [...filtered, newMessage].sort((a, b) => a.timestamp - b.timestamp);
-                    // Clear sending flag after a short delay to allow DOM to settle
-                    setTimeout(() => {
-                        isSendingMessageRef.current = false;
-                    }, 200);
-                    return sorted;
-                });
-            }).catch(error => {
-                console.error('Error sending image:', error);
-                // Clear flag on error too
-                isSendingMessageRef.current = false;
-            });
+            // Show image compose UI: preview + optional caption before sending
+            setImageCompose({ imageUrl, caption: '' });
         };
         reader.readAsDataURL(file);
+    };
+
+    const handleCancelImageCompose = () => {
+        setImageCompose(null);
+    };
+
+    const handleSendImageWithCaption = async () => {
+        if (!imageCompose || !user?.handle || !handle) return;
+        const { imageUrl, caption } = imageCompose;
+        setImageCompose(null);
+
+        const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const tempMessage: MessageUI = {
+            id: tempId,
+            senderHandle: user.handle,
+            imageUrl,
+            text: caption.trim() || undefined,
+            timestamp: Date.now(),
+            isFromMe: true,
+            senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle),
+            isSystemMessage: false
+        };
+
+        setMessages(prev => {
+            const sorted = [...prev, tempMessage].sort((a, b) => a.timestamp - b.timestamp);
+            return sorted;
+        });
+        setTimeout(() => scrollToBottom(), 100);
+        isSendingMessageRef.current = true;
+
+        appendMessage(user.handle, handle, { imageUrl, text: caption.trim() || undefined }).then((realMessage) => {
+            setMessages(prev => {
+                const filtered = prev.filter(m => m.id !== tempId);
+                const existingIndex = filtered.findIndex(m => m.id === realMessage.id);
+                if (existingIndex >= 0) {
+                    const updated = [...filtered];
+                    updated[existingIndex] = {
+                        ...realMessage,
+                        isFromMe: true,
+                        senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle),
+                        imageUrl: realMessage.imageUrl || updated[existingIndex].imageUrl
+                    };
+                    setTimeout(() => { isSendingMessageRef.current = false; }, 200);
+                    return updated;
+                }
+                const newMessage: MessageUI = {
+                    ...realMessage,
+                    isFromMe: true,
+                    senderAvatar: user.avatarUrl || getAvatarForHandle(user.handle)
+                };
+                const sorted = [...filtered, newMessage].sort((a, b) => a.timestamp - b.timestamp);
+                setTimeout(() => { isSendingMessageRef.current = false; }, 200);
+                return sorted;
+            });
+        }).catch(error => {
+            console.error('Error sending image:', error);
+            isSendingMessageRef.current = false;
+        });
     };
 
     const formatTimestamp = (ts: number) => {
@@ -1999,6 +2220,7 @@ export default function MessagesPage() {
                                 {!msg.isSystemMessage && (
                                     <div
                                         ref={isLastMessage ? lastMessageRef : null}
+                                        data-message-id={msg.id}
                                         className={`flex ${msg.isFromMe ? 'justify-end' : 'justify-start'} ${showTimestamp ? 'mt-4' : ''}`}
                                     >
                                         {msg.isFromMe ? (
@@ -2015,27 +2237,66 @@ export default function MessagesPage() {
                                                     console.log('Rendering SharedPostCard for post:', sharedPost.id, 'isTextOnly:', !sharedPost.mediaUrl && (!sharedPost.mediaItems || sharedPost.mediaItems.length === 0) && sharedPost.text);
                                                 }
                                                 
-                                                // If it's a shared post, render outside the bubble
+                                                // If it's a shared post, render outside the bubble (tappable → Scenes); long-press opens react card
                                                 if (sharedPost) {
                                                     return (
                                                         <div className="w-full flex justify-end mb-2" style={{ maxWidth: '100%' }}>
-                                                            <div style={{ maxWidth: '448px', width: '100%' }}>
-                                                                <SharedPostCard post={sharedPost} />
+                                                            <div
+                                                                className="relative"
+                                                                style={{ maxWidth: '448px', width: '100%' }}
+                                                                onContextMenu={(e) => { e.preventDefault(); handleMessageContextMenu(msg, e); }}
+                                                                onTouchStart={(e) => handleTouchStart(msg, e)}
+                                                                onTouchMove={handleTouchMove}
+                                                                onTouchEnd={handleTouchEnd}
+                                                                onTouchCancel={handleTouchEnd}
+                                                            >
+                                                                <SharedPostCard post={sharedPost} onTap={openScenesForPost} />
+                                                                {messageReactions[msg.id] && messageReactions[msg.id].length > 0 && (
+                                                                    <div className="absolute bottom-2 right-2 flex items-center gap-0.5">
+                                                                        {messageReactions[msg.id].map((reaction, idx) => {
+                                                                            const isHeart = reaction.emoji === '❤️';
+                                                                            return (
+                                                                                <button key={`${idx}-${reaction.emoji}`} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1 bg-transparent' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                    {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
+                                                                                    {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
+                                                                                </button>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     );
                                                 }
                                                 
-                                                // If post ID is detected but post is still loading, show loading state instead of URL
+                                                // Post ID detected but not loaded: show preview card, tap to view in Scenes; long-press opens react card
                                                 if (postId && !sharedPost) {
                                                     return (
                                                         <div className="w-full flex justify-end mb-2" style={{ maxWidth: '100%' }}>
-                                                            <div style={{ maxWidth: '448px', width: '100%' }}>
-                                                                <div className="w-full max-w-md rounded-2xl overflow-hidden bg-gray-800 border border-gray-700 shadow-lg p-4">
-                                                                    <div className="flex items-center justify-center py-8">
-                                                                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+                                                            <div
+                                                                data-message-bubble-id={msg.id}
+                                                                className="relative"
+                                                                style={{ maxWidth: '448px', width: '100%' }}
+                                                                onContextMenu={(e) => { e.preventDefault(); handleMessageContextMenu(msg, e); }}
+                                                                onTouchStart={(e) => handleTouchStart(msg, e)}
+                                                                onTouchMove={handleTouchMove}
+                                                                onTouchEnd={handleTouchEnd}
+                                                                onTouchCancel={handleTouchEnd}
+                                                            >
+                                                                <SharedPostPreviewCard postId={postId} onTap={() => openScenesForPostId(postId)} userId={user?.id} />
+                                                                {messageReactions[msg.id] && messageReactions[msg.id].length > 0 && (
+                                                                    <div className="absolute bottom-2 right-2 flex items-center gap-0.5">
+                                                                        {messageReactions[msg.id].map((reaction, idx) => {
+                                                                            const isHeart = reaction.emoji === '❤️';
+                                                                            return (
+                                                                                <button key={`${idx}-${reaction.emoji}`} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                    {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
+                                                                                    {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
+                                                                                </button>
+                                                                            );
+                                                                        })}
                                                                     </div>
-                                                                </div>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     );
@@ -2060,41 +2321,53 @@ export default function MessagesPage() {
                                                     // URL detected but no postId - try to extract it and fetch
                                                     const extractedPostId = extractPostId(msg.text || '');
                                                     if (extractedPostId) {
-                                                        // If we already have the post, render it
+                                                        // If we already have the post, render it (tappable → Scenes)
                                                         if (sharedPosts[extractedPostId]) {
                                                             return (
                                                                 <div className="w-full flex justify-end mb-2" style={{ maxWidth: '100%' }}>
-                                                                    <div style={{ maxWidth: '448px', width: '100%' }}>
-                                                                        <SharedPostCard post={sharedPosts[extractedPostId]} />
+                                                                    <div data-message-bubble-id={msg.id} className="relative" style={{ maxWidth: '448px', width: '100%' }} onContextMenu={(e) => { e.preventDefault(); handleMessageContextMenu(msg, e); }} onTouchStart={(e) => handleTouchStart(msg, e)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}>
+                                                                        <SharedPostCard post={sharedPosts[extractedPostId]} onTap={openScenesForPost} />
+                                                                        {messageReactions[msg.id]?.length > 0 && (
+                                                                            <div className="absolute bottom-2 right-2 flex items-center gap-0.5">
+                                                                                {messageReactions[msg.id].map((reaction, idx) => {
+                                                                                    const isHeart = reaction.emoji === '❤️';
+                                                                                    return (
+                                                                                        <button key={`${idx}-${reaction.emoji}`} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                            {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
+                                                                                            {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
+                                                                                        </button>
+                                                                                    );
+                                                                                })}
+                                                                            </div>
+                                                                        )}
                                                                     </div>
                                                                 </div>
                                                             );
                                                         }
-                                                        
-                                                        // Otherwise, fetch the post and show loading state
                                                         if (!sharedPosts[extractedPostId]) {
-                                                            getPostById(extractedPostId).then(post => {
-                                                                if (post) {
-                                                                    setSharedPosts(prev => ({ ...prev, [extractedPostId]: post }));
-                                                                }
-                                                            }).catch(error => {
-                                                                console.error('Failed to fetch post from URL:', error);
-                                                            });
+                                                            getPostById(extractedPostId, user?.id).then(post => { if (post) setSharedPosts(prev => ({ ...prev, [extractedPostId]: post })); }).catch(() => {});
                                                         }
-                                                    }
-                                                    
-                                                    // Show loading state while fetching
-                                                    return (
-                                                        <div className="w-full flex justify-end mb-2" style={{ maxWidth: '100%' }}>
-                                                            <div style={{ maxWidth: '448px', width: '100%' }}>
-                                                                <div className="w-full max-w-md rounded-2xl overflow-hidden bg-gray-800 border border-gray-700 shadow-lg p-4">
-                                                                    <div className="flex items-center justify-center py-8">
-                                                                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
-                                                                    </div>
+                                                        return (
+                                                            <div className="w-full flex justify-end mb-2" style={{ maxWidth: '100%' }}>
+                                                                <div data-message-bubble-id={msg.id} className="relative" style={{ maxWidth: '448px', width: '100%' }} onContextMenu={(e) => { e.preventDefault(); handleMessageContextMenu(msg, e); }} onTouchStart={(e) => handleTouchStart(msg, e)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}>
+                                                                    <SharedPostPreviewCard postId={extractedPostId} onTap={() => openScenesForPostId(extractedPostId)} userId={user?.id} />
+                                                                    {messageReactions[msg.id]?.length > 0 && (
+                                                                        <div className="absolute bottom-2 right-2 flex items-center gap-0.5">
+                                                                            {messageReactions[msg.id].map((reaction, idx) => {
+                                                                                const isHeart = reaction.emoji === '❤️';
+                                                                                return (
+                                                                                    <button key={`${idx}-${reaction.emoji}`} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                        {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
+                                                                                        {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
+                                                                                    </button>
+                                                                                );
+                                                                            })}
+                                                                        </div>
+                                                                    )}
                                                                 </div>
                                                             </div>
-                                                        </div>
-                                                    );
+                                                        );
+                                                    }
                                                 }
                                                 
                                                 return (
@@ -2114,6 +2387,7 @@ export default function MessagesPage() {
                                                         )}
                                                         <div className="flex flex-col items-end gap-1 flex-1 min-w-0 order-1">
                                                             <div
+                                                                data-message-bubble-id={msg.id}
                                                                 className="bg-[#0095f6] rounded-2xl rounded-tr-sm px-4 py-2.5 break-words cursor-pointer select-none shadow-sm relative"
                                                             style={{
                                                                 maxWidth: '100%',
@@ -2136,26 +2410,25 @@ export default function MessagesPage() {
                                                                 }
                                                             }}
                                                         >
-                                                            {/* Reply Preview - Instagram style */}
+                                                            {/* Reply Preview - screenshot when replying to shared post (MP4/image) */}
                                                             {msg.replyTo && (
                                                                 <div className="mb-2 pb-2 border-l-2 border-white/30 pl-2 -mx-2">
                                                                     <div className="flex items-start gap-2">
-                                                                        {/* Image thumbnail if original message had image */}
                                                                         {msg.replyTo.imageUrl && (
-                                                                            <div className="w-12 h-12 rounded overflow-hidden flex-shrink-0 border border-white/20">
-                                                                                <img 
-                                                                                    src={msg.replyTo.imageUrl} 
-                                                                                    alt="Reply preview" 
-                                                                                    className="w-full h-full object-cover"
-                                                                                />
+                                                                            <div className="w-12 h-12 rounded overflow-hidden flex-shrink-0 border border-white/20 bg-black">
+                                                                                {(msg.replyTo as { mediaType?: 'image' | 'video' }).mediaType === 'video' ? (
+                                                                                    <video src={msg.replyTo.imageUrl} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                                                                                ) : (
+                                                                                    <img src={msg.replyTo.imageUrl} alt="Reply preview" className="w-full h-full object-cover" />
+                                                                                )}
                                                                             </div>
                                                                         )}
                                                                         <div className="flex-1 min-w-0">
-                                                                            <div className="text-xs text-white/70 font-medium mb-0.5">
-                                                                                {msg.replyTo.senderHandle}
-                                                                            </div>
+                                                                            <div className="text-xs text-white/70 font-medium mb-0.5">{msg.replyTo.senderHandle}</div>
                                                                             <div className="text-xs text-white/60 truncate">
-                                                                                {msg.replyTo.imageUrl ? (msg.replyTo.text || 'Photo') : (msg.replyTo.text || 'Message')}
+                                                                                {msg.replyTo.imageUrl
+                                                                                    ? ((msg.replyTo as { mediaType?: 'image' | 'video' }).mediaType === 'video' ? 'Video' : 'Photo')
+                                                                                    : (msg.replyTo.text || 'Message')}
                                                                             </div>
                                                                         </div>
                                                                     </div>
@@ -2205,25 +2478,40 @@ export default function MessagesPage() {
                                                                     )}
                                                                 </div>
                                                             )}
-                                                            {/* Reactions - WhatsApp style on bottom-right of bubble */}
+                                                            {/* Reactions - Instagram-style: red heart only, no white bg; pop animation */}
                                                             {messageReactions[msg.id] && messageReactions[msg.id].length > 0 && (
                                                                 <div className="absolute bottom-0 right-0 flex items-center gap-0.5 mb-1 mr-1">
-                                                                    {messageReactions[msg.id].map((reaction, idx) => (
-                                                                        <button
-                                                                            key={idx}
-                                                                            onClick={(e) => {
-                                                                                e.stopPropagation();
-                                                                                handleAddReaction(msg.id, reaction.emoji);
-                                                                            }}
-                                                                            className="bg-white/90 hover:bg-white rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm transition-colors"
-                                                                            title={`${reaction.users.length} ${reaction.users.length === 1 ? 'reaction' : 'reactions'}`}
-                                                                        >
-                                                                            <span className="text-sm leading-none">{reaction.emoji}</span>
-                                                                            {reaction.users.length > 1 && (
-                                                                                <span className="text-[10px] text-gray-700 font-medium leading-none">{reaction.users.length}</span>
-                                                                            )}
-                                                                        </button>
-                                                                    ))}
+                                                                    {messageReactions[msg.id].map((reaction, idx) => {
+                                                                        const isHeart = reaction.emoji === '❤️';
+                                                                        return (
+                                                                            <button
+                                                                                key={`${idx}-${reaction.emoji}-${reaction.users.length}-${reaction.users.join('-')}`}
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    handleAddReaction(msg.id, reaction.emoji);
+                                                                                }}
+                                                                                className={
+                                                                                    isHeart
+                                                                                        ? 'rounded-full px-1 py-0.5 flex items-center gap-1 transition-colors animate-reaction-heart-pop'
+                                                                                        : 'bg-white/90 hover:bg-white rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm transition-colors'
+                                                                                }
+                                                                                title={`${reaction.users.length} ${reaction.users.length === 1 ? 'reaction' : 'reactions'}`}
+                                                                            >
+                                                                                {isHeart ? (
+                                                                                    <span className="inline-flex items-center justify-center text-base leading-none" aria-label="heart">
+                                                                                        <svg className="w-4 h-4 text-red-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                                                                            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+                                                                                        </svg>
+                                                                                    </span>
+                                                                                ) : (
+                                                                                    <span className="text-sm leading-none">{reaction.emoji}</span>
+                                                                                )}
+                                                                                {reaction.users.length > 1 && (
+                                                                                    <span className={`text-[10px] font-medium leading-none ${isHeart ? 'text-red-400' : 'text-gray-700'}`}>{reaction.users.length}</span>
+                                                                                )}
+                                                                            </button>
+                                                                        );
+                                                                    })}
                                                                 </div>
                                                             )}
                                                             </div>
@@ -2323,7 +2611,7 @@ export default function MessagesPage() {
                                                     console.log('Rendering SharedPostCard for post:', sharedPost.id, 'isTextOnly:', !sharedPost.mediaUrl && (!sharedPost.mediaItems || sharedPost.mediaItems.length === 0) && sharedPost.text);
                                                 }
                                                 
-                                                // If it's a shared post, render outside the bubble
+                                                // If it's a shared post, render outside the bubble (tappable → Scenes); long-press opens react card
                                                 if (sharedPost) {
                                                     return (
                                                         <div className="flex items-start gap-2 w-full mb-2" style={{ maxWidth: '100%' }}>
@@ -2334,14 +2622,27 @@ export default function MessagesPage() {
                                                                     size="sm"
                                                                 />
                                                             )}
-                                                            <div className="flex-1 min-w-0" style={{ maxWidth: '448px' }}>
-                                                                <SharedPostCard post={sharedPost} />
+                                                            <div data-message-bubble-id={msg.id} className="relative flex-1 min-w-0" style={{ maxWidth: '448px' }} onContextMenu={(e) => { e.preventDefault(); handleMessageContextMenu(msg, e); }} onTouchStart={(e) => handleTouchStart(msg, e)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}>
+                                                                <SharedPostCard post={sharedPost} onTap={openScenesForPost} />
+                                                                {messageReactions[msg.id]?.length > 0 && (
+                                                                    <div className="absolute bottom-2 right-2 flex items-center gap-0.5">
+                                                                        {messageReactions[msg.id].map((reaction, idx) => {
+                                                                            const isHeart = reaction.emoji === '❤️';
+                                                                            return (
+                                                                                <button key={`${idx}-${reaction.emoji}`} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                    {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
+                                                                                    {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
+                                                                                </button>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     );
                                                 }
                                                 
-                                                // If post ID is detected but post is still loading, show loading state instead of URL
+                                                // Post ID detected but not loaded: show preview card, tap to view in Scenes; long-press opens react card
                                                 if (postId && !sharedPost) {
                                                     return (
                                                         <div className="flex items-start gap-2 w-full mb-2" style={{ maxWidth: '100%' }}>
@@ -2352,12 +2653,21 @@ export default function MessagesPage() {
                                                                     size="sm"
                                                                 />
                                                             )}
-                                                            <div className="flex-1 min-w-0" style={{ maxWidth: '448px' }}>
-                                                                <div className="w-full max-w-md rounded-2xl overflow-hidden bg-gray-800 border border-gray-700 shadow-lg p-4">
-                                                                    <div className="flex items-center justify-center py-8">
-                                                                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+                                                            <div data-message-bubble-id={msg.id} className="relative flex-1 min-w-0" style={{ maxWidth: '448px' }} onContextMenu={(e) => { e.preventDefault(); handleMessageContextMenu(msg, e); }} onTouchStart={(e) => handleTouchStart(msg, e)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}>
+                                                                <SharedPostPreviewCard postId={postId} onTap={() => openScenesForPostId(postId)} userId={user?.id} />
+                                                                {messageReactions[msg.id]?.length > 0 && (
+                                                                    <div className="absolute bottom-2 right-2 flex items-center gap-0.5">
+                                                                        {messageReactions[msg.id].map((reaction, idx) => {
+                                                                            const isHeart = reaction.emoji === '❤️';
+                                                                            return (
+                                                                                <button key={`${idx}-${reaction.emoji}`} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                    {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
+                                                                                    {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
+                                                                                </button>
+                                                                            );
+                                                                        })}
                                                                     </div>
-                                                                </div>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     );
@@ -2434,55 +2744,59 @@ export default function MessagesPage() {
                                                     // URL detected but no postId - try to extract it and fetch
                                                     const extractedPostId = extractPostId(msg.text || '');
                                                     if (extractedPostId) {
-                                                        // If we already have the post, render it
+                                                        // If we already have the post, render it (tappable → Scenes); long-press opens react card
                                                         if (sharedPosts[extractedPostId]) {
                                                             return (
                                                                 <div className="flex items-start gap-2 w-full mb-2" style={{ maxWidth: '100%' }}>
                                                                     {msg.senderAvatar && (
-                                                                        <Avatar
-                                                                            src={msg.senderAvatar}
-                                                                            name={msg.senderHandle}
-                                                                            size="sm"
-                                                                        />
+                                                                        <Avatar src={msg.senderAvatar} name={msg.senderHandle} size="sm" />
                                                                     )}
-                                                                    <div className="flex-1 min-w-0" style={{ maxWidth: '448px' }}>
-                                                                        <SharedPostCard post={sharedPosts[extractedPostId]} />
+                                                                    <div data-message-bubble-id={msg.id} className="relative flex-1 min-w-0" style={{ maxWidth: '448px' }} onContextMenu={(e) => { e.preventDefault(); handleMessageContextMenu(msg, e); }} onTouchStart={(e) => handleTouchStart(msg, e)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}>
+                                                                        <SharedPostCard post={sharedPosts[extractedPostId]} onTap={openScenesForPost} />
+                                                                        {messageReactions[msg.id]?.length > 0 && (
+                                                                            <div className="absolute bottom-2 right-2 flex items-center gap-0.5">
+                                                                                {messageReactions[msg.id].map((reaction, idx) => {
+                                                                                    const isHeart = reaction.emoji === '❤️';
+                                                                                    return (
+                                                                                        <button key={`${idx}-${reaction.emoji}`} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                            {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
+                                                                                            {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
+                                                                                        </button>
+                                                                                    );
+                                                                                })}
+                                                                            </div>
+                                                                        )}
                                                                     </div>
                                                                 </div>
                                                             );
                                                         }
-                                                        
-                                                        // Otherwise, fetch the post and show loading state
                                                         if (!sharedPosts[extractedPostId]) {
-                                                            getPostById(extractedPostId).then(post => {
-                                                                if (post) {
-                                                                    setSharedPosts(prev => ({ ...prev, [extractedPostId]: post }));
-                                                                }
-                                                            }).catch(error => {
-                                                                console.error('Failed to fetch post from URL:', error);
-                                                            });
+                                                            getPostById(extractedPostId, user?.id).then(post => { if (post) setSharedPosts(prev => ({ ...prev, [extractedPostId]: post })); }).catch(() => {});
                                                         }
-                                                    }
-                                                    
-                                                    // Show loading state while fetching
-                                                    return (
-                                                        <div className="flex items-start gap-2 w-full mb-2" style={{ maxWidth: '100%' }}>
-                                                            {msg.senderAvatar && (
-                                                                <Avatar
-                                                                    src={msg.senderAvatar}
-                                                                    name={msg.senderHandle}
-                                                                    size="sm"
-                                                                />
-                                                            )}
-                                                            <div className="flex-1 min-w-0" style={{ maxWidth: '448px' }}>
-                                                                <div className="w-full max-w-md rounded-2xl overflow-hidden bg-gray-800 border border-gray-700 shadow-lg p-4">
-                                                                    <div className="flex items-center justify-center py-8">
-                                                                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
-                                                                    </div>
+                                                        return (
+                                                            <div className="flex items-start gap-2 w-full mb-2" style={{ maxWidth: '100%' }}>
+                                                                {msg.senderAvatar && (
+                                                                    <Avatar src={msg.senderAvatar} name={msg.senderHandle} size="sm" />
+                                                                )}
+                                                                <div data-message-bubble-id={msg.id} className="relative flex-1 min-w-0" style={{ maxWidth: '448px' }} onContextMenu={(e) => { e.preventDefault(); handleMessageContextMenu(msg, e); }} onTouchStart={(e) => handleTouchStart(msg, e)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}>
+                                                                    <SharedPostPreviewCard postId={extractedPostId} onTap={() => openScenesForPostId(extractedPostId)} userId={user?.id} />
+                                                                    {messageReactions[msg.id]?.length > 0 && (
+                                                                        <div className="absolute bottom-2 right-2 flex items-center gap-0.5">
+                                                                            {messageReactions[msg.id].map((reaction, idx) => {
+                                                                                const isHeart = reaction.emoji === '❤️';
+                                                                                return (
+                                                                                    <button key={`${idx}-${reaction.emoji}`} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                        {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
+                                                                                        {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
+                                                                                    </button>
+                                                                                );
+                                                                            })}
+                                                                        </div>
+                                                                    )}
                                                                 </div>
                                                             </div>
-                                                        </div>
-                                                    );
+                                                        );
+                                                    }
                                                 }
                                                 
                                                 return (
@@ -2497,6 +2811,7 @@ export default function MessagesPage() {
                                                         )}
                                                         <div className="flex flex-col gap-1.5 flex-1 min-w-0">
                                                             <div
+                                                                data-message-bubble-id={msg.id}
                                                                 className="bg-gray-800 rounded-2xl rounded-tl-sm px-4 py-2.5 break-words cursor-pointer select-none shadow-sm relative"
                                                                 style={{
                                                                     maxWidth: '100%',
@@ -2523,22 +2838,21 @@ export default function MessagesPage() {
                                                                 {msg.replyTo && (
                                                                     <div className="mb-2 pb-2 border-l-2 border-white/30 pl-2 -mx-2">
                                                                         <div className="flex items-start gap-2">
-                                                                            {/* Image thumbnail if original message had image */}
                                                                             {msg.replyTo.imageUrl && (
-                                                                                <div className="w-12 h-12 rounded overflow-hidden flex-shrink-0 border border-white/20">
-                                                                                    <img 
-                                                                                        src={msg.replyTo.imageUrl} 
-                                                                                        alt="Reply preview" 
-                                                                                        className="w-full h-full object-cover"
-                                                                                    />
+                                                                                <div className="w-12 h-12 rounded overflow-hidden flex-shrink-0 border border-white/20 bg-black">
+                                                                                    {(msg.replyTo as { mediaType?: 'image' | 'video' }).mediaType === 'video' ? (
+                                                                                        <video src={msg.replyTo.imageUrl} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                                                                                    ) : (
+                                                                                        <img src={msg.replyTo.imageUrl} alt="Reply preview" className="w-full h-full object-cover" />
+                                                                                    )}
                                                                                 </div>
                                                                             )}
                                                                             <div className="flex-1 min-w-0">
-                                                                                <div className="text-xs text-white/70 font-medium mb-0.5">
-                                                                                    {msg.replyTo.senderHandle}
-                                                                                </div>
+                                                                                <div className="text-xs text-white/70 font-medium mb-0.5">{msg.replyTo.senderHandle}</div>
                                                                                 <div className="text-xs text-white/60 truncate">
-                                                                                    {msg.replyTo.imageUrl ? (msg.replyTo.text || 'Photo') : (msg.replyTo.text || 'Message')}
+                                                                                    {msg.replyTo.imageUrl
+                                                                                        ? ((msg.replyTo as { mediaType?: 'image' | 'video' }).mediaType === 'video' ? 'Video' : 'Photo')
+                                                                                        : (msg.replyTo.text || 'Message')}
                                                                                 </div>
                                                                             </div>
                                                                         </div>
@@ -2588,25 +2902,40 @@ export default function MessagesPage() {
                                                                         )}
                                                                     </div>
                                                                 )}
-                                                                {/* Reactions - WhatsApp style on bottom-right of bubble */}
+                                                                {/* Reactions - Instagram-style: red heart only, no white bg; pop animation */}
                                                                 {messageReactions[msg.id] && messageReactions[msg.id].length > 0 && (
                                                                     <div className="absolute bottom-0 right-0 flex items-center gap-0.5 mb-1 mr-1">
-                                                                        {messageReactions[msg.id].map((reaction, idx) => (
-                                                                            <button
-                                                                                key={idx}
-                                                                                onClick={(e) => {
-                                                                                    e.stopPropagation();
-                                                                                    handleAddReaction(msg.id, reaction.emoji);
-                                                                                }}
-                                                                                className="bg-white/90 hover:bg-white rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm transition-colors"
-                                                                                title={`${reaction.users.length} ${reaction.users.length === 1 ? 'reaction' : 'reactions'}`}
-                                                                            >
-                                                                                <span className="text-sm leading-none">{reaction.emoji}</span>
-                                                                                {reaction.users.length > 1 && (
-                                                                                    <span className="text-[10px] text-gray-700 font-medium leading-none">{reaction.users.length}</span>
-                                                                                )}
-                                                                            </button>
-                                                                        ))}
+                                                                        {messageReactions[msg.id].map((reaction, idx) => {
+                                                                            const isHeart = reaction.emoji === '❤️';
+                                                                            return (
+                                                                                <button
+                                                                                    key={`${idx}-${reaction.emoji}-${reaction.users.length}-${reaction.users.join('-')}`}
+                                                                                    onClick={(e) => {
+                                                                                        e.stopPropagation();
+                                                                                        handleAddReaction(msg.id, reaction.emoji);
+                                                                                    }}
+                                                                                    className={
+                                                                                        isHeart
+                                                                                            ? 'rounded-full px-1 py-0.5 flex items-center gap-1 transition-colors animate-reaction-heart-pop'
+                                                                                            : 'bg-white/90 hover:bg-white rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm transition-colors'
+                                                                                    }
+                                                                                    title={`${reaction.users.length} ${reaction.users.length === 1 ? 'reaction' : 'reactions'}`}
+                                                                                >
+                                                                                    {isHeart ? (
+                                                                                        <span className="inline-flex items-center justify-center text-base leading-none" aria-label="heart">
+                                                                                            <svg className="w-4 h-4 text-red-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                                                                                <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+                                                                                            </svg>
+                                                                                        </span>
+                                                                                    ) : (
+                                                                                        <span className="text-sm leading-none">{reaction.emoji}</span>
+                                                                                    )}
+                                                                                    {reaction.users.length > 1 && (
+                                                                                        <span className={`text-[10px] font-medium leading-none ${isHeart ? 'text-red-400' : 'text-gray-700'}`}>{reaction.users.length}</span>
+                                                                                    )}
+                                                                                </button>
+                                                                            );
+                                                                        })}
                                                                     </div>
                                                                 )}
                                                             </div>
@@ -2653,40 +2982,43 @@ export default function MessagesPage() {
 
             {/* Input Bar */}
             <div className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 z-20">
-                {/* Reply Preview */}
-                {replyingTo && (
-                    <div className="px-4 pt-3 pb-2 border-b border-gray-800 bg-gray-800/50">
-                        <div className="flex items-center justify-between gap-3">
-                            <div className="flex items-center gap-3 flex-1 min-w-0">
-                                <div className="w-0.5 h-12 bg-[#0095f6] rounded-full flex-shrink-0" />
-                                {/* Image thumbnail if message has image */}
-                                {replyingTo.imageUrl && (
-                                    <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 border border-gray-700">
-                                        <img 
-                                            src={replyingTo.imageUrl} 
-                                            alt="Reply preview" 
-                                            className="w-full h-full object-cover"
-                                        />
-                                    </div>
-                                )}
-                                <div className="flex-1 min-w-0">
-                                    <div className="text-xs text-gray-400 mb-0.5">Replying to {replyingTo.senderHandle}</div>
-                                    {replyingTo.imageUrl ? (
-                                        <div className="text-sm text-gray-300 truncate">{replyingTo.text || 'Photo'}</div>
-                                    ) : (
-                                        <div className="text-sm text-gray-300 truncate">{replyingTo.text || 'Message'}</div>
+                {/* Reply Preview - show screenshot/thumbnail when replying to shared post (MP4 or image) */}
+                {replyingTo && (() => {
+                    const replyPostId = replyingTo.postId || extractPostId(replyingTo.text || '');
+                    const replyPost = replyPostId ? sharedPosts[replyPostId] : null;
+                    const replyThumbUrl = replyingTo.imageUrl || replyPost?.mediaUrl;
+                    const isVideoReply = replyPost?.mediaType === 'video';
+                    return (
+                        <div className="px-4 pt-3 pb-2 border-b border-gray-800 bg-gray-800/50">
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-3 flex-1 min-w-0">
+                                    <div className="w-0.5 h-12 bg-[#0095f6] rounded-full flex-shrink-0" />
+                                    {replyThumbUrl && (
+                                        <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 border border-gray-700 bg-black">
+                                            {isVideoReply ? (
+                                                <video src={replyThumbUrl} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                                            ) : (
+                                                <img src={replyThumbUrl} alt="Reply preview" className="w-full h-full object-cover" />
+                                            )}
+                                        </div>
                                     )}
+                                    <div className="flex-1 min-w-0">
+                                        <div className="text-xs text-gray-400 mb-0.5">Replying to {replyingTo.senderHandle}</div>
+                                        <div className="text-sm text-gray-300 truncate">
+                                            {replyThumbUrl ? (isVideoReply ? 'Video' : 'Photo') : (replyingTo.text || 'Message')}
+                                        </div>
+                                    </div>
                                 </div>
+                                <button
+                                    onClick={handleCancelReply}
+                                    className="p-1 hover:bg-gray-700 rounded-full transition-colors flex-shrink-0"
+                                >
+                                    <FiX className="w-4 h-4 text-gray-400" />
+                                </button>
                             </div>
-                            <button
-                                onClick={handleCancelReply}
-                                className="p-1 hover:bg-gray-700 rounded-full transition-colors flex-shrink-0"
-                            >
-                                <FiX className="w-4 h-4 text-gray-400" />
-                            </button>
                         </div>
-                    </div>
-                )}
+                    );
+                })()}
                 {/* Edit Preview */}
                 {editingMessage && (
                     <div className="px-4 pt-3 pb-2 border-b border-gray-800 bg-gray-800/50">
@@ -2700,6 +3032,42 @@ export default function MessagesPage() {
                             >
                                 <FiX className="w-4 h-4 text-gray-400" />
                             </button>
+                        </div>
+                    </div>
+                )}
+                {/* Image compose: preview + caption before sending */}
+                {imageCompose && (
+                    <div className="px-3 py-2 sm:px-4 border-b border-gray-800 bg-gray-800/50">
+                        <div className="flex items-center gap-3">
+                            <div className="flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden bg-gray-700">
+                                <img src={imageCompose.imageUrl} alt="Preview" className="w-full h-full object-cover" />
+                            </div>
+                            <div className="flex-1 min-w-0 flex flex-col gap-1">
+                                <input
+                                    type="text"
+                                    value={imageCompose.caption}
+                                    onChange={(e) => setImageCompose(prev => prev ? { ...prev, caption: e.target.value } : null)}
+                                    placeholder="Add a caption..."
+                                    className="w-full bg-gray-700 text-white placeholder-gray-400 px-3 py-2 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-white"
+                                    autoFocus
+                                />
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={handleSendImageWithCaption}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#0095f6] text-white text-sm font-medium hover:bg-[#0084d4] transition-colors"
+                                    >
+                                        <FiSend className="w-4 h-4" />
+                                        Send
+                                    </button>
+                                    <button
+                                        onClick={handleCancelImageCompose}
+                                        className="p-1.5 hover:bg-gray-700 rounded-full transition-colors text-gray-400"
+                                        aria-label="Cancel"
+                                    >
+                                        <FiX className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 )}
@@ -2727,7 +3095,7 @@ export default function MessagesPage() {
                                 }
                             }}
                             placeholder={editingMessage ? "Edit message..." : replyingTo ? "Message..." : "Message..."}
-                            className="flex-1 bg-gray-800 text-white placeholder-gray-500 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full focus:outline-none focus:ring-2 focus:ring-green-500 text-sm sm:text-base min-w-0"
+                            className="flex-1 bg-gray-800 text-white placeholder-gray-500 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full focus:outline-none focus:ring-2 focus:ring-white text-sm sm:text-base min-w-0"
                         />
                         {messageText.trim() && (
                             <button
@@ -2748,14 +3116,22 @@ export default function MessagesPage() {
                 </div>
             </div>
 
-            {/* Context Menu */}
-            {contextMenu && (
+            {/* Context Menu - position above tap when near bottom so full card is visible */}
+            {contextMenu && (() => {
+                const menuHeightEstimate = 420;
+                const padding = 16;
+                const showAbove = contextMenu.y + menuHeightEstimate > window.innerHeight - padding;
+                const top = showAbove
+                    ? Math.max(padding, contextMenu.y - menuHeightEstimate - 10)
+                    : contextMenu.y - 10;
+                const transform = showAbove ? 'translate(-50%, 0)' : 'translate(-50%, -10px)';
+                return (
                 <div
-                    className="fixed bg-gray-900 border border-gray-700 rounded-lg shadow-2xl z-50 min-w-[200px]"
+                    className="fixed bg-gray-900 border border-gray-700 rounded-lg shadow-2xl z-50 min-w-[200px] max-h-[calc(100vh-32px)] overflow-y-auto"
                     style={{
                         left: `${contextMenu.x}px`,
-                        top: `${contextMenu.y}px`,
-                        transform: 'translate(-50%, -10px)'
+                        top: `${top}px`,
+                        transform
                     }}
                     onClick={(e) => e.stopPropagation()}
                 >
@@ -2798,6 +3174,9 @@ export default function MessagesPage() {
                         </button>
                         <button
                             onClick={() => {
+                                if (contextMenu?.message) {
+                                    setMessageForSticker(contextMenu.message);
+                                }
                                 setShowStickerPicker(true);
                                 closeContextMenu();
                             }}
@@ -2855,13 +3234,14 @@ export default function MessagesPage() {
                         </button>
                     </div>
                 </div>
-            )}
+                );
+            })()}
 
             {/* Sticker Picker Modal */}
             {showStickerPicker && (
                 <div
                     className="fixed inset-0 bg-black/80 z-50 flex items-end justify-center"
-                    onClick={() => setShowStickerPicker(false)}
+                    onClick={() => { messageForStickerRef.current = null; setShowStickerPicker(false); setMessageForSticker(null); }}
                 >
                     <div
                         className="bg-gray-900 rounded-t-3xl w-full max-w-md max-h-[60vh] overflow-y-auto"
@@ -2870,7 +3250,7 @@ export default function MessagesPage() {
                         <div className="sticky top-0 bg-gray-900 border-b border-gray-700 px-4 py-3 flex items-center justify-between">
                             <h3 className="text-white font-semibold">Add Sticker</h3>
                             <button
-                                onClick={() => setShowStickerPicker(false)}
+                                onClick={() => { messageForStickerRef.current = null; setShowStickerPicker(false); setMessageForSticker(null); }}
                                 className="text-gray-400 hover:text-white"
                             >
                                 <FiChevronLeft className="w-6 h-6 rotate-180" />
@@ -3180,6 +3560,35 @@ export default function MessagesPage() {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* Scenes modal: tap shared post in DM to view fullscreen; close returns to DM feed */}
+            {scenesOpen && selectedPostForScenes && user?.id && (
+                <ScenesModal
+                    post={selectedPostForScenes}
+                    isOpen={scenesOpen}
+                    onClose={() => {
+                        setScenesOpen(false);
+                        setSelectedPostForScenes(null);
+                    }}
+                    onLike={async () => {
+                        try {
+                            const updated = await toggleLike(user.id!, selectedPostForScenes.id);
+                            setSelectedPostForScenes(updated);
+                            setSharedPosts(prev => ({ ...prev, [updated.id]: updated }));
+                        } catch (_) { /* ignore */ }
+                    }}
+                    onFollow={async () => {
+                        try {
+                            const { toggleFollow: tf } = await import('../api/client');
+                            await tf(selectedPostForScenes.userHandle);
+                            setSelectedPostForScenes(prev => prev ? { ...prev, isFollowing: !prev.isFollowing } : null);
+                        } catch (_) { /* ignore */ }
+                    }}
+                    onShare={async () => {}}
+                    onOpenComments={() => navigate(`/post/${selectedPostForScenes.id}`)}
+                    onReclip={async () => {}}
+                />
             )}
         </div>
     );

@@ -1428,11 +1428,46 @@ export async function reclipPost(userId: string, originalPostId: string, userHan
   };
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // Comment API functions (without replies)
-export async function getPostById(postId: string): Promise<Post | null> {
-  await delay(100);
-  const post = posts.find(p => p.id === postId);
-  return post || null;
+// Optional userId: when provided and we fetch from Laravel, we get user_liked etc. and decorate.
+export async function getPostById(postId: string, userId?: string): Promise<Post | null> {
+  await delay(50);
+  const local = posts.find(p => p.id === postId);
+  if (local) return local;
+
+  // Frontend-only mock posts (mock-scenes-*, etc.) – resolve locally, never call Laravel (API expects UUID)
+  if (postId.startsWith('mock-scenes-')) {
+    const mockPosts = getMockScenesVideoPosts();
+    const mock = mockPosts.find(p => p.id === postId);
+    if (mock) return userId ? decorateForUser(userId, mock) : mock;
+    return null;
+  }
+
+  // Laravel post ID must be a UUID – don't call API for non-UUID IDs (avoids 400 Bad Request)
+  if (!UUID_REGEX.test(postId)) return null;
+
+  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+  if (!useLaravelAPI) return null;
+
+  try {
+    const uuidLike = typeof userId === 'string' && UUID_REGEX.test(userId);
+    const response = await apiClient.fetchPost(postId, uuidLike ? userId : undefined);
+    const transformed = transformLaravelPost(response);
+    if (!posts.find(p => p.id === transformed.id)) {
+      posts.push(transformed);
+    }
+    if (userId) {
+      return decorateForUser(userId, transformed);
+    }
+    return transformed;
+  } catch (e: any) {
+    if (e?.status !== 404 && e?.message && !e.message.includes('404')) {
+      console.warn('getPostById API fallback failed:', postId, e);
+    }
+    return null;
+  }
 }
 
 export async function fetchComments(postId: string): Promise<Comment[]> {

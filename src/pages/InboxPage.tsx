@@ -321,25 +321,6 @@ export default function InboxPage() {
         };
     }, [user?.handle, loadData]);
 
-    if (!user) {
-        return <div className="p-6">Please sign in to view notifications.</div>;
-    }
-
-    const unreadNotifications = notifications.filter(n => !n.read).length;
-
-    const handleNotificationClick = async (notif: Notification) => {
-        if (!notif.read && user?.handle) {
-            await markNotificationRead(notif.id, user.handle);
-            setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
-        }
-
-        if (notif.type === 'sticker' || notif.type === 'reply') {
-            navigate(`/messages/${encodeURIComponent(notif.fromHandle)}`);
-        } else if (notif.type === 'dm') {
-            navigate(`/messages/${encodeURIComponent(notif.fromHandle)}`);
-        }
-    };
-
     const handleFollow = React.useCallback(async (handle: string) => {
         if (!user?.handle || !user?.id) return;
         
@@ -545,6 +526,25 @@ export default function InboxPage() {
             });
         }
     }, [user, loadData]);
+
+    if (!user) {
+        return <div className="p-6">Please sign in to view notifications.</div>;
+    }
+
+    const unreadNotifications = notifications.filter(n => !n.read).length;
+
+    const handleNotificationClick = async (notif: Notification) => {
+        if (!notif.read && user?.handle) {
+            await markNotificationRead(notif.id, user.handle);
+            setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
+        }
+
+        if (notif.type === 'sticker' || notif.type === 'reply') {
+            navigate(`/messages/${encodeURIComponent(notif.fromHandle)}`);
+        } else if (notif.type === 'dm') {
+            navigate(`/messages/${encodeURIComponent(notif.fromHandle)}`);
+        }
+    };
 
     const formatNotificationMessage = (notif: Notification): string => {
         switch (notif.type) {

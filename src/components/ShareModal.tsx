@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { FiX, FiCopy, FiShare2, FiLink, FiMessageCircle } from 'react-icons/fi';
+import { FiLink, FiSearch, FiMessageCircle } from 'react-icons/fi';
+import { SiFacebook, SiInstagram, SiWhatsapp, SiX, SiThreads } from 'react-icons/si';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import { createStory } from '../api/stories';
 import { showToast } from '../utils/toast';
 import { updateMetaTags, clearMetaTags } from '../utils/metaTags';
 import { getAvatarForHandle } from '../api/users';
-import { appendMessage } from '../api/messages';
+import { getFollowedUsers } from '../api/posts';
+import Avatar from './Avatar';
 import type { Post } from '../types';
 
 interface ShareModalProps {
@@ -17,6 +19,9 @@ interface ShareModalProps {
 
 const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
     const [copied, setCopied] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [followedHandles, setFollowedHandles] = useState<string[]>([]);
+    const [loadingFollowed, setLoadingFollowed] = useState(false);
     const navigate = useNavigate();
     const { user } = useAuth();
 
@@ -24,21 +29,31 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
     const postTitle = post.text ? post.text.substring(0, 100) + (post.text.length > 100 ? '...' : '') : 'Check out this post';
     const shareText = `${postTitle} by ${post.userHandle}`;
 
+    // Fetch people you follow when modal opens
+    useEffect(() => {
+        if (isOpen && user?.id) {
+            setLoadingFollowed(true);
+            getFollowedUsers(user.id)
+                .then(setFollowedHandles)
+                .catch(() => setFollowedHandles([]))
+                .finally(() => setLoadingFollowed(false));
+        }
+    }, [isOpen, user?.id]);
+
     // Update meta tags when modal opens for Twitter Card sharing
     useEffect(() => {
         if (isOpen) {
             const avatarUrl = getAvatarForHandle(post.userHandle);
             const imageUrl = post.mediaUrl || avatarUrl || undefined;
-            
+
             updateMetaTags({
                 title: `${postTitle} by ${post.userHandle}`,
                 description: post.text ? post.text.substring(0, 200) : `Check out this post by ${post.userHandle}`,
-                image: imageUrl, // Use post media or profile picture
+                image: imageUrl,
                 url: postUrl,
                 type: 'article'
             });
 
-            // Cleanup: restore default meta tags when modal closes
             return () => {
                 clearMetaTags();
             };
@@ -47,19 +62,17 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
 
     if (!isOpen) return null;
 
-    console.log('ShareModal rendered with post:', post);
-
     const handleCopyLink = async () => {
         try {
             await navigator.clipboard.writeText(postUrl);
             setCopied(true);
+            showToast?.('Link copied!');
             setTimeout(() => setCopied(false), 2000);
         } catch (err) {
             console.error('Failed to copy link:', err);
         }
     };
 
-    // Generate an image for text-only posts so they can be shared to stories
     async function generateImageFromText(text: string): Promise<string> {
         const width = 1080;
         const height = 1920;
@@ -67,16 +80,12 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d')!;
-
-        // Background gradient
         const grad = ctx.createLinearGradient(0, 0, width, height);
         grad.addColorStop(0, '#0ea5e9');
         grad.addColorStop(0.5, '#8b5cf6');
         grad.addColorStop(1, '#f43f5e');
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, width, height);
-
-        // Text styles
         ctx.fillStyle = '#ffffff';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -84,16 +93,13 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
         const maxWidth = width - margin * 2;
         let fontSize = 64;
         ctx.font = `${fontSize}px Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial`;
-
-        // Wrap text into lines
         function wrapLines(t: string): string[] {
             const words = t.split(/\s+/);
             const lines: string[] = [];
             let line = '';
             for (const w of words) {
                 const test = line ? line + ' ' + w : w;
-                const metrics = ctx.measureText(test);
-                if (metrics.width > maxWidth) {
+                if (ctx.measureText(test).width > maxWidth) {
                     if (line) lines.push(line);
                     line = w;
                 } else {
@@ -103,16 +109,13 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
             if (line) lines.push(line);
             return lines;
         }
-
         const safeText = (text || 'Shared from the feed').slice(0, 240);
         let lines = wrapLines(safeText);
-        // If too many lines, reduce font size
         while (lines.length > 10 && fontSize > 36) {
             fontSize -= 6;
             ctx.font = `${fontSize}px Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial`;
             lines = wrapLines(safeText);
         }
-
         const lineHeight = fontSize * 1.35;
         const totalHeight = lines.length * lineHeight;
         let y = height / 2 - totalHeight / 2;
@@ -120,15 +123,14 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
             ctx.fillText(ln, width / 2, y);
             y += lineHeight;
         }
-
         return canvas.toDataURL('image/png');
     }
 
     const handleShareToStory = async () => {
-        console.log('Share to story clicked', post);
-        if (!user) { alert('Please sign in to share clips.'); return; }
-
-        // Truncate text to 200 characters for stories
+        if (!user) {
+            alert('Please sign in to share clips.');
+            return;
+        }
         const maxLength = 200;
         const truncatedText = post.text && post.text.length > maxLength
             ? post.text.substring(0, maxLength) + '...'
@@ -137,14 +139,10 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
         try {
             let mediaUrl = post.mediaUrl;
             let mediaType: 'image' | 'video' = (post.mediaType || 'image');
-
-            // If no media on post, render a text image
             if (!mediaUrl) {
                 mediaUrl = await generateImageFromText(truncatedText || '');
                 mediaType = 'image';
             }
-
-            // Create the story directly
             await createStory(
                 user.id,
                 user.handle || '',
@@ -152,24 +150,14 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
                 mediaType,
                 truncatedText,
                 post.locationLabel,
-                undefined, // textColor
-                undefined, // textSize
-                post.id, // sharedFromPost
-                post.userHandle // sharedFromUser
+                undefined,
+                undefined,
+                post.id,
+                post.userHandle
             );
-
-            // Close the share modal
             onClose();
-
-            // Show success toast
             showToast?.('You shared this to Clips 24!');
-
-            // Navigate to Clips 24 page (StoriesPage)
-            navigate('/stories', {
-                state: {
-                    openUserHandle: user.handle // Open current user's clips
-                }
-            });
+            navigate('/stories', { state: { openUserHandle: user.handle } });
         } catch (e) {
             console.error('Failed to share to clips:', e);
             alert('Failed to share to Clips 24. Please try again.');
@@ -179,9 +167,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
     const handleShare = (platform: string) => {
         const encodedUrl = encodeURIComponent(postUrl);
         const encodedText = encodeURIComponent(shareText);
-
         let shareUrl = '';
-
         switch (platform) {
             case 'whatsapp':
                 shareUrl = `https://wa.me/?text=${encodedText}%20${encodedUrl}`;
@@ -195,201 +181,173 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
             case 'gmail':
                 shareUrl = `mailto:?subject=${encodedText}&body=${encodedText}%0A%0A${encodedUrl}`;
                 break;
-            case 'linkedin':
-                shareUrl = `https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}`;
-                break;
-            default:
-                return;
-        }
+        case 'linkedin':
+            shareUrl = `https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}`;
+            break;
+        case 'sms':
+            shareUrl = `sms:?body=${encodedText}%20${encodedUrl}`;
+            window.location.href = shareUrl;
+            return;
+        case 'threads':
+            shareUrl = `https://www.threads.net/intent/post?text=${encodedText}%20${encodedUrl}`;
+            break;
+        default:
+            return;
+    }
+    window.open(shareUrl, '_blank', 'width=600,height=400');
+};
 
-        window.open(shareUrl, '_blank', 'width=600,height=400');
+    const handleShareToDM = (handle: string) => {
+        onClose();
+        navigate(`/messages/${encodeURIComponent(handle)}`, {
+            state: { sharePostUrl: postUrl, sharePostId: post.id }
+        });
+        showToast?.('Post link ready to send!');
     };
 
-    // Only include "Share to Story" if post has media
-    const baseShareOptions = [
-        {
-            id: 'copy',
-            name: 'Copy Link',
-            icon: <FiCopy className="w-6 h-6" />,
-            color: 'bg-gray-100 hover:bg-gray-200 text-gray-800',
-            action: handleCopyLink
-        },
+    const q = searchQuery.trim().toLowerCase();
+    const filteredHandles = q
+        ? followedHandles.filter(h => h.toLowerCase().includes(q))
+        : followedHandles;
+
+    // Horizontal scrollable share options – Simple Icons for recognisable brand logos
+    const iconWrap = (children: React.ReactNode, bg: string, className = '') => (
+        <div className={`w-12 h-12 min-w-[48px] min-h-[48px] rounded-full flex items-center justify-center flex-shrink-0 shadow-md ${bg} ${className}`}>
+            {children}
+        </div>
+    );
+    const shareOptions = [
         {
             id: 'whatsapp',
-            name: 'WhatsApp',
-            icon: (
-                <div className="w-6 h-6 bg-green-500 rounded flex items-center justify-center">
-                    <span className="text-white text-xs font-bold">W</span>
-                </div>
-            ),
-            color: 'bg-green-50 hover:bg-green-100 text-green-800',
+            label: 'WhatsApp',
+            icon: iconWrap(<SiWhatsapp className="w-6 h-6 text-white" aria-hidden />, 'bg-[#25D366]'),
             action: () => handleShare('whatsapp')
         },
         {
-            id: 'facebook',
-            name: 'Facebook',
-            icon: (
-                <div className="w-6 h-6 bg-blue-600 rounded flex items-center justify-center">
-                    <span className="text-white text-xs font-bold">f</span>
-                </div>
-            ),
-            color: 'bg-blue-50 hover:bg-blue-100 text-blue-800',
-            action: () => handleShare('facebook')
-        },
-        {
-            id: 'twitter',
-            name: 'X (Twitter)',
-            icon: (
-                <div className="w-6 h-6 bg-black rounded flex items-center justify-center">
-                    <span className="text-white text-xs font-bold">X</span>
-                </div>
-            ),
-            color: 'bg-gray-50 hover:bg-gray-100 text-gray-800',
+            id: 'x',
+            label: 'X',
+            icon: iconWrap(<SiX className="w-5 h-5 text-white" aria-hidden />, 'bg-black'),
             action: () => handleShare('twitter')
         },
         {
-            id: 'gmail',
-            name: 'Gmail',
-            icon: (
-                <div className="w-6 h-6 bg-red-500 rounded flex items-center justify-center">
-                    <span className="text-white text-xs font-bold">G</span>
-                </div>
-            ),
-            color: 'bg-red-50 hover:bg-red-100 text-red-800',
-            action: () => handleShare('gmail')
+            id: 'facebook',
+            label: 'Facebook',
+            icon: iconWrap(<SiFacebook className="w-6 h-6 text-white" aria-hidden />, 'bg-[#1877F2]'),
+            action: () => handleShare('facebook')
         },
         {
-            id: 'linkedin',
-            name: 'LinkedIn',
-            icon: (
-                <div className="w-6 h-6 bg-blue-700 rounded flex items-center justify-center">
-                    <span className="text-white text-xs font-bold">in</span>
-                </div>
-            ),
-            color: 'bg-blue-50 hover:bg-blue-100 text-blue-800',
-            action: () => handleShare('linkedin')
-        }
-    ];
-
-    const handleShareToDM = async () => {
-        if (!user?.handle) {
-            alert('Please sign in to share to DMs.');
-            return;
-        }
-        
-        // Close the share modal
-        onClose();
-        
-        // Navigate to inbox with post URL in state
-        // User can select a conversation, and the post link will be auto-filled
-        navigate('/inbox', { 
-            state: { 
-                sharePostUrl: postUrl,
-                sharePostId: post.id
-            } 
-        });
-        
-        // Also copy the link to clipboard for convenience
-        try {
-            await navigator.clipboard.writeText(postUrl);
-            showToast?.('Post link ready! Select a conversation to share.');
-        } catch (err) {
-            console.error('Failed to copy link:', err);
-        }
-    };
-
-    // Always include Share to Clip option (works for media and text-only)
-    const shareOptions = [
+            id: 'instagram',
+            label: 'Instagram',
+            icon: iconWrap(<SiInstagram className="w-6 h-6 text-white" aria-hidden />, 'bg-gradient-to-br from-[#833AB4] via-[#E1306C] to-[#F77737]'),
+            action: async () => {
+                await handleCopyLink();
+                showToast?.('Link copied – paste in Instagram');
+            }
+        },
+        {
+            id: 'threads',
+            label: 'Threads',
+            icon: iconWrap(<SiThreads className="w-5 h-5 text-white" aria-hidden />, 'bg-black'),
+            action: () => handleShare('threads')
+        },
+        {
+            id: 'sms',
+            label: 'SMS',
+            icon: iconWrap(<FiMessageCircle className="w-6 h-6 text-white" aria-hidden />, 'bg-gray-600'),
+            action: () => handleShare('sms')
+        },
         {
             id: 'story',
-            name: 'Share to Clip',
-            icon: (
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-            ),
-            color: 'bg-gradient-to-br from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white',
+            label: 'Add to story',
+            icon: iconWrap(<span className="text-gray-300 text-xl font-light leading-none">+</span>, 'bg-gray-800/80', 'border-2 border-dashed border-gray-500'),
             action: handleShareToStory
         },
         {
-            id: 'dm',
-            name: 'Share to DM',
-            icon: <FiMessageCircle className="w-6 h-6" />,
-            color: 'bg-gradient-to-br from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white',
-            action: handleShareToDM
-        },
-        ...baseShareOptions
+            id: 'copy',
+            label: 'Copy link',
+            icon: iconWrap(<FiLink className="w-5 h-5 text-white" aria-hidden />, 'bg-gray-600'),
+            action: handleCopyLink
+        }
     ];
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-end justify-center z-[200]">
-            <div className="bg-white dark:bg-gray-900 w-full max-w-md rounded-t-3xl shadow-2xl transform transition-transform duration-300 ease-out">
-                {/* Header */}
-                <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center">
-                            <FiShare2 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                        </div>
-                        <div>
-                            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Share Post</h2>
-                            <p className="text-sm text-gray-500 dark:text-gray-400">Share this post with others</p>
-                        </div>
-                    </div>
-                    <button
-                        onClick={onClose}
-                        className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-                    >
-                        <FiX className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                    </button>
+        <div className="fixed inset-0 bg-black/50 flex items-end justify-center z-[200]" onClick={onClose}>
+            <div
+                className="bg-gray-900 w-full max-w-md rounded-t-2xl shadow-2xl max-h-[85vh] flex flex-col"
+                onClick={e => e.stopPropagation()}
+            >
+                {/* Drag handle */}
+                <div className="flex justify-center pt-3 pb-1">
+                    <div className="w-10 h-1 rounded-full bg-gray-600" />
                 </div>
 
-                {/* Share Options */}
-                <div className="p-6">
-                    <div className="grid grid-cols-2 gap-4 auto-rows-fr">
-                        {shareOptions.map((option) => (
-                            <button
-                                key={option.id}
-                                onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    option.action();
-                                }}
-                                className={`flex items-center gap-3 p-4 rounded-xl transition-all duration-200 hover:scale-105 ${option.color}`}
-                            >
-                                {option.icon}
-                                <span className="font-medium">{option.name}</span>
-                                {option.id === 'copy' && copied && (
-                                    <span className="text-xs text-green-600 ml-auto">Copied!</span>
-                                )}
-                            </button>
-                        ))}
+                {/* Search bar */}
+                <div className="px-4 pb-3">
+                    <div className="flex items-center gap-2 rounded-lg bg-gray-800 px-3 py-2.5">
+                        <FiSearch className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                        <input
+                            type="text"
+                            placeholder="Search"
+                            value={searchQuery}
+                            onChange={e => setSearchQuery(e.target.value)}
+                            className="flex-1 bg-transparent text-white placeholder-gray-500 text-sm outline-none min-w-0"
+                        />
                     </div>
+                </div>
 
-                    {/* Post Preview */}
-                    <div className="mt-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
-                        <div className="flex items-start gap-3">
-                            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-white font-semibold text-sm">
-                                {post.userHandle.charAt(0).toUpperCase()}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 mb-1">
-                                    <span className="font-semibold text-gray-900 dark:text-white text-sm">
-                                        {post.userHandle}
+                {/* List of people you follow */}
+                <div className="flex-1 overflow-y-auto px-2 pb-2 min-h-0">
+                    {loadingFollowed ? (
+                        <div className="py-8 text-center text-gray-400 text-sm">Loading...</div>
+                    ) : filteredHandles.length === 0 ? (
+                        <div className="py-8 text-center text-gray-400 text-sm">
+                            {q ? 'No matches' : 'No people you follow yet'}
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-3 gap-4 sm:gap-6">
+                            {filteredHandles.map(handle => (
+                                <button
+                                    key={handle}
+                                    type="button"
+                                    onClick={() => handleShareToDM(handle)}
+                                    className="flex flex-col items-center gap-2 p-2 rounded-xl hover:bg-gray-800/80 active:bg-gray-800 transition-colors"
+                                >
+                                    <Avatar
+                                        src={getAvatarForHandle(handle)}
+                                        name={handle.split('@')[0]}
+                                        size="lg"
+                                    />
+                                    <span className="text-xs text-white text-center truncate w-full" title={handle}>
+                                        {handle.split('@')[0]}
                                     </span>
-                                    <span className="text-xs text-gray-500 dark:text-gray-400">
-                                        {post.locationLabel}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* Share to – social logos row (always visible at bottom) */}
+                <div className="border-t border-gray-800 flex-shrink-0 bg-gray-900/95">
+                    <p className="px-4 pt-3 pb-2 text-xs font-medium text-gray-500 uppercase tracking-wide">Share to</p>
+                    <div className="px-2 pb-4 overflow-x-auto overflow-y-hidden scrollbar-hide">
+                        <div className="flex items-center gap-5 sm:gap-6 min-w-max px-2">
+                            {shareOptions.map(({ id, label, icon, action }) => (
+                                <button
+                                    key={id}
+                                    type="button"
+                                    onClick={() => {
+                                        action();
+                                        if (id === 'copy') return;
+                                        onClose();
+                                    }}
+                                    className="flex flex-col items-center gap-2 flex-shrink-0 min-w-[56px] focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded-lg"
+                                >
+                                    {icon}
+                                    <span className="text-[10px] sm:text-xs text-gray-400 whitespace-nowrap">
+                                        {id === 'copy' && copied ? 'Copied!' : label}
                                     </span>
-                                </div>
-                                {post.text && (
-                                    <p className="text-sm text-gray-700 dark:text-gray-300 line-clamp-2">
-                                        {post.text}
-                                    </p>
-                                )}
-                                <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                                    <FiLink className="w-3 h-3 inline mr-1" />
-                                    {postUrl}
-                                </div>
-                            </div>
+                                </button>
+                            ))}
                         </div>
                     </div>
                 </div>

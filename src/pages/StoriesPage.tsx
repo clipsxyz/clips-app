@@ -117,6 +117,7 @@ export default function StoriesPage() {
     const [showScenesModal, setShowScenesModal] = React.useState(false);
     const [fullPost, setFullPost] = React.useState<Post | null>(null);
     const [originalPost, setOriginalPost] = React.useState<Post | null>(null);
+    const [sharedPostFetchFailed, setSharedPostFetchFailed] = React.useState(false);
     const [showSharedPostModal, setShowSharedPostModal] = React.useState(false);
     const [isFollowingStoryUser, setIsFollowingStoryUser] = React.useState<boolean>(false);
     const [isFollowLoading, setIsFollowLoading] = React.useState<boolean>(false);
@@ -762,10 +763,20 @@ export default function StoriesPage() {
 
         // Check if this is a shared post - if it has sharedFromPost, fetch the original
         if (currentStory?.sharedFromPost) {
+            setSharedPostFetchFailed(false);
             console.log('Fetching original post for shared story:', currentStory.sharedFromPost);
-            // Fetch the original post to display it
+            let cancelled = false;
+            const timeoutId = window.setTimeout(() => {
+                if (!cancelled) {
+                    console.warn('getPostById timeout for shared story');
+                    setOriginalPost(null);
+                    setSharedPostFetchFailed(true);
+                }
+            }, 8000);
             getPostById(currentStory.sharedFromPost)
                 .then((post) => {
+                    if (cancelled) return;
+                    window.clearTimeout(timeoutId);
                     if (post) {
                         console.log('Original post fetched:', {
                             id: post.id,
@@ -774,19 +785,28 @@ export default function StoriesPage() {
                             mediaUrl: post.mediaUrl,
                             hasMediaItems: !!(post.mediaItems && post.mediaItems.length > 0)
                         });
-                        // Set the post regardless of media - we'll handle display in the render
                         setOriginalPost(post);
                     } else {
                         console.warn('Original post not found:', currentStory.sharedFromPost);
                         setOriginalPost(null);
+                        setSharedPostFetchFailed(true);
                     }
                 })
                 .catch((error) => {
-                    console.error('Failed to fetch original post:', error);
-                    setOriginalPost(null);
+                    if (!cancelled) {
+                        window.clearTimeout(timeoutId);
+                        console.error('Failed to fetch original post:', error);
+                        setOriginalPost(null);
+                        setSharedPostFetchFailed(true);
+                    }
                 });
+            return () => {
+                cancelled = true;
+                window.clearTimeout(timeoutId);
+            };
         } else {
             setOriginalPost(null);
+            setSharedPostFetchFailed(false);
         }
     }, [currentGroupIndex, currentStoryIndex, storyGroups]);
 
@@ -1197,11 +1217,45 @@ export default function StoriesPage() {
                                         });
                                     }
                                     
-                                    if (currentStory?.sharedFromPost && !originalPost) {
+                                    if (currentStory?.sharedFromPost && !originalPost && !sharedPostFetchFailed) {
                                         // Loading state while fetching original post
                                         return (
                                             <div className="w-full h-full flex items-center justify-center">
                                                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
+                                            </div>
+                                        );
+                                    }
+                                    
+                                    // Fallback: shared post but fetch failed or post not found – show story's own media (video/image we stored when creating the story)
+                                    if (currentStory?.sharedFromPost && !originalPost && sharedPostFetchFailed && currentStory.mediaUrl) {
+                                        const isVideo = currentStory.mediaType === 'video';
+                                        return (
+                                            <div className="w-full h-full flex items-center justify-center bg-black">
+                                                {isVideo ? (
+                                                    <video
+                                                        ref={videoRef}
+                                                        src={currentStory.mediaUrl}
+                                                        className="w-full h-full object-contain"
+                                                        autoPlay
+                                                        loop
+                                                        muted={isMuted}
+                                                        playsInline
+                                                        onLoadedData={() => {
+                                                            if (videoRef.current) {
+                                                                videoRef.current.muted = isMuted;
+                                                                if (!isMuted && videoRef.current.paused) {
+                                                                    videoRef.current.play().catch(() => {});
+                                                                }
+                                                            }
+                                                        }}
+                                                    />
+                                                ) : (
+                                                    <img
+                                                        src={currentStory.mediaUrl}
+                                                        alt="Shared clip"
+                                                        className="w-full h-full object-contain"
+                                                    />
+                                                )}
                                             </div>
                                         );
                                     }

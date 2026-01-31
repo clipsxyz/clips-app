@@ -9,7 +9,7 @@ export interface ChatMessage {
     postId?: string; // For comment notifications - the post that was commented on
     commentId?: string; // For comment notifications - the comment ID
     commentText?: string; // For comment notifications - the comment text
-    replyTo?: { messageId: string; text: string; senderHandle: string; imageUrl?: string }; // Reply to another message
+    replyTo?: { messageId: string; text: string; senderHandle: string; imageUrl?: string; mediaType?: 'image' | 'video' }; // Reply to another message; imageUrl = thumbnail/media URL, mediaType for video screenshot
 }
 
 type ConversationId = string; // sorted `${a}|${b}`

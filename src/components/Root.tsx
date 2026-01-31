@@ -29,9 +29,28 @@ import TextOnlyPostDetailsPage from '../pages/TextOnlyPostDetailsPage';
 import ReplyQuestionPage from '../pages/ReplyQuestionPage';
 
 
+function ErrorFallback({ error, resetError }: { error: Error; resetError: () => void }) {
+    return (
+        <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-6">
+            <div className="max-w-md w-full bg-gray-800 rounded-xl p-6 border border-gray-700">
+                <h1 className="text-lg font-semibold text-red-400 mb-2">Something went wrong</h1>
+                <p className="text-sm text-gray-300 mb-4 font-mono break-words">{error?.message || String(error)}</p>
+                <button
+                    onClick={resetError}
+                    className="w-full py-2.5 px-4 rounded-lg bg-[#0095f6] hover:bg-[#0084d4] text-white font-medium transition-colors"
+                >
+                    Try again
+                </button>
+            </div>
+        </div>
+    );
+}
+
 export default function Root() {
     return (
-        <Sentry.ErrorBoundary fallback={<div className="p-6 text-red-600">Something went wrong.</div>}>
+        <Sentry.ErrorBoundary
+            fallback={({ error, resetError }) => <ErrorFallback error={error} resetError={resetError} />}
+        >
             <AuthProvider>
                 <ThemeProvider>
                     <BrowserRouter>

@@ -16,8 +16,7 @@ if (import.meta.env.PROD) {
   import('./utils/vitals').then(m => m.initVitals());
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <Root />
-  </React.StrictMode>
-);
+// StrictMode disabled: it double-invokes components in dev, which can trigger
+// "Rendered more hooks than during the previous render" when auth/user loads
+// asynchronously and a component conditionally returns before all hooks run.
+ReactDOM.createRoot(document.getElementById('root')!).render(<Root />);

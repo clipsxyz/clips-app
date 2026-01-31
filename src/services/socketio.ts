@@ -6,26 +6,29 @@ export function getSocket(): Socket | null {
     return socket;
 }
 
-export function connectSocket(userHandle: string): Socket {
+export function connectSocket(userHandle: string): Socket | null {
     if (socket?.connected) {
         return socket;
     }
 
-    // Connect to Socket.IO server
-    // In development, use localhost. In production, use your server URL
-    const serverUrl = import.meta.env.VITE_SOCKETIO_URL || 'http://localhost:3001';
-    
+    // Only connect when a Socket.IO server URL is explicitly set (e.g. in .env as VITE_SOCKETIO_URL).
+    // When unset, the app works without real-time socket and uses Custom Events fallback — no console spam.
+    const serverUrl = (import.meta.env.VITE_SOCKETIO_URL || '').trim();
+    if (!serverUrl) {
+        socket = null;
+        return null;
+    }
+
     socket = io(serverUrl, {
         transports: ['websocket', 'polling'],
         reconnection: true,
-        reconnectionDelay: 1000,
-        reconnectionAttempts: 5,
+        reconnectionDelay: 2000,
+        reconnectionAttempts: 3,
         reconnectionDelayMax: 5000,
     });
 
     socket.on('connect', () => {
         console.log('Connected to Socket.IO server');
-        // Register user with their handle
         socket?.emit('register', { userHandle });
     });
 
@@ -33,12 +36,9 @@ export function connectSocket(userHandle: string): Socket {
         console.log('Disconnected from Socket.IO server');
     });
 
-    socket.on('connect_error', (error) => {
-        // Only log if it's not a connection refused error (expected when server is not running)
-        // The app will gracefully fall back to Custom Events
-        if (!error.message?.includes('websocket error') && !error.message?.includes('xhr poll error')) {
-            console.error('Socket.IO connection error:', error);
-        }
+    socket.on('connect_error', () => {
+        // Connection failed; socket.io-client will retry up to reconnectionAttempts (3).
+        // App continues to work via Custom Events fallback.
     });
 
     return socket;

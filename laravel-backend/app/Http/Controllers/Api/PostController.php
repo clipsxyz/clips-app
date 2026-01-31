@@ -26,99 +26,100 @@ class PostController extends Controller
             'cursor' => 'integer|min:0',
             'limit' => 'integer|min:1|max:50',
             'filter' => 'string|in:Finglas,Dublin,Ireland,Following',
-            'userId' => 'nullable|uuid|exists:users,id'
+            'userId' => 'nullable|string'
         ]);
 
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 400);
         }
 
-        $cursor = $request->get('cursor', 0);
-        $limit = $request->get('limit', 10);
-        $filter = $request->get('filter', 'Dublin');
-        // Viewer: query param first, then Auth (protected routes), then Bearer token (public feed on mobile)
-        $userId = $request->get('userId');
-        if ($userId === null && Auth::check()) {
-            $userId = Auth::id();
-        }
-        if ($userId === null && $request->bearerToken()) {
-            try {
-                $token = PersonalAccessToken::findToken($request->bearerToken());
-                if ($token && $token->tokenable) {
-                    $userId = $token->tokenable->id;
+        try {
+            $cursor = $request->get('cursor', 0);
+            $limit = $request->get('limit', 10);
+            $filter = $request->get('filter', 'Dublin');
+            $userId = $request->get('userId');
+            if ($userId === null && Auth::check()) {
+                $userId = Auth::id();
+            }
+            if ($userId === null && $request->bearerToken()) {
+                try {
+                    $token = PersonalAccessToken::findToken($request->bearerToken());
+                    if ($token && $token->tokenable) {
+                        $userId = $token->tokenable->id;
+                    }
+                } catch (\Throwable $e) {
+                    // ignore
                 }
-            } catch (\Throwable $e) {
-                // ignore
             }
-        }
-        $offset = $cursor * $limit;
+            $offset = $cursor * $limit;
 
-        $query = Post::notReclipped()
-            ->with(['user:id,handle,display_name,avatar_url', 'taggedUsers:id,handle,display_name,avatar_url'])
-            ->withCount(['likes', 'comments', 'shares', 'views', 'reclips']);
+            $query = Post::notReclipped()
+                ->with(['user:id,handle,display_name,avatar_url', 'taggedUsers:id,handle,display_name,avatar_url'])
+                ->withCount(['likes', 'comments', 'shares', 'views', 'reclips']);
 
-        // Add user-specific relationships if userId provided
-        if ($userId) {
-            $query->with(['likes' => function ($q) use ($userId) {
-                $q->where('user_id', $userId);
-            }])
-            ->with(['bookmarks' => function ($q) use ($userId) {
-                $q->where('user_id', $userId);
-            }])
-            ->with(['reclips' => function ($q) use ($userId) {
-                $q->where('user_id', $userId);
-            }])
-            ->with(['user.followers' => function ($q) use ($userId) {
-                $q->where('follower_id', $userId);
-            }]);
-        }
-
-        // Apply filters
-        if ($filter === 'Following' && $userId) {
-            $query->following($userId);
-        } elseif ($filter !== 'Following') {
-            $query->byLocation($filter);
-        }
-
-        $posts = $query->orderBy('created_at', 'desc')
-            ->offset($offset)
-            ->limit($limit)
-            ->get()
-            ->unique('id')
-            ->values();
-
-        // Transform posts to include user-specific data
-        $userModel = $userId ? User::find($userId) : null;
-        $transformedPosts = $posts->map(function ($post) use ($userModel) {
-            $postData = $post->toArray();
-            
-            // Transform taggedUsers relationship to array of handles for frontend compatibility
-            $postData['taggedUsers'] = $post->taggedUsers->pluck('handle')->toArray();
-            
-            if ($userModel) {
-                $postData['user_liked'] = $post->isLikedBy($userModel);
-                $postData['is_bookmarked'] = $post->isBookmarkedBy($userModel);
-                $postData['is_following'] = $post->isFollowingAuthor($userModel);
-                $postData['author_follows_you'] = $post->authorFollowsViewer($userModel);
-                $postData['user_reclipped'] = $post->isReclippedBy($userModel);
-            } else {
-                $postData['user_liked'] = false;
-                $postData['is_bookmarked'] = false;
-                $postData['is_following'] = false;
-                $postData['author_follows_you'] = false;
-                $postData['user_reclipped'] = false;
+            if ($userId) {
+                $query->with(['likes' => function ($q) use ($userId) {
+                    $q->where('user_id', $userId);
+                }])
+                ->with(['bookmarks' => function ($q) use ($userId) {
+                    $q->where('user_id', $userId);
+                }])
+                ->with(['reclips' => function ($q) use ($userId) {
+                    $q->where('user_id', $userId);
+                }])
+                ->with(['user.followers' => function ($q) use ($userId) {
+                    $q->where('follower_id', $userId);
+                }]);
             }
 
-            return $postData;
-        });
+            if ($filter === 'Following' && $userId) {
+                $query->following($userId);
+            } elseif ($filter !== 'Following') {
+                $query->byLocation($filter);
+            }
 
-        $nextCursor = $posts->count() === $limit ? $cursor + 1 : null;
+            $posts = $query->orderBy('created_at', 'desc')
+                ->offset($offset)
+                ->limit($limit)
+                ->get()
+                ->unique('id')
+                ->values();
 
-        return response()->json([
-            'items' => $transformedPosts,
-            'nextCursor' => $nextCursor,
-            'hasMore' => $nextCursor !== null
-        ]);
+            $userModel = $userId ? User::find($userId) : null;
+            $transformedPosts = $posts->map(function ($post) use ($userModel) {
+                $postData = $post->toArray();
+                $postData['taggedUsers'] = $post->taggedUsers->pluck('handle')->toArray();
+                if ($userModel) {
+                    $postData['user_liked'] = $post->isLikedBy($userModel);
+                    $postData['is_bookmarked'] = $post->isBookmarkedBy($userModel);
+                    $postData['is_following'] = $post->isFollowingAuthor($userModel);
+                    $postData['author_follows_you'] = $post->authorFollowsViewer($userModel);
+                    $postData['user_reclipped'] = $post->isReclippedBy($userModel);
+                } else {
+                    $postData['user_liked'] = false;
+                    $postData['is_bookmarked'] = false;
+                    $postData['is_following'] = false;
+                    $postData['author_follows_you'] = false;
+                    $postData['user_reclipped'] = false;
+                }
+                return $postData;
+            });
+
+            $nextCursor = $posts->count() === $limit ? $cursor + 1 : null;
+
+            return response()->json([
+                'items' => $transformedPosts,
+                'nextCursor' => $nextCursor,
+                'hasMore' => $nextCursor !== null
+            ]);
+        } catch (\Throwable $e) {
+            \Log::warning('posts index failed: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'items' => [],
+                'nextCursor' => null,
+                'hasMore' => false
+            ]);
+        }
     }
 
     /**
@@ -429,57 +430,67 @@ class PostController extends Controller
      */
     public function incrementView(Request $request, string $id): JsonResponse
     {
-        // Find post by id (can be UUID or string)
-        $post = Post::where('id', $id)->first();
-        
-        // If post doesn't exist in database, return success anyway (frontend may be using mock data)
-        if (!$post) {
+        try {
+            // Find post by id (can be UUID or string)
+            $post = Post::where('id', $id)->first();
+
+            // If post doesn't exist in database, return success anyway (frontend may be using mock data)
+            if (!$post) {
+                return response()->json([
+                    'success' => true,
+                    'views' => 0,
+                    'message' => 'Post not in database, view tracked client-side'
+                ]);
+            }
+
+            $user = Auth::user();
+
+            // If user is authenticated, track the view
+            if ($user) {
+                try {
+                    DB::transaction(function () use ($user, $post) {
+                        try {
+                            if (!$user->views()->where('post_id', $post->id)->exists()) {
+                                $user->views()->attach($post->id, [], false);
+                            }
+                        } catch (\Illuminate\Database\QueryException $e) {
+                            if ($e->getCode() !== '23000' && $e->getCode() !== 23000) {
+                                throw $e;
+                            }
+                        } catch (\Exception $e) {
+                            \Log::debug('View tracking error: ' . $e->getMessage());
+                        }
+                    });
+                } catch (\Exception $e) {
+                    \Log::debug('View tracking transaction error: ' . $e->getMessage());
+                }
+            }
+
+            try {
+                $post->increment('views_count');
+            } catch (\Exception $e) {
+                // no-op
+            }
+
+            $views = 0;
+            try {
+                $views = (int) ($post->fresh()->views_count ?? 0);
+            } catch (\Throwable $e) {
+                // no-op
+            }
+
+            return response()->json([
+                'success' => true,
+                'views' => $views
+            ]);
+        } catch (\Throwable $e) {
+            \Log::warning('incrementView failed: ' . $e->getMessage(), ['id' => $id, 'trace' => $e->getTraceAsString()]);
             return response()->json([
                 'success' => true,
                 'views' => 0,
-                'message' => 'Post not in database, view tracked client-side'
+                'message' => 'View tracked client-side'
             ]);
         }
-
-        $user = Auth::user();
-        
-        // If user is authenticated, track the view
-        if ($user) {
-            try {
-                DB::transaction(function () use ($user, $post) {
-                    // Insert view (will be ignored if duplicate due to unique constraint)
-                    try {
-                        // Use attach with duplicate check - attach will ignore if already exists
-                        if (!$user->views()->where('post_id', $post->id)->exists()) {
-                            $user->views()->attach($post->id, [], false); // false = don't touch timestamps
-                        }
-                    } catch (\Illuminate\Database\QueryException $e) {
-                        // Ignore duplicate entry errors (unique constraint violation)
-                        if ($e->getCode() !== '23000') {
-                            throw $e; // Re-throw if it's not a duplicate key error
-                        }
-                    } catch (\Exception $e) {
-                        // Ignore other errors in view tracking
-                        \Log::debug('View tracking error: ' . $e->getMessage());
-                    }
-                });
-            } catch (\Exception $e) {
-                // Ignore any errors in view tracking - don't fail the request
-                \Log::debug('View tracking transaction error: ' . $e->getMessage());
-            }
-        }
-        
-        // Increment view count regardless of auth status
-        try {
-            $post->increment('views_count');
-        } catch (\Exception $e) {
-            // If increment fails, just return current count
-        }
-
-        return response()->json([
-            'success' => true,
-            'views' => $post->fresh()->views_count ?? 0
-        ]);
     }
 
     /**

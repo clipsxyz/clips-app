@@ -53,6 +53,27 @@ function getEffectivePlacesTraveled(profileUser: any, authUser: any): string[] {
     return deduped;
 }
 
+/** Get effective places with localStorage fallback so we never miss bio or Travel Info saved in Profile. */
+function getEffectivePlacesWithStorageFallback(profileUser: any, authUser: any): string[] {
+    let places = getEffectivePlacesTraveled(profileUser, authUser);
+    if (places.length > 0) return places;
+    try {
+        const raw = localStorage.getItem('user');
+        if (!raw) return [];
+        const u = JSON.parse(raw);
+        const storedList = Array.isArray(u?.placesTraveled) && u.placesTraveled.length > 0 ? u.placesTraveled : [];
+        if (storedList.length > 0) return storedList;
+        const bio = typeof u?.bio === 'string' ? (u.bio as string).trim() : '';
+        if (bio) {
+            const fromBio = parsePlacesFromBio(bio);
+            if (fromBio.length > 0) return fromBio;
+            const commaSplit = bio.split(',').map((s: string) => s.trim()).filter(Boolean);
+            if (commaSplit.length > 0) return commaSplit;
+        }
+    } catch (_) {}
+    return [];
+}
+
 export default function ViewProfilePage() {
     const navigate = useNavigate();
     const { handle } = useParams<{ handle: string }>();
@@ -623,6 +644,18 @@ export default function ViewProfilePage() {
                     // Fallback to 0 if API call fails - local data will be used instead
                 }
 
+                // When viewing own profile, ensure following count is at least the frontend follow list size
+                // (e.g. user followed Ava from feed but backend count wasn't updated or API failed)
+                const isOwnProfile = decodedHandle === user?.handle;
+                if (isOwnProfile && user?.id) {
+                    try {
+                        const followedList = await getFollowedUsers(user.id);
+                        if (followedList.length > followingCount) {
+                            followingCount = followedList.length;
+                        }
+                    } catch (_) {}
+                }
+
                 // If no dedicated "Places traveled" list, derive places from bio (e.g. "Paris, London, Tokyo" or "I've been to Dublin and Cork")
                 if ((!placesTraveled || placesTraveled.length === 0) && bio) {
                     const fromBio = parsePlacesFromBio(bio);
@@ -668,7 +701,7 @@ export default function ViewProfilePage() {
         };
 
         loadProfile();
-    }, [handle, user?.id, user?.placesTraveled]);
+    }, [handle, user?.id, user?.placesTraveled, user?.bio]);
 
     // Check if user has stories (unviewed for others, any for current user)
     React.useEffect(() => {
@@ -925,19 +958,8 @@ export default function ViewProfilePage() {
                         onClick={(e) => {
                             e.stopPropagation();
                             e.preventDefault();
-                            // Resolve places: Travel Info lists, then BOTH profile + auth bios (so "places in my bio" always counts)
-                            let effectivePlaces = getEffectivePlacesTraveled(profileUser, user);
-                            // Fallback: saved user bio from localStorage — split on commas only
-                            if (!effectivePlaces?.length) {
-                                try {
-                                    const u = JSON.parse(localStorage.getItem('user') || '{}');
-                                    const bio = (u?.bio ?? '').trim();
-                                    if (bio) {
-                                        const fromBio = bio.split(',').map((s: string) => s.trim()).filter(Boolean);
-                                        if (fromBio.length) effectivePlaces = fromBio;
-                                    }
-                                } catch (_) {}
-                            }
+                            // Use helper that includes localStorage fallback so bio / Travel Info from Profile always count
+                            const effectivePlaces = getEffectivePlacesWithStorageFallback(profileUser, user);
                             if (!effectivePlaces || effectivePlaces.length === 0) {
                                 const decodedHandle = handle ? decodeURIComponent(handle) : 'This user';
                                 Swal.fire({
@@ -1154,8 +1176,10 @@ export default function ViewProfilePage() {
                 </div>
             </div>
 
-            {/* Traveled Modal */}
-            {showTraveledModal && (
+            {/* Traveled Modal - compute places at render time with localStorage fallback so bio / Travel Info always show */}
+            {showTraveledModal && (() => {
+                const placesToShow = getEffectivePlacesWithStorageFallback(profileUser, user);
+                return (
                 <div className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4" onClick={() => setShowTraveledModal(false)}>
                     <div className="bg-gray-900 rounded-2xl max-w-md w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                         {/* Header */}
@@ -1171,9 +1195,9 @@ export default function ViewProfilePage() {
                         
                         {/* Places List */}
                         <div className="p-6">
-                            {placesForTravelModal && placesForTravelModal.length > 0 ? (
+                            {placesToShow.length > 0 ? (
                                 <div className="flex flex-col gap-3">
-                                    {placesForTravelModal.map((place: string, index: number) => (
+                                    {placesToShow.map((place: string, index: number) => (
                                         <div
                                             key={index}
                                             className="flex items-center gap-3 p-4 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors cursor-pointer"
@@ -1214,7 +1238,8 @@ export default function ViewProfilePage() {
                         </div>
                     </div>
                 </div>
-            )}
+                );
+            })()}
 
             {/* Post Viewer Modal */}
             {selectedPost && (
