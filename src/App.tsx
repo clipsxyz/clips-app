@@ -892,7 +892,8 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
               }}
               className={`text-left transition-opacity w-full ${isOverlaid ? 'hover:opacity-80' : 'hover:opacity-70'}`}
             >
-              <h3 id={titleId} className={`font-semibold flex items-center gap-1.5 ${textColorClass}`}>
+              {/* Instagram-style feed header: 14px semibold (Instagram uses ~14px for username in app) */}
+              <h3 id={titleId} className={`text-sm font-semibold flex items-center gap-1.5 ${textColorClass}`} style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
                 <span>{isReclippedPost ? post.originalUserHandle : post.userHandle}</span>
                 <Flag
                   value={isCurrentUser ? (user?.countryFlag || '') : (getFlagForHandle(isReclippedPost ? post.originalUserHandle! : post.userHandle) || '')}
@@ -2646,6 +2647,7 @@ function EngagementBar({
 
     const handleReclipAdded = () => {
       setReclips(prev => prev + 1);
+      setUserReclipped(true); // so the reclip icon turns green
     };
 
     const handleViewAdded = () => {
@@ -2747,127 +2749,103 @@ function EngagementBar({
     setShowShareToStoriesModal(true);
   }
 
+  // Instagram-style: 24px icons (Instagram uses ~24–28px for feed actions), white on dark bar
+  const iconSize = 'w-6 h-6'; // 24px – Instagram feed action size
+  const iconGap = 'gap-1.5'; // 8px between icon and count
+  const rowGap = 'gap-5'; // 20px between action groups
+
   return (
-    <div className="px-2 sm:px-4 pb-4 pt-3 border-t" style={{ borderColor: '#030712' }}>
+    <div className="px-4 pb-4 pt-3 border-t min-w-0" style={{ borderColor: '#030712' }}>
       <div className="flex items-center justify-between min-w-0">
-        <div className="flex items-center justify-between min-w-0 flex-1 w-full">
+        {/* Left group: Like, Views, Comment, Share to Stories, Reclip (Instagram order) */}
+        <div className={`flex items-center min-w-0 flex-shrink ${rowGap}`}>
           {/* Like */}
           <button
             ref={likeButtonRef}
-            className="flex items-center gap-1 sm:gap-2 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0"
+            className={`flex items-center ${iconGap} transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0`}
             onClick={likeClick}
             aria-pressed={liked}
             aria-label={liked ? 'Unlike' : 'Like'}
             title={liked ? 'Unlike' : 'Like'}
           >
             {liked ? (
-              <AiFillHeart className="w-4 h-4 sm:w-5 sm:h-5 text-purple-500" />
+              <AiFillHeart className={`${iconSize} text-purple-500`} />
             ) : (
-              <FiHeart className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600 dark:text-gray-400" />
+              <FiHeart className={`${iconSize} text-white`} />
             )}
-            <span className="text-xs sm:text-sm text-gray-700 dark:text-gray-300">{likes}</span>
+            <span className="text-xs text-white tabular-nums">{likes}</span>
           </button>
 
           {/* Views */}
-          <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
-            <FiEye className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600 dark:text-gray-400" />
-            <span className="text-xs sm:text-sm text-gray-700 dark:text-gray-300">{views}</span>
+          <div className={`flex items-center ${iconGap} flex-shrink-0`}>
+            <FiEye className={`${iconSize} text-white`} />
+            <span className="text-xs text-white tabular-nums">{views}</span>
           </div>
 
           {/* Comments */}
           <button
-            className="flex items-center gap-1 sm:gap-2 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0"
+            className={`flex items-center ${iconGap} transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0`}
             onClick={onOpenComments}
             aria-label="Comments"
             title="Comments"
           >
-            <FiMessageSquare className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600 dark:text-gray-400" />
-            <span className="text-xs sm:text-sm text-gray-700 dark:text-gray-300">{comments}</span>
+            <FiMessageSquare className={`${iconSize} text-white`} />
+            <span className="text-xs text-white tabular-nums">{comments}</span>
           </button>
 
           {/* Share to Stories */}
           <button
-            className="flex items-center gap-1 sm:gap-2 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0"
+            className={`flex items-center ${iconGap} transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0`}
             onClick={shareClick}
             aria-label="Share post to stories"
             title="Share post to stories"
           >
-            <div className="relative w-4 h-4 sm:w-5 sm:h-5">
-              <div className="absolute inset-0 rounded-full bg-gray-600 dark:bg-gray-400"></div>
-              <svg
-                className="absolute inset-0 w-full h-full"
-                viewBox="0 0 20 20"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <circle
-                  cx="10"
-                  cy="10"
-                  r="9"
-                  stroke="white"
-                  strokeWidth="1.5"
-                  strokeDasharray="2 2"
-                  fill="none"
-                />
-                <line
-                  x1="10"
-                  y1="6"
-                  x2="10"
-                  y2="14"
-                  stroke="white"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-                <line
-                  x1="6"
-                  y1="10"
-                  x2="14"
-                  y2="10"
-                  stroke="white"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
+            <div className={`relative ${iconSize}`}>
+              <div className="absolute inset-0 rounded-full bg-white/90" />
+              <svg className="absolute inset-0 w-full h-full" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="10" cy="10" r="9" stroke="#030712" strokeWidth="1.5" strokeDasharray="2 2" fill="none" />
+                <line x1="10" y1="6" x2="10" y2="14" stroke="#030712" strokeWidth="2" strokeLinecap="round" />
+                <line x1="6" y1="10" x2="14" y2="10" stroke="#030712" strokeWidth="2" strokeLinecap="round" />
               </svg>
             </div>
-            <span className="text-xs sm:text-sm text-gray-700 dark:text-gray-300">{shares}</span>
+            <span className="text-xs text-white tabular-nums">{shares}</span>
           </button>
 
           {/* Reclip */}
           <button
-            className={`flex items-center gap-1 sm:gap-2 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0 ${post.userHandle === currentUserHandle ? 'opacity-30 cursor-not-allowed' : ''}`}
+            className={`flex items-center ${iconGap} transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0 ${post.userHandle === currentUserHandle ? 'opacity-30 cursor-not-allowed' : ''}`}
             onClick={reclipClick}
             disabled={post.userHandle === currentUserHandle}
             aria-label={post.userHandle === currentUserHandle ? "Cannot reclip your own post" : "Reclip post"}
             title={post.userHandle === currentUserHandle ? "Cannot reclip your own post" : "Reclip post"}
           >
-            <FiRepeat className={`w-4 h-4 sm:w-5 sm:h-5 ${userReclipped ? 'text-green-500' : 'text-gray-600 dark:text-gray-400'}`} />
-            <span className="text-xs sm:text-sm text-gray-700 dark:text-gray-300">{reclips}</span>
+            <FiRepeat className={`${iconSize} ${userReclipped ? 'text-green-500' : 'text-gray-600 dark:text-gray-400'}`} />
+            <span className="text-xs text-gray-700 dark:text-gray-300 tabular-nums">{reclips}</span>
           </button>
+        </div>
 
-          {/* Share (paper airplane) - opens share sheet with DM list + WhatsApp etc */}
+        {/* Right group: Share/DM (paper plane), Metrics – kept inset from edge (Instagram: bookmark on right) */}
+        <div className={`flex items-center flex-shrink-0 ${rowGap}`}>
+          {/* Share (paper airplane) – DM / share sheet */}
           <button
-            className="flex items-center gap-1 sm:gap-2 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0"
+            className={`flex items-center justify-center ${iconSize} transition-opacity hover:opacity-70 active:opacity-50`}
             onClick={() => _onShare?.()}
             aria-label="Share post"
             title="Share post"
           >
-            <FiSend className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600 dark:text-gray-400" />
+            <FiSend className={`${iconSize} text-white`} />
           </button>
 
-          {/* Metrics (only on boost page for boosted posts) */}
           {showMetricsIcon && onToggleMetrics && (
             <button
-              className="flex items-center gap-1 sm:gap-2 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0"
+              className={`flex items-center justify-center ${iconSize} transition-opacity hover:opacity-70 active:opacity-50`}
               onClick={onToggleMetrics}
               aria-label="Toggle metrics"
               title="View metrics"
             >
-              <FiBarChart2 className={`w-5 h-5 transition-colors ${isMetricsOpen ? 'text-brand-600 dark:text-brand-400' : 'text-gray-600 dark:text-gray-400'}`} />
+              <FiBarChart2 className={`${iconSize} ${isMetricsOpen ? 'text-brand-400' : 'text-white'}`} />
             </button>
           )}
-        </div>
-
-        <div className="flex items-center gap-3">
         </div>
       </div>
       <ShareToStoriesModal
@@ -3646,22 +3624,14 @@ function FeedPageWrapper() {
     }
   }, [routerLocation.search, routerLocation.pathname]); // Don't include customLocation to avoid infinite loops
 
-  // Load from cache on mount/tab change
+  // Reset feed only when tab/location (currentFilter) changes — not when userId changes, to avoid flash (Ava appears then disappears when auth loads)
   React.useEffect(() => {
-    // Reset pages when changing tabs
     setPages([]);
     setCursor(0);
     setEnd(false);
     console.log('Location changed to:', currentFilter, 'customLocation:', customLocation, 'active:', active, 'computed currentFilter:', currentFilter);
-    // Invalidate prior in-flight requests
     requestTokenRef.current++;
-
-    // Don't load cached data for Discover tab - always fetch fresh
-    if (currentFilter.toLowerCase() !== 'discover') {
-      // Temporarily disable feed cache loading to avoid duplicates
-      // loadFeed(userId, currentFilter).then(p => p.length && setPages(p));
-    }
-  }, [userId, currentFilter]);
+  }, [currentFilter]);
 
   // Sync with TopBar dropdown and Discover page
   React.useEffect(() => {
@@ -4186,7 +4156,7 @@ function FeedPageWrapper() {
 
         return (
           <FeedCard
-            key={p.id}
+            key={p.id ? `post-${p.id}-${index}` : `post-${index}`}
             post={p}
             priority={isPriority}
             onLike={async () => {
@@ -4616,6 +4586,7 @@ function FeedPageWrapper() {
             }}
             onOpenComments={() => handleOpenComments(p.id)}
             onView={async () => {
+              if (!p?.id) return;
               // Skip view tracking for frontend-only mock posts (mock-scenes-*) – they don't exist in the API
               if (p.id.startsWith('mock-scenes-')) return;
               if (!online) {
@@ -5376,6 +5347,7 @@ function BoostPageWrapper() {
             }}
             onOpenComments={() => handleOpenComments(p.id)}
             onView={async () => {
+              if (!p?.id) return;
               if (p.id.startsWith('mock-scenes-')) return;
               if (!online) {
                 await enqueue({ type: 'view', postId: p.id, userId });

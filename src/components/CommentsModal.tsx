@@ -124,14 +124,17 @@ function CommentItem({
                     {showReplyInput && (
                         <div className="mt-3 ml-4">
                             <div className="flex items-center gap-2">
-                                <input
-                                    type="text"
-                                    value={replyText}
-                                    onChange={(e) => setReplyText(e.target.value)}
-                                    placeholder="Write a reply..."
-                                    className="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent text-sm"
-                                    disabled={submittingReply}
-                                />
+                                {/* Left-to-right linear gradient border on focus (purple → baby blue) */}
+                                <div className="flex-1 rounded-lg p-[2px] bg-gray-300 dark:bg-gray-600 focus-within:bg-gradient-to-r focus-within:from-violet-600 focus-within:to-sky-300 transition-[background] duration-200">
+                                    <input
+                                        type="text"
+                                        value={replyText}
+                                        onChange={(e) => setReplyText(e.target.value)}
+                                        placeholder="Write a reply..."
+                                        className="w-full px-3 py-2 rounded-[6px] border-0 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-0 text-sm"
+                                        disabled={submittingReply}
+                                    />
+                                </div>
                                 <button
                                     onClick={handleReply}
                                     disabled={!replyText.trim() || submittingReply}
@@ -223,14 +226,17 @@ function CommentInput({
                 name={user?.name || 'User'}
                 size="sm"
             />
-            <input
-                type="text"
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder={placeholder}
-                className="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                disabled={isLoading}
-            />
+            {/* Left-to-right linear gradient border on focus (purple → baby blue) */}
+            <div className="flex-1 rounded-lg p-[2px] bg-gray-300 dark:bg-gray-600 focus-within:bg-gradient-to-r focus-within:from-violet-600 focus-within:to-sky-300 transition-[background] duration-200">
+                <input
+                    type="text"
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    placeholder={placeholder}
+                    className="w-full px-3 py-2 rounded-[6px] border-0 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-0"
+                    disabled={isLoading}
+                />
+            </div>
             <button
                 type="submit"
                 disabled={!text.trim() || isLoading}

@@ -86,6 +86,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             initializeNotifications();
           });
         }
+        // If we have an auth token (Laravel), refresh user from API so handle and profile are correct (fixes Share/DM list after refresh)
+        const token = localStorage.getItem('authToken');
+        if (token && import.meta.env.VITE_USE_LARAVEL_API !== 'false') {
+          import('../api/client').then(({ getCurrentUser }) => {
+            getCurrentUser()
+              .then((apiUser: any) => {
+                const updated = {
+                  ...userToSet,
+                  handle: apiUser.handle ?? userToSet.handle,
+                  name: apiUser.display_name ?? apiUser.name ?? apiUser.username ?? userToSet.name,
+                  email: apiUser.email ?? userToSet.email,
+                  local: apiUser.location_local ?? userToSet.local,
+                  regional: apiUser.location_regional ?? userToSet.regional,
+                  national: apiUser.location_national ?? userToSet.national,
+                  avatarUrl: apiUser.avatar_url ?? userToSet.avatarUrl,
+                  is_private: apiUser.is_private ?? userToSet.is_private,
+                };
+                setUser(updated);
+                localStorage.setItem('user', JSON.stringify(updated));
+              })
+              .catch(() => {});
+          });
+        }
         // Restore profile pic from IndexedDB (survives refresh on phone)
         if (!userToSet.avatarUrl) {
           db.get(AVATAR_KEY(userToSet.id))

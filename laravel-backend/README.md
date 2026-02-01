@@ -19,9 +19,17 @@ All 14 migration files are in `database/migrations/`:
 9. `2024_01_01_000009_create_post_views_table.php` - Post views
 10. `2024_01_01_000010_create_post_reclips_table.php` - Post reclips
 11. `2024_01_01_000011_create_offline_queue_table.php` - Offline queue
-12. `2024_01_01_000012_create_feed_cache_table.php` - Feed cache
-13. `2024_01_01_000013_harden_constraints.php` - Additional constraints
-14. `2024_01_01_000014_add_original_user_handle_to_posts.php` - **NEW** - Adds `original_user_handle` field
+12. `2024_01_01_000012_create_feed_cache_table.php` - Feed cache (superseded: see below)
+13. `2025_02_01_000001_drop_feed_cache_table.php` - **Drops** `feed_cache`; feed is now cached via Laravel Cache (Memcached)
+14. `2024_01_01_000013_harden_constraints.php` - Additional constraints
+15. `2024_01_01_000014_add_original_user_handle_to_posts.php` - Adds `original_user_handle` field
+
+### Cache (feed)
+
+- The **feed_cache** table has been removed. Feed responses are cached using **Laravel Cache** with **Memcached**.
+- **Production:** set `CACHE_DRIVER=memcached` in `.env` and run Memcached.
+- **Local dev:** default is `file`; set `CACHE_DRIVER=memcached` when Memcached is running.
+- Optional Memcached `.env` vars: `MEMCACHED_HOST`, `MEMCACHED_PORT` (default `127.0.0.1`, `11211`).
 
 ## 🔗 Eloquent Relationships Defined
 

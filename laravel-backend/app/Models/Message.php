@@ -16,10 +16,12 @@ class Message extends Model
         'text',
         'image_url',
         'is_system_message',
+        'read_at',
     ];
 
     protected $casts = [
         'is_system_message' => 'boolean',
+        'read_at' => 'datetime',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];

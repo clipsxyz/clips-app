@@ -10,6 +10,7 @@ use App\Jobs\ProcessRenderJob;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Laravel\Sanctum\PersonalAccessToken;
@@ -53,9 +54,44 @@ class PostController extends Controller
             }
             $offset = $cursor * $limit;
 
-            $query = Post::notReclipped()
+            $cacheKey = 'feed:' . ($filter ?? 'all') . ':' . ($userId ?? 'guest') . ':' . $cursor . ':' . $limit;
+            $ttlSeconds = 300; // 5 minutes
+
+            $response = Cache::remember($cacheKey, $ttlSeconds, function () use ($request, $cursor, $limit, $filter, $userId, $offset) {
+                return $this->buildFeedResponse($cursor, $limit, $filter, $userId, $offset);
+            });
+
+            return response()->json($response);
+        } catch (\Throwable $e) {
+            \Log::warning('posts index failed: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'items' => [],
+                'nextCursor' => null,
+                'hasMore' => false
+            ]);
+        }
+    }
+
+    /**
+     * Build feed items and nextCursor (used by index with Laravel Cache).
+     */
+    private function buildFeedResponse($cursor, $limit, $filter, $userId, $offset): array
+    {
+            // Following feed: include both original and reclipped posts from people you follow (reclips appear for your followers).
+            // Location feeds: only original posts from that location.
+            $query = Post::query()
                 ->with(['user:id,handle,display_name,avatar_url', 'taggedUsers:id,handle,display_name,avatar_url'])
                 ->withCount(['likes', 'comments', 'shares', 'views', 'reclips']);
+
+            if ($filter === 'Following' && $userId) {
+                $query->following($userId);
+                // Include reclipped posts so "when you reclip it gets shared to people who follow you"
+            } elseif ($filter !== 'Following') {
+                $query->notReclipped()->byLocation($filter);
+            } else {
+                // Following but no userId (e.g. guest): only original posts
+                $query->notReclipped();
+            }
 
             if ($userId) {
                 $query->with(['likes' => function ($q) use ($userId) {
@@ -70,12 +106,6 @@ class PostController extends Controller
                 ->with(['user.followers' => function ($q) use ($userId) {
                     $q->where('follower_id', $userId);
                 }]);
-            }
-
-            if ($filter === 'Following' && $userId) {
-                $query->following($userId);
-            } elseif ($filter !== 'Following') {
-                $query->byLocation($filter);
             }
 
             $posts = $query->orderBy('created_at', 'desc')
@@ -107,19 +137,11 @@ class PostController extends Controller
 
             $nextCursor = $posts->count() === $limit ? $cursor + 1 : null;
 
-            return response()->json([
+            return [
                 'items' => $transformedPosts,
                 'nextCursor' => $nextCursor,
                 'hasMore' => $nextCursor !== null
-            ]);
-        } catch (\Throwable $e) {
-            \Log::warning('posts index failed: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
-            return response()->json([
-                'items' => [],
-                'nextCursor' => null,
-                'hasMore' => false
-            ]);
-        }
+            ];
     }
 
     /**

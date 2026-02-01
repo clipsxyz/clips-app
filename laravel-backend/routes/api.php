@@ -191,6 +191,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/conversations', [MessageController::class, 'getConversations']);
         Route::get('/conversation/{otherHandle}', [MessageController::class, 'getConversation']);
         Route::post('/send', [MessageController::class, 'sendMessage']);
+        Route::post('/conversation/{otherHandle}/read', [MessageController::class, 'markConversationRead']);
     });
 
     // Stories routes

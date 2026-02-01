@@ -53,7 +53,7 @@ export default function Root() {
         >
             <AuthProvider>
                 <ThemeProvider>
-                    <BrowserRouter>
+                    <BrowserRouter future={{ v7_relativeSplatPath: true }}>
                         <Routes>
                             <Route path="/splash" element={<SplashPage />} />
                             <Route path="/landing" element={<LandingPage />} />

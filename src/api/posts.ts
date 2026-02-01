@@ -128,6 +128,20 @@ const LOCATION_CITIES = new Set([
 // Storage key for posts
 const POSTS_STORAGE_KEY = 'clips_app_posts';
 
+/** Returns true if this id is from mock/seed data (JSON, Artane, Bob, Ava). Only these should be excluded when saving to localStorage. */
+function isMockPostId(id: string): boolean {
+  if (!id || typeof id !== 'string') return true;
+  const s = id as string;
+  return (
+    s.startsWith('post-') ||           // JSON seed posts (post-1-..., post-2-...)
+    s.startsWith('artane-post-') ||
+    s.startsWith('bob-post-') ||
+    s.startsWith('ava-boosted-demo-') ||
+    s.startsWith('ava-normal-') ||      // ava-normal-ireland-demo + ava-normal-*-galway
+    s.startsWith('mock-scenes-')
+  );
+}
+
 // Get posts from localStorage
 function getPostsFromStorage(): Post[] {
   try {
@@ -139,12 +153,10 @@ function getPostsFromStorage(): Post[] {
   }
 }
 
-// Save posts to localStorage
+// Save posts to localStorage — only user-created posts (exclude all mock/seed posts to avoid unbounded growth and duplicates on reload)
 function savePostsToStorage(postsToSave: Post[]): void {
   try {
-    // Only save user-created posts (not the initial mock posts from JSON)
-    // Filter out posts that start with 'post-' prefix (from JSON file)
-    const userCreatedPosts = postsToSave.filter(p => !p.id.startsWith('post-post-') && !p.id.startsWith('artane-post-'));
+    const userCreatedPosts = postsToSave.filter(p => !isMockPostId(p.id));
     localStorage.setItem(POSTS_STORAGE_KEY, JSON.stringify(userCreatedPosts));
     console.log('💾 Saved', userCreatedPosts.length, 'user-created posts to localStorage');
   } catch (error) {
@@ -177,27 +189,13 @@ if (!postsInitialized) {
     } as Post;
   });
 
-  // Load user-created posts from localStorage
-  const userCreatedPosts = getPostsFromStorage();
+  // Load user-created posts from localStorage (only non-mock posts should be stored; old saves may have contained mock data)
+  const userCreatedPosts = getPostsFromStorage().filter(p => !isMockPostId(p.id));
   console.log('📂 Loaded', userCreatedPosts.length, 'user-created posts from localStorage');
 
-  // Merge: user-created posts first (newest), then JSON posts
+  // Merge: user-created posts first (newest), then JSON posts — mock posts are never loaded from storage
   posts = [...userCreatedPosts, ...jsonPosts];
   postsInitialized = true;
-
-  // Debug: Log initial posts
-  console.log('Initial posts loaded:', posts.length);
-  console.log('Initial post IDs:', posts.map(p => p.id));
-  console.log('Posts array created at:', new Date().toISOString());
-  console.log('Posts array reference ID:', Math.random().toString(36).substr(2, 9));
-
-  // Check for duplicates
-  const duplicateIds = posts.filter((p, i) => posts.findIndex(other => other.id === p.id) !== i);
-  if (duplicateIds.length > 0) {
-    console.error('DUPLICATE IDs FOUND:', duplicateIds.map(p => p.id));
-  } else {
-    console.log('No duplicate IDs found in initial posts');
-  }
 
   // Add mock posts for test user from Artane
   const artaneNow = Date.now();
@@ -379,6 +377,16 @@ if (!postsInitialized) {
 
   posts = [...posts, ...artanePosts, ...bobPosts, avaBoostedPost, avaNormalPost];
 
+  // Dedupe by id (keep first occurrence) so corrupted localStorage or old saves don't leave thousands of duplicates
+  const seenIds = new Set<string>();
+  posts = posts.filter(p => {
+    const id = String(p.id);
+    if (seenIds.has(id)) return false;
+    seenIds.add(id);
+    return true;
+  });
+  console.log('Posts initialized:', posts.length, 'unique posts');
+
   // Activate boost for Ava's post so it appears as Sponsored in Dublin (regional) feed
   activateBoost(avaBoostedPost.id, 'ava-mock-user', 'regional', 5).catch(() => { });
 } else {
@@ -476,7 +484,8 @@ const delay = (ms = 250) => new Promise(r => setTimeout(r, ms));
 export type Page = { items: Post[]; nextCursor: number | null };
 
 /** Case-insensitive lookup so "Bob@Cork" and "bob@cork" are treated as the same user. */
-export function getFollowState(follows: Record<string, boolean>, handle: string): boolean {
+export function getFollowState(follows: Record<string, boolean>, handle: string | undefined): boolean {
+  if (handle == null || typeof handle !== 'string') return false;
   const lower = handle.toLowerCase();
   const key = Object.keys(follows).find(k => k.toLowerCase() === lower);
   return key ? !!follows[key] : false;
@@ -538,17 +547,24 @@ export function decorateForUser(userId: string, p: Post): Post {
 function transformLaravelPost(response: any): Post {
   const finalVideoUrl = response.final_video_url || response.finalVideoUrl;
   const originalMediaUrl = response.media_url || response.mediaUrl || '';
+  const mediaItems = response.media_items || response.mediaItems;
+  // Still-image posts often have media only in media_items; ensure we have a single mediaUrl for display
+  const firstItem = Array.isArray(mediaItems) && mediaItems.length > 0 ? mediaItems[0] : null;
+  const firstItemUrl = firstItem && (firstItem.url != null) ? String(firstItem.url).trim() : '';
+  const firstItemType = firstItem && (firstItem.type === 'video' || firstItem.type === 'image') ? firstItem.type : null;
+  const resolvedMediaUrl = (finalVideoUrl || originalMediaUrl || firstItemUrl) || '';
+  const resolvedMediaType = response.media_type || response.mediaType || firstItemType || undefined;
 
   return {
     id: response.id,
     userHandle: response.user_handle || response.userHandle,
     locationLabel: response.location_label || response.locationLabel || 'Unknown Location',
     tags: response.tags || [],
-    // Use final_video_url if available (from completed render job), otherwise use original media_url
-    mediaUrl: finalVideoUrl || originalMediaUrl,
+    // Use final_video_url if available, else media_url, else first media_items item (for still-image posts)
+    mediaUrl: resolvedMediaUrl,
     finalVideoUrl: finalVideoUrl || undefined, // Set as separate field for Media component
-    mediaType: response.media_type || response.mediaType,
-    mediaItems: response.media_items || response.mediaItems,
+    mediaType: resolvedMediaType,
+    mediaItems: mediaItems,
     text: response.text_content || response.text,
     imageText: response.image_text || response.imageText,
     caption: response.caption,
@@ -784,6 +800,17 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
           // Original posts: only show if you follow the author
           return isFollowing;
         });
+
+        // On first page, prepend Ava demo post so she appears on localhost/Following (user can follow & DM)
+        const isFirstPageDiscover = cursor === null || cursor === 0;
+        if (isFirstPageDiscover && !transformedItems.some((p) => p.id === 'ava-normal-ireland-demo')) {
+          const avaNormal = getAvaNormalPost();
+          const decorated = decorateForUser(stateUserId, { ...avaNormal, isBoosted: false, boostFeedType: undefined });
+          transformedItems = [decorated, ...transformedItems];
+          if (!posts.find((p) => p.id === avaNormal.id)) {
+            posts.push(avaNormal);
+          }
+        }
       }
 
       // Prepend mock Sarah/Bob video posts on first page for Scenes testing (dev)
@@ -795,12 +822,17 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       const dedupedMock = mockVideoPosts.filter(p => !existingIds.has(p.id));
       let items = [...dedupedMock, ...transformedItems];
 
-      // Inject Ava's normal (non-sponsored) mock post on Ireland feed first page when using API
-      if (t === 'ireland' && isFirstPage && !existingIds.has('ava-normal-ireland-demo')) {
+      // Inject Ava's demo post on first page so she appears on localhost (all location tabs + discover); Laravel DB often has no Ava
+      const injectAvaTabs = ['ireland', 'dublin', 'finglas', 'discover'];
+      if (isFirstPage && injectAvaTabs.includes(t) && !existingIds.has('ava-normal-ireland-demo')) {
         const avaNormal = getAvaNormalPost();
         const stateUserId = userId || 'me';
         const decorated = decorateForUser(stateUserId, { ...avaNormal, isBoosted: false, boostFeedType: undefined });
         items = [decorated, ...items];
+        // So getPostById finds her when sharing to DM
+        if (!posts.find(p => p.id === avaNormal.id)) {
+          posts.push(avaNormal);
+        }
       }
 
       // Mark any post in the active boosted list so "Sponsored" shows (location feeds and Following feed)
@@ -840,18 +872,20 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
 
   // Mock implementation (fallback)
   try {
-    // Reload posts from localStorage to get latest user-created posts
-    // This ensures posts created in this session are included
-    const userCreatedPosts = getPostsFromStorage();
-    // Get JSON/seed posts (include Ava boosted + Ava normal mock so they stay in the array)
-    const jsonPosts = posts.filter(p =>
-      p.id.startsWith('post-post-') || p.id.startsWith('artane-post-') || p.id.startsWith('bob-post-') || p.id.startsWith('ava-boosted-demo-') || p.id.startsWith('ava-normal-')
-    );
-    // Merge: user-created posts first (newest), then existing JSON posts
-    // Only update if we have user-created posts to avoid overwriting with empty array
+    // Reload only user-created posts from localStorage (exclude mock ids to avoid duplicates)
+    const userCreatedPosts = getPostsFromStorage().filter(p => !isMockPostId(p.id));
+    // Keep current in-memory mock/seed posts (don't reload mock from storage)
+    const mockPosts = posts.filter(p => isMockPostId(p.id));
+    // Merge: user-created first, then mock/seed (single copy of each)
     if (userCreatedPosts.length > 0 || posts.length === 0) {
-      posts = [...userCreatedPosts, ...jsonPosts];
-      console.log('📂 Reloaded posts from localStorage:', userCreatedPosts.length, 'user posts +', jsonPosts.length, 'JSON posts =', posts.length, 'total');
+      const seen = new Set<string>();
+      posts = [...userCreatedPosts, ...mockPosts].filter(p => {
+        const id = String(p.id);
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+      console.log('📂 Reloaded posts:', userCreatedPosts.length, 'user +', mockPosts.length, 'mock =', posts.length, 'total');
     }
 
     await delay();
@@ -1443,6 +1477,15 @@ export async function getPostById(postId: string, userId?: string): Promise<Post
     const mock = mockPosts.find(p => p.id === postId);
     if (mock) return userId ? decorateForUser(userId, mock) : mock;
     return null;
+  }
+
+  // Demo post Ava (injected in feed but not in Laravel) – resolve so DM shared post and getPostById work
+  if (postId === 'ava-normal-ireland-demo') {
+    const avaPost = getAvaNormalPost();
+    if (!posts.find(p => p.id === avaPost.id)) {
+      posts.push(avaPost);
+    }
+    return userId ? decorateForUser(userId, avaPost) : avaPost;
   }
 
   // Laravel post ID must be a UUID – don't call API for non-UUID IDs (avoids 400 Bad Request)

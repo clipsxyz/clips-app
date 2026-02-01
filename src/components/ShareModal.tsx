@@ -8,6 +8,7 @@ import { showToast } from '../utils/toast';
 import { updateMetaTags, clearMetaTags } from '../utils/metaTags';
 import { getAvatarForHandle } from '../api/users';
 import { getFollowedUsers } from '../api/posts';
+import * as apiClient from '../api/client';
 import Avatar from './Avatar';
 import type { Post } from '../types';
 
@@ -29,16 +30,40 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
     const postTitle = post.text ? post.text.substring(0, 100) + (post.text.length > 100 ? '...' : '') : 'Check out this post';
     const shareText = `${postTitle} by ${post.userHandle}`;
 
-    // Fetch people you follow when modal opens
+    // Fetch people you follow when modal opens (for "Share to DM" list)
     useEffect(() => {
-        if (isOpen && user?.id) {
-            setLoadingFollowed(true);
+        if (!isOpen || !user) return;
+        setLoadingFollowed(true);
+        const useLaravel = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+
+        const setFromLocal = () => {
             getFollowedUsers(user.id)
                 .then(setFollowedHandles)
                 .catch(() => setFollowedHandles([]))
                 .finally(() => setLoadingFollowed(false));
+        };
+
+        const hasToken = typeof localStorage !== 'undefined' && !!localStorage.getItem('authToken');
+        if (useLaravel && user.handle && hasToken) {
+            apiClient
+                .fetchFollowing(user.handle, 0, 100)
+                .then((res: { items?: { handle?: string; user_handle?: string }[] }) => {
+                    const apiHandles = (res?.items ?? []).map((u) => u.handle ?? u.user_handle).filter(Boolean) as string[];
+                    return getFollowedUsers(user.id).then((localHandles) => {
+                        const merged = [...new Set([...apiHandles, ...localHandles])];
+                        setFollowedHandles(merged.length ? merged : apiHandles);
+                    });
+                })
+                .catch((err) => {
+                    console.warn('Share modal: fetchFollowing failed, using local list', err);
+                    setFromLocal();
+                    return;
+                })
+                .finally(() => setLoadingFollowed(false));
+        } else {
+            setFromLocal();
         }
-    }, [isOpen, user?.id]);
+    }, [isOpen, user?.id, user?.handle]);
 
     // Update meta tags when modal opens for Twitter Card sharing
     useEffect(() => {

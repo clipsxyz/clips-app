@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { FiChevronLeft, FiSend, FiCornerUpLeft, FiMoreHorizontal, FiMapPin, FiEdit3, FiX, FiMic, FiUserPlus, FiPlus, FiCheck } from 'react-icons/fi';
 import { IoMdPhotos } from 'react-icons/io';
@@ -254,8 +254,12 @@ function SharedPostPreviewCard({ postId, onTap, userId }: { postId: string; onTa
         return () => { cancelled = true; };
     }, [postId, userId]);
 
-    const hasMedia = previewPost?.mediaUrl && previewPost.mediaUrl.trim() !== '' && !previewPost.mediaUrl.startsWith('data:');
-    const isVideo = previewPost?.mediaType === 'video';
+    // Media can be in mediaUrl OR in mediaItems (still-image posts often only have media_items)
+    const firstMediaItem = previewPost?.mediaItems?.[0];
+    const firstItemUrl = firstMediaItem && (firstMediaItem.url ?? (firstMediaItem as { media_url?: string }).media_url);
+    const displayUrl = (previewPost?.mediaUrl?.trim() || (typeof firstItemUrl === 'string' && firstItemUrl.trim()) || '').trim() || '';
+    const hasMedia = displayUrl.length > 0;
+    const isVideo = previewPost?.mediaType === 'video' || firstMediaItem?.type === 'video';
 
     return (
         <button
@@ -270,7 +274,7 @@ function SharedPostPreviewCard({ postId, onTap, userId }: { postId: string; onTa
                     <div className="relative w-full aspect-video bg-black">
                         {isVideo ? (
                             <video
-                                src={previewPost!.mediaUrl}
+                                src={displayUrl}
                                 className="w-full h-full object-cover"
                                 muted
                                 playsInline
@@ -278,7 +282,7 @@ function SharedPostPreviewCard({ postId, onTap, userId }: { postId: string; onTa
                                 disablePictureInPicture
                             />
                         ) : (
-                            <img src={previewPost!.mediaUrl} alt="" className="w-full h-full object-cover" />
+                            <img src={displayUrl} alt="" className="w-full h-full object-cover" />
                         )}
                         <div className="absolute inset-0 flex items-center justify-center bg-black/20">
                             <div className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center">
@@ -308,18 +312,18 @@ function SharedPostPreviewCard({ postId, onTap, userId }: { postId: string; onTa
 
 // Component to render shared post card (matching ScenesModal format exactly - Twitter card style)
 function SharedPostCard({ post, onTap }: { post: Post; onTap?: (post: Post) => void }) {
-    // More strict check: text-only means no real mediaUrl (or empty string), no mediaItems (or empty array), and has text
-    // Exclude data:image URLs (generated images) and check for real media
-    const hasRealMediaUrl = post.mediaUrl && post.mediaUrl.trim() !== '' && !post.mediaUrl.startsWith('data:image');
-    const hasMediaItems = post.mediaItems && post.mediaItems.length > 0;
-    // If post has text and no real media, show as text-only card (Twitter style)
-    // This matches ScenesModal behavior for shared text-only posts
-    const isTextOnly = !!post.text && !hasRealMediaUrl && !hasMediaItems;
+    // Derive display URL from mediaUrl or first mediaItems item (still-image posts often only have media_items)
+    const firstMediaItem = post.mediaItems?.[0];
+    const firstItemUrl = firstMediaItem && (firstMediaItem.url ?? (firstMediaItem as { media_url?: string }).media_url);
+    const displayMediaUrlForCheck = (post.mediaUrl?.trim() || (typeof firstItemUrl === 'string' && firstItemUrl.trim()) || '').trim() || '';
+    const hasDisplayMedia = displayMediaUrlForCheck.length > 0;
+    // Text-only = has text and no media to display (still images and video both count as media)
+    const isTextOnly = !!post.text && !hasDisplayMedia;
     
     const cardContent = (() => {
     // Always show text-only posts as white Twitter card (matching ScenesModal)
     // Force white background regardless of dark mode - use !important via inline styles
-    if (isTextOnly || (post.text && !hasMediaItems)) {
+    if (isTextOnly) {
         // Match ScenesModal EXACTLY - copy the exact same structure and classes
         // This is the Twitter card style: white card with black text box
         return (
@@ -413,7 +417,7 @@ function SharedPostCard({ post, onTap }: { post: Post; onTap?: (post: Post) => v
     }
     
     // For posts with media, show a simple preview (video = static frame, tap opens Scenes)
-    const isVideo = post.mediaType === 'video';
+    const isVideo = post.mediaType === 'video' || firstMediaItem?.type === 'video';
     return (
         <div 
             className="w-full max-w-sm rounded-2xl overflow-hidden border shadow-lg mt-2"
@@ -434,11 +438,11 @@ function SharedPostCard({ post, onTap }: { post: Post; onTap?: (post: Post) => v
                 {post.text && (
                     <p className="text-sm line-clamp-2" style={{ color: '#374151' }}>{post.text}</p>
                 )}
-                {post.mediaUrl && (
+                {displayMediaUrlForCheck && (
                     <div className="mt-2 rounded-lg overflow-hidden bg-black">
                         {isVideo ? (
                             <video
-                                src={post.mediaUrl}
+                                src={displayMediaUrlForCheck}
                                 className="w-full h-auto max-h-48 object-cover"
                                 muted
                                 playsInline
@@ -446,7 +450,7 @@ function SharedPostCard({ post, onTap }: { post: Post; onTap?: (post: Post) => v
                                 disablePictureInPicture
                             />
                         ) : (
-                            <img src={post.mediaUrl} alt="Post media" className="w-full h-auto max-h-48 object-cover" />
+                            <img src={displayMediaUrlForCheck} alt="Post media" className="w-full h-auto max-h-48 object-cover" />
                         )}
                     </div>
                 )}
@@ -518,10 +522,11 @@ export default function MessagesPage() {
                 const shortHandle = handle.includes('@') ? handle : `@${handle}`;
                 showToast?.(`Shared with ${shortHandle}`);
                 setTimeout(scrollToBottom, 100);
-            } catch (e) {
+            } catch (e: any) {
                 console.error('Direct share failed:', e);
                 sharedPostSentRef.current = false;
-                showToast?.('Failed to share. You can paste the link and send.');
+                const msg = e?.response?.message ?? e?.message ?? 'Failed to share. You can paste the link and send.';
+                showToast?.(typeof msg === 'string' ? msg : 'Failed to share. You can paste the link and send.');
                 setMessageText(state.sharePostUrl!);
                 if (state.sharePostId) setPendingSharePostId(state.sharePostId);
             }
@@ -554,6 +559,13 @@ export default function MessagesPage() {
     
     // Message reactions state (messageId -> { emoji: string, users: string[] }[])
     const [messageReactions, setMessageReactions] = useState<Record<string, { emoji: string; users: string[] }[]>>({});
+    // Sticker reaction animation: pop big then fly to card
+    const [stickerReactionAnimation, setStickerReactionAnimation] = useState<{
+        messageId: string;
+        emoji: string;
+        phase: 'pop' | 'fly';
+        targetRect?: { left: number; top: number; width: number; height: number };
+    } | null>(null);
     
     // Reply state
     const [replyingTo, setReplyingTo] = useState<MessageUI | null>(null);
@@ -893,22 +905,25 @@ export default function MessagesPage() {
 
             try {
                 let places: string[] = [];
+                const hasToken = typeof localStorage !== 'undefined' && !!localStorage.getItem('authToken');
 
-                try {
-                    const profile = await fetchUserProfile(handle, user.id);
+                if (hasToken) {
+                    try {
+                        const profile = await fetchUserProfile(handle, user.id);
 
-                    // 1) Try explicit places_traveled / placesTraveled from API
-                    const apiPlaces =
-                        (profile as any).places_traveled ||
-                        (profile as any).placesTraveled;
-                    if (Array.isArray(apiPlaces) && apiPlaces.length > 0) {
-                        places = apiPlaces;
-                    } else if (typeof (profile as any).bio === 'string') {
-                        // 2) Derive from bio text (same parsing as profile page)
-                        places = parsePlacesFromBio((profile as any).bio);
+                        // 1) Try explicit places_traveled / placesTraveled from API
+                        const apiPlaces =
+                            (profile as any).places_traveled ||
+                            (profile as any).placesTraveled;
+                        if (Array.isArray(apiPlaces) && apiPlaces.length > 0) {
+                            places = apiPlaces;
+                        } else if (typeof (profile as any).bio === 'string') {
+                            // 2) Derive from bio text (same parsing as profile page)
+                            places = parsePlacesFromBio((profile as any).bio);
+                        }
+                    } catch (error) {
+                        console.warn('Failed to fetch profile for places traveled in DMs:', error);
                     }
-                } catch (error) {
-                    console.warn('Failed to fetch profile for places traveled in DMs:', error);
                 }
 
                 // 3) Mock fallback for Bob@Ireland (match ViewProfilePage behavior)
@@ -1480,71 +1495,11 @@ export default function MessagesPage() {
             }).catch(() => {});
         };
 
-        // If opened from long-press "Add sticker": try screenshot first, then fallback to sticker-on-card image
+        // If opened from long-press "Add sticker": add sticker as reaction and run pop → fly-to-card animation
         if (targetMessage) {
-            const sel = (id: string) => document.querySelector(`[data-message-bubble-id="${id}"]`) || document.querySelector(`[data-message-id="${id}"]`);
-            const el = sel(targetMessage.id) as HTMLElement | null;
-            if (el) {
-                try {
-                    await new Promise(r => setTimeout(r, 200));
-                    const target = sel(targetMessage.id) as HTMLElement | null;
-                    if (target && target.offsetWidth > 0 && target.offsetHeight > 0) {
-                        const html2canvas = (await import('html2canvas')).default;
-                        const shot = await html2canvas(target, {
-                            useCORS: true,
-                            allowTaint: true,
-                            scale: Math.min(2, window.devicePixelRatio || 2),
-                            backgroundColor: '#1f2937',
-                            logging: false,
-                            width: target.offsetWidth,
-                            height: target.offsetHeight,
-                            windowWidth: target.scrollWidth,
-                            windowHeight: target.scrollHeight
-                        });
-                        const ctx = shot.getContext('2d');
-                        if (ctx) {
-                            const fontSize = Math.max(48, Math.min(shot.width, shot.height) * 0.2);
-                            ctx.font = `${fontSize}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
-                            ctx.textAlign = 'center';
-                            ctx.textBaseline = 'middle';
-                            ctx.fillText(sticker, shot.width / 2, shot.height / 2);
-                        }
-                        sendStickerAsImage(shot.toDataURL('image/png'));
-                        return;
-                    }
-                } catch (err) {
-                    console.warn('Sticker-on-screenshot failed, using card fallback:', err);
-                }
-            }
-            // Fallback: sticker on a card image (no html2canvas or element not found)
-            try {
-                const w = 400, h = 280;
-                const canvas = document.createElement('canvas');
-                canvas.width = w;
-                canvas.height = h;
-                const ctx = canvas.getContext('2d');
-                if (ctx) {
-                    const r = 16;
-                    ctx.beginPath();
-                    ctx.moveTo(r, 0); ctx.lineTo(w - r, 0); ctx.quadraticCurveTo(w, 0, w, r);
-                    ctx.lineTo(w, h - r); ctx.quadraticCurveTo(w, h, w - r, h);
-                    ctx.lineTo(r, h); ctx.quadraticCurveTo(0, h, 0, h - r);
-                    ctx.lineTo(0, r); ctx.quadraticCurveTo(0, 0, r, 0);
-                    ctx.closePath();
-                    const grad = ctx.createLinearGradient(0, 0, w, h);
-                    grad.addColorStop(0, '#3b82f6');
-                    grad.addColorStop(1, '#1d4ed8');
-                    ctx.fillStyle = grad;
-                    ctx.fill();
-                    const fontSize = Math.max(72, Math.min(w, h) * 0.25);
-                    ctx.font = `${fontSize}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    ctx.fillText(sticker, w / 2, h / 2);
-                    sendStickerAsImage(canvas.toDataURL('image/png'));
-                    return;
-                }
-            } catch (_) {}
+            handleAddReaction(targetMessage.id, sticker);
+            setStickerReactionAnimation({ messageId: targetMessage.id, emoji: sticker, phase: 'pop' });
+            return;
         }
 
         // Default: send sticker as text (emoji message)
@@ -1957,6 +1912,28 @@ export default function MessagesPage() {
         }
     }, [contextMenu]);
 
+    // Sticker reaction animation: after "pop" phase, find reaction pill and switch to "fly" phase
+    useEffect(() => {
+        if (!stickerReactionAnimation || stickerReactionAnimation.phase !== 'pop') return;
+        const timer = setTimeout(() => {
+            const candidates = document.querySelectorAll(`[data-reaction-message-id="${stickerReactionAnimation.messageId}"]`);
+            const el = Array.from(candidates).find((n) => n.getAttribute('data-reaction-emoji') === stickerReactionAnimation.emoji);
+            if (el) {
+                const rect = el.getBoundingClientRect();
+                setStickerReactionAnimation((prev) => (prev ? { ...prev, phase: 'fly', targetRect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height } } : null));
+            } else {
+                setStickerReactionAnimation(null);
+            }
+        }, 380);
+        return () => clearTimeout(timer);
+    }, [stickerReactionAnimation?.messageId, stickerReactionAnimation?.emoji, stickerReactionAnimation?.phase]);
+
+    // Sticker reaction animation: after "fly" phase ends, clear overlay
+    useEffect(() => {
+        if (!stickerReactionAnimation || stickerReactionAnimation.phase !== 'fly') return;
+        const timer = setTimeout(() => setStickerReactionAnimation(null), 420);
+        return () => clearTimeout(timer);
+    }, [stickerReactionAnimation?.phase, stickerReactionAnimation?.messageId]);
 
     if (loading) {
         return (
@@ -2256,7 +2233,7 @@ export default function MessagesPage() {
                                                                         {messageReactions[msg.id].map((reaction, idx) => {
                                                                             const isHeart = reaction.emoji === '❤️';
                                                                             return (
-                                                                                <button key={`${idx}-${reaction.emoji}`} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1 bg-transparent' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1 bg-transparent' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
                                                                                     {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
                                                                                     {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
                                                                                 </button>
@@ -2289,7 +2266,7 @@ export default function MessagesPage() {
                                                                         {messageReactions[msg.id].map((reaction, idx) => {
                                                                             const isHeart = reaction.emoji === '❤️';
                                                                             return (
-                                                                                <button key={`${idx}-${reaction.emoji}`} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
                                                                                     {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
                                                                                     {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
                                                                                 </button>
@@ -2332,7 +2309,7 @@ export default function MessagesPage() {
                                                                                 {messageReactions[msg.id].map((reaction, idx) => {
                                                                                     const isHeart = reaction.emoji === '❤️';
                                                                                     return (
-                                                                                        <button key={`${idx}-${reaction.emoji}`} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                        <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
                                                                                             {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
                                                                                             {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
                                                                                         </button>
@@ -2356,7 +2333,7 @@ export default function MessagesPage() {
                                                                             {messageReactions[msg.id].map((reaction, idx) => {
                                                                                 const isHeart = reaction.emoji === '❤️';
                                                                                 return (
-                                                                                    <button key={`${idx}-${reaction.emoji}`} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                    <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
                                                                                         {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
                                                                                         {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
                                                                                     </button>
@@ -2486,6 +2463,8 @@ export default function MessagesPage() {
                                                                         return (
                                                                             <button
                                                                                 key={`${idx}-${reaction.emoji}-${reaction.users.length}-${reaction.users.join('-')}`}
+                                                                                data-reaction-message-id={msg.id}
+                                                                                data-reaction-emoji={reaction.emoji}
                                                                                 onClick={(e) => {
                                                                                     e.stopPropagation();
                                                                                     handleAddReaction(msg.id, reaction.emoji);
@@ -2629,7 +2608,7 @@ export default function MessagesPage() {
                                                                         {messageReactions[msg.id].map((reaction, idx) => {
                                                                             const isHeart = reaction.emoji === '❤️';
                                                                             return (
-                                                                                <button key={`${idx}-${reaction.emoji}`} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
                                                                                     {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
                                                                                     {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
                                                                                 </button>
@@ -2660,7 +2639,7 @@ export default function MessagesPage() {
                                                                         {messageReactions[msg.id].map((reaction, idx) => {
                                                                             const isHeart = reaction.emoji === '❤️';
                                                                             return (
-                                                                                <button key={`${idx}-${reaction.emoji}`} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
                                                                                     {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
                                                                                     {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
                                                                                 </button>
@@ -2758,7 +2737,7 @@ export default function MessagesPage() {
                                                                                 {messageReactions[msg.id].map((reaction, idx) => {
                                                                                     const isHeart = reaction.emoji === '❤️';
                                                                                     return (
-                                                                                        <button key={`${idx}-${reaction.emoji}`} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                        <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
                                                                                             {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
                                                                                             {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
                                                                                         </button>
@@ -2785,7 +2764,7 @@ export default function MessagesPage() {
                                                                             {messageReactions[msg.id].map((reaction, idx) => {
                                                                                 const isHeart = reaction.emoji === '❤️';
                                                                                 return (
-                                                                                    <button key={`${idx}-${reaction.emoji}`} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
+                                                                                    <button key={`${idx}-${reaction.emoji}`} data-reaction-message-id={msg.id} data-reaction-emoji={reaction.emoji} onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); handleAddReaction(msg.id, reaction.emoji); }} className={isHeart ? 'rounded-full px-1 py-0.5 flex items-center gap-1' : 'bg-white/90 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-sm'}>
                                                                                         {isHeart ? <span className="text-red-500"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg></span> : <span className="text-sm">{reaction.emoji}</span>}
                                                                                         {reaction.users.length > 1 && <span className="text-[10px] font-medium text-gray-600">{reaction.users.length}</span>}
                                                                                     </button>
@@ -2910,6 +2889,8 @@ export default function MessagesPage() {
                                                                             return (
                                                                                 <button
                                                                                     key={`${idx}-${reaction.emoji}-${reaction.users.length}-${reaction.users.join('-')}`}
+                                                                                    data-reaction-message-id={msg.id}
+                                                                                    data-reaction-emoji={reaction.emoji}
                                                                                     onClick={(e) => {
                                                                                         e.stopPropagation();
                                                                                         handleAddReaction(msg.id, reaction.emoji);
@@ -2938,7 +2919,7 @@ export default function MessagesPage() {
                                                                         })}
                                                                     </div>
                                                                 )}
-                                                            </div>
+                                                                </div>
                                                             {/* Timestamp */}
                                                             <div className="flex items-center gap-1.5 px-1">
                                                                 <span className="text-[10px] text-gray-400">
@@ -3164,6 +3145,7 @@ export default function MessagesPage() {
                             onClick={() => {
                                 if (contextMenu?.message) {
                                     handleAddReaction(contextMenu.message.id, '❤️');
+                                    setStickerReactionAnimation({ messageId: contextMenu.message.id, emoji: '❤️', phase: 'pop' });
                                 }
                                 closeContextMenu();
                             }}
@@ -3302,6 +3284,37 @@ export default function MessagesPage() {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* Sticker reaction pop → fly-to-card animation */}
+            {stickerReactionAnimation && (
+                <>
+                    <style dangerouslySetInnerHTML={{ __html: [
+                        '@keyframes sticker-pop-big{',
+                        '0%{transform:translate(-50%,-50%) scale(0.4);opacity:.9}',
+                        '70%{transform:translate(-50%,-50%) scale(2.9);opacity:1}',
+                        '100%{transform:translate(-50%,-50%) scale(2.5);opacity:1}',
+                        '}'
+                    ].join('') }} />
+                    <div className="fixed inset-0 pointer-events-none z-[100]" aria-hidden>
+                        <span
+                            className="absolute text-[180px] leading-none select-none"
+                            style={(() => {
+                                const base: React.CSSProperties = { fontFamily: '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif' };
+                                if (stickerReactionAnimation.phase === 'pop') {
+                                    return { ...base, left: '50%', top: '50%', transform: 'translate(-50%, -50%) scale(2.5)', animation: 'sticker-pop-big 0.35s ease-out forwards' };
+                                }
+                                const rect = stickerReactionAnimation.targetRect;
+                                if (rect) {
+                                    return { ...base, left: rect.left + rect.width / 2, top: rect.top + rect.height / 2, transform: 'translate(-50%, -50%) scale(0.35)', transition: 'transform 0.4s ease-in-out, left 0.4s ease-in-out, top 0.4s ease-in-out' };
+                                }
+                                return { ...base, left: '50%', top: '50%', transform: 'translate(-50%, -50%) scale(2.5)' };
+                            })()}
+                        >
+                            {stickerReactionAnimation.emoji}
+                        </span>
+                    </div>
+                </>
             )}
 
             {/* Forward Message Modal */}

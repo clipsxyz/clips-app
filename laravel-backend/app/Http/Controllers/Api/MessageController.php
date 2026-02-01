@@ -80,7 +80,8 @@ class MessageController extends Controller
                     'unread_count' => Message::where('conversation_id', $conversationId)
                         ->where('recipient_handle', $user->handle)
                         ->where('is_system_message', false)
-                        ->count(), // This would need a read tracking system
+                        ->whereNull('read_at')
+                        ->count(),
                 ];
             }
         }
@@ -155,6 +156,30 @@ class MessageController extends Controller
         });
 
         return response()->json($message, 201);
+    }
+
+    /**
+     * Mark all messages in a conversation as read (for the authenticated user as recipient).
+     */
+    public function markConversationRead(Request $request, string $otherHandle): JsonResponse
+    {
+        $validator = Validator::make(['otherHandle' => $otherHandle], [
+            'otherHandle' => 'required|string|exists:users,handle'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $user = Auth::user();
+        $conversationId = Message::getConversationId($user->handle, $otherHandle);
+
+        Message::where('conversation_id', $conversationId)
+            ->where('recipient_handle', $user->handle)
+            ->whereNull('read_at')
+            ->update(['read_at' => now()]);
+
+        return response()->json(['success' => true]);
     }
 }
 

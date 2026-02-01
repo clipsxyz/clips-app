@@ -231,8 +231,8 @@ export async function toggleCommentLike(commentId: string) {
 export async function fetchUserProfile(handle: string, userId?: string) {
     const params = new URLSearchParams();
     if (userId) params.append('userId', userId);
-
-    return apiRequest(`/users/${handle}?${params}`);
+    const encoded = encodeURIComponent(handle);
+    return apiRequest(`/users/${encoded}?${params}`);
 }
 
 export async function toggleFollow(handle: string) {
@@ -248,8 +248,8 @@ export async function fetchFollowers(handle: string, cursor: number = 0, limit: 
         cursor: cursor.toString(),
         limit: limit.toString(),
     });
-
-    return apiRequest(`/users/${handle}/followers?${params}`);
+    const encoded = encodeURIComponent(handle);
+    return apiRequest(`/users/${encoded}/followers?${params}`);
 }
 
 export async function fetchFollowing(handle: string, cursor: number = 0, limit: number = 20) {
@@ -257,8 +257,8 @@ export async function fetchFollowing(handle: string, cursor: number = 0, limit: 
         cursor: cursor.toString(),
         limit: limit.toString(),
     });
-
-    return apiRequest(`/users/${handle}/following?${params}`);
+    const encoded = encodeURIComponent(handle);
+    return apiRequest(`/users/${encoded}/following?${params}`);
 }
 
 export async function togglePrivacy() {
@@ -268,13 +268,48 @@ export async function togglePrivacy() {
 }
 
 export async function acceptFollowRequest(handle: string) {
-    return apiRequest(`/users/${handle}/follow/accept`, {
+    const encoded = encodeURIComponent(handle);
+    return apiRequest(`/users/${encoded}/follow/accept`, {
         method: 'POST',
     });
 }
 
 export async function denyFollowRequest(handle: string) {
-    return apiRequest(`/users/${handle}/follow/deny`, {
+    const encoded = encodeURIComponent(handle);
+    return apiRequest(`/users/${encoded}/follow/deny`, {
+        method: 'POST',
+    });
+}
+
+// Messages API (DMs)
+export async function fetchConversations(cursor: number = 0, limit: number = 20) {
+    const params = new URLSearchParams({
+        cursor: cursor.toString(),
+        limit: limit.toString(),
+    });
+    return apiRequest(`/messages/conversations?${params}`);
+}
+
+export async function fetchConversation(otherHandle: string) {
+    const encoded = encodeURIComponent(otherHandle);
+    return apiRequest(`/messages/conversation/${encoded}`);
+}
+
+export async function sendMessage(recipientHandle: string, payload: { text?: string; image_url?: string; is_system_message?: boolean }) {
+    return apiRequest('/messages/send', {
+        method: 'POST',
+        body: JSON.stringify({
+            recipient_handle: recipientHandle,
+            text: payload.text ?? null,
+            image_url: payload.image_url ?? null,
+            is_system_message: payload.is_system_message ?? false,
+        }),
+    });
+}
+
+export async function markConversationRead(otherHandle: string) {
+    const encoded = encodeURIComponent(otherHandle);
+    return apiRequest(`/messages/conversation/${encoded}/read`, {
         method: 'POST',
     });
 }

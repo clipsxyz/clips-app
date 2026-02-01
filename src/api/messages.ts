@@ -1,3 +1,9 @@
+const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+
+function hasAuthToken(): boolean {
+    return typeof localStorage !== 'undefined' && !!localStorage.getItem('authToken');
+}
+
 export interface ChatMessage {
     id: string;
     senderHandle: string;
@@ -14,6 +20,18 @@ export interface ChatMessage {
 
 type ConversationId = string; // sorted `${a}|${b}`
 
+/** Map Laravel API message to frontend ChatMessage */
+function laravelMsgToChatMessage(m: { id: string; sender_handle: string; text?: string | null; image_url?: string | null; created_at?: string; is_system_message?: boolean }): ChatMessage {
+    return {
+        id: m.id,
+        senderHandle: m.sender_handle,
+        text: m.text ?? undefined,
+        imageUrl: m.image_url ?? undefined,
+        timestamp: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
+        isSystemMessage: !!m.is_system_message,
+    };
+}
+
 const conversations = new Map<ConversationId, ChatMessage[]>();
 // Track unread counts by recipient handle
 const unreadByHandle = new Map<string, number>();
@@ -29,11 +47,37 @@ function getConversationId(a: string, b: string): ConversationId {
 }
 
 export async function fetchConversation(a: string, b: string): Promise<ChatMessage[]> {
+    if (useLaravelAPI && hasAuthToken()) {
+        try {
+            const apiClient = await import('./client');
+            const raw = await apiClient.fetchConversation(b); // b = other handle (Laravel uses auth user + other)
+            const list = Array.isArray(raw) ? raw.map(laravelMsgToChatMessage) : [];
+            return list.sort((m1, m2) => m1.timestamp - m2.timestamp); // oldest first for chat UI
+        } catch (e) {
+            if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
+            console.warn('Laravel fetchConversation failed, using mock:', e);
+        }
+    }
     const id = getConversationId(a, b);
     return conversations.get(id)?.slice().sort((m1, m2) => m2.timestamp - m1.timestamp) || [];
 }
 
 export async function appendMessage(from: string, to: string, message: Omit<ChatMessage, 'id' | 'timestamp' | 'senderHandle'> & { timestamp?: number }): Promise<ChatMessage> {
+    if (useLaravelAPI && hasAuthToken()) {
+        try {
+            const apiClient = await import('./client');
+            const raw = await apiClient.sendMessage(to, {
+                text: message.text ?? undefined,
+                image_url: message.imageUrl ?? undefined,
+                is_system_message: message.isSystemMessage ?? false,
+            });
+            return laravelMsgToChatMessage(raw);
+        } catch (e) {
+            if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
+            // Rethrow so caller (e.g. direct share) can show error and put link in input; don't fall through to mock
+            throw e;
+        }
+    }
     const id = getConversationId(from, to);
     const list = conversations.get(id) || [];
     const msg: ChatMessage = {
@@ -125,10 +169,32 @@ export async function editMessage(messageId: string, newText: string, from: stri
 }
 
 export async function getUnreadTotal(handle: string): Promise<number> {
+    if (useLaravelAPI && hasAuthToken()) {
+        try {
+            const apiClient = await import('./client');
+            const res = await apiClient.fetchConversations(0, 100);
+            const items = res?.items ?? [];
+            return items.reduce((s: number, i: { unread_count?: number }) => s + (Number(i.unread_count) || 0), 0);
+        } catch (e: any) {
+            if (e?.name === 'ConnectionRefused' || e?.message === 'CONNECTION_REFUSED') throw e;
+            if (e?.status === 401) return unreadByHandle.get(handle) || 0;
+            console.warn('Laravel getUnreadTotal failed, using mock:', e);
+        }
+    }
     return unreadByHandle.get(handle) || 0;
 }
 
 export async function markConversationRead(selfHandle: string, otherHandle: string): Promise<void> {
+    if (useLaravelAPI && hasAuthToken()) {
+        try {
+            const apiClient = await import('./client');
+            await apiClient.markConversationRead(otherHandle);
+        } catch (e) {
+            if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
+            console.warn('Laravel markConversationRead failed:', e);
+        }
+        return;
+    }
     const key = `${selfHandle}::${otherHandle}`;
     lastReadByThread.set(key, Date.now());
     unreadByHandle.set(selfHandle, await computeUnreadTotal(selfHandle));
@@ -148,6 +214,34 @@ export interface ConversationSummary {
 }
 
 export async function listConversations(forHandle: string): Promise<ConversationSummary[]> {
+    if (useLaravelAPI && hasAuthToken()) {
+        try {
+            const apiClient = await import('./client');
+            const res = await apiClient.fetchConversations(0, 100);
+            const items = res?.items ?? [];
+            const { userHasUnviewedStoriesByHandle } = await import('./stories');
+            const summaries: ConversationSummary[] = await Promise.all(
+                items.map(async (row: { other_user?: { handle: string }; latest_message?: any; unread_count?: number }) => {
+                    const otherHandle = row.other_user?.handle ?? '';
+                    const lastMessage = row.latest_message ? laravelMsgToChatMessage(row.latest_message) : undefined;
+                    const unread = Number(row.unread_count) || 0;
+                    const hasUnviewedStories = await userHasUnviewedStoriesByHandle(otherHandle);
+                    return {
+                        otherHandle,
+                        lastMessage,
+                        unread,
+                        isPinned: false,
+                        isRequest: false,
+                        hasUnviewedStories,
+                    };
+                })
+            );
+            return summaries.sort((a, b) => (b.lastMessage?.timestamp ?? 0) - (a.lastMessage?.timestamp ?? 0));
+        } catch (e) {
+            if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
+            console.warn('Laravel listConversations failed, using mock:', e);
+        }
+    }
     const summaries = new Map<string, { last?: ChatMessage; unread: number; isRequest?: boolean }>();
     const pinned = pinnedConversations.get(forHandle) || new Set<string>();
     const requests = messageRequests.get(forHandle) || new Set<string>();
