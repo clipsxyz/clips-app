@@ -45,8 +45,12 @@ return [
     */
 
     'firebase' => [
-        'server_key' => env('FIREBASE_SERVER_KEY'),
         'project_id' => env('FIREBASE_PROJECT_ID'),
+    ],
+
+    'stripe' => [
+        'key' => env('STRIPE_KEY', env('STRIPE_PUBLISHABLE_KEY')),
+        'secret' => env('STRIPE_SECRET', env('STRIPE_SECRET_KEY')),
     ],
 
 ];

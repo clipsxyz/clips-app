@@ -1,34 +1,34 @@
-{
-  "extends": [
+module.exports = {
+  extends: [
     "eslint:recommended",
     "@typescript-eslint/recommended",
     "plugin:react-hooks/recommended"
   ],
-  "parser": "@typescript-eslint/parser",
-  "plugins": ["react-refresh"],
-  "rules": {
+  parser: "@typescript-eslint/parser",
+  plugins: ["react-refresh"],
+  rules: {
     "react-refresh/only-export-components": [
       "warn",
-      { "allowConstantExport": true }
+      { allowConstantExport: true }
     ],
     "@typescript-eslint/no-explicit-any": "off"
   },
-  "ignorePatterns": [
+  ignorePatterns: [
     "src/screens/**/*"
   ],
-  "overrides": [
+  overrides: [
     {
-      "files": ["src/screens/**/*.tsx", "src/screens/**/*.ts"],
-      "parserOptions": {
-        "ecmaFeatures": {
-          "jsx": true
+      files: ["src/screens/**/*.tsx", "src/screens/**/*.ts"],
+      parserOptions: {
+        ecmaFeatures: {
+          jsx: true
         }
       },
-      "rules": {
+      rules: {
         "@typescript-eslint/no-explicit-any": "off",
         "react-refresh/only-export-components": "off",
         "@typescript-eslint/ban-ts-comment": "off"
       }
     }
   ]
-}
+};

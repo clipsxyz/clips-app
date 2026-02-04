@@ -2563,6 +2563,8 @@ function EngagementBar({
   currentUserHandle,
   currentUserId,
   showMetricsIcon,
+  showBoostButton,
+  onBoost,
   onToggleMetrics,
   isMetricsOpen,
   likeButtonRef
@@ -2576,6 +2578,8 @@ function EngagementBar({
   currentUserHandle?: string;
   currentUserId?: string;
   showMetricsIcon?: boolean;
+  showBoostButton?: boolean;
+  onBoost?: () => Promise<void>;
   onToggleMetrics?: () => void;
   isMetricsOpen?: boolean;
   likeButtonRef?: React.RefObject<HTMLButtonElement>;
@@ -2835,6 +2839,10 @@ function EngagementBar({
           >
             <FiSend className={`${iconSize} text-white`} />
           </button>
+
+          {showBoostButton && onBoost && (
+            <BoostButton postId={post.id} onBoost={onBoost} />
+          )}
 
           {showMetricsIcon && onToggleMetrics && (
             <button
@@ -3218,6 +3226,8 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         currentUserHandle={user?.handle}
         currentUserId={user?.id}
         showMetricsIcon={showBoostIcon && isBoosted}
+        showBoostButton={showBoostIcon}
+        onBoost={onBoost}
         onToggleMetrics={() => setIsMetricsOpen(!isMetricsOpen)}
         isMetricsOpen={isMetricsOpen}
         likeButtonRef={likeButtonRef}
@@ -5185,7 +5195,7 @@ function BoostPageWrapper() {
   const [unreadCount, setUnreadCount] = React.useState(0);
   const [hasInbox, setHasInbox] = React.useState(false);
 
-  // Load user's posts – only posts the user created (exclude reclipped posts)
+  // Load user's posts + Bob's mock posts (so you can try boost without creating a post)
   React.useEffect(() => {
     async function loadUserPosts() {
       if (!user?.handle) return;
@@ -5193,11 +5203,14 @@ function BoostPageWrapper() {
       setLoading(true);
       setError(null);
       try {
-        const userPosts = await fetchPostsByUser(user.handle, 50);
-        // Boost page: only show posts the user created, not reclips (reclips have originalUserHandle set)
+        const [userPosts, bobPosts] = await Promise.all([
+          fetchPostsByUser(user.handle, 50),
+          fetchPostsByUser('Bob@Ireland', 10),
+        ]);
         const createdOnly = userPosts.filter(p => !p.originalUserHandle);
         const decorated = createdOnly.map(p => decorateForUser(userId, p));
-        setPosts(decorated);
+        const bobDecorated = bobPosts.map(p => decorateForUser(userId, p));
+        setPosts([...decorated, ...bobDecorated]);
       } catch (err) {
         console.error('Error loading user posts:', err);
         setError('Failed to load your posts');
@@ -5213,16 +5226,18 @@ function BoostPageWrapper() {
   const location = useLocation();
   React.useEffect(() => {
     const handleBoostSuccess = () => {
-      // Reload posts to update boost status (only posts the user created, not reclips)
-      if (user?.handle) {
-        fetchPostsByUser(user.handle, 50)
-          .then(userPosts => {
-            const createdOnly = userPosts.filter(p => !p.originalUserHandle);
-            const decorated = createdOnly.map(p => decorateForUser(userId, p));
-            setPosts(decorated);
-          })
-          .catch(console.error);
-      }
+      if (!user?.handle) return;
+      Promise.all([
+        fetchPostsByUser(user.handle, 50),
+        fetchPostsByUser('Bob@Ireland', 10),
+      ])
+        .then(([userPosts, bobPosts]) => {
+          const createdOnly = userPosts.filter(p => !p.originalUserHandle);
+          const decorated = createdOnly.map(p => decorateForUser(userId, p));
+          const bobDecorated = bobPosts.map(p => decorateForUser(userId, p));
+          setPosts([...decorated, ...bobDecorated]);
+        })
+        .catch(console.error);
     };
 
     // Check if we're returning from a successful boost
@@ -5296,14 +5311,14 @@ function BoostPageWrapper() {
       {/* Header */}
       <div className="px-3 py-2">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Your Posts</h2>
-        <p className="text-sm text-gray-600 dark:text-gray-400">Boost your posts to reach more people</p>
+        <p className="text-sm text-gray-600 dark:text-gray-400">Boost your posts to reach more people. Demo: you can also boost Bob&apos;s mock posts below.</p>
       </div>
 
       <div className="h-4" />
 
       {posts.length === 0 ? (
         <div className="p-6 text-center">
-          <p className="text-gray-600 dark:text-gray-400">You haven't created any posts yet.</p>
+          <p className="text-gray-600 dark:text-gray-400">You haven&apos;t created any posts yet.</p>
         </div>
       ) : (
         posts.map(p => (

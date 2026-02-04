@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use App\Models\User;
+use App\Models\Post;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\PostController;
 use App\Http\Controllers\Api\CommentController;
@@ -18,6 +19,7 @@ use App\Http\Controllers\Api\StoryController;
 use App\Http\Controllers\Api\CollectionController;
 use App\Http\Controllers\Api\MusicController;
 use App\Http\Controllers\Api\MusicLibraryController;
+use App\Http\Controllers\Api\BoostController;
 
 /*
 |--------------------------------------------------------------------------
@@ -36,6 +38,76 @@ Route::get('/health', function () {
         'status' => 'OK',
         'timestamp' => now()->toISOString(),
         'environment' => app()->environment()
+    ]);
+});
+
+// Dev: ensure a "Boost Test" user exists with one post – use these credentials to test boost flow
+Route::get('/dev/boost-test-user', function () {
+    try {
+        $user = User::firstOrCreate(
+            ['email' => 'boosttest@example.com'],
+            [
+                'username' => 'boosttest',
+                'password' => Hash::make('password123'),
+                'display_name' => 'Boost Test',
+                'handle' => 'BoostTest@Dublin',
+                'location_local' => 'Dublin',
+                'location_regional' => 'Dublin',
+                'location_national' => 'Ireland',
+            ]
+        );
+        $post = Post::where('user_id', $user->id)->first();
+        if (!$post) {
+            $post = Post::create([
+                'user_id' => $user->id,
+                'user_handle' => $user->handle,
+                'text_content' => 'This is a test post – use it to try the Boost flow!',
+                'location_label' => 'Dublin',
+                'likes_count' => 0,
+                'views_count' => 0,
+                'comments_count' => 0,
+            ]);
+        }
+        return response()->json([
+            'message' => 'Use these credentials to log in, then go to Boost and boost this post.',
+            'email' => 'boosttest@example.com',
+            'password' => 'password123',
+            'handle' => $user->handle,
+            'post_id' => $post->id,
+            'steps' => ['1. Log in with the email and password above', '2. Go to Boost tab', '3. Tap Boost on the test post', '4. Choose a tier and Continue to Payment', '5. Fill the form and Pay (mock – no real charge)'],
+        ]);
+    } catch (\Throwable $e) {
+        return response()->json(['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()], 500);
+    }
+});
+
+// Boost prices from config (for display or to keep frontend in sync; no auth)
+Route::get('/boost/prices', function () {
+    return response()->json([
+        'currency' => config('boost.currency'),
+        'prices' => config('boost.prices'),
+        'amounts_cents' => config('boost.amounts_cents'),
+    ]);
+});
+
+// Create Stripe PaymentIntent for boost (no auth required for demo; add auth middleware in production)
+Route::post('/boost/create-payment-intent', [BoostController::class, 'createPaymentIntent']);
+
+// Stripe sandbox config check (no auth – so you can verify keys without logging in)
+Route::get('/boost/stripe-status', function () {
+    $secret = config('services.stripe.secret');
+    $key = config('services.stripe.key');
+    $hasSecret = !empty($secret) && is_string($secret);
+    $hasPublishable = !empty($key) && is_string($key);
+    $secretIsTest = $hasSecret && str_starts_with($secret, 'sk_test_');
+    return response()->json([
+        'configured' => $hasSecret && $hasPublishable,
+        'mode' => $secretIsTest ? 'test' : 'live',
+        'publishable_key_set' => $hasPublishable,
+        'secret_key_set' => $hasSecret,
+        'message' => $hasSecret && $hasPublishable
+            ? ($secretIsTest ? 'Stripe test (sandbox) keys are loaded. Use test cards when you add real payments.' : 'Stripe live keys are loaded.')
+            : 'Add STRIPE_KEY and STRIPE_SECRET to laravel-backend/.env',
     ]);
 });
 

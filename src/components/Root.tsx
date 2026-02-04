@@ -19,6 +19,7 @@ import InstantFiltersPage from '../pages/InstantFiltersPage';
 import SplashPage from '../pages/SplashPage';
 import LandingPage from '../pages/LandingPage';
 import PaymentPage from '../pages/PaymentPage';
+import PaymentSuccessPage from '../pages/PaymentSuccessPage';
 import CollectionFeedPage from '../pages/CollectionFeedPage';
 import TemplatesPage from '../pages/TemplatesPage';
 import TemplateEditorPage from '../pages/TemplateEditorPage';
@@ -72,6 +73,7 @@ export default function Root() {
                                 <Route path="login" element={<LoginPage />} />
                                 <Route path="boost" element={<BoostPage />} />
                                 <Route path="payment" element={<PaymentPage />} />
+                                <Route path="payment-success" element={<PaymentSuccessPage />} />
                                 <Route path="clip" element={<ClipPage />} />
                                 <Route path="stories" element={<StoriesPage />} />
                                 <Route path="discover" element={<DiscoverPage />} />

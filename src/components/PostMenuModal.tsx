@@ -1,7 +1,6 @@
 import React from 'react';
 import { Post } from '../types';
 import {
-    FiX,
     FiBookmark,
     FiCopy,
     FiShare2,
@@ -145,132 +144,95 @@ export default function PostMenuModal({
             { icon: FiInfo, label: 'Not interested', action: onNotInterested },
         ];
 
+    // Build full list for Threads-style sheet: label left, icon right, full-width rows. Insert dividers by group.
+    const renderRow = (item: MenuItem, index: number) => {
+        const Icon = item.icon;
+        const isDanger = item.danger;
+        const isHighlight = item.highlight;
+        const textClass = isDanger ? 'text-red-500' : isHighlight ? 'text-amber-400' : 'text-white';
+        const iconClass = isDanger ? 'text-red-500' : isHighlight ? 'text-amber-400' : 'text-gray-300';
+        return (
+            <button
+                key={index}
+                onClick={() => item.action && handleAction(item.action)}
+                disabled={isProcessing}
+                className="flex w-full items-center justify-between py-3.5 px-4 active:bg-white/5 transition-colors disabled:opacity-50"
+            >
+                <span className={`text-[15px] font-medium ${textClass}`}>{item.label}</span>
+                <Icon className={`w-5 h-5 flex-shrink-0 ${iconClass}`} />
+            </button>
+        );
+    };
+
     return (
         <>
             <div className="fixed inset-0 z-[200] flex items-end">
                 {/* Backdrop */}
                 <div
-                    className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                    className="absolute inset-0 bg-black/50"
                     onClick={onClose}
                 />
 
-                {/* Modal Sheet */}
-                <div className="relative w-full bg-[#262626] dark:bg-[#1a1a1a] rounded-t-3xl shadow-2xl max-h-[85vh] overflow-hidden flex flex-col animate-in slide-in-from-bottom duration-300">
-                    {/* Close button at top */}
-                    <button
-                        onClick={onClose}
-                        className="absolute top-4 right-4 z-10 p-2 rounded-full hover:bg-gray-700/50 transition-colors"
-                        aria-label="Close"
-                    >
-                        <FiX className="w-5 h-5 text-white" />
-                    </button>
-                    {/* Drag Handle */}
-                    <div className="flex justify-center pt-3 pb-2">
-                        <div className="w-12 h-1 bg-gray-500 dark:bg-gray-600 rounded-full" />
+                {/* Threads-style bottom sheet: handle, rounded top, dark, list rows */}
+                <div className="relative w-full bg-[#262626] rounded-t-2xl shadow-2xl max-h-[85vh] overflow-hidden flex flex-col animate-in slide-in-from-bottom duration-300">
+                    {/* Drag handle */}
+                    <div className="flex justify-center pt-2.5 pb-1">
+                        <div className="w-10 h-0.5 bg-gray-500 rounded-full" />
                     </div>
 
-                    {/* Top Action Buttons Row */}
-                    <div className="px-4 py-3 border-b border-gray-700 dark:border-gray-800 flex items-center justify-around">
-                        {/* Save/Bookmark */}
-                        <button
-                            onClick={handleSave}
-                            disabled={isProcessing}
-                            className="flex flex-col items-center gap-2 py-2 px-4 rounded-lg hover:bg-gray-700/50 dark:hover:bg-gray-600/50 transition-colors disabled:opacity-50"
-                        >
-                            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${isSaved ? 'bg-yellow-500/20' : 'bg-gray-700 dark:bg-gray-600'}`}>
-                                <FiBookmark className={`w-6 h-6 ${isSaved ? 'text-yellow-400 fill-yellow-400' : 'text-white'}`} />
-                            </div>
-                            <span className="text-xs text-white font-medium">{isSaved ? 'Saved' : 'Save'}</span>
-                        </button>
-
-                        {/* Share */}
-                        <button
-                            onClick={() => onShare && handleAction(onShare)}
-                            disabled={isProcessing}
-                            className="flex flex-col items-center gap-2 py-2 px-4 rounded-lg hover:bg-gray-700/50 dark:hover:bg-gray-600/50 transition-colors disabled:opacity-50"
-                        >
-                            <div className="w-12 h-12 rounded-full bg-gray-700 dark:bg-gray-600 flex items-center justify-center">
-                                <FiShare2 className="w-6 h-6 text-white" />
-                            </div>
-                            <span className="text-xs text-white font-medium">Share</span>
-                        </button>
-
-                        {/* Boost - only for own posts */}
-                        {isCurrentUser && onBoost && (
-                            <button
-                                onClick={() => onBoost && handleAction(onBoost)}
-                                disabled={isProcessing}
-                                className="flex flex-col items-center gap-2 py-2 px-4 rounded-lg hover:bg-gray-700/50 dark:hover:bg-gray-600/50 transition-colors disabled:opacity-50"
-                            >
-                                <div className="w-12 h-12 rounded-full bg-gray-700 dark:bg-gray-600 flex items-center justify-center">
-                                    <FiZap className="w-6 h-6 text-white" />
+                    <div className="flex-1 overflow-y-auto pb-6">
+                        {/* Own post: Copy link, Save/Unsave, Share, Boost, then divider and rest */}
+                        {isCurrentUser ? (
+                            <>
+                                <div className="py-1">
+                                    {[
+                                        { icon: FiCopy, label: 'Copy link', action: handleCopyLink },
+                                        { icon: FiBookmark, label: isSaved ? 'Unsave' : 'Save', action: handleSave },
+                                        { icon: FiShare2, label: 'Share', action: () => onShare && handleAction(onShare) },
+                                        ...(onBoost ? [{ icon: FiZap, label: 'Boost', action: onBoost }] : []),
+                                    ].map((row, i) => (
+                                        <React.Fragment key={i}>
+                                            {renderRow(row as MenuItem, i)}
+                                        </React.Fragment>
+                                    ))}
                                 </div>
-                                <span className="text-xs text-white font-medium">Boost</span>
-                            </button>
-                        )}
-
-                        {/* QR Code - only for other users' posts */}
-                        {!isCurrentUser && (
-                            <button
-                                onClick={() => {
-                                    setShowQRCodeModal(true);
-                                }}
-                                disabled={isProcessing}
-                                className="flex flex-col items-center gap-2 py-2 px-4 rounded-lg hover:bg-gray-700/50 dark:hover:bg-gray-600/50 transition-colors disabled:opacity-50"
-                            >
-                                <div className="w-12 h-12 rounded-full bg-gray-700 dark:bg-gray-600 flex items-center justify-center">
-                                    <FiMaximize className="w-6 h-6 text-white" />
+                                <div className="mx-4 border-t border-gray-600/80" />
+                                <div className="py-1">
+                                    {menuItems.filter(m => m.label !== 'Copy Link').map((item, index) => renderRow(item, index))}
                                 </div>
-                                <span className="text-xs text-white font-medium">QR code</span>
-                            </button>
+                            </>
+                        ) : (
+                            <>
+                                <div className="py-1">
+                                    {[
+                                        { icon: FiCopy, label: 'Copy link', action: handleCopyLink },
+                                        { icon: FiBookmark, label: isSaved ? 'Unsave' : 'Save', action: handleSave },
+                                        { icon: FiShare2, label: 'Share', action: () => onShare && handleAction(onShare) },
+                                        ...(onBoost ? [{ icon: FiZap, label: 'Boost', action: onBoost }] : []),
+                                        { icon: FiMaximize, label: 'QR code', action: () => setShowQRCodeModal(true) },
+                                    ].map((row, i) => (
+                                        <React.Fragment key={i}>
+                                            {renderRow(row as MenuItem, i)}
+                                        </React.Fragment>
+                                    ))}
+                                </div>
+                                <div className="mx-4 border-t border-gray-600/80" />
+                                <div className="py-1">
+                                    {(() => {
+                                        const rest = menuItems.filter(m => m.label !== 'Copy Link');
+                                        return rest.map((item, index) => (
+                                            <React.Fragment key={`${item.label}-${index}`}>
+                                                {index > 0 && !rest[index - 1].danger && item.danger ? (
+                                                    <div className="mx-4 border-t border-gray-600/80" />
+                                                ) : null}
+                                                {renderRow(item, index)}
+                                            </React.Fragment>
+                                        ));
+                                    })()}
+                                </div>
+                            </>
                         )}
                     </div>
-
-                    {/* Menu Items Grid */}
-                    <div className="flex-1 overflow-y-auto py-4 px-4">
-                        <div className="grid grid-cols-3 gap-4">
-                            {menuItems.map((item, index) => {
-                                const Icon = item.icon;
-                                const isDanger = item.danger;
-                                const isHighlight = item.highlight;
-
-                                return (
-                                    <button
-                                        key={index}
-                                        onClick={() => item.action && handleAction(item.action)}
-                                        disabled={isProcessing}
-                                        className="flex flex-col items-center gap-2 py-2 px-2 rounded-lg hover:bg-gray-700/50 dark:hover:bg-gray-600/50 transition-colors disabled:opacity-50"
-                                    >
-                                        <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
-                                            isDanger 
-                                                ? 'bg-red-500/20' 
-                                                : isHighlight 
-                                                    ? 'bg-yellow-500/20' 
-                                                    : 'bg-gray-700 dark:bg-gray-600'
-                                        }`}>
-                                            <Icon className={`w-6 h-6 ${
-                                                isDanger 
-                                                    ? 'text-red-400' 
-                                                    : isHighlight 
-                                                        ? 'text-yellow-400' 
-                                                        : 'text-white'
-                                            }`} />
-                                        </div>
-                                        <span className={`text-xs font-medium text-center leading-tight ${
-                                            isDanger 
-                                                ? 'text-red-400' 
-                                                : isHighlight 
-                                                    ? 'text-yellow-400' 
-                                                    : 'text-white'
-                                        }`}>
-                                            {item.label}
-                                        </span>
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    </div>
-
                 </div>
             </div>
 

@@ -314,6 +314,18 @@ export async function markConversationRead(otherHandle: string) {
     });
 }
 
+/** Create a Stripe PaymentIntent for boost. Returns { clientSecret }. */
+export async function createBoostPaymentIntent(postId: string, feedType: 'local' | 'regional' | 'national') {
+    const data = await apiRequest('/boost/create-payment-intent', {
+        method: 'POST',
+        body: JSON.stringify({ postId, feedType }),
+    }) as { clientSecret?: string; client_secret?: string; error?: string };
+    if (data.error) throw new Error(data.error);
+    const clientSecret = data.clientSecret ?? data.client_secret;
+    if (!clientSecret) throw new Error('No client secret returned');
+    return { clientSecret };
+}
+
 // Upload API
 export async function uploadFile(file: File) {
     const formData = new FormData();
