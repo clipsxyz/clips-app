@@ -64,9 +64,8 @@ export default defineConfig({
       'ETag': '', // Disable ETag caching
     },
     hmr: {
-      protocol: 'ws', // Using regular WebSocket (HTTP) instead of wss (HTTPS)
-      // Use browser host (e.g. localhost) instead of 0.0.0.0 to avoid HMR websocket failures
-      host: 'localhost',
+      protocol: 'ws',
+      host: 'localhost', // For laptop dev; when on phone via IP, HMR may fail but app still loads
     },
     proxy: {
       '/api': {

@@ -274,7 +274,7 @@ if (!postsInitialized) {
       userHandle: 'Sarah@Artane',
       locationLabel: 'Artane, Dublin',
       tags: [],
-      mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+      mediaUrl: 'https://lorem.video/720p',
       mediaType: 'video',
       caption: 'Stunning views from Howth Hill looking back towards Dublin',
       createdAt: artaneNow - 7200000, // 2 hours ago
@@ -291,7 +291,7 @@ if (!postsInitialized) {
       userHandle: 'Sarah@Artane',
       locationLabel: 'Dublin City Centre',
       tags: [],
-      mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+      mediaUrl: 'https://lorem.video/cat_720p',
       mediaType: 'video',
       caption: 'Walking through the vibrant streets of Dublin',
       createdAt: artaneNow - 86400000, // 1 day ago
@@ -535,12 +535,20 @@ export function decorateForUser(userId: string, p: Post): Post {
     mediaItems: p.mediaItems,
     templateId: p.templateId // Also preserve templateId
   };
-  if (p.taggedUsers && p.taggedUsers.length > 0) {
-    console.log('decorateForUser - preserving taggedUsers:', p.taggedUsers, 'for post:', p.id.substring(0, 30), 'templateId:', p.templateId);
-  } else if (p.templateId && !p.taggedUsers) {
-    console.log('decorateForUser - template post but NO taggedUsers:', { postId: p.id.substring(0, 30), templateId: p.templateId, originalTaggedUsers: p.taggedUsers });
-  }
+  // Preserve taggedUsers for template posts (used by Media for tag display)
   return decorated;
+}
+
+/** Rewrite localhost media URLs so they work when opening app from phone on network */
+function rewriteMediaUrlForNetwork(url: string): string {
+  if (!url || typeof url !== 'string') return url;
+  const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return url;
+  // On phone/tablet: replace localhost:8000 with current host:8000 so backend media loads
+  return url
+    .replace(/http:\/\/localhost:8000\//g, `http://${hostname}:8000/`)
+    .replace(/https:\/\/localhost:8000\//g, `https://${hostname}:8000/`)
+    .replace(/http:\/\/127\.0\.0\.1:8000\//g, `http://${hostname}:8000/`);
 }
 
 // Transform Laravel API post response to frontend Post format
@@ -552,8 +560,19 @@ function transformLaravelPost(response: any): Post {
   const firstItem = Array.isArray(mediaItems) && mediaItems.length > 0 ? mediaItems[0] : null;
   const firstItemUrl = firstItem && (firstItem.url != null) ? String(firstItem.url).trim() : '';
   const firstItemType = firstItem && (firstItem.type === 'video' || firstItem.type === 'image') ? firstItem.type : null;
-  const resolvedMediaUrl = (finalVideoUrl || originalMediaUrl || firstItemUrl) || '';
+  let resolvedMediaUrl = (finalVideoUrl || originalMediaUrl || firstItemUrl) || '';
+  resolvedMediaUrl = rewriteMediaUrlForNetwork(resolvedMediaUrl);
   const resolvedMediaType = response.media_type || response.mediaType || firstItemType || undefined;
+
+  // Rewrite mediaItems URLs for network access
+  let processedMediaItems = mediaItems;
+  if (Array.isArray(mediaItems) && mediaItems.length > 0) {
+    processedMediaItems = mediaItems.map((item: any) =>
+      item && item.url
+        ? { ...item, url: rewriteMediaUrlForNetwork(String(item.url)) }
+        : item
+    );
+  }
 
   return {
     id: response.id,
@@ -562,13 +581,17 @@ function transformLaravelPost(response: any): Post {
     tags: response.tags || [],
     // Use final_video_url if available, else media_url, else first media_items item (for still-image posts)
     mediaUrl: resolvedMediaUrl,
-    finalVideoUrl: finalVideoUrl || undefined, // Set as separate field for Media component
+    finalVideoUrl: rewriteMediaUrlForNetwork(finalVideoUrl || '') || undefined,
     mediaType: resolvedMediaType,
-    mediaItems: mediaItems,
+    mediaItems: processedMediaItems ?? mediaItems,
     text: response.text_content || response.text,
     imageText: response.image_text || response.imageText,
     caption: response.caption,
-    createdAt: new Date(response.created_at || response.createdAt).getTime(),
+    createdAt: (() => {
+      const raw = response.created_at || response.createdAt;
+      const ts = raw ? new Date(raw).getTime() : Date.now();
+      return Number.isFinite(ts) ? ts : Date.now();
+    })(),
     stats: {
       likes: response.likes_count || response.stats?.likes || 0,
       views: response.views_count || response.stats?.views || 0,
@@ -606,7 +629,7 @@ function getMockScenesVideoPosts(): Post[] {
       userHandle: 'Sarah@Artane',
       locationLabel: 'Artane, Dublin',
       tags: [],
-      mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+      mediaUrl: 'https://lorem.video/720p',
       mediaType: 'video',
       caption: 'Stunning views from Howth Hill looking back towards Dublin',
       createdAt: now - 7200000,
@@ -623,7 +646,7 @@ function getMockScenesVideoPosts(): Post[] {
       userHandle: 'Sarah@Artane',
       locationLabel: 'Dublin City Centre',
       tags: [],
-      mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+      mediaUrl: 'https://lorem.video/cat_720p',
       mediaType: 'video',
       caption: 'Walking through the vibrant streets of Dublin',
       createdAt: now - 86400000,
@@ -640,7 +663,7 @@ function getMockScenesVideoPosts(): Post[] {
       userHandle: 'Bob@Ireland',
       locationLabel: 'Galway, Ireland',
       tags: [],
-      mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+      mediaUrl: 'https://lorem.video/corgi_480p_h264_30fps_10s',
       mediaType: 'video',
       caption: 'Amazing sunset over Galway Bay!',
       createdAt: now - 9000000,
@@ -737,7 +760,7 @@ function postMatchesLocationTab(p: Post, tab: string): boolean {
   return local === query;
 }
 
-export async function fetchPostsPage(tab: string, cursor: number | null, limit = 5, userId = 'me', userLocal = '', userRegional = '', userNational = '', currentUserHandle = ''): Promise<Page> {
+export async function fetchPostsPage(tab: string, cursor: number | null, limit = 5, userId = 'me', _userLocal = '', _userRegional = '', _userNational = '', currentUserHandle = ''): Promise<Page> {
   // Try Laravel API first, fallback to mock if it fails
   const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
 
@@ -765,8 +788,18 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       const uuidLike = typeof userId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
       const response = await apiClient.fetchPostsPage(apiCursor, limit, filter, uuidLike ? userId : undefined);
 
-      // Transform Laravel response to frontend format
-      let transformedItems: Post[] = response.items.map((item: any) => transformLaravelPost(item));
+      // Defensive: ensure items is an array (API may return unexpected shape on error)
+      const rawItems = Array.isArray(response?.items) ? response.items : [];
+      let transformedItems: Post[] = rawItems
+        .map((item: any) => {
+          try {
+            return transformLaravelPost(item);
+          } catch (err) {
+            console.warn('Skipping malformed post:', item?.id, err);
+            return null;
+          }
+        })
+        .filter((x: Post | null): x is Post => x !== null);
 
       // Tighten "Following" (discover) feed on the frontend as well so it only shows:
       // - Original posts from people you actually follow
@@ -813,26 +846,33 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
         }
       }
 
+      // Merge user-created posts from localStorage (e.g. when create returned 401 and used mock)
+      // These would otherwise be missing when feed loads from Laravel API
+      const userCreatedFromStorage = getPostsFromStorage().filter(p => !isMockPostId(p.id));
+      const userCreatedMatchingTab = userCreatedFromStorage.filter(p =>
+        t === 'discover' ? true : postMatchesLocationTab(p, t)
+      );
+      const allApiAndMockIds = new Set(transformedItems.map(p => p.id));
+
       // Prepend mock Sarah/Bob video posts on first page for Scenes testing (dev)
-      // Only add mock posts whose AUTHOR location matches this feed – e.g. Sarah (Dublin) only in Dublin, Bob (Galway) only in Galway/Ireland
       const isFirstPage = cursor === null || cursor === 0;
       const allMockVideo = (isFirstPage && t !== 'discover') ? getMockScenesVideoPosts() : [];
       const mockVideoPosts = allMockVideo.filter(p => postMatchesLocationTab(p, t));
-      const existingIds = new Set(transformedItems.map(p => p.id));
-      const dedupedMock = mockVideoPosts.filter(p => !existingIds.has(p.id));
-      let items = [...dedupedMock, ...transformedItems];
+      const dedupedMock = mockVideoPosts.filter(p => !allApiAndMockIds.has(p.id));
+      const dedupedUserCreated = userCreatedMatchingTab.filter(p => !allApiAndMockIds.has(p.id));
+
+      // Order: user-created first (newest), then mock videos, then API posts
+      let items = [...dedupedUserCreated, ...dedupedMock, ...transformedItems];
+      const itemIds = new Set(items.map(p => p.id));
 
       // Inject Ava's demo post on first page so she appears on localhost (all location tabs + discover); Laravel DB often has no Ava
       const injectAvaTabs = ['ireland', 'dublin', 'finglas', 'discover'];
-      if (isFirstPage && injectAvaTabs.includes(t) && !existingIds.has('ava-normal-ireland-demo')) {
+      if (isFirstPage && injectAvaTabs.includes(t) && !itemIds.has('ava-normal-ireland-demo')) {
         const avaNormal = getAvaNormalPost();
         const stateUserId = userId || 'me';
         const decorated = decorateForUser(stateUserId, { ...avaNormal, isBoosted: false, boostFeedType: undefined });
         items = [decorated, ...items];
-        // So getPostById finds her when sharing to DM
-        if (!posts.find(p => p.id === avaNormal.id)) {
-          posts.push(avaNormal);
-        }
+        if (!posts.find(p => p.id === avaNormal.id)) posts.push(avaNormal);
       }
 
       // Mark any post in the active boosted list so "Sponsored" shows (location feeds and Following feed)
@@ -859,7 +899,7 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
 
       return {
         items,
-        nextCursor: response.nextCursor
+        nextCursor: response?.nextCursor ?? null
       };
     } catch (error: any) {
       // Only log if it's not a connection refused error (backend not running)
@@ -885,23 +925,12 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
         seen.add(id);
         return true;
       });
-      console.log('📂 Reloaded posts:', userCreatedPosts.length, 'user +', mockPosts.length, 'mock =', posts.length, 'total');
     }
 
     await delay();
     const t = tab.toLowerCase();
 
     // Debug: Log posts array state
-    console.log('fetchPostsPage called with posts array length:', posts.length);
-    console.log('Current posts IDs:', posts.map(p => p.id));
-
-    console.log('Fetching posts for tab:', t, 'with user data:', {
-      userId,
-      userLocal,
-      userRegional,
-      userNational,
-      totalPosts: posts.length
-    });
 
     // Feed rules (by design):
     // - Location tabs (Dublin, Ireland, Finglas, etc.): show posts by AUTHOR LOCATION only (who posted from that place). No follow check.
@@ -1009,19 +1038,6 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       return false;
     });
 
-    console.log('Filtered posts for', t, ':', filtered.length, 'posts');
-    console.log('All posts with locations:', posts.map(p => ({
-      userHandle: p.userHandle,
-      userLocal: p.userLocal,
-      userRegional: p.userRegional,
-      userNational: p.userNational
-    })));
-    console.log('Filtered posts:', filtered.map(p => ({
-      userHandle: p.userHandle,
-      userLocal: p.userLocal,
-      userRegional: p.userRegional,
-      userNational: p.userNational
-    })));
 
     // Sort by newest first using explicit createdAt epoch timestamps
     let sorted = filtered.slice().sort((a, b) => {
@@ -1039,15 +1055,6 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       }
     }
 
-    // Debug: log the sorted order
-    console.log('Sorted posts (first 3):', sorted.slice(0, 3).map((p, i) => ({
-      index: i,
-      id: p.id.substring(0, 60),
-      createdAt: p.createdAt,
-      timeAgo: new Date(p.createdAt).toISOString(),
-      userHandle: p.userHandle
-    })));
-
     const start = cursor ?? 0;
     const isFirstPage = start === 0;
     // Only add mock Sarah/Bob posts whose AUTHOR location matches this feed – e.g. Sarah (Dublin) only in Dublin, not in Galway
@@ -1057,37 +1064,7 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
     const dedupedMock = mockVideoPosts.filter(p => !existingIdsInSorted.has(p.id));
     const sortedWithMock = dedupedMock.length > 0 ? [...dedupedMock, ...sorted] : sorted;
 
-    const slice = sortedWithMock.slice(start, start + limit).map(p => {
-      // Debug: Log ALL properties of post before decoration, especially for template posts
-      if (p.templateId) {
-        console.log('fetchPostsPage - template post BEFORE decorateForUser:', {
-          postId: p.id.substring(0, 30),
-          templateId: p.templateId,
-          taggedUsers: p.taggedUsers,
-          hasTaggedUsers: !!p.taggedUsers,
-          taggedUsersType: typeof p.taggedUsers,
-          taggedUsersIsArray: Array.isArray(p.taggedUsers),
-          taggedUsersLength: p.taggedUsers?.length,
-          allPostKeys: Object.keys(p)
-        });
-      }
-      const decorated = decorateForUser(userId, p);
-      // Debug: Log taggedUsers after decoration
-      if (decorated.taggedUsers && decorated.taggedUsers.length > 0) {
-        console.log('fetchPostsPage - post has taggedUsers AFTER decorateForUser:', { postId: decorated.id.substring(0, 30), taggedUsers: decorated.taggedUsers, templateId: decorated.templateId });
-      } else if (p.taggedUsers && p.taggedUsers.length > 0 && !decorated.taggedUsers) {
-        // Only warn if taggedUsers were present BEFORE decoration but missing AFTER
-        console.warn('fetchPostsPage - taggedUsers LOST during decoration:', {
-          postId: p.id.substring(0, 30),
-          templateId: p.templateId,
-          originalTaggedUsers: p.taggedUsers,
-          decoratedTaggedUsers: decorated.taggedUsers,
-          originalHasTaggedUsers: !!p.taggedUsers,
-          decoratedHasTaggedUsers: !!decorated.taggedUsers
-        });
-      }
-      return decorated;
-    });
+    const slice = sortedWithMock.slice(start, start + limit).map(p => decorateForUser(userId, p));
 
     // Instagram-style: inject paid boosted posts into the feed (one every 5 organic)
     // Only show a boosted post in a location feed if the AUTHOR's location matches that tab (e.g. Ava boosted for regional → show in Galway, not Dublin)
@@ -1160,7 +1137,6 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
 
     const next = start + slice.length < sortedWithMock.length ? start + slice.length : null;
 
-    console.log('Returning page with:', { itemsCount: items.length, nextCursor: next });
     return { items, nextCursor: next };
   } catch (error) {
     console.error('Error in fetchPostsPage:', error);
@@ -1270,6 +1246,10 @@ export async function incrementViews(userId: string, id: string): Promise<Post> 
   if (useLaravelAPI) {
     try {
       const response = await apiClient.incrementView(id);
+      // Laravel returns { success, views } not a full post - return minimal for merge (avoids id: undefined)
+      if (response && typeof response.views === 'number' && (response.id == null || response.user_handle == null)) {
+        return { id, stats: { likes: 0, views: response.views, comments: 0, shares: 0, reclips: 0 } } as Post;
+      }
       return transformLaravelPost(response);
     } catch (error: any) {
       // Only log if it's not a connection refused error (backend not running)
@@ -1832,23 +1812,6 @@ export async function createPost(
       }
     }
 
-    // Debug: Log taggedUsers parameter
-    console.log('createPost function - received taggedUsers parameter:', taggedUsers, 'type:', typeof taggedUsers, 'isArray:', Array.isArray(taggedUsers), 'length:', taggedUsers?.length);
-
-    console.log('Creating post with:', {
-      userId,
-      userHandle,
-      text,
-      location,
-      imageUrl,
-      mediaType,
-      imageText,
-      caption,
-      userLocal,
-      userRegional,
-      userNational
-    });
-
     // Get location from user data if provided, otherwise infer from handle
     const locationData = userLocal && userRegional && userNational
       ? { userLocal, userRegional, userNational }
@@ -1953,27 +1916,6 @@ export async function createPost(
 
     // Save to localStorage for persistence
     savePostsToStorage(posts);
-
-    console.log('📝 Post created and added to posts array. Total posts:', posts.length);
-    console.log('📝 New post mediaUrl:', newPost.mediaUrl?.substring(0, 50) || 'undefined', 'isBlob:', newPost.mediaUrl?.startsWith('blob:'), 'isData:', newPost.mediaUrl?.startsWith('data:'));
-    console.log('📝 New post mediaItems:', newPost.mediaItems?.map(item => ({
-      type: item.type,
-      urlType: item.url?.startsWith('blob:') ? 'blob' : item.url?.startsWith('data:') ? 'data' : 'http',
-      urlPreview: item.url?.substring(0, 50)
-    })));
-    console.log('📝 New post:', {
-      id: newPost.id.substring(0, 30),
-      mediaType: newPost.mediaType,
-      hasMediaUrl: !!newPost.mediaUrl,
-      hasMediaItems: !!newPost.mediaItems && newPost.mediaItems.length > 0,
-      taggedUsers: newPost.taggedUsers,
-      templateId: newPost.templateId
-    });
-
-    // Verify the post in the array has taggedUsers
-    const postInArray = posts[0];
-    console.log('Post in array [0] taggedUsers:', postInArray?.taggedUsers);
-    console.log('Post in array [0] templateId:', postInArray?.templateId);
 
     return decorateForUser(userId, newPost);
   }

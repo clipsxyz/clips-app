@@ -15,6 +15,9 @@ export default function PaymentSuccessPage() {
         if (handled) return;
         const raw = sessionStorage.getItem(STORAGE_KEY);
         sessionStorage.removeItem(STORAGE_KEY);
+        const paymentIntentId = searchParams.get('payment_intent');
+        const redirectStatus = searchParams.get('redirect_status');
+
         if (!raw) {
             navigate('/boost');
             return;
@@ -26,8 +29,22 @@ export default function PaymentSuccessPage() {
             navigate('/boost');
             return;
         }
+
+        if (redirectStatus !== 'succeeded' || !paymentIntentId) {
+            Swal.fire({
+                icon: 'warning',
+                title: 'Payment incomplete',
+                text: redirectStatus === 'requires_payment_method'
+                    ? 'Payment could not be processed. Please try again with a different payment method.'
+                    : 'Payment was not completed. Please try again.',
+                confirmButtonText: 'Back to Boost',
+                confirmButtonColor: '#8B5CF6',
+            }).then(() => navigate('/boost'));
+            return;
+        }
+
         setHandled(true);
-        activateBoost(data.postId, data.userId, data.feedType, data.price)
+        activateBoost(data.postId, data.userId, data.feedType, data.price, paymentIntentId)
             .then(() => {
                 const label = data.feedType === 'local' ? 'Local' : data.feedType === 'regional' ? 'Regional' : 'National';
                 return Swal.fire({

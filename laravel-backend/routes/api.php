@@ -93,6 +93,15 @@ Route::get('/boost/prices', function () {
 // Create Stripe PaymentIntent for boost (no auth required for demo; add auth middleware in production)
 Route::post('/boost/create-payment-intent', [BoostController::class, 'createPaymentIntent']);
 
+// Activate boost after Stripe payment (verifies PaymentIntent with Stripe)
+Route::post('/boost/activate', [BoostController::class, 'activate']);
+
+// Get active boosted post IDs for feed merging (public)
+Route::get('/boost/active-ids', [BoostController::class, 'activeIds']);
+
+// Get boost status for a single post
+Route::get('/boost/status/{postId}', [BoostController::class, 'status']);
+
 // Stripe sandbox config check (no auth – so you can verify keys without logging in)
 Route::get('/boost/stripe-status', function () {
     $secret = config('services.stripe.secret');

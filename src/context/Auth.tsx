@@ -198,3 +198,8 @@ export function useAuth() {
   if (!ctx) throw new Error('useAuth must be used within AuthProvider');
   return ctx;
 }
+
+/** Safe variant: returns null when outside AuthProvider instead of throwing */
+export function useAuthOptional() {
+  return React.useContext(Ctx);
+}

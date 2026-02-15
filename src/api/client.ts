@@ -2,33 +2,26 @@
 // Updated API client for Laravel backend
 // Use IP address if accessing from network, otherwise localhost
 const getApiBaseUrl = () => {
-    if (import.meta.env.VITE_API_URL) {
-        console.log('Using VITE_API_URL from env:', import.meta.env.VITE_API_URL);
-        return import.meta.env.VITE_API_URL;
-    }
-    // Check if frontend is using HTTPS
+    const hostname = window.location.hostname;
     const isHttps = window.location.protocol === 'https:';
     const protocol = isHttps ? 'https' : 'http';
 
-    // If accessing from a different host (like phone on network), use IP address
-    const hostname = window.location.hostname;
-    if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
-        // Extract IP from current URL (e.g., 192.168.1.3:5173 -> 192.168.1.3:8000)
-        const ip = hostname;
-        // For network access, use the same protocol as frontend but direct to backend port
-        const apiUrl = `${protocol}://${ip}:8000/api`;
-        console.log('Using network IP for API:', apiUrl, '(from hostname:', hostname, ', protocol:', protocol, ')');
+    // When accessing from phone/tablet via IP (e.g. 192.168.1.5:5173), NEVER use localhost - it points to the device, not the laptop
+    const onNetwork = hostname !== 'localhost' && hostname !== '127.0.0.1';
+    if (onNetwork) {
+        const apiUrl = `${protocol}://${hostname}:8000/api`;
         return apiUrl;
     }
-    // For localhost, use proxy (same origin) to avoid mixed content issues
-    // The Vite proxy will forward /api requests to http://localhost:8000/api
-    const localhostUrl = '/api';
-    console.log('Using proxy for API (localhost):', localhostUrl, '(frontend protocol:', protocol, ')');
-    return localhostUrl;
+
+    // On laptop (localhost): use env or proxy
+    if (import.meta.env.VITE_API_URL) {
+        return import.meta.env.VITE_API_URL;
+    }
+    // For localhost, use proxy (same origin) - Vite forwards /api to http://localhost:8000/api
+    return '/api';
 };
 
 const API_BASE_URL = getApiBaseUrl();
-console.log('🌐 API Base URL:', API_BASE_URL);
 
 // Helper function to make API requests
 export async function apiRequest(endpoint: string, options: RequestInit = {}) {
@@ -324,6 +317,50 @@ export async function createBoostPaymentIntent(postId: string, feedType: 'local'
     const clientSecret = data.clientSecret ?? data.client_secret;
     if (!clientSecret) throw new Error('No client secret returned');
     return { clientSecret };
+}
+
+/** Activate boost after Stripe payment. Requires paymentIntentId from redirect URL. */
+export async function activateBoostApi(params: {
+    paymentIntentId: string;
+    postId: string;
+    feedType: 'local' | 'regional' | 'national';
+    userId: string;
+    price: number;
+}) {
+    return apiRequest('/boost/activate', {
+        method: 'POST',
+        body: JSON.stringify({
+            paymentIntentId: params.paymentIntentId,
+            postId: params.postId,
+            feedType: params.feedType,
+            userId: params.userId,
+            price: params.price,
+        }),
+    }) as Promise<{ boost: { id: number; postId: string; feedType: string; activatedAt: string; expiresAt: string } }>;
+}
+
+/** Get active boosted post IDs for a feed type. */
+export async function getActiveBoostedPostIdsApi(feedType: 'local' | 'regional' | 'national'): Promise<string[]> {
+    const data = await apiRequest(`/boost/active-ids?feedType=${encodeURIComponent(feedType)}`) as { postIds?: string[] };
+    return data.postIds ?? [];
+}
+
+/** Get boost status for a single post. */
+export async function getBoostStatusApi(postId: string): Promise<{
+    isActive: boolean;
+    timeRemaining: number;
+    feedType: string | null;
+    activatedAt: string | null;
+    expiresAt: string | null;
+}> {
+    const data = await apiRequest(`/boost/status/${encodeURIComponent(postId)}`) as {
+        isActive: boolean;
+        timeRemaining: number;
+        feedType: string | null;
+        activatedAt: string | null;
+        expiresAt: string | null;
+    };
+    return data;
 }
 
 // Upload API

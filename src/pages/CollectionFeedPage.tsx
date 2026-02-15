@@ -154,7 +154,13 @@ export default function CollectionFeedPage() {
                                         return;
                                     }
                                     const updated = await incrementViews(userId, p.id);
-                                    updateOne(p.id, _post => ({ ...updated }));
+                                    if (updated.userHandle === 'Unknown') return;
+                                    updateOne(p.id, post => ({
+                                        ...post,
+                                        stats: updated.stats && typeof updated.stats.views === 'number'
+                                            ? { ...post.stats, views: updated.stats.views }
+                                            : post.stats
+                                    }));
                                     window.dispatchEvent(new CustomEvent(`viewAdded-${p.id}`));
                                 }}
                                 onReclip={async () => {

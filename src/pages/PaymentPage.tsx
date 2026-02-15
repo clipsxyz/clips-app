@@ -11,7 +11,8 @@ import type { Post } from '../types';
 import type { BoostFeedType } from '../components/BoostSelectionModal';
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
-const stripePromise = stripePublishableKey ? loadStripe(stripePublishableKey) : null;
+const isPlaceholderKey = !stripePublishableKey || stripePublishableKey.includes('your_publishable_key_here') || stripePublishableKey === 'pk_test_xxx';
+const stripePromise = !isPlaceholderKey && stripePublishableKey ? loadStripe(stripePublishableKey) : null;
 
 interface PaymentPageLocationState {
     post: Post;
@@ -46,10 +47,11 @@ function StripePaymentForm({
     const elements = useElements();
     const [isProcessing, setIsProcessing] = React.useState(false);
     const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
+    const [paymentElementReady, setPaymentElementReady] = React.useState(false);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!stripe || !elements || !canBoostThisPost) return;
+        if (!stripe || !elements || !canBoostThisPost || !paymentElementReady) return;
         setIsProcessing(true);
         setErrorMessage(null);
         try {
@@ -84,23 +86,25 @@ function StripePaymentForm({
 
     return (
         <form onSubmit={handleSubmit} className="space-y-4">
-            <PaymentElement options={{ layout: 'tabs' }} />
+            <PaymentElement options={{ layout: 'tabs' }} onReady={() => setPaymentElementReady(true)} />
             {errorMessage && (
                 <p className="text-sm text-red-600 dark:text-red-400">{errorMessage}</p>
             )}
             <button
                 type="submit"
-                disabled={!stripe || isProcessing}
-                className={`w-full py-4 px-6 rounded-xl font-semibold text-white transition-all duration-200 ${!stripe || isProcessing
+                disabled={!stripe || !paymentElementReady || isProcessing}
+                className={`w-full py-4 px-6 rounded-xl font-semibold text-white transition-all duration-200 ${!stripe || !paymentElementReady || isProcessing
                     ? 'bg-gray-300 dark:bg-gray-700 cursor-not-allowed'
                     : 'bg-brand-600 hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 shadow-lg hover:shadow-xl active:scale-[0.98]'
-                    }`}
+                }`}
             >
                 {isProcessing ? (
                     <span className="flex items-center justify-center gap-2">
                         <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg>
                         Processing...
                     </span>
+                ) : !paymentElementReady ? (
+                    'Loading payment form...'
                 ) : (
                     `Pay €${price.toFixed(2)}`
                 )}
@@ -287,10 +291,17 @@ export default function PaymentPage() {
                             <p className="text-xs text-amber-600 dark:text-amber-400 mt-3">If the backend is running, check laravel-backend/.env has STRIPE_SECRET=sk_test_... and run: composer require stripe/stripe-php</p>
                             <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">You can still use the form below to test the flow (demo only, no real charge).</p>
                         </div>
-                    ) : !stripePublishableKey ? (
+                    ) : isPlaceholderKey ? (
                         <div className="mb-4 p-4 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 text-sm">
                             <p className="font-medium text-gray-800 dark:text-gray-200 mb-1">Stripe not configured</p>
-                            <p>Add VITE_STRIPE_PUBLISHABLE_KEY=pk_test_... to your .env file and restart the dev server to see the real Stripe payment form.</p>
+                            <p className="mb-2">Your .env has a placeholder key. Replace it with your real Stripe publishable key:</p>
+                            <ol className="list-decimal list-inside space-y-1 text-xs">
+                                <li>Go to <a href="https://dashboard.stripe.com/test/apikeys" target="_blank" rel="noopener noreferrer" className="text-brand-600 underline">Stripe Dashboard → API keys</a></li>
+                                <li>Copy the <strong>Publishable key</strong> (starts with pk_test_)</li>
+                                <li>In your project root .env, set: VITE_STRIPE_PUBLISHABLE_KEY=pk_test_xxxxx</li>
+                                <li>Restart the dev server (npm run dev)</li>
+                            </ol>
+                            <p className="mt-2 text-xs">You can still use the form below for a demo flow (no real charge).</p>
                         </div>
                     ) : null}
 

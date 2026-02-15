@@ -589,10 +589,18 @@ function FollowButton({ initial, onToggle }: { initial: boolean; onToggle: () =>
   );
 }
 
-function BoostButton({ postId, onBoost }: { postId: string; onBoost: () => Promise<void> }) {
+function BoostButton({ postId, onBoost, stretch, knownBoosted }: { postId: string; onBoost: () => Promise<void>; stretch?: boolean; knownBoosted?: boolean }) {
   const [busy, setBusy] = React.useState(false);
-  const [isBoosted, setIsBoosted] = React.useState(false);
+  const [isBoosted, setIsBoosted] = React.useState(!!knownBoosted);
   const [timeRemaining, setTimeRemaining] = React.useState(0);
+
+  // When parent knows we just boosted (e.g. returned from payment), show Boosted immediately
+  React.useEffect(() => {
+    if (knownBoosted) {
+      setIsBoosted(true);
+      getBoostTimeRemaining(postId).then(setTimeRemaining);
+    }
+  }, [postId, knownBoosted]);
 
   // Check boost status
   React.useEffect(() => {
@@ -602,7 +610,7 @@ function BoostButton({ postId, onBoost }: { postId: string; onBoost: () => Promi
         setIsBoosted(true);
         const remaining = await getBoostTimeRemaining(postId);
         setTimeRemaining(remaining);
-      } else {
+      } else if (!knownBoosted) {
         setIsBoosted(false);
         setTimeRemaining(0);
       }
@@ -610,13 +618,20 @@ function BoostButton({ postId, onBoost }: { postId: string; onBoost: () => Promi
 
     checkBoostStatus();
 
-    // Check every minute to update status
-    const interval = setInterval(() => {
-      checkBoostStatus();
-    }, 60000); // Check every minute
+    // Re-check when boost is activated elsewhere (e.g. after payment success)
+    const onBoostActivated = (e: CustomEvent<{ postId: string }>) => {
+      if (e.detail?.postId === postId) checkBoostStatus();
+    };
+    window.addEventListener('boostActivated', onBoostActivated as EventListener);
 
-    return () => clearInterval(interval);
-  }, [postId]);
+    // Check every minute to update status
+    const interval = setInterval(checkBoostStatus, 60000);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('boostActivated', onBoostActivated as EventListener);
+    };
+  }, [postId, knownBoosted]);
 
   // Format time remaining
   const formatTimeRemaining = (ms: number): string => {
@@ -639,15 +654,16 @@ function BoostButton({ postId, onBoost }: { postId: string; onBoost: () => Promi
     }
   }
 
+  const stretchCls = stretch ? 'flex-1 justify-center min-w-0' : '';
   if (isBoosted) {
     return (
       <button
         disabled
         aria-label="Post is boosted"
         title={`Boosted - ${formatTimeRemaining(timeRemaining)} remaining`}
-        className="px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200 bg-red-600 text-white dark:bg-red-500 flex items-center gap-2 cursor-not-allowed"
+        className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200 bg-red-600 text-white dark:bg-red-500 flex items-center gap-2 cursor-not-allowed opacity-90 ${stretchCls}`}
       >
-        <FiZap className="w-4 h-4" />
+        <FiZap className="w-4 h-4 flex-shrink-0" />
         <span>Boosted</span>
       </button>
     );
@@ -659,9 +675,9 @@ function BoostButton({ postId, onBoost }: { postId: string; onBoost: () => Promi
       disabled={busy}
       aria-label="Boost post"
       title="Boost this post"
-      className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-60 transition-all duration-200 active:scale-[.98] bg-brand-600 text-white hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 flex items-center gap-2"
+      className={`px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-60 transition-all duration-200 active:scale-[.98] bg-brand-600 text-white hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 flex items-center gap-2 ${stretchCls}`}
     >
-      <FiZap className="w-4 h-4" />
+      <FiZap className="w-4 h-4 flex-shrink-0" />
       <span>Boost</span>
     </button>
   );
@@ -1368,13 +1384,26 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   const mediaContainerRef = React.useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
 
-  // Debug: Log taggedUsers when Media component receives them
-  React.useEffect(() => {
-    console.log('Media component - taggedUsers:', taggedUsers, 'onShowTaggedUsers:', !!onShowTaggedUsers, 'should show icon:', !!(taggedUsers && Array.isArray(taggedUsers) && taggedUsers.length > 0 && onShowTaggedUsers));
-  }, [taggedUsers, onShowTaggedUsers]);
 
-  // Determine if we have multiple media items (carousel)
-  const items: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }> = mediaItems && mediaItems.length > 0 ? mediaItems : (url ? [{ url, type: (mediaType || 'image') as 'image' | 'video' }] : []);
+  // Rewrite localhost media URLs for network access (e.g. phone at 192.168.1.7:5173)
+  const rewriteMediaUrl = React.useCallback((u: string): string => {
+    if (!u || typeof u !== 'string') return u;
+    const h = typeof window !== 'undefined' ? window.location.hostname : '';
+    if (h === 'localhost' || h === '127.0.0.1') return u;
+    // Blob URLs are origin-bound and won't work from phone when created on laptop
+    if (u.startsWith('blob:')) return '';
+    return u
+      .replace(/http:\/\/localhost:8000\//g, `http://${h}:8000/`)
+      .replace(/https:\/\/localhost:8000\//g, `https://${h}:8000/`)
+      .replace(/http:\/\/127\.0\.0\.1:8000\//g, `http://${h}:8000/`);
+  }, []);
+
+  // Determine if we have multiple media items (carousel); rewrite URLs for network (e.g. phone)
+  const rawItems: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }> = mediaItems && mediaItems.length > 0 ? mediaItems : (url ? [{ url, type: (mediaType || 'image') as 'image' | 'video' }] : []);
+  const items = React.useMemo(
+    () => rawItems.map((it) => (it.url ? { ...it, url: rewriteMediaUrl(it.url) } : it)),
+    [mediaItems, url, mediaType, rewriteMediaUrl]
+  );
   const [currentIndex, setCurrentIndex] = React.useState(0);
   const hasMultipleItems = items.length > 1;
   const currentItem = items[currentIndex];
@@ -1555,7 +1584,10 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                     }
                   }
                   v.play().catch((err) => {
-                    console.warn('Video play failed (e.g. mobile autoplay):', err);
+                    // NotSupportedError = no/invalid src; expected for placeholder or failed loads
+                    if (err?.name !== 'NotSupportedError' && !String(err?.message || '').includes('no supported source')) {
+                      console.warn('Video play failed:', err);
+                    }
                   });
                   setIsPlaying(true);
                 }
@@ -1623,8 +1655,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     }
   };
 
-  const handleVideoError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
-    console.error('Media: Video load error', e);
+  const handleVideoError = (_e: React.SyntheticEvent<HTMLVideoElement>) => {
     setIsLoading(false);
     setHasError(true);
   };
@@ -2068,7 +2099,8 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
           }
 
           // Match create post page exactly - use object-cover in fixed aspect container
-          let mediaElement = currentItem.type === 'video' ? (
+          const hasValidVideoSrc = currentItem.type === 'video' && currentItem.url && currentItem.url.trim().length > 0;
+          let mediaElement = hasValidVideoSrc ? (
             <video
               ref={videoRef}
               src={currentItem.url}
@@ -2079,7 +2111,6 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
               loop
               onLoadedData={handleVideoLoad}
               onError={handleVideoError}
-              onLoadStart={() => console.log('Media: Video load started')}
               onPlay={handleVideoPlay}
               onPause={handleVideoPause}
               onTimeUpdate={() => {
@@ -2094,6 +2125,11 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                 <track kind="captions" srcLang="en" label="English" default />
               )}
             </video>
+          ) : currentItem.type === 'video' ? (
+            // Video with no/invalid src - show error state
+            <div className="w-full h-full flex items-center justify-center bg-gray-900">
+              <span className="text-gray-500 text-sm">Video unavailable</span>
+            </div>
           ) : (
             <ProgressiveImage
               src={currentItem.url}
@@ -2135,9 +2171,10 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
               {/* Error State */}
               {hasError && (
                 <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-75 z-50">
-                  <div className="text-center text-white">
+                  <div className="text-center text-white px-4">
                     <div className="text-2xl mb-2">⚠️</div>
                     <div className="text-sm">Failed to load {currentItem.type}</div>
+                    <div className="text-xs text-gray-400 mt-1">Check your connection</div>
                   </div>
                 </div>
               )}
@@ -2567,7 +2604,9 @@ function EngagementBar({
   onBoost,
   onToggleMetrics,
   isMetricsOpen,
-  likeButtonRef
+  likeButtonRef,
+  variant = 'default',
+  knownBoosted
 }: {
   post: Post;
   onLike: () => Promise<void>;
@@ -2582,7 +2621,11 @@ function EngagementBar({
   onBoost?: () => Promise<void>;
   onToggleMetrics?: () => void;
   isMetricsOpen?: boolean;
-  likeButtonRef?: React.RefObject<HTMLButtonElement>;
+  likeButtonRef?: React.RefObject<HTMLButtonElement | null>;
+  /** 'boost' = boost page: long boost button + analytics tab only */
+  variant?: 'default' | 'boost';
+  /** When true, boost button shows Boosted immediately */
+  knownBoosted?: boolean;
 }) {
   const [isSaved, setIsSaved] = React.useState(false);
   const [showShareToStoriesModal, setShowShareToStoriesModal] = React.useState(false);
@@ -2758,6 +2801,33 @@ function EngagementBar({
   const iconGap = 'gap-1.5'; // 8px between icon and count
   const rowGap = 'gap-5'; // 20px between action groups
 
+  if (variant === 'boost') {
+    return (
+      <div className="px-4 pb-4 pt-3 border-t min-w-0" style={{ borderColor: '#030712' }}>
+        <div className="flex items-center gap-3">
+          {showBoostButton && onBoost && (
+            <BoostButton postId={post.id} onBoost={onBoost} stretch knownBoosted={knownBoosted} />
+          )}
+          {onToggleMetrics && (
+            <button
+              className={`flex items-center justify-center w-10 h-10 rounded-lg transition-colors ${isMetricsOpen ? 'bg-brand-600/30 text-brand-400' : 'bg-white/10 text-white hover:bg-white/15'}`}
+              onClick={onToggleMetrics}
+              aria-label="View analytics"
+              title="View analytics"
+            >
+              <FiBarChart2 className="w-5 h-5" />
+            </button>
+          )}
+        </div>
+        <ShareToStoriesModal
+          isOpen={showShareToStoriesModal}
+          onClose={() => setShowShareToStoriesModal(false)}
+          post={post}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="px-4 pb-4 pt-3 border-t min-w-0" style={{ borderColor: '#030712' }}>
       <div className="flex items-center justify-between min-w-0">
@@ -2841,7 +2911,7 @@ function EngagementBar({
           </button>
 
           {showBoostButton && onBoost && (
-            <BoostButton postId={post.id} onBoost={onBoost} />
+            <BoostButton postId={post.id} onBoost={onBoost} knownBoosted={knownBoosted} />
           )}
 
           {showMetricsIcon && onToggleMetrics && (
@@ -2984,7 +3054,55 @@ function BoostMetrics({ post, isOpen }: { post: Post; isOpen: boolean }) {
   );
 }
 
-export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare, onOpenComments, onView, onReclip, onOpenScenes, showBoostIcon, onBoost, onDelete, onOpenDM, priority = false }: {
+function PostAnalyticsCard({ post, isOpen }: { post: Post; isOpen: boolean }) {
+  return (
+    <div className={`mx-4 mb-4 p-4 bg-white dark:bg-gray-900 rounded-xl border-2 border-brand-200 dark:border-brand-800 transition-all duration-300 overflow-hidden shadow-sm ${isOpen ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0 p-0 mb-0'}`}>
+      <div className="flex items-center gap-2 mb-3">
+        <FiBarChart2 className="w-5 h-5 text-brand-600 dark:text-brand-400" />
+        <h3 className="font-semibold text-gray-900 dark:text-gray-100">Post Analytics</h3>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="flex flex-col">
+          <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 mb-1">
+            <FiEye className="w-4 h-4" />
+            <span className="text-xs font-medium">Views</span>
+          </div>
+          <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">{post.stats.views.toLocaleString()}</span>
+        </div>
+        <div className="flex flex-col">
+          <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 mb-1">
+            <FiHeart className="w-4 h-4" />
+            <span className="text-xs font-medium">Likes</span>
+          </div>
+          <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">{post.stats.likes.toLocaleString()}</span>
+        </div>
+        <div className="flex flex-col">
+          <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 mb-1">
+            <FiMessageSquare className="w-4 h-4" />
+            <span className="text-xs font-medium">Comments</span>
+          </div>
+          <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">{post.stats.comments.toLocaleString()}</span>
+        </div>
+        <div className="flex flex-col">
+          <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 mb-1">
+            <FiShare2 className="w-4 h-4" />
+            <span className="text-xs font-medium">Shares</span>
+          </div>
+          <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">{post.stats.shares.toLocaleString()}</span>
+        </div>
+        <div className="flex flex-col">
+          <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 mb-1">
+            <FiRepeat className="w-4 h-4" />
+            <span className="text-xs font-medium">Reclips</span>
+          </div>
+          <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">{post.stats.reclips.toLocaleString()}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare, onOpenComments, onView, onReclip, onOpenScenes, showBoostIcon, onBoost, onDelete, onOpenDM, priority = false, engagementVariant = 'default', knownBoosted }: {
   post: Post;
   onLike: () => Promise<void>;
   onFollow?: () => Promise<void>;
@@ -2999,6 +3117,10 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   /** Open in-feed DM compose sheet (mutual follow only). */
   onOpenDM?: (handle: string) => void;
   priority?: boolean;
+  /** 'boost' = boost page layout: long boost button + analytics tab only */
+  engagementVariant?: 'default' | 'boost';
+  /** When true, boost button shows Boosted immediately (e.g. just returned from payment) */
+  knownBoosted?: boolean;
 }) {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -3157,7 +3279,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
                 setHeartAnimation({ startX: clientX, startY: clientY });
               }, 50);
             }}
-            taggedUsers={post.taggedUsers}
+            taggedUsers={post.taggedUsers ?? []}
             onShowTaggedUsers={() => setShowTaggedUsersModal(true)}
             templateId={post.templateId}
             videoCaptionsEnabled={post.videoCaptionsEnabled}
@@ -3225,23 +3347,28 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         onReclip={onReclip}
         currentUserHandle={user?.handle}
         currentUserId={user?.id}
-        showMetricsIcon={showBoostIcon && isBoosted}
+        showMetricsIcon={engagementVariant === 'boost' ? false : (showBoostIcon && isBoosted)}
         showBoostButton={showBoostIcon}
         onBoost={onBoost}
         onToggleMetrics={() => setIsMetricsOpen(!isMetricsOpen)}
         isMetricsOpen={isMetricsOpen}
         likeButtonRef={likeButtonRef}
+        variant={engagementVariant === 'boost' ? 'boost' : 'default'}
+        knownBoosted={knownBoosted}
       />
       {/* Heart animation from tap to like button - rendered after EngagementBar so ref is set */}
-      {heartAnimation && likeButtonRef.current && (
-        <HeartDropAnimation
-          key={`heart-${post.id}-${heartAnimation.startX}-${heartAnimation.startY}`}
-          startX={heartAnimation.startX}
-          startY={heartAnimation.startY}
-          targetElement={likeButtonRef.current}
-          onComplete={() => setHeartAnimation(null)}
-        />
-      )}
+      {heartAnimation && (() => {
+        const el = likeButtonRef.current;
+        return el ? (
+          <HeartDropAnimation
+            key={`heart-${post.id}-${heartAnimation.startX}-${heartAnimation.startY}`}
+            startX={heartAnimation.startX}
+            startY={heartAnimation.startY}
+            targetElement={el}
+            onComplete={() => setHeartAnimation(null)}
+          />
+        ) : null;
+      })()}
       {/* News Ticker Banner */}
       {post.bannerText && (
         <div className="h-7 bg-black dark:bg-black overflow-hidden border-t border-gray-700 dark:border-gray-700">
@@ -3252,7 +3379,11 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
           </div>
         </div>
       )}
-      {showBoostIcon && <BoostMetrics post={post} isOpen={isMetricsOpen} />}
+      {engagementVariant === 'boost' ? (
+        <PostAnalyticsCard post={post} isOpen={isMetricsOpen} />
+      ) : (
+        showBoostIcon && <BoostMetrics post={post} isOpen={isMetricsOpen} />
+      )}
       {user && (
         <>
           <PostMenuModal
@@ -3724,15 +3855,6 @@ function FeedPageWrapper() {
       setPages(prev => {
         // If this is the first page (cursor === 0), replace; otherwise append for pagination
         const next = cursor === 0 ? [page.items] : [...prev, page.items];
-        console.log('Setting pages:', {
-          prevLength: prev.length,
-          newLength: next.length,
-          cursor,
-          isFirstPage: cursor === 0,
-          filterForRequest,
-          currentFilter,
-          pageItemsCount: page.items.length
-        });
         // Temporarily disable feed cache to avoid duplicates
         // saveFeed(userId, currentFilter, next);
         return next;
@@ -3752,32 +3874,19 @@ function FeedPageWrapper() {
 
   // Listen for new posts and refresh feed
   React.useEffect(() => {
-    console.log('Setting up postCreated event listener');
     const handlePostCreated = () => {
-      console.log('PostCreated event received - refreshing feed');
-      console.log('Current filter:', currentFilter);
-      console.log('User data:', { userId, userLocal: user?.local, userRegional: user?.regional, userNational: user?.national });
-
-      // Reset and reload feed to show new post
+      // Reset feed state; initial load effect will trigger loadMore when cursor becomes 0
       setPages([]);
       setCursor(0);
       setEnd(false);
       setLoading(false);
       setError(null);
-      latestPostIdRef.current = null; // Reset tracking
-
-      // Load fresh data
-      console.log('About to call loadMore from handlePostCreated');
-      loadMore();
+      latestPostIdRef.current = null;
     };
 
     window.addEventListener('postCreated', handlePostCreated);
-    console.log('postCreated event listener added');
-    return () => {
-      console.log('Removing postCreated event listener');
-      window.removeEventListener('postCreated', handlePostCreated);
-    };
-  }, [currentFilter, userId, user]);
+    return () => window.removeEventListener('postCreated', handlePostCreated);
+  }, []);
 
   // Poll for new posts every 10 seconds
   React.useEffect(() => {
@@ -3840,22 +3949,16 @@ function FeedPageWrapper() {
     return () => clearInterval(pollInterval);
   }, [pages.length, loading, end, currentFilter, userId, user?.local, user?.regional, user?.national]);
 
-  // Initial load
+  // Initial load (and reload after postCreated reset)
   React.useEffect(() => {
-    console.log('Initial load effect triggered:', { cursor, pagesLength: pages.length, currentFilter });
-    // If arriving with ?location=... from Discover, wait until customLocation is set
     const params = new URLSearchParams(routerLocation.search);
     const pendingUrlLocation = params.get('location');
-    if (pendingUrlLocation && !customLocation) {
-      console.log('Deferring initial load until customLocation is applied for URL location:', pendingUrlLocation);
-      return;
-    }
+    if (pendingUrlLocation && !customLocation) return;
 
     if (cursor !== null && pages.length === 0) {
-      console.log('Calling loadMore from initial load effect');
       loadMore();
     }
-  }, [cursor, currentFilter, routerLocation.search, customLocation]);
+  }, [cursor, pages.length, currentFilter, routerLocation.search, customLocation]);
 
   // Easing function for smooth animation (ease-out cubic)
   const easeOutCubic = (t: number): number => {
@@ -3946,29 +4049,22 @@ function FeedPageWrapper() {
   }, [pages]);
 
   function updateOne(id: string, updater: (p: Post) => Post) {
-    console.log('updateOne called for post:', id);
     setPages(cur => {
       const updated = cur.map(group => group.map(p => {
         if (p.id === id) {
           const next = updater({ ...p });
-          // Preserve boost label so it doesn't disappear after like/follow/view (API doesn't return these)
+          // Never lose id (incrementViews etc can return minimal objects without id)
           const preserved = {
             ...next,
+            id: next.id ?? p.id,
             isBoosted: next.isBoosted ?? p.isBoosted,
-            boostFeedType: next.boostFeedType ?? p.boostFeedType
+            boostFeedType: next.boostFeedType ?? p.boostFeedType,
+            stats: next.stats && typeof next.stats.likes === 'number' ? next.stats : (p.stats || next.stats),
           };
-          console.log('Updating post:', id, 'from likes:', p.stats.likes, 'to:', preserved.stats.likes);
           return preserved;
         }
         return p;
       }));
-
-      // Check for duplicates after update
-      const allPosts = updated.flat();
-      const duplicates = allPosts.filter((p, i) => allPosts.findIndex(other => other.id === p.id) !== i);
-      if (duplicates.length > 0) {
-        console.error('DUPLICATES AFTER UPDATE:', duplicates.map(p => p.id));
-      }
 
       return updated;
     });
@@ -4020,10 +4116,7 @@ function FeedPageWrapper() {
       return true;
     }).map((p) => bestByKey.get(idKey(p))!);
 
-    const duplicateCount = flattened.length - uniquePosts.length;
-    if (duplicateCount > 0) {
-      console.warn('Feed deduped by id: removed', duplicateCount, 'duplicate(s); prefer Sponsored copy when same id.');
-    }
+    // Dedupe already handled above; no need to log
 
     // Merge posts and ads, sort by epoch time (createdAt) - newest first
     const feedItems: Array<{ type: 'post' | 'ad'; item: Post | Ad; createdAt: number }> = [
@@ -4605,9 +4698,14 @@ function FeedPageWrapper() {
               }
               try {
                 const updated = await incrementViews(userId, p.id);
-                // Don't overwrite feed state with dummy post when API/post not found (would break UI)
                 if (updated.userHandle === 'Unknown') return;
-                updateOne(p.id, _post => ({ ...updated }));
+                // Merge only stats.views - never replace full post (API returns minimal { success, views })
+                updateOne(p.id, post => ({
+                  ...post,
+                  stats: updated.stats && typeof updated.stats.views === 'number'
+                    ? { ...post.stats, views: updated.stats.views }
+                    : post.stats
+                }));
                 window.dispatchEvent(new CustomEvent(`viewAdded-${p.id}`));
               } catch (err) {
                 console.warn('incrementViews error:', err);
@@ -5192,6 +5290,8 @@ function BoostPageWrapper() {
   const [selectedPostForScenes, setSelectedPostForScenes] = React.useState<Post | null>(null);
   const [boostModalOpen, setBoostModalOpen] = React.useState(false);
   const [selectedPostForBoost, setSelectedPostForBoost] = React.useState<Post | null>(null);
+  const [recentlyBoostedPostId, setRecentlyBoostedPostId] = React.useState<string | null>(null);
+  const [recentlyBoostedFeedType, setRecentlyBoostedFeedType] = React.useState<'local' | 'regional' | 'national' | null>(null);
   const [unreadCount, setUnreadCount] = React.useState(0);
   const [hasInbox, setHasInbox] = React.useState(false);
 
@@ -5225,6 +5325,8 @@ function BoostPageWrapper() {
   // Refresh boost status when returning from payment or creating new post
   const location = useLocation();
   React.useEffect(() => {
+    const locationState = location.state as { boostSuccess?: boolean; postId?: string; feedType?: 'local' | 'regional' | 'national' } | null;
+
     const handleBoostSuccess = () => {
       if (!user?.handle) return;
       Promise.all([
@@ -5235,28 +5337,55 @@ function BoostPageWrapper() {
           const createdOnly = userPosts.filter(p => !p.originalUserHandle);
           const decorated = createdOnly.map(p => decorateForUser(userId, p));
           const bobDecorated = bobPosts.map(p => decorateForUser(userId, p));
-          setPosts([...decorated, ...bobDecorated]);
+          let result = [...decorated, ...bobDecorated];
+          // Mark the boosted post so Sponsored label and disabled Boost button show
+          if (locationState?.postId && locationState?.feedType) {
+            result = result.map(p =>
+              p.id === locationState.postId ? { ...p, isBoosted: true as const, boostFeedType: locationState.feedType } : p
+            );
+          }
+          setPosts(result);
         })
         .catch(console.error);
     };
 
     // Check if we're returning from a successful boost
-    const locationState = location.state as any;
-    if (locationState?.boostSuccess) {
+    if (locationState?.boostSuccess && locationState?.postId) {
+      setRecentlyBoostedPostId(locationState.postId);
+      if (locationState.feedType) setRecentlyBoostedFeedType(locationState.feedType);
       handleBoostSuccess();
       // Clear the state to prevent re-triggering
       window.history.replaceState({ ...locationState, boostSuccess: false }, '');
+      // Clear knownBoosted after 30s (async check will have run by then)
+      const t = setTimeout(() => {
+        setRecentlyBoostedPostId(null);
+        setRecentlyBoostedFeedType(null);
+      }, 30000);
+      return () => clearTimeout(t);
     }
 
     // Check if we're coming from create page with a new post to boost
-    if (locationState?.newPost && locationState?.showBoostModal) {
+    const loc = location.state as { newPost?: Post; showBoostModal?: boolean } | null;
+    if (loc?.newPost && loc?.showBoostModal) {
       // Set the new post for boost modal
-      setSelectedPostForBoost(locationState.newPost);
+      setSelectedPostForBoost(loc.newPost);
       setBoostModalOpen(true);
       // Clear the state to prevent re-triggering
-      window.history.replaceState({ ...locationState, showBoostModal: false }, '');
+      window.history.replaceState({ ...loc, showBoostModal: false }, '');
     }
   }, [location.state, user?.handle, userId]);
+
+  // Ensure boosted post gets Sponsored label when returning from payment (backup if refetch missed it)
+  React.useEffect(() => {
+    if (recentlyBoostedPostId && recentlyBoostedFeedType) {
+      const needsUpdate = posts.some(p => p.id === recentlyBoostedPostId && !p.isBoosted);
+      if (needsUpdate) {
+        setPosts(cur => cur.map(p =>
+          p.id === recentlyBoostedPostId ? { ...p, isBoosted: true, boostFeedType: recentlyBoostedFeedType } : p
+        ));
+      }
+    }
+  }, [recentlyBoostedPostId, recentlyBoostedFeedType, posts]);
 
   const handleOpenComments = (postId: string) => {
     setSelectedPostId(postId);
@@ -5326,7 +5455,19 @@ function BoostPageWrapper() {
             key={p.id}
             post={p}
             showBoostIcon={true}
+            engagementVariant="boost"
+            knownBoosted={recentlyBoostedPostId === p.id || !!p.isBoosted}
             onBoost={async () => {
+              const existing = await getActiveBoost(p.id);
+              if (existing?.isActive) {
+                Swal.fire({
+                  icon: 'info',
+                  title: 'Already boosted',
+                  text: 'This post is already boosted. It will expire in 6 hours.',
+                  confirmButtonColor: '#8B5CF6',
+                });
+                return;
+              }
               setSelectedPostForBoost(p);
               setBoostModalOpen(true);
             }}
@@ -5371,7 +5512,12 @@ function BoostPageWrapper() {
               try {
                 const updated = await incrementViews(userId, p.id);
                 if (updated.userHandle === 'Unknown') return;
-                updateOne(p.id, _post => ({ ...updated }));
+                updateOne(p.id, post => ({
+                  ...post,
+                  stats: updated.stats && typeof updated.stats.views === 'number'
+                    ? { ...post.stats, views: updated.stats.views }
+                    : post.stats
+                }));
                 window.dispatchEvent(new CustomEvent(`viewAdded-${p.id}`));
               } catch (err) {
                 console.warn('incrementViews error:', err);

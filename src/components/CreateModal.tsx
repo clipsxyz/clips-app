@@ -1,7 +1,7 @@
 import React from 'react';
 import { FiX, FiCamera, FiImage, FiLayers } from 'react-icons/fi';
 import Avatar from './Avatar';
-import { useAuth } from '../context/Auth';
+import { useAuthOptional } from '../context/Auth';
 
 interface CreateModalProps {
     isOpen: boolean;
@@ -10,7 +10,8 @@ interface CreateModalProps {
 }
 
 export default function CreateModal({ isOpen, onClose, onNavigate }: CreateModalProps) {
-    const { user } = useAuth();
+    const ctx = useAuthOptional();
+    const user = ctx?.user ?? null;
 
     if (!isOpen) return null;
 
