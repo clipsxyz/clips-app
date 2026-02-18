@@ -150,7 +150,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       local: userData.local || '',
       regional: userData.regional || '',
       national: userData.national || '',
-      handle: userData.handle || `${userData.name.trim()}@Unknown`,
+      handle: userData.handle || `${(userData.name || '').trim().split(/\s+/)[0] || userData.name || 'User'}@Unknown`,
       countryFlag: userData.countryFlag || undefined,
       avatarUrl: userData.avatarUrl || undefined,
       bio: userData.bio || undefined,

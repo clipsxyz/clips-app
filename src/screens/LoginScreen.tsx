@@ -133,7 +133,7 @@ export default function LoginScreen({ navigation }: any) {
             local: local,
             regional: regional,
             national: national,
-            handle: `${name.trim()}@${regional}`,
+            handle: `${name.trim().split(/\s+/)[0] || name.trim()}@${regional}`,
             countryFlag: countryFlag.trim(),
             avatarUrl: profilePicture
         };
@@ -341,7 +341,7 @@ export default function LoginScreen({ navigation }: any) {
                                 <Avatar
                                     src={profilePicture || undefined}
                                     name={name || 'User'}
-                                    size={80}
+                                    size="xl"
                                 />
                             </View>
 

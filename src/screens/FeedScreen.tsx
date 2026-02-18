@@ -35,6 +35,9 @@ import {
     addComment,
     fetchComments,
     incrementShares,
+    toggleCommentLike,
+    toggleReplyLike,
+    addReply,
 } from '../api/posts';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle } from '../api/stories';
 import { getUnreadTotal } from '../api/messages';
@@ -243,7 +246,7 @@ function PostHeader({
                             <Text style={styles.timeText}>{timeAgo(post.createdAt)}</Text>
                         </View>
                     )}
-                </View>
+                </TouchableOpacity>
             </View>
             <View style={styles.postHeaderRight}>
                 {post.locationLabel && (
@@ -270,6 +273,8 @@ function CommentsModal({
     const [comments, setComments] = useState<Comment[]>([]);
     const [loading, setLoading] = useState(false);
     const [commentText, setCommentText] = useState('');
+    const [replyingToCommentId, setReplyingToCommentId] = useState<string | null>(null);
+    const [replyInputText, setReplyInputText] = useState('');
 
     useEffect(() => {
         if (isOpen && postId) {
@@ -293,11 +298,62 @@ function CommentsModal({
         if (!commentText.trim()) return;
         try {
             const newComment = await addComment(postId, userId, commentText);
-            setComments(prev => [newComment, ...prev]);
+            // Keep ordering consistent with Scenes-style comments: newest at the bottom.
+            setComments(prev => [...prev, newComment]);
             setCommentText('');
         } catch (err) {
             console.error('Error adding comment:', err);
             Alert.alert('Error', 'Failed to add comment');
+        }
+    };
+
+    const handleToggleCommentLike = async (commentId: string) => {
+        try {
+            // Optimistic update
+            setComments(prev =>
+                prev.map(c => {
+                    if (c.id !== commentId) return c;
+                    const nextLiked = !c.userLiked;
+                    const nextLikes = (c.likes || 0) + (nextLiked ? 1 : -1);
+                    return { ...c, userLiked: nextLiked, likes: nextLikes };
+                })
+            );
+            const updated = await toggleCommentLike(commentId);
+            setComments(prev => prev.map(c => (c.id === commentId ? updated : c)));
+        } catch (err) {
+            console.error('Error toggling comment like:', err);
+        }
+    };
+
+    const handleToggleReplyLike = async (parentCommentId: string, replyId: string) => {
+        try {
+            const updatedParent = await toggleReplyLike(parentCommentId, replyId);
+            setComments(prev => prev.map(c => (c.id === parentCommentId ? updatedParent : c)));
+        } catch (err) {
+            console.error('Error toggling reply like:', err);
+        }
+    };
+
+    const handleAddReply = async (parentId: string, text: string) => {
+        if (!text.trim()) return;
+        try {
+            const newReply = await addReply(postId, parentId, userId, text.trim());
+            setComments(prev =>
+                prev.map(c => {
+                    if (c.id !== parentId) return c;
+                    const existingReplies = c.replies || [];
+                    return {
+                        ...c,
+                        replies: [...existingReplies, newReply],
+                        replyCount: (c.replyCount || existingReplies.length) + 1,
+                    };
+                })
+            );
+            setReplyInputText('');
+            setReplyingToCommentId(null);
+        } catch (err) {
+            console.error('Error adding reply:', err);
+            Alert.alert('Error', 'Failed to add reply');
         }
     };
 
@@ -313,7 +369,9 @@ function CommentsModal({
             <View style={styles.modalOverlay}>
                 <View style={styles.modalContent}>
                     <View style={styles.modalHeader}>
-                        <Text style={styles.modalTitle}>Comments</Text>
+                        <Text style={styles.modalTitle}>
+                            {comments.length} {comments.length === 1 ? 'comment' : 'comments'}
+                        </Text>
                         <TouchableOpacity onPress={onClose}>
                             <Icon name="close" size={24} color="#FFFFFF" />
                         </TouchableOpacity>
@@ -325,6 +383,7 @@ function CommentsModal({
                         <FlatList
                             data={comments}
                             keyExtractor={(item) => item.id}
+                            style={styles.commentsList}
                             renderItem={({ item }) => (
                                 <View style={styles.commentItem}>
                                     <Avatar
@@ -333,13 +392,112 @@ function CommentsModal({
                                         size={32}
                                     />
                                     <View style={styles.commentContent}>
-                                        <Text style={styles.commentUser}>{item.userHandle}</Text>
+                                        <View style={styles.commentHeaderRow}>
+                                            <Text style={styles.commentUser}>{item.userHandle}</Text>
+                                            <Text style={styles.commentTime}>{timeAgo(item.createdAt)}</Text>
+                                        </View>
                                         <Text style={styles.commentText}>{item.text}</Text>
-                                        <Text style={styles.commentTime}>{timeAgo(item.createdAt)}</Text>
+                                        <View style={styles.commentActionsRow}>
+                                            <TouchableOpacity
+                                                onPress={() => {
+                                                    setReplyingToCommentId(
+                                                        replyingToCommentId === item.id ? null : item.id
+                                                    );
+                                                    setReplyInputText('');
+                                                }}
+                                            >
+                                                <Text style={styles.commentReplyText}>
+                                                    {replyingToCommentId === item.id ? 'Cancel reply' : 'Reply'}
+                                                </Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={styles.commentLikeRow}
+                                                onPress={() => handleToggleCommentLike(item.id)}
+                                            >
+                                                <Icon
+                                                    name={item.userLiked ? 'heart' : 'heart-outline'}
+                                                    size={16}
+                                                    color={item.userLiked ? '#EF4444' : '#6B7280'}
+                                                />
+                                                <Text style={styles.commentLikeCount}>
+                                                    {item.likes ?? 0}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        </View>
+
+                                        {/* Replies list */}
+                                        {item.replies && item.replies.length > 0 && (
+                                            <View style={styles.replyList}>
+                                                {item.replies.map(reply => (
+                                                    <View key={reply.id} style={styles.replyItem}>
+                                                        <Avatar
+                                                            src={undefined}
+                                                            name={reply.userHandle.split('@')[0]}
+                                                            size={24}
+                                                        />
+                                                        <View style={styles.replyContent}>
+                                                            <View style={styles.replyHeaderRow}>
+                                                                <Text style={styles.replyUser}>
+                                                                    {reply.userHandle}
+                                                                </Text>
+                                                                <Text style={styles.replyTime}>
+                                                                    {timeAgo(reply.createdAt)}
+                                                                </Text>
+                                                            </View>
+                                                            <Text style={styles.replyText}>
+                                                                {reply.text}
+                                                            </Text>
+                                                            <TouchableOpacity
+                                                                style={styles.replyLikeRow}
+                                                                onPress={() =>
+                                                                    handleToggleReplyLike(item.id, reply.id)
+                                                                }
+                                                            >
+                                                                <Icon
+                                                                    name={
+                                                                        reply.userLiked
+                                                                            ? 'heart'
+                                                                            : 'heart-outline'
+                                                                    }
+                                                                    size={14}
+                                                                    color={
+                                                                        reply.userLiked
+                                                                            ? '#EF4444'
+                                                                            : '#6B7280'
+                                                                    }
+                                                                />
+                                                                <Text style={styles.replyLikeCount}>
+                                                                    {reply.likes ?? 0}
+                                                                </Text>
+                                                            </TouchableOpacity>
+                                                        </View>
+                                                    </View>
+                                                ))}
+                                            </View>
+                                        )}
+
+                                        {/* Inline reply input (Scenes-style) */}
+                                        {replyingToCommentId === item.id && (
+                                            <View style={styles.inlineReplyContainer}>
+                                                <TextInput
+                                                    style={styles.inlineReplyInput}
+                                                    placeholder="Write a reply..."
+                                                    placeholderTextColor="#6B7280"
+                                                    value={replyInputText}
+                                                    onChangeText={setReplyInputText}
+                                                    multiline
+                                                />
+                                                <TouchableOpacity
+                                                    style={styles.inlineReplySendButton}
+                                                    onPress={() => handleAddReply(item.id, replyInputText)}
+                                                >
+                                                    <Icon name="send" size={16} color="#8B5CF6" />
+                                                </TouchableOpacity>
+                                            </View>
+                                        )}
                                     </View>
                                 </View>
                             )}
-                            style={styles.commentsList}
                         />
                     )}
 
@@ -513,6 +671,15 @@ const FeedCard = React.memo(function FeedCard({
                 onStoryPress={onStoryPress}
             />
 
+            {post.isBoosted && (
+                <View style={styles.sponsoredBadge}>
+                    <Text style={styles.sponsoredText}>Sponsored</Text>
+                    {post.boostFeedType && (
+                        <Text style={styles.sponsoredFeedType}>· {post.boostFeedType} boost</Text>
+                    )}
+                </View>
+            )}
+
             {post.mediaUrl && (
                 <Image
                     source={{ uri: post.mediaUrl }}
@@ -600,9 +767,9 @@ const FeedCard = React.memo(function FeedCard({
             </View>
         </TouchableOpacity>
     );
-}
+});
 
-const FeedScreen: React.FC = ({ navigation }: any) => {
+function FeedScreen({ navigation }: { navigation?: any }) {
     const { user } = useAuth();
     const userId = user?.id ?? 'anon';
     const defaultNational = user?.national || 'Ireland';
@@ -1054,6 +1221,26 @@ const styles = StyleSheet.create({
         backgroundColor: '#030712',
         marginBottom: 16,
     },
+    sponsoredBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        paddingHorizontal: 16,
+        paddingTop: 8,
+        paddingBottom: 6,
+    },
+    sponsoredText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#F59E0B',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    sponsoredFeedType: {
+        fontSize: 12,
+        color: '#9CA3AF',
+        textTransform: 'capitalize',
+    },
     postHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -1305,25 +1492,114 @@ const styles = StyleSheet.create({
     commentItem: {
         flexDirection: 'row',
         marginBottom: 16,
-        gap: 12,
+        columnGap: 12,
     },
     commentContent: {
         flex: 1,
+        minHeight: 0,
+    },
+    commentHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'baseline',
+        justifyContent: 'flex-start',
+        columnGap: 8,
+        marginBottom: 2,
     },
     commentUser: {
         fontSize: 14,
         fontWeight: '600',
         color: '#FFFFFF',
-        marginBottom: 4,
-    },
-    commentText: {
-        fontSize: 14,
-        color: '#D1D5DB',
-        marginBottom: 4,
     },
     commentTime: {
         fontSize: 12,
         color: '#6B7280',
+    },
+    commentText: {
+        fontSize: 14,
+        color: '#D1D5DB',
+        marginBottom: 8,
+    },
+    commentActionsRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    commentReplyText: {
+        fontSize: 12,
+        color: '#9CA3AF',
+        fontWeight: '500',
+    },
+    commentLikeRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        columnGap: 4,
+    },
+    commentLikeCount: {
+        fontSize: 12,
+        color: '#D1D5DB',
+    },
+    replyList: {
+        marginTop: 8,
+        paddingLeft: 24,
+        borderLeftWidth: 1,
+        borderLeftColor: '#1F2937',
+        rowGap: 8,
+    },
+    replyItem: {
+        flexDirection: 'row',
+        columnGap: 8,
+    },
+    replyContent: {
+        flex: 1,
+        minHeight: 0,
+    },
+    replyHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'baseline',
+        columnGap: 6,
+        marginBottom: 2,
+    },
+    replyUser: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#FFFFFF',
+    },
+    replyTime: {
+        fontSize: 11,
+        color: '#6B7280',
+    },
+    replyText: {
+        fontSize: 13,
+        color: '#E5E7EB',
+        marginBottom: 4,
+    },
+    replyLikeRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        columnGap: 4,
+    },
+    replyLikeCount: {
+        fontSize: 11,
+        color: '#D1D5DB',
+    },
+    inlineReplyContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        columnGap: 8,
+        marginTop: 8,
+    },
+    inlineReplyInput: {
+        flex: 1,
+        backgroundColor: '#111827',
+        borderRadius: 999,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        color: '#FFFFFF',
+        fontSize: 13,
+        maxHeight: 80,
+    },
+    inlineReplySendButton: {
+        padding: 6,
     },
     commentInputContainer: {
         flexDirection: 'row',

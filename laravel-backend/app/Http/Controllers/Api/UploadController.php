@@ -20,9 +20,9 @@ class UploadController extends Controller
         // Try to increase PHP limits
         $this->increaseUploadLimits();
         
-        // Check current PHP limits
-        $uploadMax = $this->parseSize(ini_get('upload_max_filesize'));
-        $postMax = $this->parseSize(ini_get('post_max_size'));
+        // Check current PHP limits (guard against empty ini values)
+        $uploadMax = $this->parseSize(ini_get('upload_max_filesize') ?: '8M');
+        $postMax = $this->parseSize(ini_get('post_max_size') ?: '8M');
         $maxAllowed = min($uploadMax, $postMax);
         
         // Check if request is too large (before validation)
@@ -87,42 +87,57 @@ class UploadController extends Controller
         }
 
         $file = $request->file('file');
-        $user = Auth::user();
-
-        // Generate unique filename with user ID for organization (or 'guest' if not authenticated)
-        $userId = $user ? $user->id : 'guest';
-        $filename = $userId . '/' . time() . '-' . uniqid() . '.' . $file->getClientOriginalExtension();
-        
-        // Use configured filesystem disk (local or s3)
-        // Try 'local' first, then 'public', then default
-        $disk = 'local';
+        $user = null;
         try {
-            // Check if 'local' disk is available
-            Storage::disk('local');
-        } catch (\Exception $e) {
-            // Try 'public' disk
-            try {
-                Storage::disk('public');
-                $disk = 'public';
-            } catch (\Exception $e2) {
-                // Use default
-                $disk = config('filesystems.default', 'local');
-            }
+            $user = Auth::user();
+        } catch (\Throwable $e) {
+            // Auth may throw if guard not configured; continue as guest
         }
-        
-        // Store file
-        $path = $file->storeAs('uploads', $filename, $disk);
 
-        // Get full URL (works for both local and S3)
+        $ext = $file->getClientOriginalExtension() ?: 'jpg';
+        $userId = $user ? $user->id : 'guest';
+        $filename = $userId . '/' . time() . '-' . uniqid() . '.' . $ext;
+
+        $disk = config('filesystems.default');
+        if ($disk === 'local') {
+            $disk = 'public'; // prefer public so file is web-accessible
+        }
+        if (!in_array($disk, ['public', 's3', 'local'], true)) {
+            $disk = 'public';
+        }
+
+        // Ensure uploads directory exists (avoids "No such file or directory" on some setups)
+        try {
+            Storage::disk($disk)->makeDirectory('uploads');
+        } catch (\Throwable $e) {
+            // ignore if already exists or not needed
+        }
+
+        try {
+            $path = $file->storeAs('uploads', $filename, $disk);
+        } catch (\Throwable $e) {
+            \Log::error('Upload storeAs failed: ' . $e->getMessage(), ['disk' => $disk, 'exception' => $e]);
+            $hint = 'Check storage permissions and that php artisan storage:link has been run.';
+            $detail = $e->getMessage();
+            if (str_contains(strtolower($detail), 'permission') || str_contains(strtolower($detail), 'denied')) {
+                $hint = 'Storage directory is not writable. On this PC, ensure the folder storage/app/public (and storage/app/public/uploads) can be written by the user running PHP.';
+            } elseif (str_contains(strtolower($detail), 'no such file') || str_contains(strtolower($detail), 'failed to open')) {
+                $hint = 'Storage path missing or invalid. Run: php artisan storage:link';
+            }
+            return response()->json([
+                'error' => 'Upload failed',
+                'message' => $hint,
+                'detail' => $detail,
+            ], 500);
+        }
+
         try {
             $fileUrl = Storage::disk($disk)->url($path);
-            // Make sure it's an absolute URL
             if (!str_starts_with($fileUrl, 'http')) {
                 $fileUrl = url($fileUrl);
             }
-        } catch (\Exception $e) {
-            // If URL generation fails, create a route-based URL
-            $fileUrl = url('/storage/' . $path);
+        } catch (\Throwable $e) {
+            $fileUrl = url('/storage/uploads/' . $filename);
         }
 
         return response()->json([
@@ -168,21 +183,14 @@ class UploadController extends Controller
         $user = Auth::user();
         $uploadedFiles = [];
 
-        // Use configured filesystem disk (local or s3)
-        // Try 'local' first, then 'public', then default
-        $disk = 'local';
+        // Use a web-accessible filesystem disk (prefer 'public' for local dev so files are served via /storage)
+        // Try 'public' first, then fall back to configured default
+        $disk = 'public';
         try {
-            // Check if 'local' disk is available
-            Storage::disk('local');
+            Storage::disk('public');
         } catch (\Exception $e) {
-            // Try 'public' disk
-            try {
-                Storage::disk('public');
-                $disk = 'public';
-            } catch (\Exception $e2) {
-                // Use default
-                $disk = config('filesystems.default', 'local');
-            }
+            // Fallback to configured default disk (e.g. s3 or local)
+            $disk = config('filesystems.default', 'public');
         }
 
         $userId = $user ? $user->id : 'guest';
@@ -238,6 +246,9 @@ class UploadController extends Controller
     private function parseSize(string $size): int
     {
         $size = trim($size);
+        if ($size === '') {
+            return 8 * 1024 * 1024; // 8M default
+        }
         $last = strtolower($size[strlen($size) - 1]);
         $value = (int)$size;
         

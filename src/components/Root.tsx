@@ -28,6 +28,7 @@ import CanvaVideoEditor from '../pages/CanvaVideoEditor';
 import TextOnlyPostPage from '../pages/TextOnlyPostPage';
 import TextOnlyPostDetailsPage from '../pages/TextOnlyPostDetailsPage';
 import ReplyQuestionPage from '../pages/ReplyQuestionPage';
+import TermsPage from '../pages/TermsPage';
 
 
 function ErrorFallback({ error, resetError }: { error: Error; resetError: () => void }) {
@@ -50,7 +51,7 @@ function ErrorFallback({ error, resetError }: { error: Error; resetError: () => 
 export default function Root() {
     return (
         <Sentry.ErrorBoundary
-            fallback={({ error, resetError }) => <ErrorFallback error={error} resetError={resetError} />}
+            fallback={({ error, resetError }) => <ErrorFallback error={error as Error} resetError={resetError} />}
         >
             <AuthProvider>
                 <ThemeProvider>
@@ -71,6 +72,7 @@ export default function Root() {
                                 <Route path="template-editor" element={<TemplateEditorPage />} />
                                 <Route path="video-editor" element={<VideoEditorPage />} />
                                 <Route path="login" element={<LoginPage />} />
+                                <Route path="terms" element={<TermsPage />} />
                                 <Route path="boost" element={<BoostPage />} />
                                 <Route path="payment" element={<PaymentPage />} />
                                 <Route path="payment-success" element={<PaymentSuccessPage />} />

@@ -227,11 +227,11 @@ export default function TopBar({ activeTab: _activeTab, onLocationChange }: TopB
                 className="relative px-3 py-1.5 text-xs font-medium transition-all active:scale-[.98] text-gray-300 hover:text-white"
                 title={`View ${user?.local || 'Local'} feed`}
               >
-                {/* Gradient border wrapper */}
+                {/* White border wrapper */}
                 <div
                   className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
                   style={{
-                    background: 'conic-gradient(from 0deg, rgb(255, 140, 0), rgb(248, 0, 50), rgb(255, 0, 160), rgb(140, 40, 255), rgb(0, 35, 255), rgb(25, 160, 255), rgb(255, 140, 0))',
+                    background: 'conic-gradient(from 0deg, white, white)',
                   }}
                 >
                   {/* Overlay that covers border initially, then rotates to reveal it */}

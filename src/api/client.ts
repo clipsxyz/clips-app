@@ -23,21 +23,27 @@ const getApiBaseUrl = () => {
 
 const API_BASE_URL = getApiBaseUrl();
 
-// Helper function to make API requests
-export async function apiRequest(endpoint: string, options: RequestInit = {}) {
+// Helper function to make API requests (with configurable timeout to avoid long hangs when backend is slow)
+export async function apiRequest(endpoint: string, options: RequestInit & { timeoutMs?: number } = {}) {
     const token = localStorage.getItem('authToken');
+    const { timeoutMs = 8000, ...fetchOptions } = options;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     const config: RequestInit = {
+        ...fetchOptions,
         headers: {
             'Content-Type': 'application/json',
             ...(token && { Authorization: `Bearer ${token}` }),
-            ...options.headers,
+            ...fetchOptions.headers,
         },
-        ...options,
+        signal: controller.signal,
     };
 
     try {
         const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({ error: 'Network error' }));
@@ -50,13 +56,15 @@ export async function apiRequest(endpoint: string, options: RequestInit = {}) {
 
         return response.json();
     } catch (error: any) {
+        clearTimeout(timeoutId);
         // Suppress connection refused errors when backend isn't running
         // Check for various connection error patterns
         const isConnectionError =
             error?.message?.includes('Failed to fetch') ||
             error?.message?.includes('ERR_CONNECTION_REFUSED') ||
             error?.message?.includes('NetworkError') ||
-            error?.name === 'TypeError' && error?.message?.includes('fetch');
+            error?.name === 'AbortError' ||
+            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
 
         if (isConnectionError) {
             // Re-throw with a specific error type that can be caught and handled gracefully
@@ -96,7 +104,7 @@ export async function getCurrentUser() {
     return apiRequest('/auth/me');
 }
 
-// Posts API
+// Posts API (6s timeout for faster fallback on slow mobile networks)
 export async function fetchPostsPage(cursor: number = 0, limit: number = 10, filter: string = 'Dublin', userId?: string) {
     const params = new URLSearchParams({
         cursor: cursor.toString(),
@@ -105,7 +113,7 @@ export async function fetchPostsPage(cursor: number = 0, limit: number = 10, fil
         ...(userId && { userId }),
     });
 
-    return apiRequest(`/posts?${params}`);
+    return apiRequest(`/posts?${params}`, { timeoutMs: 6000 });
 }
 
 export async function fetchPost(postId: string, userId?: string) {
@@ -363,33 +371,64 @@ export async function getBoostStatusApi(postId: string): Promise<{
     return data;
 }
 
-// Upload API
+// Upload API (with timeout and clearer errors for phone/network)
+const UPLOAD_TIMEOUT_MS = 60000; // 60s for slow connections
+
 export async function uploadFile(file: File) {
     const formData = new FormData();
     formData.append('file', file);
 
     const token = localStorage.getItem('authToken');
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
 
-    const response = await fetch(`${API_BASE_URL}/upload/single`, {
-        method: 'POST',
-        headers: {
-            ...(token && { Authorization: `Bearer ${token}` }),
-        },
-        body: formData,
-    });
+    try {
+        const response = await fetch(`${API_BASE_URL}/upload/single`, {
+            method: 'POST',
+            headers: {
+                ...(token && { Authorization: `Bearer ${token}` }),
+            },
+            body: formData,
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
 
-    if (!response.ok) {
-        let errorMessage = 'Upload failed';
-        try {
-            const errorData = await response.json();
-            errorMessage = errorData.error || errorData.message || JSON.stringify(errorData);
-        } catch (e) {
-            errorMessage = `Upload failed: HTTP ${response.status} ${response.statusText}`;
+        if (!response.ok) {
+            let errorMessage = 'Upload failed';
+            try {
+                const errorData = await response.json();
+                const parts = [errorData.error, errorData.message].filter(Boolean);
+                if (errorData.detail) parts.push(errorData.detail);
+                errorMessage = parts.join(': ') || JSON.stringify(errorData);
+            } catch (e) {
+                errorMessage = `Upload failed: HTTP ${response.status} ${response.statusText}`;
+            }
+            throw new Error(errorMessage);
         }
-        throw new Error(errorMessage);
-    }
 
-    return response.json();
+        return response.json();
+    } catch (err: any) {
+        clearTimeout(timeoutId);
+        if (err?.name === 'AbortError') {
+            throw new Error('Upload timed out. Check your connection and try again.');
+        }
+        const msg = err?.message ?? '';
+        const isNetwork =
+            msg === 'Failed to fetch' ||
+            msg.includes('NetworkError') ||
+            msg.includes('Load failed') ||
+            err?.name === 'TypeError';
+        if (isNetwork) {
+            const onNetwork = typeof window !== 'undefined' &&
+                window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+            throw new Error(
+                onNetwork
+                    ? "Can't reach the server. Use the same Wi‑Fi as this computer and ensure the backend is running (e.g. http://<this-PC-IP>:8000)."
+                    : 'Network error. Check that the backend is running and try again.'
+            );
+        }
+        throw err;
+    }
 }
 
 // Offline queue functions (keep existing implementation)
@@ -397,7 +436,8 @@ export async function enqueue(action: any) {
     // Keep existing offline queue implementation
     const { get, set } = await import('idb-keyval');
     const queue = await get('mutationQueue') || [];
-    queue.push({ ...action, id: crypto.randomUUID(), timestamp: Date.now() });
+    const { randomUUID } = await import('../utils/uuid');
+    queue.push({ ...action, id: randomUUID(), timestamp: Date.now() });
     await set('mutationQueue', queue);
 }
 

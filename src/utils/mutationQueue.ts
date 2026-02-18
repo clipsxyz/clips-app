@@ -1,4 +1,5 @@
 import { db } from './db';
+import { randomUUID } from './uuid';
 
 type Mutation = {
   id: string;
@@ -17,7 +18,7 @@ type Mutation = {
 const QKEY = 'mutations';
 
 export async function enqueue(m: Omit<Mutation, 'id' | 'at'>) {
-  const item: Mutation = { ...m, id: crypto.randomUUID(), at: Date.now() };
+  const item: Mutation = { ...m, id: randomUUID(), at: Date.now() };
   await db.update(QKEY, (arr: Mutation[] = []) => [...arr, item]);
 }
 

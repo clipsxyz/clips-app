@@ -1,7 +1,7 @@
 import React from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
-import { FiMapPin, FiUser, FiGlobe, FiCamera, FiX } from 'react-icons/fi';
+import { FiMapPin, FiUser, FiGlobe, FiCamera, FiX, FiEye, FiEyeOff } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMaps';
 import { loginUser } from '../api/client';
@@ -28,6 +28,17 @@ function saveLocalRegistration(email: string, password: string, userData: any) {
 export default function LoginPage() {
   const { login } = useAuth();
   const nav = useNavigate();
+
+  // Lock body scroll on mobile so the page stays fixed
+  React.useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+      document.documentElement.style.overflow = '';
+    };
+  }, []);
   const [searchParams, setSearchParams] = useSearchParams();
   const [mode, setMode] = React.useState<PageMode>('signup');
   const [loginError, setLoginError] = React.useState('');
@@ -61,15 +72,40 @@ export default function LoginPage() {
   const [loadingRegions, setLoadingRegions] = React.useState(false);
   const [loadingCities, setLoadingCities] = React.useState(false);
 
-  // Step 2: Account details
+  // Step 1: Account details (email, password, birthday)
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [confirmPassword, setConfirmPassword] = React.useState('');
-  const [age, setAge] = React.useState('');
-  const [interests, setInterests] = React.useState<string[]>([]);
+  const [birthMonth, setBirthMonth] = React.useState('');
+  const [birthDay, setBirthDay] = React.useState('');
+  const [birthYear, setBirthYear] = React.useState('');
 
   // Step 3: Profile picture
   const [profilePicture, setProfilePicture] = React.useState<string | null>(null);
+
+  // Password visibility toggle
+  const [showPassword, setShowPassword] = React.useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = React.useState(false);
+
+  // Forgot password
+  const [showForgotPassword, setShowForgotPassword] = React.useState(false);
+  const [forgotEmail, setForgotEmail] = React.useState('');
+  const [forgotSent, setForgotSent] = React.useState(false);
+
+  // Password strength: 0=weak, 1=fair, 2=good, 3=strong
+  function getPasswordStrength(pw: string): number {
+    if (!pw) return 0;
+    let score = 0;
+    if (pw.length >= 8) score++;
+    if (pw.length >= 12) score++;
+    if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) score++;
+    if (/\d/.test(pw)) score++;
+    if (/[^a-zA-Z0-9]/.test(pw)) score++;
+    if (score >= 4) return 3;
+    if (score >= 2) return 2;
+    if (score >= 1) return 1;
+    return 0;
+  }
 
   const nationalOptions = [
     // Europe
@@ -167,19 +203,20 @@ export default function LoginPage() {
     }
   }, [regional, national]);
 
-  const interestOptions = [
-    'Food & Dining', 'Sports', 'Music', 'Art & Culture', 'Technology',
-    'Travel', 'Fashion', 'Photography', 'Fitness', 'Gaming',
-    'Books', 'Movies', 'Nature', 'Cooking', 'Dancing'
-  ];
+  const MIN_AGE = 13;
 
-  function handleLocationSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!name || !local || !regional || !national) {
-      alert('Please fill in all location fields');
-      return;
-    }
-    updateStep(2);
+  function getAgeFromBirthday(): number | null {
+    const m = parseInt(birthMonth, 10);
+    const d = parseInt(birthDay, 10);
+    const y = parseInt(birthYear, 10);
+    if (!m || !d || !y || m < 1 || m > 12 || d < 1 || d > 31 || y < 1900 || y > new Date().getFullYear()) return null;
+    const today = new Date();
+    const birth = new Date(y, m - 1, d);
+    if (birth > today) return null;
+    let age = today.getFullYear() - birth.getFullYear();
+    const mDiff = today.getMonth() - birth.getMonth();
+    if (mDiff < 0 || (mDiff === 0 && today.getDate() < birth.getDate())) age--;
+    return age;
   }
 
   function handleAccountSubmit(e: React.FormEvent) {
@@ -192,9 +229,26 @@ export default function LoginPage() {
       alert('Passwords do not match');
       return;
     }
-    // Age is optional, but if provided, must be at least 13
-    if (age && parseInt(age) < 13) {
-      alert('You must be at least 13 years old');
+    if (!birthMonth || !birthDay || !birthYear) {
+      alert('Please enter your date of birth');
+      return;
+    }
+    const age = getAgeFromBirthday();
+    if (age === null) {
+      alert('Please enter a valid date of birth');
+      return;
+    }
+    if (age < MIN_AGE) {
+      alert(`You must be at least ${MIN_AGE} years old to create an account`);
+      return;
+    }
+    updateStep(2);
+  }
+
+  function handleLocationSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name || !local || !regional || !national) {
+      alert('Please fill in all location fields');
       return;
     }
     updateStep(3);
@@ -204,16 +258,17 @@ export default function LoginPage() {
     e.preventDefault();
     setSignupError('');
 
+    const age = getAgeFromBirthday();
+
     const userData = {
       name: name.trim(),
       email: email.trim(),
       password: password,
-      age: age ? parseInt(age) : undefined,
-      interests: interests,
+      age: age ?? undefined,
       local: local,
       regional: regional,
       national: national,
-      handle: `${name.trim()}@${regional}`,
+      handle: `${name.trim().split(/\s+/)[0] || name.trim()}@${regional}`,
       countryFlag: countryFlag.trim(),
       avatarUrl: profilePicture,
     };
@@ -243,14 +298,6 @@ export default function LoginPage() {
 
   function removeProfilePicture() {
     setProfilePicture(null);
-  }
-
-  function toggleInterest(interest: string) {
-    setInterests(prev =>
-      prev.includes(interest)
-        ? prev.filter(i => i !== interest)
-        : [...prev, interest]
-    );
   }
 
   async function handleLoginSubmit(e: React.FormEvent) {
@@ -320,10 +367,73 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center py-8 px-4 sm:px-6 lg:px-8" style={{ backgroundColor: '#000000' }}>
-      <div className="w-full max-w-md">
+    <div 
+      className="h-full min-h-0 flex-1 flex flex-col overflow-hidden items-center px-4 sm:px-6 py-4 sm:py-6 relative"
+      style={{ 
+        backgroundColor: '#000000',
+        paddingTop: 'max(1rem, env(safe-area-inset-top))',
+        paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
+      }}
+    >
+      {/* Forgot password modal */}
+      {showForgotPassword && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-sm rounded-lg border border-gray-700 bg-gray-900 p-6">
+            <h3 className="text-lg font-medium text-white mb-2">Reset password</h3>
+            {forgotSent ? (
+              <>
+                <p className="text-sm text-gray-300 mb-4">
+                  If an account exists for that email, we&apos;ve sent a reset link. Check your inbox.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => { setShowForgotPassword(false); setForgotSent(false); setForgotEmail(''); }}
+                  className="w-full py-2 bg-blue-500 text-white rounded-sm hover:bg-blue-600 text-sm font-medium"
+                >
+                  Back to login
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-gray-400 mb-4">Enter your email and we&apos;ll send you a link to reset your password.</p>
+                <input
+                  type="email"
+                  value={forgotEmail}
+                  onChange={e => setForgotEmail(e.target.value)}
+                  placeholder="Email"
+                  className="w-full rounded-sm border border-gray-600 bg-gray-800 px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-gray-500 mb-4"
+                  autoFocus
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setShowForgotPassword(false); setForgotEmail(''); }}
+                    className="flex-1 py-2 bg-gray-700 text-white rounded-sm hover:bg-gray-600 text-sm font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (forgotEmail.trim()) {
+                        setForgotSent(true);
+                        // TODO: Call API when backend supports it - apiRequest('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email: forgotEmail }) });
+                      }
+                    }}
+                    className="flex-1 py-2 bg-blue-500 text-white rounded-sm hover:bg-blue-600 text-sm font-medium"
+                  >
+                    Send link
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="w-full max-w-md flex-1 flex flex-col min-h-0">
         {/* Sign up / Log in toggle */}
-        <div className="flex justify-center gap-6 mb-4">
+        <div className="flex-shrink-0 flex justify-center gap-6 mb-3 sm:mb-4">
           <button
             type="button"
             onClick={() => { setMode('signup'); setLoginError(''); setSignupError(''); }}
@@ -341,8 +451,13 @@ export default function LoginPage() {
         </div>
 
         {mode === 'login' ? (
-          <form onSubmit={handleLoginSubmit} className="border border-gray-700 rounded-lg shadow-sm flex flex-col px-10 py-10" style={{ backgroundColor: '#000000' }}>
+          <div className="max-w-md mx-auto rounded-2xl p-0.5 bg-[linear-gradient(90deg,red,yellow,red)] shadow-lg">
+            <form
+              onSubmit={handleLoginSubmit}
+              className="rounded-2xl bg-black px-8 py-8 flex flex-col"
+            >
             <div className="text-center mb-6">
+              <p className="text-xs text-gray-500 mb-2">No algorithms just places</p>
               <h1 className="text-3xl font-light mb-2 tracking-tight text-white">Gazetteer</h1>
               <p className="text-sm text-gray-400">Log in to your account</p>
             </div>
@@ -352,17 +467,36 @@ export default function LoginPage() {
                 value={loginEmail}
                 onChange={e => setLoginEmail(e.target.value)}
                 placeholder="Email"
-                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
                 autoComplete="email"
               />
-              <input
-                type="password"
-                value={loginPassword}
-                onChange={e => setLoginPassword(e.target.value)}
-                placeholder="Password"
-                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
-                autoComplete="current-password"
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={loginPassword}
+                  onChange={e => setLoginPassword(e.target.value)}
+                  placeholder="Password"
+                  className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                  autoComplete="current-password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(p => !p)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <FiEyeOff className="w-4 h-4" /> : <FiEye className="w-4 h-4" />}
+                </button>
+              </div>
+              <div className="text-right">
+                <button
+                  type="button"
+                  onClick={() => { setShowForgotPassword(true); setLoginError(''); }}
+                  className="text-xs text-blue-400 hover:underline"
+                >
+                  Forgot password?
+                </button>
+              </div>
               {loginError && <p className="text-xs text-red-500">{loginError}</p>}
             </div>
             <div className="mt-6 space-y-3">
@@ -380,14 +514,20 @@ export default function LoginPage() {
                 </button>
               </p>
             </div>
-          </form>
+            </form>
+          </div>
         ) : (
-        <form onSubmit={step === 1 ? handleLocationSubmit : step === 2 ? handleAccountSubmit : handleProfilePictureSubmit} className="border border-gray-700 rounded-lg shadow-sm flex flex-col" style={{ minHeight: '600px', backgroundColor: '#000000' }}>
+        <div className="max-w-md mx-auto rounded-2xl p-0.5 bg-[linear-gradient(90deg,red,yellow,red)] shadow-lg flex-1">
+        <form
+          onSubmit={step === 1 ? handleAccountSubmit : step === 2 ? handleLocationSubmit : handleProfilePictureSubmit}
+          className="rounded-2xl bg-black flex flex-col flex-1 min-h-0"
+        >
           {/* Header */}
-          <div className="flex-shrink-0 px-10 pt-10 pb-6">
+          <div className="flex-shrink-0 px-6 sm:px-10 pt-4 sm:pt-10 pb-4 sm:pb-6">
             <div className="text-center">
+              <p className="text-xs text-gray-500 mb-2">No algorithms just places</p>
               <h1 
-                className="text-3xl font-light mb-2 tracking-tight relative" 
+                className="text-2xl sm:text-3xl font-light mb-1 sm:mb-2 tracking-tight relative" 
                 style={{ 
                   fontFamily: 'system-ui, -apple-system, sans-serif',
                   color: '#ffffff'
@@ -408,12 +548,12 @@ export default function LoginPage() {
                   Gazetteer
                 </span>
               </h1>
-              <p className="text-sm text-gray-400 mb-6 font-normal">
-                {step === 1 ? 'GPS-focused news feeds powered by location' : step === 2 ? 'Complete your profile' : 'Add a profile picture'}
+              <p className="text-xs sm:text-sm text-gray-400 mb-4 sm:mb-6 font-normal">
+                {step === 1 ? 'Create your account' : step === 2 ? 'No algorithms just places' : 'Add a profile picture'}
               </p>
               
               {/* Step Indicators - Instagram style */}
-              <div className="flex justify-center items-center space-x-2 mb-6">
+              <div className="flex justify-center items-center space-x-2 mb-4 sm:mb-6">
                 <div className={`h-1 rounded-full transition-all ${step >= 1 ? 'bg-blue-500' : 'bg-gray-300'}`} style={{ width: step >= 1 ? '80px' : '40px' }}></div>
                 <div className={`h-1 rounded-full transition-all ${step >= 2 ? 'bg-blue-500' : 'bg-gray-300'}`} style={{ width: step >= 2 ? '80px' : '40px' }}></div>
                 <div className={`h-1 rounded-full transition-all ${step >= 3 ? 'bg-blue-500' : 'bg-gray-300'}`} style={{ width: step >= 3 ? '80px' : '40px' }}></div>
@@ -422,19 +562,158 @@ export default function LoginPage() {
           </div>
 
           {/* Scrollable Content */}
-          <div className="flex-1 overflow-y-auto px-10 pb-4 space-y-3">
+          <div className="flex-1 min-h-0 overflow-y-auto px-6 sm:px-10 pb-8 space-y-2 sm:space-y-3">
 
         {step === 1 && (
           <>
-            {/* Step 1: Location Selection - Instagram Style */}
+            {/* Step 1: Account Details - Gmail-style (email, password, birthday) */}
+            {/* Email */}
+            <div>
+              <input
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                placeholder="Email"
+                required
+                autoComplete="email"
+              />
+            </div>
+
+            {/* Password */}
+            <div>
+              <p className="text-xs text-gray-500 mb-1.5 px-1">8+ characters, include a number or symbol</p>
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                  placeholder="Password"
+                  required
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(p => !p)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <FiEyeOff className="w-4 h-4" /> : <FiEye className="w-4 h-4" />}
+                </button>
+              </div>
+              {/* Password strength meter */}
+              {password && (
+                <div className="mt-1.5 flex items-center gap-2">
+                  <div className="flex-1 h-1 rounded-full bg-gray-700 overflow-hidden">
+                    <div
+                      className={`h-full transition-all ${
+                        getPasswordStrength(password) === 0 ? 'w-1/4 bg-red-500' :
+                        getPasswordStrength(password) === 1 ? 'w-1/2 bg-orange-500' :
+                        getPasswordStrength(password) === 2 ? 'w-3/4 bg-yellow-500' :
+                        'w-full bg-green-500'
+                      }`}
+                    />
+                  </div>
+                  <span className={`text-xs ${
+                    getPasswordStrength(password) === 0 ? 'text-red-400' :
+                    getPasswordStrength(password) === 1 ? 'text-orange-400' :
+                    getPasswordStrength(password) === 2 ? 'text-yellow-400' :
+                    'text-green-400'
+                  }`}>
+                    {getPasswordStrength(password) === 0 ? 'Weak' :
+                     getPasswordStrength(password) === 1 ? 'Fair' :
+                     getPasswordStrength(password) === 2 ? 'Good' : 'Strong'}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Confirm Password */}
+            <div className="relative">
+              <input
+                type={showConfirmPassword ? 'text' : 'password'}
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                placeholder="Confirm Password"
+                required
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirmPassword(p => !p)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+              >
+                {showConfirmPassword ? <FiEyeOff className="w-4 h-4" /> : <FiEye className="w-4 h-4" />}
+              </button>
+              {confirmPassword && (
+                <p className={`text-xs mt-1.5 px-1 ${password === confirmPassword ? 'text-green-500' : 'text-red-500'}`}>
+                  {password === confirmPassword ? 'Passwords match' : 'Passwords don\'t match'}
+                </p>
+              )}
+            </div>
+
+            {/* Date of Birth - Google style (month dropdown, day, year) - required, 13+ */}
+            <div>
+              <p className="text-xs text-gray-400 mb-2 px-1">Date of birth (you must be 13 or older)</p>
+              <div className="grid grid-cols-12 gap-2">
+                <div className="col-span-5 relative">
+                  <select
+                    value={birthMonth}
+                    onChange={e => setBirthMonth(e.target.value)}
+                    className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2.5 pr-8 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500 appearance-none"
+                    required
+                  >
+                    <option value="">Month</option>
+                    {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m, i) => (
+                      <option key={m} value={String(i + 1)}>{m}</option>
+                    ))}
+                  </select>
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
+                    <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                  </div>
+                </div>
+                <div className="col-span-3">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={birthDay}
+                    onChange={e => setBirthDay(e.target.value.replace(/\D/g, '').slice(0, 2))}
+                    placeholder="Day"
+                    className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                    maxLength={2}
+                  />
+                </div>
+                <div className="col-span-4">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={birthYear}
+                    onChange={e => setBirthYear(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    placeholder="Year"
+                    className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                    maxLength={4}
+                  />
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {step === 2 && (
+          <>
+            {/* Step 2: Location Selection */}
             {/* Name Input */}
             <div>
               <input
                 value={name}
                 onChange={e => setName(e.target.value)}
-                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
                 placeholder="Full Name"
                 required
+                autoComplete="name"
               />
             </div>
 
@@ -522,119 +801,8 @@ export default function LoginPage() {
                 onChange={e => setCountryFlag(e.target.value)}
                 maxLength={8}
                 placeholder="Country Flag (emoji)"
-                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
               />
-            </div>
-          </>
-        )}
-
-        {step === 2 && (
-          <>
-            {/* Step 2: Account Details - Instagram Style */}
-            {/* Email */}
-            <div>
-              <input
-                type="email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
-                placeholder="Email"
-                required
-              />
-            </div>
-
-            {/* Password */}
-            <div>
-              <input
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
-                placeholder="Password"
-                required
-              />
-            </div>
-
-            {/* Confirm Password */}
-            <div>
-              <input
-                type="password"
-                value={confirmPassword}
-                onChange={e => setConfirmPassword(e.target.value)}
-                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
-                placeholder="Confirm Password"
-                required
-              />
-            </div>
-
-            {/* Age */}
-            <div>
-              <input
-                type="number"
-                min="13"
-                max="120"
-                value={age}
-                onChange={e => setAge(e.target.value)}
-                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
-                placeholder="Age (optional)"
-              />
-            </div>
-
-            {/* Interests */}
-            <div className="pt-2">
-              <p className="text-xs text-gray-400 mb-3 px-1">Select up to 5 interests</p>
-              <div className="relative">
-                <select
-                  value=""
-                  onChange={(e) => {
-                    const selectedInterest = e.target.value;
-                    if (selectedInterest && !interests.includes(selectedInterest) && interests.length < 5) {
-                      toggleInterest(selectedInterest);
-                    }
-                    e.target.value = ''; // Reset dropdown
-                  }}
-                  className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500 appearance-none"
-                  disabled={interests.length >= 5}
-                >
-                  <option value="">Select an interest</option>
-                  {interestOptions
-                    .filter(interest => !interests.includes(interest))
-                    .map(interest => (
-                      <option key={interest} value={interest}>{interest}</option>
-                    ))}
-                </select>
-                <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-                  <svg className="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </div>
-              </div>
-              
-              {/* Selected Interests as Chips */}
-              {interests.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {interests.map(interest => (
-                    <div
-                      key={interest}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-500 text-white rounded-sm text-xs"
-                    >
-                      <span>{interest}</span>
-                      <button
-                        type="button"
-                        onClick={() => toggleInterest(interest)}
-                        className="hover:bg-blue-600 rounded-full p-0.5 transition-colors"
-                        aria-label={`Remove ${interest}`}
-                      >
-                        <FiX className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              
-              {interests.length >= 5 && (
-                <p className="text-xs text-gray-400 mt-2 px-1">Maximum 5 interests selected</p>
-              )}
             </div>
           </>
         )}
@@ -689,43 +857,55 @@ export default function LoginPage() {
             </div>
           </>
         )}
-        </div>
 
-        {/* Footer - Instagram Style */}
-        <div className="flex-shrink-0 px-10 pb-10 pt-6 border-t border-gray-700">
-          <div className="space-y-3">
-            <button
-              type="submit"
-              className="w-full px-4 py-2 bg-blue-500 text-white rounded-sm hover:bg-blue-600 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {step === 1 ? 'Next' : step === 2 ? 'Next' : 'Sign Up'}
-            </button>
-            
-            {(step === 2 || step === 3) && (
+            {/* Footer - inside scroll area so T&C is reachable on mobile */}
+            <div className="pt-6 mt-4 border-t border-gray-700 space-y-3">
               <button
-                type="button"
-                onClick={() => updateStep(step - 1)}
-                className="w-full px-4 py-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm font-semibold"
+                type="submit"
+                className="w-full px-4 py-2 bg-blue-500 text-white rounded-sm hover:bg-blue-600 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Back
+                {step === 1 ? 'Create account' : step === 2 ? 'Next' : 'Sign Up'}
               </button>
-            )}
+              
+              {(step === 2 || step === 3) && (
+                <button
+                  type="button"
+                  onClick={() => updateStep(step - 1)}
+                  className="w-full px-4 py-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm font-semibold"
+                >
+                  Back
+                </button>
+              )}
 
-            <p className="text-xs text-center text-gray-400 mt-4">
-              Already have an account?{' '}
-              <button type="button" onClick={() => setMode('login')} className="text-blue-500 hover:underline font-medium">
-                Log in
-              </button>
-            </p>
-            <p className="text-xs text-center text-gray-500 mt-1">
-              {step === 1 
-                ? 'By signing up, you agree to the terms and conditions and community guidelines'
-                : 'By signing up, you agree to connect with your local community'
-              }
-            </p>
-          </div>
+              <p className="text-xs text-center text-gray-400 mt-4">
+                Already have an account?{' '}
+                <button type="button" onClick={() => setMode('login')} className="text-blue-500 hover:underline font-medium">
+                  Log in
+                </button>
+              </p>
+              <p className="text-xs text-center text-gray-500 mt-1">
+                {step === 1 
+                  ? 'By signing up, you agree to the terms and conditions and community guidelines'
+                  : step === 2 
+                    ? (
+                      <>
+                        By signing up, you agree to our{' '}
+                        <Link to="/terms" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
+                          Terms and Conditions
+                        </Link>
+                        {' '}and{' '}
+                        <Link to="/terms#community-guidelines" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
+                          Community Guidelines
+                        </Link>
+                      </>
+                    )
+                    : 'Almost done! Add a profile picture to personalize your account'
+                }
+              </p>
+            </div>
         </div>
       </form>
+      </div>
         )}
       </div>
     </div>

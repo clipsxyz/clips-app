@@ -1,6 +1,7 @@
 import raw from '../data/posts.json';
 import type { Post, Comment, StickerOverlay } from '../types';
 import * as apiClient from './client';
+import { randomUUID } from '../utils/uuid';
 import { wasEverAStory } from './stories';
 import { getActiveBoostedPostIds, activateBoost } from './boost';
 import type { BoostFeedType } from '../components/BoostSelectionModal';
@@ -479,7 +480,7 @@ export function getState(userId: string): UserState {
   return userState[userId];
 }
 
-const delay = (ms = 250) => new Promise(r => setTimeout(r, ms));
+const delay = (ms = 0) => new Promise(r => setTimeout(r, ms));
 
 export type Page = { items: Post[]; nextCursor: number | null };
 
@@ -786,7 +787,17 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       const apiCursor = cursor ?? 0;
       // Only send userId if it looks like a UUID (backend requires uuid|exists:users,id)
       const uuidLike = typeof userId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
-      const response = await apiClient.fetchPostsPage(apiCursor, limit, filter, uuidLike ? userId : undefined);
+      const feedTypeApi = tabToBoostFeedType(t);
+      // Fetch boosted IDs in parallel with posts so "Sponsored" label shows on first page too
+      const boostedPromise = feedTypeApi
+        ? getActiveBoostedPostIds(feedTypeApi).then((ids) => new Set(ids))
+        : t === 'discover'
+          ? Promise.all([getActiveBoostedPostIds('local'), getActiveBoostedPostIds('regional'), getActiveBoostedPostIds('national')]).then(([a, b, c]) => new Set([...a, ...b, ...c]))
+          : Promise.resolve(new Set<string>());
+      const [boostedSetApi, response] = await Promise.all([
+        boostedPromise,
+        apiClient.fetchPostsPage(apiCursor, limit, filter, uuidLike ? userId : undefined),
+      ]);
 
       // Defensive: ensure items is an array (API may return unexpected shape on error)
       const rawItems = Array.isArray(response?.items) ? response.items : [];
@@ -876,19 +887,7 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       }
 
       // Mark any post in the active boosted list so "Sponsored" shows (location feeds and Following feed)
-      const feedTypeApi = tabToBoostFeedType(t);
-      let boostedSetApi = new Set<string>();
-      if (feedTypeApi) {
-        const ids = await getActiveBoostedPostIds(feedTypeApi);
-        boostedSetApi = new Set(ids);
-      } else if (t === 'discover') {
-        const [localIds, regionalIds, nationalIds] = await Promise.all([
-          getActiveBoostedPostIds('local'),
-          getActiveBoostedPostIds('regional'),
-          getActiveBoostedPostIds('national')
-        ]);
-        boostedSetApi = new Set([...localIds, ...regionalIds, ...nationalIds]);
-      }
+      // boostedSetApi already fetched in parallel above
       if (boostedSetApi.size > 0) {
         items = items.map(p =>
           boostedSetApi.has(p.id)
@@ -896,6 +895,10 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
             : p
         );
       }
+
+      // Decorate every item with local follow/like state so + vs check and heart stay correct (e.g. Following feed)
+      const uid = userId || 'me';
+      items = items.map(p => decorateForUser(uid, p));
 
       return {
         items,
@@ -927,7 +930,7 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       });
     }
 
-    await delay();
+    await delay(0);
     const t = tab.toLowerCase();
 
     // Debug: Log posts array state
@@ -1066,7 +1069,7 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
 
     const slice = sortedWithMock.slice(start, start + limit).map(p => decorateForUser(userId, p));
 
-    // Instagram-style: inject paid boosted posts into the feed (one every 5 organic)
+    // Instagram-style: inject paid boosted posts into the feed (one every 3 organic)
     // Only show a boosted post in a location feed if the AUTHOR's location matches that tab (e.g. Ava boosted for regional → show in Galway, not Dublin)
     const feedType = tabToBoostFeedType(tab);
     let items = slice;
@@ -1104,7 +1107,7 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
         const merged: Post[] = [];
         let o = 0, b = 0;
         while (o < slice.length || b < boostedPosts.length) {
-          const insertBoostedAt = merged.length === 1 || ((merged.length - 1) % 5 === 0 && merged.length >= 1);
+          const insertBoostedAt = merged.length === 1 || ((merged.length - 1) % 3 === 0 && merged.length >= 1);
           if (b < boostedPosts.length && insertBoostedAt) {
             merged.push(boostedPosts[b++]);
           } else if (o < slice.length) {
@@ -1447,7 +1450,7 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 // Comment API functions (without replies)
 // Optional userId: when provided and we fetch from Laravel, we get user_liked etc. and decorate.
 export async function getPostById(postId: string, userId?: string): Promise<Post | null> {
-  await delay(50);
+  await delay(0);
   const local = posts.find(p => p.id === postId);
   if (local) return local;
 
@@ -1495,7 +1498,8 @@ export async function getPostById(postId: string, userId?: string): Promise<Post
 
 export async function fetchComments(postId: string): Promise<Comment[]> {
   await delay(200);
-  return comments.filter(c => c.postId === postId);
+  // Only return top-level comments (replies live in comment.replies, not as top-level items)
+  return comments.filter(c => c.postId === postId && !c.parentId);
 }
 
 export async function fetchPostsByUser(userHandle: string, limit = 30): Promise<Post[]> {
@@ -1538,7 +1542,7 @@ export async function addComment(postId: string, userHandle: string, text: strin
   console.log('addComment called:', { postId, userHandle, text, postsCount: posts.length });
 
   const comment: Comment = {
-    id: crypto.randomUUID(),
+    id: randomUUID(),
     postId,
     userHandle,
     text,
@@ -1618,9 +1622,10 @@ export async function toggleReplyLike(parentCommentId: string, replyId: string):
     throw new Error('Reply not found');
   }
 
-  // Toggle the like state
+  // Ensure likes is a number (in case API or old data omitted it)
+  const currentLikes = typeof reply.likes === 'number' ? reply.likes : 0;
   reply.userLiked = !reply.userLiked;
-  reply.likes += reply.userLiked ? 1 : -1;
+  reply.likes = currentLikes + (reply.userLiked ? 1 : -1);
 
   return parentComment;
 }
@@ -1628,7 +1633,7 @@ export async function toggleReplyLike(parentCommentId: string, replyId: string):
 export async function addReply(postId: string, parentId: string, userHandle: string, text: string): Promise<Comment> {
   await delay(300);
   const reply: Comment = {
-    id: crypto.randomUUID(),
+    id: randomUUID(),
     postId,
     userHandle,
     text,
@@ -1876,7 +1881,7 @@ export async function createPost(
         : undefined;
 
     const newPost: Post = {
-      id: `${crypto.randomUUID()}-${postCreatedAt}`,
+      id: `${randomUUID()}-${postCreatedAt}`,
       userHandle,
       locationLabel: location || 'Unknown Location',
       tags: [],

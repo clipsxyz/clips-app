@@ -21,6 +21,7 @@ import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addC
 import { updatePost, checkFollowsMe } from './api/client';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory } from './api/stories';
 import { enqueue, drain } from './utils/mutationQueue';
+import { loadFeed, saveFeed } from './utils/feedCache';
 import { timeAgo } from './utils/timeAgo';
 import { getActiveAds, trackAdImpression, trackAdClick } from './api/ads';
 import { getActiveBoost, getBoostTimeRemaining } from './api/boost';
@@ -178,11 +179,18 @@ export default function App() {
   // Determine current filter - custom location overrides tabs
   const currentFilter = customLocation || activeTab;
 
+  const isLoginPage = loc.pathname === '/login';
   return (
     <>
-      <main id="main" className="mx-auto max-w-md min-h-screen pb-[calc(64px+theme(spacing.safe))] md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800" style={{ backgroundColor: '#030712' }}>
+      <main 
+        id="main" 
+        className={`mx-auto max-w-md md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800 ${isLoginPage ? 'h-screen min-h-[100dvh] overflow-hidden flex flex-col' : 'min-h-screen pb-[calc(64px+theme(spacing.safe))]'}`} 
+        style={{ backgroundColor: '#030712' }}
+      >
         {loc.pathname !== '/login' && loc.pathname !== '/feed' && loc.pathname !== '/profile' && loc.pathname !== '/clip' && loc.pathname !== '/stories' && !loc.pathname.startsWith('/user/') && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
-        <Outlet context={{ activeTab, setActiveTab, customLocation, setCustomLocation }} />
+        <div className={isLoginPage ? 'flex-1 min-h-0 overflow-hidden flex flex-col' : undefined}>
+          <Outlet context={{ activeTab, setActiveTab, customLocation, setCustomLocation }} />
+        </div>
         {loc.pathname !== '/discover' && loc.pathname !== '/create/filters' && loc.pathname !== '/create/instant' && loc.pathname !== '/payment' && loc.pathname !== '/clip' && loc.pathname !== '/create' && loc.pathname !== '/template-editor' && loc.pathname !== '/login' && (
           <BottomNav onCreateClick={() => navigate('/create/instant')} />
         )}
@@ -200,15 +208,22 @@ export default function App() {
 
 function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCustom?: () => void; userLocal?: string; userRegional?: string; userNational?: string; clipsCount?: number }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const isMountedRef = React.useRef(false);
   const [notificationCount, setNotificationCount] = React.useState(0);
   const [insightsCount, setInsightsCount] = React.useState(0);
   const [questionsCount, setQuestionsCount] = React.useState(0);
   const borderOverlayRef = React.useRef<HTMLDivElement>(null);
+  const clipsBorderOverlayRef = React.useRef<HTMLDivElement>(null);
   const discoverBorderOverlayRef = React.useRef<HTMLDivElement>(null);
   const tabBorderOverlayRefs = React.useRef<{ [key: string]: HTMLDivElement | null }>({});
   const prevActiveTabRef = React.useRef<Tab | null>(null);
+  const clipsDiscoverAnimatedRef = React.useRef(false);
+
+  // Highlight Clips / Discover pills based on current route
+  const isOnClipsPage = location.pathname === '/stories';
+  const isOnDiscoverPage = location.pathname === '/discover';
 
   // Use user location from props or context, with fallback to defaults
   const local = props.userLocal || user?.local || 'Finglas';
@@ -286,50 +301,47 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
     return 1 - Math.pow(1 - t, 3);
   };
 
-  // Animate border reveal when active tab changes
+  // Helper: run progressive border reveal on an overlay element
+  const runBorderRevealAnimation = React.useCallback((overlay: HTMLDivElement | null) => {
+    if (!overlay) return;
+    overlay.style.maskImage = 'conic-gradient(from 0deg, black 360deg)';
+    overlay.style.webkitMaskImage = 'conic-gradient(from 0deg, black 360deg)';
+    const duration = 1800;
+    const startTime = Date.now();
+    const animate = () => {
+      const elapsed = Date.now() - startTime;
+      const rawProgress = Math.min(elapsed / duration, 1);
+      const easedProgress = easeOutCubic(rawProgress);
+      const angle = easedProgress * 360;
+      const mask = `conic-gradient(from 0deg, transparent 0deg, transparent ${angle}deg, black ${angle}deg, black 360deg)`;
+      overlay.style.maskImage = mask;
+      overlay.style.webkitMaskImage = mask;
+      if (rawProgress < 1) requestAnimationFrame(animate);
+      else {
+        overlay.style.maskImage = 'conic-gradient(from 0deg, transparent 0deg, transparent 360deg)';
+        overlay.style.webkitMaskImage = 'conic-gradient(from 0deg, transparent 0deg, transparent 360deg)';
+      }
+    };
+    requestAnimationFrame(animate);
+  }, []);
+
+  // Animate border reveal when active tab changes (location tabs – white border)
   React.useEffect(() => {
     const currentTab = props.active;
     const prevTab = prevActiveTabRef.current;
-    
-    // Only animate if tab actually changed
     if (currentTab !== prevTab && currentTab) {
-      const overlay = tabBorderOverlayRefs.current[currentTab];
-      if (overlay) {
-        // Reset overlay to start position
-        overlay.style.maskImage = 'conic-gradient(from 0deg, black 360deg)';
-        overlay.style.webkitMaskImage = 'conic-gradient(from 0deg, black 360deg)';
-        
-        // Start animation
-        const duration = 1800; // 1.8 seconds for smoother feel
-        const startTime = Date.now();
-        
-        const animate = () => {
-          const elapsed = Date.now() - startTime;
-          const rawProgress = Math.min(elapsed / duration, 1);
-          // Apply easing for smoother animation
-          const easedProgress = easeOutCubic(rawProgress);
-          const angle = easedProgress * 360;
-          
-          // Create mask that reveals progressively going around
-          const mask = `conic-gradient(from 0deg, transparent 0deg, transparent ${angle}deg, black ${angle}deg, black 360deg)`;
-          overlay.style.maskImage = mask;
-          overlay.style.webkitMaskImage = mask;
-          
-          if (rawProgress < 1) {
-            requestAnimationFrame(animate);
-          } else {
-            // Animation complete - make overlay fully transparent so border is fully visible
-            overlay.style.maskImage = 'conic-gradient(from 0deg, transparent 0deg, transparent 360deg)';
-            overlay.style.webkitMaskImage = 'conic-gradient(from 0deg, transparent 0deg, transparent 360deg)';
-          }
-        };
-        
-        requestAnimationFrame(animate);
-      }
+      runBorderRevealAnimation(tabBorderOverlayRefs.current[currentTab] ?? null);
     }
-    
     prevActiveTabRef.current = currentTab;
-  }, [props.active]);
+  }, [props.active, runBorderRevealAnimation]);
+
+  // One-time progressive border animation for Clips and Discover on mount
+  React.useEffect(() => {
+    if (clipsDiscoverAnimatedRef.current) return;
+    clipsDiscoverAnimatedRef.current = true;
+    runBorderRevealAnimation(clipsBorderOverlayRef.current);
+    runBorderRevealAnimation(discoverBorderOverlayRef.current);
+  }, [runBorderRevealAnimation]);
 
   return (
     <div role="tablist" aria-label="Locations" className="sticky top-0 z-30 bg-[#030712] py-2 relative">
@@ -338,7 +350,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
 
       {/* Top header row with Clips on the left, centered Gazetteer logo, and Discover on the right */}
       <div className="relative z-10 mb-2 flex items-center px-2 sm:px-3 gap-1 sm:gap-2 min-w-0">
-        {/* Left: Clips pill */}
+        {/* Left: Clips pill with progressive white border */}
         <div className="flex items-center flex-shrink-0">
           <button
             type="button"
@@ -346,8 +358,20 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               e.stopPropagation();
               navigate('/stories');
             }}
-            className="relative px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-bold text-gray-300 hover:text-white transition-colors rounded-lg border-2 border-white"
+            className={`relative px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-bold transition-colors rounded-lg min-w-0 ${
+              isOnClipsPage ? 'bg-white/5 text-white' : 'text-gray-300 hover:text-white'
+            }`}
+            style={{ outline: 'none', boxShadow: 'none' }}
           >
+            <div
+              className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
+              style={{
+                background:
+                  'linear-gradient(90deg, red, yellow, red)',
+              }}
+            >
+              <div className="w-full h-full rounded-lg bg-black relative z-10" />
+            </div>
             <span className="relative z-10">Clips24</span>
           </button>
         </div>
@@ -375,11 +399,9 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                 <defs>
                   <linearGradient id="gazetteerWaveGradient" x1="0%" y1="50%" x2="100%" y2="50%">
                     <stop offset="0%" stopColor="transparent" stopOpacity="0" />
-                    <stop offset="15%" stopColor="rgb(255, 140, 0)" stopOpacity="0.6" />
-                    <stop offset="30%" stopColor="rgb(248, 0, 50)" stopOpacity="0.6" />
-                    <stop offset="50%" stopColor="rgb(255, 0, 160)" stopOpacity="0.6" />
-                    <stop offset="70%" stopColor="rgb(140, 40, 255)" stopOpacity="0.6" />
-                    <stop offset="85%" stopColor="rgb(0, 35, 255)" stopOpacity="0.6" />
+                    <stop offset="20%" stopColor="red" stopOpacity="0.7" />
+                    <stop offset="50%" stopColor="yellow" stopOpacity="0.9" />
+                    <stop offset="80%" stopColor="red" stopOpacity="0.7" />
                     <stop offset="100%" stopColor="transparent" stopOpacity="0" />
                   </linearGradient>
                 </defs>
@@ -410,7 +432,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
           </button>
         </div>
 
-        {/* Right: Discover pill */}
+        {/* Right: Discover pill with progressive white border */}
         <div className="flex items-center flex-shrink-0">
           <button
             type="button"
@@ -418,8 +440,20 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               e.stopPropagation();
               navigate('/discover');
             }}
-            className="relative px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-bold text-gray-300 hover:text-white transition-colors rounded-lg border-2 border-white"
+            className={`relative px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-bold transition-colors rounded-lg min-w-0 ${
+              isOnDiscoverPage ? 'bg-white/5 text-white' : 'text-gray-300 hover:text-white'
+            }`}
+            style={{ outline: 'none', boxShadow: 'none' }}
           >
+            <div
+              className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
+              style={{
+                background:
+                  'linear-gradient(90deg, red, yellow, red)',
+              }}
+            >
+              <div className="w-full h-full rounded-lg bg-black relative z-10" />
+            </div>
             <span className="relative z-10">Discover</span>
           </button>
         </div>
@@ -475,11 +509,11 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                   e.currentTarget.style.boxShadow = 'none';
                 }}
               >
-                {/* Gradient border wrapper */}
+                {/* White progressive border wrapper */}
                 <div
                   className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
                   style={{
-                    background: 'conic-gradient(from 0deg, rgb(255, 140, 0), rgb(248, 0, 50), rgb(255, 0, 160), rgb(140, 40, 255), rgb(0, 35, 255), rgb(25, 160, 255), rgb(255, 140, 0))',
+                    background: 'conic-gradient(from 0deg, white, white)',
                   }}
                 >
                   {/* Overlay that covers border initially, then rotates to reveal it */}
@@ -1036,20 +1070,15 @@ function TextCard({ text, onDoubleLike, textStyle, stickers }: { text: string; o
   // Get text color from textStyle or default to white
   const textColor = textStyle?.color || 'white';
 
-  async function handleTap() {
+  function handleTap() {
     const now = Date.now();
     const timeSinceLastTap = now - lastTap.current;
 
     if (timeSinceLastTap < 300) {
-      // Double tap detected - only call onDoubleLike here
       setBurst(true);
-      try {
-        await onDoubleLike();
-      } finally {
-        setTimeout(() => setBurst(false), 600);
-      }
+      onDoubleLike().catch(() => {});
+      setTimeout(() => setBurst(false), 600);
     }
-    // Always update lastTap for next potential double-tap
     lastTap.current = now;
   }
 
@@ -1756,25 +1785,18 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
         onHeartAnimation(clientX, clientY);
       }
 
-      // Show burst animation
+      // Show burst animation (clear on timer so UI never waits on API)
       setBurst(true);
+      onDoubleLike().catch(error => console.error('Error in double tap like:', error));
 
-      try {
-        // Call the like handler
-        await onDoubleLike();
-      } catch (error) {
-        console.error('Error in double tap like:', error);
-      } finally {
-        // Smoothly fade out animations
-        setTimeout(() => {
-          setBurst(false);
-        }, ANIMATION_DURATIONS.HEART_BURST);
+      setTimeout(() => {
+        setBurst(false);
+      }, ANIMATION_DURATIONS.HEART_BURST);
 
-        setTimeout(() => {
-          setTapPosition(null);
-          isProcessingDoubleTap.current = false;
-        }, ANIMATION_DURATIONS.HEART_POPUP);
-      }
+      setTimeout(() => {
+        setTapPosition(null);
+        isProcessingDoubleTap.current = false;
+      }, ANIMATION_DURATIONS.HEART_POPUP);
     } else {
       // Single tap - wait to see if it's actually a double tap
       singleTapTimer.current = setTimeout(() => {
@@ -2670,6 +2692,7 @@ function EngagementBar({
   const [reclips, setReclips] = React.useState(post.stats.reclips);
   const [userReclipped, setUserReclipped] = React.useState(post.userReclipped || false);
   const [busy, setBusy] = React.useState(false);
+  const likeCooldownRef = React.useRef(0);
 
   // Sync with post data changes
   React.useEffect(() => {
@@ -2733,14 +2756,11 @@ function EngagementBar({
     };
   }, [post.id]);
 
-  async function likeClick() {
-    if (busy) return;
-    setBusy(true);
-    try {
-      await onLike();
-    } finally {
-      setBusy(false);
-    }
+  function likeClick() {
+    const now = Date.now();
+    if (now < likeCooldownRef.current) return;
+    likeCooldownRef.current = now + 400;
+    onLike().catch(err => console.warn('Like error:', err));
   }
 
   async function reclipClick() {
@@ -2783,11 +2803,7 @@ function EngagementBar({
     }
 
     setBusy(true);
-    try {
-      await onReclip();
-    } finally {
-      setBusy(false);
-    }
+    onReclip().finally(() => setBusy(false));
   }
 
   async function shareClick() {
@@ -3348,7 +3364,9 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         currentUserHandle={user?.handle}
         currentUserId={user?.id}
         showMetricsIcon={engagementVariant === 'boost' ? false : (showBoostIcon && isBoosted)}
-        showBoostButton={showBoostIcon}
+        // Only show the blue Boost button where explicitly enabled (e.g. Boost page),
+        // not on normal news feed cards.
+        showBoostButton={engagementVariant === 'boost' && showBoostIcon}
         onBoost={onBoost}
         onToggleMetrics={() => setIsMetricsOpen(!isMetricsOpen)}
         isMetricsOpen={isMetricsOpen}
@@ -3356,6 +3374,12 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         variant={engagementVariant === 'boost' ? 'boost' : 'default'}
         knownBoosted={knownBoosted}
       />
+      {/* Debug: show media URL under card in dev so you can copy it on phone */}
+      {import.meta.env.DEV && post.mediaUrl && (
+        <div className="px-4 pb-2 text-[10px] text-gray-400 break-all">
+          mediaUrl: {post.mediaUrl}
+        </div>
+      )}
       {/* Heart animation from tap to like button - rendered after EngagementBar so ref is set */}
       {heartAnimation && (() => {
         const el = likeButtonRef.current;
@@ -3639,6 +3663,54 @@ function FeedPageWrapper() {
   const [dmSheetRecipientHandle, setDmSheetRecipientHandle] = React.useState<string | null>(null);
   const [dmSheetMessage, setDmSheetMessage] = React.useState('');
   const dmSheetInputRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const pagesLoadedForFilterRef = React.useRef<string | null>(null);
+
+  // Per-location "notify me when this feed wakes up" preferences (stored by lowercase name)
+  const [notifyLocations, setNotifyLocations] = React.useState<string[]>([]);
+  React.useEffect(() => {
+    try {
+      const raw = localStorage.getItem('locationNotifyOptIn');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) setNotifyLocations(parsed);
+      }
+    } catch {
+      // ignore parse errors
+    }
+  }, []);
+
+  const isVisitorInCustomLocation = React.useMemo(() => {
+    if (!customLocation || !user) return false;
+    const loc = customLocation.trim().toLowerCase();
+    const local = (user.local || '').trim().toLowerCase();
+    const regional = (user.regional || '').trim().toLowerCase();
+    const national = (user.national || '').trim().toLowerCase();
+    return loc !== '' && loc !== local && loc !== regional && loc !== national;
+  }, [customLocation, user?.local, user?.regional, user?.national]);
+
+  const isNotifyOnForCurrentLocation = React.useMemo(() => {
+    if (!customLocation) return false;
+    const key = customLocation.trim().toLowerCase();
+    if (!key) return false;
+    return notifyLocations.includes(key);
+  }, [customLocation, notifyLocations]);
+
+  const toggleNotifyForCurrentLocation = React.useCallback(() => {
+    if (!customLocation) return;
+    const key = customLocation.trim().toLowerCase();
+    if (!key) return;
+    setNotifyLocations(prev => {
+      const exists = prev.includes(key);
+      const next = exists ? prev.filter(k => k !== key) : [...prev, key];
+      try {
+        localStorage.setItem('locationNotifyOptIn', JSON.stringify(next));
+      } catch {
+        // ignore storage errors
+      }
+      return next;
+    });
+  }, [customLocation]);
+
 
   // Internal state for Following feed (separate from tabs)
   const [showFollowingFeed, setShowFollowingFeed] = React.useState(false);
@@ -3721,8 +3793,8 @@ function FeedPageWrapper() {
     };
   }, [user?.handle]);
 
-  // Determine current filter - showFollowingFeed overrides everything, then custom location, then active tab
-  const currentFilter = showFollowingFeed ? 'discover' : (customLocation || active);
+  // Determine current filter - use 'discover' whenever user is on Following tab so we never briefly request wrong feed
+  const currentFilter = (active === 'Following' || showFollowingFeed) ? 'discover' : (customLocation || active);
 
   // Read location from URL query (?location=...) when arriving from Discover
   React.useEffect(() => {
@@ -3765,14 +3837,47 @@ function FeedPageWrapper() {
     }
   }, [routerLocation.search, routerLocation.pathname]); // Don't include customLocation to avoid infinite loops
 
-  // Reset feed only when tab/location (currentFilter) changes — not when userId changes, to avoid flash (Ava appears then disappears when auth loads)
+  // Reset feed only when tab/location (currentFilter) changes
   React.useEffect(() => {
+    pagesLoadedForFilterRef.current = null;
     setPages([]);
     setCursor(0);
     setEnd(false);
-    console.log('Location changed to:', currentFilter, 'customLocation:', customLocation, 'active:', active, 'computed currentFilter:', currentFilter);
     requestTokenRef.current++;
   }, [currentFilter]);
+
+  // Cache-first for location feeds; Following (discover) always fetches fresh so we never show wrong posts
+  React.useEffect(() => {
+    const params = new URLSearchParams(routerLocation.search);
+    const pendingUrlLocation = params.get('location');
+    if (pendingUrlLocation && !customLocation) return;
+    if (cursor !== 0 || !userId) return;
+
+    const isDiscover = currentFilter.toLowerCase() === 'discover';
+    if (isDiscover) {
+      loadMore(false);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const cached = await loadFeed(userId, currentFilter);
+        if (cancelled) return;
+        const hasCache = cached && cached.length > 0;
+        if (hasCache) {
+          pagesLoadedForFilterRef.current = currentFilter;
+          setPages(cached);
+          loadMore(true);
+        } else {
+          loadMore(false);
+        }
+      } catch {
+        if (!cancelled) loadMore(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [cursor, currentFilter, userId, routerLocation.search, customLocation]);
 
   // Sync with TopBar dropdown and Discover page
   React.useEffect(() => {
@@ -3837,11 +3942,11 @@ function FeedPageWrapper() {
     setSelectedPostId(null);
   };
 
-  async function loadMore() {
+  async function loadMore(silent = false) {
     if (loading || end || cursor === null) {
       return;
     }
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError(null);
     try {
       requestTokenRef.current++;
@@ -3853,10 +3958,19 @@ function FeedPageWrapper() {
         return;
       }
       setPages(prev => {
-        // If this is the first page (cursor === 0), replace; otherwise append for pagination
-        const next = cursor === 0 ? [page.items] : [...prev, page.items];
-        // Temporarily disable feed cache to avoid duplicates
-        // saveFeed(userId, currentFilter, next);
+        const existingIds = cursor === 0 ? new Set<string>() : new Set(prev.flat().map(p => p.id));
+        const newChunk = page.items.filter(x => !existingIds.has(x.id));
+        const seenInChunk = new Set<string>();
+        const dedupedChunk = newChunk.filter(x => {
+          if (seenInChunk.has(x.id)) return false;
+          seenInChunk.add(x.id);
+          return true;
+        });
+        const next = cursor === 0 ? [dedupedChunk] : [...prev, dedupedChunk];
+        if (cursor === 0) {
+          pagesLoadedForFilterRef.current = filterForRequest;
+          saveFeed(userId, currentFilter, next).catch(() => {});
+        }
         return next;
       });
       setCursor(page.nextCursor);
@@ -3865,7 +3979,7 @@ function FeedPageWrapper() {
       console.error('loadMore error:', e);
       setError(e?.message ?? 'Failed to load posts.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
 
@@ -3933,9 +4047,11 @@ function FeedPageWrapper() {
             // Load fresh data using the same pattern as loadMore
             const filterForRequest = currentFilter;
             const pageFresh = await fetchPostsPage(filterForRequest, 0, 5, userId, user?.local || '', user?.regional || '', user?.national || '', user?.handle || '');
-            setPages([pageFresh.items]);
+            const next = [pageFresh.items];
+            setPages(next);
             setCursor(pageFresh.nextCursor);
             setEnd(pageFresh.nextCursor === null);
+            saveFeed(userId, currentFilter, next).catch(() => {});
 
             // Scroll to top smoothly to show new posts
             window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -3949,16 +4065,6 @@ function FeedPageWrapper() {
     return () => clearInterval(pollInterval);
   }, [pages.length, loading, end, currentFilter, userId, user?.local, user?.regional, user?.national]);
 
-  // Initial load (and reload after postCreated reset)
-  React.useEffect(() => {
-    const params = new URLSearchParams(routerLocation.search);
-    const pendingUrlLocation = params.get('location');
-    if (pendingUrlLocation && !customLocation) return;
-
-    if (cursor !== null && pages.length === 0) {
-      loadMore();
-    }
-  }, [cursor, pages.length, currentFilter, routerLocation.search, customLocation]);
 
   // Easing function for smooth animation (ease-out cubic)
   const easeOutCubic = (t: number): number => {
@@ -4096,8 +4202,9 @@ function FeedPageWrapper() {
     }
   }, [currentFilter, user]);
 
-  // Merge posts and ads, sort by epoch time (createdAt)
+  // Merge posts and ads; only show posts when they were loaded for the current filter (stops wrong feed flashing on Following)
   const flat = React.useMemo(() => {
+    if (pagesLoadedForFilterRef.current !== currentFilter) return [];
     const flattened = pages.flat();
 
     // Dedupe by id (normalize to string so 123 and "123" are the same). Prefer the copy with isBoosted so "Sponsored" shows.
@@ -4129,6 +4236,16 @@ function FeedPageWrapper() {
 
     return feedItems;
   }, [pages, ads]);
+
+  // Posts only (no ads) - for Scenes carousel
+  const postsOnly = React.useMemo(() => flat.filter((f) => f.type === 'post').map((f) => f.item as Post), [flat]);
+
+  // Human-readable feed label for Scenes carousel header
+  const feedLabelForScenes = React.useMemo(() => {
+    const f = currentFilter?.toLowerCase() || '';
+    if (f === 'discover') return 'Following';
+    return currentFilter ? String(currentFilter).charAt(0).toUpperCase() + String(currentFilter).slice(1) : '';
+  }, [currentFilter]);
 
   // Not logged in
   if (!user) {
@@ -4178,11 +4295,11 @@ function FeedPageWrapper() {
               className="relative px-3 py-1.5 text-sm font-medium text-white rounded-lg"
               onClick={() => setCustomLocation(null)}
             >
-              {/* Gradient border wrapper */}
+              {/* Gradient border wrapper – match Clips/Discover red → yellow → red, with rotating reveal */}
               <div
                 className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
                 style={{
-                  background: 'conic-gradient(from 0deg, rgb(255, 140, 0), rgb(248, 0, 50), rgb(255, 0, 160), rgb(140, 40, 255), rgb(0, 35, 255), rgb(25, 160, 255), rgb(255, 140, 0))',
+                  background: 'linear-gradient(90deg, red, yellow, red)',
                 }}
               >
                 {/* Overlay that covers border initially, then rotates to reveal it */}
@@ -4263,14 +4380,21 @@ function FeedPageWrapper() {
             post={p}
             priority={isPriority}
             onLike={async () => {
-              console.log('Like button clicked for post:', p.id, 'userLiked:', p.userLiked);
               if (!online) {
                 updateOne(p.id, post => ({ ...post, userLiked: !post.userLiked }));
                 await enqueue({ type: 'like', postId: p.id, userId });
                 return;
               }
               const nextLiked = !p.userLiked;
-              const nextLikes = p.stats.likes + (nextLiked ? 1 : -1);
+              const nextLikes = Math.max(0, p.stats.likes + (nextLiked ? 1 : -1));
+              updateOne(p.id, post => ({
+                ...post,
+                userLiked: nextLiked,
+                stats: { ...post.stats, likes: nextLikes }
+              }));
+              window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
+                detail: { liked: nextLiked, likes: nextLikes }
+              }));
               try {
                 const updated = await toggleLike(userId, p.id);
                 updateOne(p.id, _post => ({ ...updated }));
@@ -4278,20 +4402,19 @@ function FeedPageWrapper() {
                   detail: { liked: updated.userLiked, likes: updated.stats.likes }
                 }));
               } catch (err) {
-                console.warn('Like failed, updating UI optimistically:', err);
+                console.warn('Like failed, reverting:', err);
                 updateOne(p.id, post => ({
                   ...post,
-                  userLiked: nextLiked,
-                  stats: { ...post.stats, likes: Math.max(0, nextLikes) }
+                  userLiked: p.userLiked,
+                  stats: { ...post.stats, likes: p.stats.likes }
                 }));
                 window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
-                  detail: { liked: nextLiked, likes: Math.max(0, nextLikes) }
+                  detail: { liked: p.userLiked, likes: p.stats.likes }
                 }));
               }
             }}
             onFollow={async () => {
           if (!online) {
-            // Offline: optimistically toggle follow both in the post and in the shared follow state
             updateOne(p.id, post => ({ ...post, isFollowing: !post.isFollowing }));
             setFollowState(userId, p.userHandle, !p.isFollowing);
             await enqueue({ type: 'follow', postId: p.id, userId });
@@ -4305,45 +4428,44 @@ function FeedPageWrapper() {
                 return;
               }
 
-              // Check if profile is private before following
+              const wasFollowing = p.isFollowing;
+              if (!wasFollowing) {
+                setFollowState(userId, p.userHandle, true);
+                updateOne(p.id, post => ({ ...post, isFollowing: true }));
+              }
+
               const { isProfilePrivate } = await import('./api/privacy');
               const { toggleFollow } = await import('./api/client');
               const { createFollowRequest, hasPendingFollowRequest, removeFollowRequest } = await import('./api/privacy');
               const { createNotification } = await import('./api/notifications');
               const { getFollowedUsers } = await import('./api/posts');
-              
               const profilePrivate = isProfilePrivate(p.userHandle);
 
-              // For private profiles, handle follow flow only on the profile page
-              // so all the "request sent" / "pending" logic is in one place.
-              // From the feed card, just take the user to the profile.
               if (profilePrivate) {
+                if (!wasFollowing) {
+                  setFollowState(userId, p.userHandle, false);
+                  updateOne(p.id, post => ({ ...post, isFollowing: false }));
+                }
                 navigate(`/user/${p.userHandle}`);
                 return;
               }
               
-              // Check actual follow status from the followed users list
               let isActuallyFollowing = p.isFollowing;
               if (user?.id) {
                 try {
                   const followedUsers = await getFollowedUsers(user.id);
                   isActuallyFollowing = followedUsers.includes(p.userHandle);
-                  // If actually following, remove any stale follow requests
-                  if (isActuallyFollowing && user.handle) {
-                    removeFollowRequest(user.handle, p.userHandle);
-                  }
+                  if (isActuallyFollowing && user.handle) removeFollowRequest(user.handle, p.userHandle);
                 } catch (error) {
                   console.warn('Error checking followed users:', error);
                 }
               }
               
-              // If already following, remove any stale follow requests and just unfollow
-              if (isActuallyFollowing) {
-                if (user?.handle) {
-                  removeFollowRequest(user.handle, p.userHandle);
-                }
+              if (isActuallyFollowing && wasFollowing) {
+                if (user?.handle) removeFollowRequest(user.handle, p.userHandle);
                 const updated = await toggleFollowForPost(userId, p.id);
                 updateOne(p.id, _post => ({ ...updated }));
+                setFollowState(userId, p.userHandle, !!updated.isFollowing);
                 return;
               }
               
@@ -4384,9 +4506,7 @@ function FeedPageWrapper() {
                 isActuallyFollowing
               });
               
-              // If private profile and has pending request, show message
               if (profilePrivate && hasPending && user?.handle) {
-                // Already has a pending request - show message
                 const Swal = (await import('sweetalert2')).default;
                 Swal.fire({
                   title: 'Gazetteer says',
@@ -4630,25 +4750,13 @@ function FeedPageWrapper() {
                   }
                 }
               } else {
-                // Public profile - follow immediately
+                // Public profile – follow via API then update UI
                 try {
-                  // First try the backend API so Laravel posts (which aren't in the mock posts array)
-                  // correctly toggle follow state.
                   const result = await toggleFollow(p.userHandle);
                   const newFollowingState =
                     result?.status === 'accepted' || result?.following === true;
-
                   setFollowState(userId, p.userHandle, newFollowingState);
                   updateOne(p.id, post => ({ ...post, isFollowing: newFollowingState }));
-
-                  // Refetch discover feed so the new follow's posts appear in Following tab
-                  if (newFollowingState && (showFollowingFeed || currentFilter.toLowerCase() === 'discover')) {
-                    setPages([]);
-                    setCursor(0);
-                    setEnd(false);
-                    setError(null);
-                    requestTokenRef.current++;
-                  }
                 } catch (apiError: any) {
                   const isConnectionError =
                     apiError?.message === 'CONNECTION_REFUSED' ||
@@ -4657,27 +4765,20 @@ function FeedPageWrapper() {
                   const is404 = apiError?.status === 404;
 
                   if (isConnectionError) {
-                    // Backend not available – fall back to mock follow toggling
                     try {
                       const updated = await toggleFollowForPost(userId, p.id);
                       updateOne(p.id, _post => ({ ...updated }));
+                      setFollowState(userId, p.userHandle, !!updated.isFollowing);
                     } catch {
-                      setFollowState(userId, p.userHandle, true);
-                      updateOne(p.id, post => ({ ...post, isFollowing: true }));
+                      setFollowState(userId, p.userHandle, wasFollowing);
+                      updateOne(p.id, post => ({ ...post, isFollowing: wasFollowing }));
                     }
                   } else if (is404 || apiError?.status >= 400) {
-                    // User not found (404) or other API error – update local state so + turns to check
-                    // (e.g. feed shows Bob@Ireland but backend only has bob@finglas)
                     setFollowState(userId, p.userHandle, true);
                     updateOne(p.id, post => ({ ...post, isFollowing: true }));
-                    if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
-                      setPages([]);
-                      setCursor(0);
-                      setEnd(false);
-                      setError(null);
-                      requestTokenRef.current++;
-                    }
                   } else {
+                    setFollowState(userId, p.userHandle, wasFollowing);
+                    updateOne(p.id, post => ({ ...post, isFollowing: wasFollowing }));
                     throw apiError;
                   }
                 }
@@ -4920,11 +5021,15 @@ function FeedPageWrapper() {
         </div>
       )}
 
-      {loading && (
-        <div className="px-4 py-6 animate-pulse">
-          <div className="h-4 w-40 bg-gray-200 dark:bg-gray-800 rounded mb-2" />
-          <div className="h-4 w-24 bg-gray-200 dark:bg-gray-800 rounded mb-4" />
-          <div className="w-full aspect-square bg-gray-200 dark:bg-gray-800 rounded-xl" />
+      {(loading || (pages.length === 0 && !end)) && (
+        <div className="space-y-4 px-4 py-6">
+          {[1, 2].map((i) => (
+            <div key={i} className="animate-pulse">
+              <div className="h-4 w-40 bg-gray-200 dark:bg-gray-800 rounded mb-2" />
+              <div className="h-4 w-24 bg-gray-200 dark:bg-gray-800 rounded mb-4" />
+              <div className="w-full aspect-square bg-gray-200 dark:bg-gray-800 rounded-xl" />
+            </div>
+          ))}
         </div>
       )}
 
@@ -4936,15 +5041,88 @@ function FeedPageWrapper() {
               <div className="text-gray-600 text-sm">This feed only populates with the accounts you follow. Start tapping Follow to personalize your stream</div>
             </>
           ) : customLocation ? (
-            <>
-              <div className="text-lg font-semibold mb-1">No posts from {customLocation} yet</div>
-              <div className="text-gray-600 text-sm">Try this feed soon to see when people from {customLocation} start posting</div>
-            </>
+            isVisitorInCustomLocation ? (
+              <div className="max-w-md mx-auto rounded-2xl border border-gray-800 bg-gradient-to-b from-black/80 via-black/70 to-black/90 px-5 py-6 shadow-lg">
+                <div className="mb-3 text-sm font-medium uppercase tracking-wide text-gray-400">
+                  You’re early to this feed
+                </div>
+                <div className="text-xl font-semibold mb-2 text-white">
+                  {`No locals are posting in ${customLocation} yet`}
+                </div>
+                <div className="text-sm text-gray-400 mb-5">
+                  {`We’ll light up this feed once people in ${customLocation} start sharing.`}
+                </div>
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 justify-center">
+                  <button
+                    type="button"
+                    onClick={toggleNotifyForCurrentLocation}
+                    className={`inline-flex items-center justify-center px-4 py-2.5 rounded-full text-sm font-semibold transition-all ${
+                      isNotifyOnForCurrentLocation
+                        ? 'bg-green-600 text-white hover:bg-green-500'
+                        : 'bg-gradient-to-r from-red-500 via-yellow-400 to-red-500 text-black hover:brightness-110'
+                    }`}
+                  >
+                    {isNotifyOnForCurrentLocation ? 'You’ll be notified' : `Notify me when ${customLocation} wakes up`}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Use the existing resetFeed flow and navigate cleanly back to /feed (no ?location)
+                      window.dispatchEvent(new CustomEvent('resetFeed'));
+                      navigate('/feed');
+                    }}
+                    className="inline-flex items-center justify-center px-4 py-2.5 rounded-full text-sm font-medium text-gray-300 hover:text-white hover:bg-white/5 border border-white/40 transition-colors"
+                  >
+                    Back to your home feed
+                  </button>
+                </div>
+                <div className="mt-4 text-[11px] text-gray-500">
+                  Feed warming up · we’ll only ping you when real clips from {customLocation} start to appear.
+                </div>
+              </div>
+            ) : (
+              <div className="max-w-md mx-auto rounded-2xl border border-gray-800 bg-gradient-to-b from-black/80 via-black/70 to-black/90 px-5 py-6 shadow-lg">
+                <div className="mb-3 text-sm font-medium uppercase tracking-wide text-gray-400">
+                  Your home feed
+                </div>
+                <div className="text-xl font-semibold mb-2 text-white">
+                  {`No posts in your ${customLocation} feed yet`}
+                </div>
+                <div className="text-sm text-gray-400 mb-4">
+                  You can be the first to post here. Share what’s happening around you to start this feed.
+                </div>
+                <div className="flex items-center justify-center">
+                  <button
+                    type="button"
+                    onClick={() => navigate('/create/instant')}
+                    className="inline-flex items-center justify-center px-4 py-2.5 rounded-full text-sm font-semibold bg-gradient-to-r from-red-500 via-yellow-400 to-red-500 text-black hover:brightness-110 transition-all"
+                  >
+                    Create a clip in this feed
+                  </button>
+                </div>
+              </div>
+            )
           ) : (
-            <>
-              <div className="text-lg font-semibold mb-1">No posts yet</div>
-              <div className="text-gray-600 text-sm">No posts available for this location</div>
-            </>
+            <div className="max-w-md mx-auto rounded-2xl border border-gray-800 bg-gradient-to-b from-black/80 via-black/70 to-black/90 px-5 py-6 shadow-lg">
+              <div className="mb-3 text-sm font-medium uppercase tracking-wide text-gray-400">
+                Your home feed
+              </div>
+              <div className="text-xl font-semibold mb-2 text-white">
+                {currentFilter ? `No posts in your ${currentFilter} feed yet` : 'No posts yet'}
+              </div>
+              <div className="text-sm text-gray-400 mb-4">
+                You can be the first to post here. Share what’s happening around you to start this feed.
+              </div>
+              <div className="flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={() => navigate('/create/instant')}
+                  className="inline-flex items-center justify-center px-4 py-2.5 rounded-full text-sm font-semibold bg-gradient-to-r from-red-500 via-yellow-400 to-red-500 text-black hover:brightness-110 transition-all"
+                >
+                  Create a clip in this feed
+                </button>
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -5007,6 +5185,20 @@ function FeedPageWrapper() {
             isOpen={scenesOpen}
             initialVideoTime={initialVideoTime}
             initialMutedState={initialMutedState}
+            posts={postsOnly.length > 0 ? postsOnly : undefined}
+            feedLabel={feedLabelForScenes || undefined}
+            onPostChange={postsOnly.length > 0 ? (newIndex: number, savedVideoTime?: number) => {
+              const oldPost = selectedPostForScenes;
+              if (oldPost && savedVideoTime != null) {
+                videoTimesMap.set(oldPost.id, savedVideoTime);
+              }
+              const nextPost = postsOnly[newIndex];
+              if (nextPost) {
+                setSelectedPostForScenes(nextPost);
+                setInitialVideoTime(videoTimesMap.get(nextPost.id) ?? null);
+                setInitialMutedState(videoMutedMap.get(nextPost.id) ?? null);
+              }
+            } : undefined}
             onClose={(savedTime) => {
               // Save video time when closing Scenes
               if (savedTime !== null && savedTime !== undefined) {
@@ -5022,13 +5214,10 @@ function FeedPageWrapper() {
               }));
             }}
             onLike={async () => {
-              console.log('Like button clicked for post:', p.id, 'userLiked:', p.userLiked);
               if (!online) {
                 const optimisticPost = { ...p, userLiked: !p.userLiked };
                 updateOne(p.id, post => ({ ...post, userLiked: !post.userLiked }));
-                if (selectedPostForScenes?.id === p.id) {
-                  setSelectedPostForScenes(optimisticPost);
-                }
+                if (selectedPostForScenes?.id === p.id) setSelectedPostForScenes(optimisticPost);
                 window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
                   detail: { liked: optimisticPost.userLiked, likes: p.stats.likes }
                 }));
@@ -5036,25 +5225,26 @@ function FeedPageWrapper() {
                 return;
               }
               const nextLiked = !p.userLiked;
-              const nextLikes = p.stats.likes + (nextLiked ? 1 : -1);
+              const nextLikes = Math.max(0, p.stats.likes + (nextLiked ? 1 : -1));
+              const optimistic = { ...p, userLiked: nextLiked, stats: { ...p.stats, likes: nextLikes } };
+              updateOne(p.id, _ => optimistic);
+              if (selectedPostForScenes?.id === p.id) setSelectedPostForScenes(optimistic);
+              window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
+                detail: { liked: nextLiked, likes: nextLikes }
+              }));
               try {
                 const updated = await toggleLike(userId, p.id);
                 updateOne(p.id, _post => ({ ...updated }));
-                if (selectedPostForScenes?.id === p.id) {
-                  setSelectedPostForScenes(updated);
-                }
+                if (selectedPostForScenes?.id === p.id) setSelectedPostForScenes(updated);
                 window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
                   detail: { liked: updated.userLiked, likes: updated.stats.likes }
                 }));
               } catch (err) {
-                console.warn('Like failed, updating UI optimistically:', err);
-                const optimistic = { ...p, userLiked: nextLiked, stats: { ...p.stats, likes: Math.max(0, nextLikes) } };
-                updateOne(p.id, _ => optimistic);
-                if (selectedPostForScenes?.id === p.id) {
-                  setSelectedPostForScenes(optimistic);
-                }
+                console.warn('Like failed, reverting:', err);
+                updateOne(p.id, post => ({ ...post, userLiked: p.userLiked, stats: { ...post.stats, likes: p.stats.likes } }));
+                if (selectedPostForScenes?.id === p.id) setSelectedPostForScenes(p);
                 window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
-                  detail: { liked: nextLiked, likes: Math.max(0, nextLikes) }
+                  detail: { liked: p.userLiked, likes: p.stats.likes }
                 }));
               }
             }}
@@ -5478,7 +5668,15 @@ function BoostPageWrapper() {
                 return;
               }
               const nextLiked = !p.userLiked;
-              const nextLikes = p.stats.likes + (nextLiked ? 1 : -1);
+              const nextLikes = Math.max(0, p.stats.likes + (nextLiked ? 1 : -1));
+              updateOne(p.id, post => ({
+                ...post,
+                userLiked: nextLiked,
+                stats: { ...post.stats, likes: nextLikes }
+              }));
+              window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
+                detail: { liked: nextLiked, likes: nextLikes }
+              }));
               try {
                 const updated = await toggleLike(userId, p.id);
                 updateOne(p.id, _post => ({ ...updated }));
@@ -5486,14 +5684,14 @@ function BoostPageWrapper() {
                   detail: { liked: updated.userLiked, likes: updated.stats.likes }
                 }));
               } catch (err) {
-                console.warn('Like failed, updating UI optimistically:', err);
+                console.warn('Like failed, reverting:', err);
                 updateOne(p.id, post => ({
                   ...post,
-                  userLiked: nextLiked,
-                  stats: { ...post.stats, likes: Math.max(0, nextLikes) }
+                  userLiked: p.userLiked,
+                  stats: { ...post.stats, likes: p.stats.likes }
                 }));
                 window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
-                  detail: { liked: nextLiked, likes: Math.max(0, nextLikes) }
+                  detail: { liked: p.userLiked, likes: p.stats.likes }
                 }));
               }
             }}
@@ -5625,7 +5823,13 @@ function BoostPageWrapper() {
               return;
             }
             const nextLiked = !selectedPostForScenes.userLiked;
-            const nextLikes = selectedPostForScenes.stats.likes + (nextLiked ? 1 : -1);
+            const nextLikes = Math.max(0, selectedPostForScenes.stats.likes + (nextLiked ? 1 : -1));
+            const optimistic = { ...selectedPostForScenes, userLiked: nextLiked, stats: { ...selectedPostForScenes.stats, likes: nextLikes } };
+            updateOne(selectedPostForScenes.id, _ => optimistic);
+            setSelectedPostForScenes(optimistic);
+            window.dispatchEvent(new CustomEvent(`likeToggled-${selectedPostForScenes.id}`, {
+              detail: { liked: nextLiked, likes: nextLikes }
+            }));
             try {
               const updated = await toggleLike(userId, selectedPostForScenes.id);
               updateOne(selectedPostForScenes.id, _post => ({ ...updated }));
@@ -5634,12 +5838,11 @@ function BoostPageWrapper() {
                 detail: { liked: updated.userLiked, likes: updated.stats.likes }
               }));
             } catch (err) {
-              console.warn('Like failed, updating UI optimistically:', err);
-              const optimistic = { ...selectedPostForScenes, userLiked: nextLiked, stats: { ...selectedPostForScenes.stats, likes: Math.max(0, nextLikes) } };
-              updateOne(selectedPostForScenes.id, _ => optimistic);
-              setSelectedPostForScenes(optimistic);
+              console.warn('Like failed, reverting:', err);
+              updateOne(selectedPostForScenes.id, post => ({ ...post, userLiked: selectedPostForScenes.userLiked, stats: { ...post.stats, likes: selectedPostForScenes.stats.likes } }));
+              setSelectedPostForScenes(selectedPostForScenes);
               window.dispatchEvent(new CustomEvent(`likeToggled-${selectedPostForScenes.id}`, {
-                detail: { liked: nextLiked, likes: Math.max(0, nextLikes) }
+                detail: { liked: selectedPostForScenes.userLiked, likes: selectedPostForScenes.stats.likes }
               }));
             }
           }}

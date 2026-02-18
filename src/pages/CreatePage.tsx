@@ -654,13 +654,14 @@ export default function CreatePage() {
                 }
             }
 
-            // For videos with blob URLs, try to upload to backend first (Laravel validation doesn't accept blob URLs)
-            // If backend is not accessible, fall back to blob URL (mock will handle it)
-            // For images, convert blob URL to data URL BEFORE calling createPost (while blob is still valid)
+            // For media with blob URLs, we need a persistent URL before sending to Laravel:
+            // - Videos: upload the blob to the backend (/upload/single) and use the returned fileUrl.
+            // - Images: convert blob URL to a data URL BEFORE calling createPost.
             let persistentMediaUrl = selectedMedia;
-            if (selectedMedia && selectedMedia.startsWith('blob:')) {
-                if (mediaType === 'video') {
-                    // Try to upload video blob to backend first
+            const isVideo = mediaType === 'video' || !mediaType;
+            if (selectedMedia) {
+                // Case 1: blob: URL – upload to backend for videos
+                if (selectedMedia.startsWith('blob:') && isVideo) {
                     console.log('📤 Attempting to upload video blob to backend...', selectedMedia.substring(0, 50));
                     try {
                         const response = await fetch(selectedMedia);
@@ -679,7 +680,6 @@ export default function CreatePage() {
                             throw new Error('Upload failed: ' + (uploadResult.error || 'Unknown error'));
                         }
                     } catch (error: any) {
-                        // Check if it's a connection error - if so, use blob URL (mock fallback will handle it)
                         const isConnectionError = 
                             error?.name === 'ConnectionRefused' ||
                             error?.message?.includes('CONNECTION_REFUSED') ||
@@ -689,18 +689,43 @@ export default function CreatePage() {
                         
                         if (isConnectionError) {
                             console.log('⚠️ Backend not accessible, using blob URL (mock fallback will handle it)');
-                            // Keep blob URL - mock fallback will handle it
                             persistentMediaUrl = selectedMedia;
                         } else {
-                            // Other error (validation, etc) - show error and return
                             console.error('❌ Failed to upload video to backend:', error);
                             showToast('Failed to upload video. Please try again.');
                             setIsUploading(false);
                             return;
                         }
                     }
-                } else {
-                    // Convert images to data URL
+                }
+                // Case 2: video URL still pointing at dev server (e.g. http://192.168.1.7:5173/...)
+                else if (isVideo && selectedMedia.startsWith(window.location.origin)) {
+                    console.log('📤 Uploading dev-server video URL to backend...', selectedMedia);
+                    try {
+                        const response = await fetch(selectedMedia);
+                        if (!response.ok) {
+                            throw new Error(`Failed to fetch video from dev server: ${response.status} ${response.statusText}`);
+                        }
+                        const blob = await response.blob();
+                        const file = new File([blob], `video-${Date.now()}.webm`, { type: blob.type || 'video/webm' });
+                        const { uploadFile } = await import('../api/client');
+                        const uploadResult = await uploadFile(file);
+                        
+                        if (uploadResult.success && uploadResult.fileUrl) {
+                            persistentMediaUrl = uploadResult.fileUrl;
+                            console.log('✅ Dev-server video uploaded to backend:', persistentMediaUrl);
+                        } else {
+                            throw new Error('Upload failed: ' + (uploadResult.error || 'Unknown error'));
+                        }
+                    } catch (error: any) {
+                        console.error('❌ Failed to upload dev-server video URL to backend:', error);
+                        showToast('Failed to upload video. Please try again.');
+                        setIsUploading(false);
+                        return;
+                    }
+                }
+                // Case 3: image blob – convert to data URL
+                else if (selectedMedia.startsWith('blob:') && !isVideo) {
                     console.log('Converting image blob URL to data URL before upload...');
                     try {
                         const response = await fetch(selectedMedia);
@@ -712,14 +737,13 @@ export default function CreatePage() {
                             reader.readAsDataURL(blob);
                         });
                         persistentMediaUrl = dataUrl;
-                        console.log('✅ Converted blob URL to data URL', {
+                        console.log('✅ Converted image blob URL to data URL', {
                             originalSize: blob.size,
                             dataUrlSize: dataUrl.length,
                             isDataUrl: dataUrl.startsWith('data:')
                         });
                     } catch (error) {
                         console.error('❌ Failed to convert blob URL to data URL:', error);
-                        // Continue with blob URL - it might still work if not revoked yet
                     }
                 }
             }

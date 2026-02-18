@@ -1,4 +1,5 @@
 import type { Ad, AdAccount } from '../types';
+import { randomUUID } from '../utils/uuid';
 
 /**
  * AD SYSTEM WITH EPOCH TIME TRACKING
@@ -370,7 +371,7 @@ export async function createAd(
     const midnight = getMidnightInTimezone(timezone);
 
     const newAd: Ad = {
-        id: `ad-${crypto.randomUUID()}`,
+        id: `ad-${randomUUID()}`,
         adAccountId,
         advertiserHandle,
         title,

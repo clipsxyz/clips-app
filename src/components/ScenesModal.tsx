@@ -1,7 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { FiX, FiHeart, FiShare2, FiRepeat, FiMapPin, FiVolume2, FiVolumeX, FiMessageSquare, FiMessageCircle, FiChevronUp, FiBookmark, FiMoreHorizontal, FiSend } from 'react-icons/fi';
+import { FiX, FiHeart, FiShare2, FiRepeat, FiMapPin, FiVolume2, FiVolumeX, FiMessageSquare, FiMessageCircle, FiChevronUp, FiChevronDown, FiBookmark, FiMoreHorizontal, FiSend, FiSmile } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import SavePostModal from './SavePostModal';
 import PostMenuModal from './PostMenuModal';
@@ -13,7 +13,7 @@ import Flag from './Flag';
 import type { EffectConfig } from '../utils/effects';
 import { useAuth } from '../context/Auth';
 import { useOnline } from '../hooks/useOnline';
-import { addComment, fetchComments } from '../api/posts';
+import { addComment, addReply, fetchComments, toggleCommentLike, toggleReplyLike } from '../api/posts';
 import { getCollectionsForPost } from '../api/collections';
 import { isProfilePrivate, canSendMessage, hasPendingFollowRequest, createFollowRequest } from '../api/privacy';
 import { getFollowedUsers, setFollowState } from '../api/posts';
@@ -137,6 +137,12 @@ type ScenesModalProps = {
     onReclip: () => Promise<void>;
     /** Only for posts the current user created (not reclips). When provided, Boost menu option is shown. */
     onBoost?: () => void;
+    /** Feed carousel: list of posts to swipe through (from current feed). When provided, enables vertical swipe between posts. */
+    posts?: Post[];
+    /** Label for the feed (e.g. "National", "Dublin", "Galway Feed"). Shown at top when in carousel mode. */
+    feedLabel?: string;
+    /** Called when user swipes to a different post. Pass saved video time for the previous post. */
+    onPostChange?: (newIndex: number, savedVideoTime?: number) => void;
 };
 
 export default function ScenesModal({
@@ -148,9 +154,12 @@ export default function ScenesModal({
     onLike,
     onFollow,
     onShare,
-    onOpenComments,
+    onOpenComments: _onOpenComments, // kept for API; we use handleCaptionClick for inline comments
     onReclip,
-    onBoost
+    onBoost,
+    posts,
+    feedLabel,
+    onPostChange
 }: ScenesModalProps) {
     const [liked, setLiked] = React.useState(post.userLiked);
     const [likes, setLikes] = React.useState(post.stats.likes);
@@ -169,9 +178,19 @@ export default function ScenesModal({
     const [isPaused, setIsPaused] = React.useState(false);
     const [isCaptionExpanded, setIsCaptionExpanded] = React.useState(false);
     const [commentsList, setCommentsList] = React.useState<Comment[]>([]);
+    // Which comment threads have their replies expanded in the Scenes comments sheet
+    const [expandedReplyThreads, setExpandedReplyThreads] = React.useState<Record<string, boolean>>({});
     const [isLoadingComments, setIsLoadingComments] = React.useState(false);
+    const [replyingToCommentId, setReplyingToCommentId] = React.useState<string | null>(null);
+    const [replyInputText, setReplyInputText] = React.useState('');
+    const [submittingReplyId, setSubmittingReplyId] = React.useState<string | null>(null);
+    const [likingCommentId, setLikingCommentId] = React.useState<string | null>(null);
+    const [likingReplyKey, setLikingReplyKey] = React.useState<string | null>(null);
+    const [showCommentEmojiPicker, setShowCommentEmojiPicker] = React.useState(false);
     const [sheetDragY, setSheetDragY] = React.useState(0);
     const [isDragging, setIsDragging] = React.useState(false);
+    // Height of the comments sheet. Keep it to about half the screen so video stays visible above.
+    const [sheetHeight, setSheetHeight] = React.useState('50vh'); // shrinks when keyboard opens
     const sheetRef = React.useRef<HTMLDivElement>(null);
     const dragStartY = React.useRef<number>(0);
     const [tapPosition, setTapPosition] = React.useState<{ x: number; y: number } | null>(null);
@@ -184,12 +203,21 @@ export default function ScenesModal({
     const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
     const profileBorderOverlayRef = React.useRef<HTMLDivElement>(null);
     const profileBorderOverlayRef2 = React.useRef<HTMLDivElement>(null);
+    const expandedCommentInputRef = React.useRef<HTMLInputElement>(null);
     const { user } = useAuth();
     const online = useOnline();
     const navigate = useNavigate();
     const [saveModalOpen, setSaveModalOpen] = React.useState(false);
     const [isSaved, setIsSaved] = React.useState(false);
     const [menuOpen, setMenuOpen] = React.useState(false);
+
+    const effectivePosts = React.useMemo(() => (posts && posts.length > 0 ? posts : (post ? [post] : [])), [posts, post]);
+    const isCarousel = Boolean(effectivePosts.length > 1);
+    const carouselTouchStart = React.useRef<number>(0);
+    const carouselTouchHandled = React.useRef(false);
+    const [carouselTouchDelta, setCarouselTouchDelta] = React.useState(0);
+    const [carouselAnimating, setCarouselAnimating] = React.useState(false);
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 768;
 
     // Determine if we have multiple media items (carousel)
     const items: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }> = post.mediaItems && post.mediaItems.length > 0
@@ -258,6 +286,44 @@ export default function ScenesModal({
         animateBorder(profileBorderOverlayRef.current);
         animateBorder(profileBorderOverlayRef2.current);
     }, [isOpen]);
+
+    // Reset carousel touch delta when closing
+    React.useEffect(() => {
+        if (!isOpen) setCarouselTouchDelta(0);
+    }, [isOpen]);
+
+    // Don't auto-focus the comment input when the sheet opens — on mobile that opens the keyboard
+    // and pushes the video off-screen. User can tap the input when they want to type.
+
+    // Lock body scroll when comments sheet is open so video doesn't move (TikTok-style)
+    React.useEffect(() => {
+        if (!isCaptionExpanded) return;
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => { document.body.style.overflow = prev; };
+    }, [isCaptionExpanded]);
+
+    // Shrink sheet when keyboard opens (Visual Viewport API) so video stays visible
+    React.useEffect(() => {
+        if (!isCaptionExpanded) return;
+        const vv = window.visualViewport;
+        if (!vv) return;
+        const update = () => {
+            const visible = vv.height;
+            const full = window.innerHeight;
+            const keyboardOpen = visible < full * 0.85;
+            // Use at most ~50% of the screen height so the video area stays in view.
+            const maxPx = keyboardOpen ? Math.round(visible * 0.5) : Math.round(full * 0.5);
+            setSheetHeight(`${maxPx}px`);
+        };
+        update();
+        vv.addEventListener('resize', update);
+        vv.addEventListener('scroll', update);
+        return () => {
+            vv.removeEventListener('resize', update);
+            vv.removeEventListener('scroll', update);
+        };
+    }, [isCaptionExpanded]);
 
     // Reset video state when switching items
     React.useEffect(() => {
@@ -523,6 +589,19 @@ export default function ScenesModal({
         };
     }, [post.id, isCaptionExpanded]);
 
+    // When the underlying post changes (e.g. swipe from post 1 to post 4),
+    // reset the comments UI so we never show comments from the previous post.
+    React.useEffect(() => {
+        setCommentsList([]);
+        setIsLoadingComments(false);
+        setReplyingToCommentId(null);
+        setReplyInputText('');
+        setShowCommentEmojiPicker(false);
+        setSheetDragY(0);
+        setIsCaptionExpanded(false);
+        setExpandedReplyThreads({});
+    }, [post.id]);
+
     React.useEffect(() => {
         function onKeyDown(e: KeyboardEvent) {
             if (e.key === 'Escape') {
@@ -747,6 +826,68 @@ export default function ScenesModal({
         }, 300);
     }, [handleMediaTap]);
 
+    // Carousel: vertical swipe - content follows finger (Reels/TikTok style)
+    // When comments sheet is open, do not respond to carousel touch so the video stays fixed
+    const handleCarouselTouchStart = React.useCallback((e: React.TouchEvent) => {
+        if (isCaptionExpanded) return;
+        if (isCarousel && e.touches.length > 0) {
+            carouselTouchStart.current = e.touches[0].clientY;
+            carouselTouchHandled.current = false;
+            setCarouselAnimating(false);
+            setCarouselTouchDelta(0);
+        }
+    }, [isCarousel, isCaptionExpanded]);
+
+    const handleCarouselTouchMove = React.useCallback((e: React.TouchEvent) => {
+        if (isCaptionExpanded) return;
+        if (!isCarousel || effectivePosts.length === 0 || e.touches.length === 0) return;
+        e.preventDefault();
+        const idx = effectivePosts.findIndex((p) => p.id === post.id);
+        if (idx < 0) return;
+        const deltaY = e.touches[0].clientY - carouselTouchStart.current;
+        const maxDelta = vh * 0.5;
+        let clamped = deltaY;
+        if (deltaY < 0 && idx >= effectivePosts.length - 1) clamped = Math.max(deltaY, -40);
+        else if (deltaY > 0 && idx <= 0) clamped = Math.min(deltaY, 40);
+        else clamped = Math.max(-maxDelta, Math.min(maxDelta, deltaY));
+        setCarouselTouchDelta(clamped);
+    }, [isCarousel, isCaptionExpanded, effectivePosts, post.id, vh]);
+
+    const handleCarouselTouchEnd = React.useCallback((e: React.TouchEvent) => {
+        if (isCaptionExpanded) return;
+        if (!isCarousel || effectivePosts.length === 0 || e.changedTouches.length === 0) return;
+        const deltaY = e.changedTouches[0].clientY - carouselTouchStart.current;
+        const threshold = vh * 0.12;
+        const idx = effectivePosts.findIndex((p) => p.id === post.id);
+        if (idx < 0) return;
+
+        let newIndex: number | null = null;
+        if (deltaY < -threshold && idx < effectivePosts.length - 1) {
+            newIndex = idx + 1;
+        } else if (deltaY > threshold && idx > 0) {
+            newIndex = idx - 1;
+        }
+
+        if (newIndex !== null && onPostChange) {
+            carouselTouchHandled.current = true;
+            touchHandledRef.current = true;
+            setCarouselAnimating(true);
+            const targetOffset = newIndex > idx ? -vh : vh;
+            setCarouselTouchDelta(targetOffset);
+            const savedTime = videoRef.current && currentItem?.type === 'video' ? videoRef.current.currentTime : undefined;
+            const transitionMs = 280;
+            setTimeout(() => {
+                onPostChange(newIndex!, savedTime);
+                setCarouselTouchDelta(0);
+                setCarouselAnimating(false);
+            }, transitionMs);
+        } else {
+            setCarouselAnimating(true);
+            setCarouselTouchDelta(0);
+            setTimeout(() => setCarouselAnimating(false), 320);
+        }
+    }, [isCarousel, isCaptionExpanded, effectivePosts, post.id, onPostChange, currentItem?.type, vh]);
+
     async function handleFollow() {
         if (busy) return;
         setBusy(true);
@@ -804,6 +945,10 @@ export default function ScenesModal({
         if (isCaptionExpanded) {
             setIsCaptionExpanded(false);
             setSheetDragY(0);
+            setReplyingToCommentId(null);
+            setReplyInputText('');
+            setShowCommentEmojiPicker(false);
+            setExpandedReplyThreads({});
         } else {
             setIsCaptionExpanded(true);
             // Fetch comments when expanding
@@ -821,14 +966,20 @@ export default function ScenesModal({
         }
     };
 
-    // Drag handlers for bottom sheet
+    // Drag handlers for bottom sheet - TikTok style: only drag when touch starts on the handle bar so comments list can scroll
     const handleSheetTouchStart = (e: React.TouchEvent) => {
+        const target = e.target as HTMLElement;
+        if (!target.closest('[data-sheet-drag-handle]')) return;
+        if (target.closest('button, input, textarea')) return;
         setIsDragging(true);
         dragStartY.current = e.touches[0].clientY;
+        e.stopPropagation();
     };
 
     const handleSheetTouchMove = (e: React.TouchEvent) => {
         if (!isDragging) return;
+        e.preventDefault();
+        e.stopPropagation();
         const currentY = e.touches[0].clientY;
         const deltaY = currentY - dragStartY.current;
         if (deltaY > 0) {
@@ -836,59 +987,221 @@ export default function ScenesModal({
         }
     };
 
-    const handleSheetTouchEnd = () => {
+    const handleSheetTouchEnd = (e: React.TouchEvent) => {
+        if (isDragging) {
+            e.stopPropagation();
+        }
         if (sheetDragY > 100) {
-            // Dismiss if dragged down more than 100px
             setIsCaptionExpanded(false);
         }
         setSheetDragY(0);
         setIsDragging(false);
     };
 
-    async function handleAddComment(e: React.FormEvent) {
-        e.preventDefault();
-        if (!commentText.trim() || isAddingComment || !user) return;
+    async function handleAddComment(textOrEvent?: string | React.FormEvent) {
+        const e = typeof textOrEvent === 'object' && textOrEvent;
+        if (e && 'preventDefault' in e) e.preventDefault();
+        const text = (typeof textOrEvent === 'string' ? textOrEvent.trim() : commentText.trim());
+        if (!text || isAddingComment) return;
+        if (!user) {
+            Swal.fire({
+                title: 'Log in to comment',
+                text: 'Please log in from Profile to post comments.',
+                icon: 'info',
+                background: '#262626',
+                color: '#ffffff',
+                confirmButtonColor: '#8B5CF6',
+            });
+            return;
+        }
 
-        const text = commentText.trim();
-
-        // Clear the input immediately for better UX (before disabling)
         setCommentText('');
+        setShowCommentEmojiPicker(false);
         setIsAddingComment(true);
 
-        try {
-            // Increment comment count optimistically using functional update
-            setComments(prev => prev + 1);
+        const tempId = `temp-${Date.now()}`;
+        const optimisticComment: Comment = {
+            id: tempId,
+            postId: post.id,
+            userHandle: user.handle || 'You',
+            text,
+            createdAt: Date.now(),
+            likes: 0,
+            userLiked: false,
+        };
+        setComments(prev => prev + 1);
+        // Keep ordering consistent with feed comments: newest at the bottom.
+        // Append optimistic comment so there is no position "jump" when the real one arrives.
+        setCommentsList(prev => [...prev, optimisticComment]);
 
+        try {
             if (!online) {
                 await enqueue({ type: 'comment', postId: post.id, userId: user.id, text });
+                // Offline: keep optimistic comment; it will sync later
             } else {
-                // Use the same addComment function as CommentsModal
-                await addComment(post.id, user?.handle || 'darraghdublin', text);
-                // Refresh comments list
-                const fetchedComments = await fetchComments(post.id);
-                setCommentsList(fetchedComments);
+                const newComment = await addComment(post.id, user.handle || 'darraghdublin', text);
+                // Replace optimistic comment with real one from API/mock store without changing order
+                setCommentsList(prev =>
+                    prev.map(c => c.id === tempId ? newComment : c)
+                );
             }
 
-            // Dispatch event after successful comment
             window.dispatchEvent(new CustomEvent(`commentAdded-${post.id}`, {
                 detail: { text }
             }));
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error adding comment:', error);
-            // Restore text on error
             setCommentText(text);
-            // Revert comment count on error
             setComments(prev => Math.max(0, prev - 1));
+            setCommentsList(prev => prev.filter(c => c.id !== tempId));
+            const msg = error?.message || error?.response?.message || (error?.response?.error) || 'Could not post comment. Try again.';
+            const isAuth = error?.status === 401 || (typeof msg === 'string' && (msg.toLowerCase().includes('unauthenticated') || msg.toLowerCase().includes('unauthorized')));
+            Swal.fire({
+                title: 'Comment failed',
+                text: isAuth ? 'Please log in with the app login (Profile → Log in) to post comments.' : msg,
+                icon: 'error',
+                background: '#262626',
+                color: '#ffffff',
+                confirmButtonColor: '#8B5CF6',
+            });
         } finally {
             setIsAddingComment(false);
         }
     }
+
+    const handleLikeComment = async (commentId: string) => {
+        if (!user || likingCommentId !== null) return;
+        setLikingCommentId(commentId);
+        setCommentsList(prev => prev.map(c => {
+            if (c.id !== commentId) return c;
+            const newLiked = !c.userLiked;
+            return { ...c, userLiked: newLiked, likes: (c.likes || 0) + (newLiked ? 1 : -1) };
+        }));
+        try {
+            if (!online) {
+                await enqueue({ type: 'commentLike', commentId, userId: user.id });
+                return;
+            }
+            const updated = await toggleCommentLike(commentId);
+            setCommentsList(prev => prev.map(c => c.id === commentId ? updated : c));
+        } catch (err) {
+            console.error('Failed to like comment:', err);
+            setCommentsList(prev => prev.map(c => {
+                if (c.id !== commentId) return c;
+                return { ...c, userLiked: !c.userLiked, likes: (c.likes || 0) + (c.userLiked ? 1 : -1) };
+            }));
+        } finally {
+            setLikingCommentId(null);
+        }
+    };
+
+    const handleLikeReply = async (parentCommentId: string, replyId: string) => {
+        const key = `${parentCommentId}-${replyId}`;
+        if (!user || likingReplyKey !== null) return;
+        setLikingReplyKey(key);
+        setCommentsList(prev => prev.map(c => {
+            if (c.id !== parentCommentId || !c.replies) return c;
+            return {
+                ...c,
+                replies: c.replies.map(r => {
+                    if (r.id !== replyId) return r;
+                    const newLiked = !r.userLiked;
+                    return { ...r, userLiked: newLiked, likes: (r.likes || 0) + (newLiked ? 1 : -1) };
+                }),
+            };
+        }));
+        try {
+            if (!online) {
+                await enqueue({ type: 'replyLike', parentCommentId, replyId, userId: user.id });
+                return;
+            }
+            const updatedParent = await toggleReplyLike(parentCommentId, replyId);
+            setCommentsList(prev => prev.map(c => c.id === parentCommentId ? updatedParent : c));
+        } catch (err) {
+            console.error('Failed to like reply:', err);
+            setCommentsList(prev => prev.map(c => {
+                if (c.id !== parentCommentId || !c.replies) return c;
+                return {
+                    ...c,
+                    replies: c.replies.map(r => {
+                        if (r.id !== replyId) return r;
+                        return { ...r, userLiked: !r.userLiked, likes: (r.likes || 0) + (r.userLiked ? 1 : -1) };
+                    }),
+                };
+            }));
+        } finally {
+            setLikingReplyKey(null);
+        }
+    };
+
+    const handleReplyToComment = async (parentId: string, text: string) => {
+        if (!user || !text.trim()) return;
+        setSubmittingReplyId(parentId);
+        const optimisticReply: Comment = {
+            id: `temp-reply-${Date.now()}`,
+            postId: post.id,
+            userHandle: user.handle || 'You',
+            text: text.trim(),
+            createdAt: Date.now(),
+            likes: 0,
+            userLiked: false,
+            parentId: parentId,
+        };
+        setCommentsList(prev => prev.map(c => {
+            if (c.id !== parentId) return c;
+            return { ...c, replies: [...(c.replies || []), optimisticReply], replyCount: (c.replyCount || 0) + 1 };
+        }));
+        setReplyInputText('');
+        setReplyingToCommentId(null);
+        try {
+            if (!online) {
+                await enqueue({ type: 'reply', postId: post.id, parentId, userId: user.id, text: text.trim() });
+            } else {
+                const newReply = await addReply(post.id, parentId, user.handle || 'darraghdublin', text.trim());
+                setCommentsList(prev => prev.map(c => {
+                    if (c.id !== parentId) return c;
+                    return {
+                        ...c,
+                        replies: (c.replies || []).map(r => r.id === optimisticReply.id ? newReply : r),
+                    };
+                }));
+            }
+            window.dispatchEvent(new CustomEvent(`commentAdded-${post.id}`));
+        } catch (err) {
+            console.error('Failed to add reply:', err);
+            setCommentsList(prev => prev.map(c => {
+                if (c.id !== parentId) return c;
+                return { ...c, replies: (c.replies || []).filter(r => r.id !== optimisticReply.id), replyCount: Math.max(0, (c.replyCount || 1) - 1) };
+            }));
+        } finally {
+            setSubmittingReplyId(null);
+        }
+    };
 
     if (!isOpen) return null;
 
     React.useEffect(() => {
         console.log('ScenesModal - shareModalOpen changed:', shareModalOpen);
     }, [shareModalOpen]);
+
+    const carouselIdx = effectivePosts.length > 0 ? Math.max(0, effectivePosts.findIndex((p) => p.id === post.id)) : 0;
+    const carouselPrevPost = carouselIdx > 0 ? effectivePosts[carouselIdx - 1] : null;
+    const carouselNextPost = carouselIdx >= 0 && carouselIdx < effectivePosts.length - 1 ? effectivePosts[carouselIdx + 1] : null;
+
+    const CarouselSlidePreview = ({ p }: { p: Post }) => {
+        const mediaUrl = p.mediaItems?.[0]?.url || p.mediaUrl;
+        const mediaType = p.mediaItems?.[0]?.type || p.mediaType || 'image';
+        if (!mediaUrl) return <div className="w-full h-full bg-black" />;
+        return (
+            <div className="w-full h-full flex items-center justify-center bg-black">
+                {mediaType === 'video' ? (
+                    <video src={mediaUrl} className="max-w-full max-h-full object-contain" muted playsInline />
+                ) : (
+                    <img src={mediaUrl} alt="" className="max-w-full max-h-full object-contain" />
+                )}
+            </div>
+        );
+    };
 
     // Render ShareModal in a portal outside ScenesModal DOM hierarchy
     return (
@@ -900,25 +1213,66 @@ export default function ScenesModal({
                     aria-label="Scenes fullscreen viewer"
                     className="fixed inset-0 z-[100] bg-black flex items-center justify-center"
                 >
-                    {/* Top Left - Street sign with location (top) and time (bottom) */}
-                    <div className="absolute top-5 left-3 z-10">
-                        <StreetSign
+                    {effectivePosts.length > 0 ? (
+                        <div
+                            className={isCaptionExpanded ? 'fixed left-0 right-0 top-0 overflow-hidden touch-none' : 'absolute inset-0 overflow-hidden touch-none'}
+                            style={{
+                                touchAction: 'none',
+                                // When comments sheet is open, pin video to top half so it stays visible (keyboard can't push it off)
+                                ...(isCaptionExpanded ? { height: '50vh', zIndex: 105 } : {})
+                            }}
+                            onTouchStart={handleCarouselTouchStart}
+                            onTouchMove={handleCarouselTouchMove}
+                            onTouchEnd={(e) => {
+                                handleCarouselTouchEnd(e);
+                                if (!carouselTouchHandled.current) {
+                                    handleMediaTouchEnd(e);
+                                }
+                            }}
+                        >
+                            <div
+                                className="w-full"
+                                style={{
+                                    transform: `translate3d(0, ${(carouselIdx > 0 ? -vh : 0) + carouselTouchDelta}px, 0)`,
+                                    transition: carouselAnimating ? 'transform 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94)' : 'none',
+                                    willChange: carouselAnimating ? 'transform' : undefined,
+                                    backfaceVisibility: 'hidden' as const
+                                }}
+                            >
+                                {carouselPrevPost && (
+                                    <div className="w-full flex items-center justify-center bg-black" style={{ height: vh }}>
+                                        <CarouselSlidePreview p={carouselPrevPost} />
+                                    </div>
+                                )}
+                                <div className="w-full relative" style={{ height: vh }}>
+                                    {/* Current post - full content */}
+                                    {/* Top Left - Street sign with location (top) and time (bottom) */}
+                                    <div className="absolute top-5 left-3 z-10">
+                                        <StreetSign
                             topLabel={post.locationLabel || ''}
                             bottomLabel={post.createdAt ? timeAgo(post.createdAt) : ''}
                         />
                     </div>
 
-                    {/* Top Bar - Counter and Close Button - Evenly Spaced */}
+                    {/* Top Bar - Feed label (centre), Counter, Close Button */}
                     <div className="absolute top-4 left-0 right-0 z-30 flex items-center justify-between px-4">
-                        {/* Left side - Empty spacer */}
+                        {/* Left side - Counter (only for multi-item posts) */}
                         <div className="flex-1 flex justify-start">
-                        </div>
-
-                        {/* Center - Counter (only for multi-item posts) */}
-                        <div className="flex-1 flex justify-center">
                             {hasMultipleItems && (
                                 <div className="px-2 py-1 bg-black/50 text-white text-xs rounded-full">
                                     {currentIndex + 1} / {items.length}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Center - Feed label when in carousel mode */}
+                        <div className="absolute left-0 right-0 top-0 bottom-0 flex items-center justify-center pointer-events-none">
+                            {feedLabel && (
+                                <div className="inline-flex items-center gap-1.5 rounded-full border border-white/80 bg-black/60 px-3 py-1.5 text-white">
+                                    <FiMapPin className="w-4 h-4 flex-shrink-0" />
+                                    <span className="text-xs font-semibold uppercase tracking-wider">
+                                        {feedLabel}
+                                    </span>
                                 </div>
                             )}
                         </div>
@@ -971,17 +1325,22 @@ export default function ScenesModal({
                     {/* Main Media Content */}
                     <div
                         ref={mediaContainerRef}
-                        className={`w-full h-full flex items-center justify-center select-none cursor-pointer transition-all duration-300 ease-out ${isCaptionExpanded
+                        className={`w-full flex items-center justify-center select-none cursor-pointer transition-all duration-300 ease-out ${isCaptionExpanded
                             ? 'absolute top-[8%] left-1/2 -translate-x-1/2 scale-[0.45] origin-top'
-                            : 'relative scale-100'
+                            : isCarousel
+                                ? 'absolute inset-0 scale-100'
+                                : 'relative h-full scale-100'
                             }`}
                         onClick={(e) => {
+                            if (carouselTouchHandled.current) return;
                             // Only handle media click if clicking directly on the media area (not on buttons)
                             if (e.target === e.currentTarget || (e.target instanceof HTMLElement && !e.target.closest('button'))) {
                                 handleMediaClick(e);
                             }
                         }}
-                        onTouchEnd={handleMediaTouchEnd}
+                        {...(isCarousel ? {} : {
+                            onTouchEnd: handleMediaTouchEnd
+                        })}
                     >
                         {currentItem ? (() => {
                             // Get effects for current media item
@@ -1777,333 +2136,319 @@ export default function ScenesModal({
                                         </div>
                                     ) : null}
 
-                                    {/* Comment Count - Clickable to open comments */}
-                                    {comments > 0 && (
+                                    {/* Comment Count or Add prompt - opens comments panel */}
+                                    {comments > 0 ? (
                                         <button
-                                            onClick={onOpenComments}
+                                            type="button"
+                                            onClick={handleCaptionClick}
                                             className="text-white text-xs opacity-80 hover:opacity-100 mb-3"
                                         >
-                                            View all {comments} {comments === 1 ? 'comment' : 'comments'}
+                                            💬 View all {comments} {comments === 1 ? 'comment' : 'comments'}
+                                        </button>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            onClick={handleCaptionClick}
+                                            className="text-white text-xs opacity-80 hover:opacity-100 mb-3"
+                                        >
+                                            💬 Add the first comment
                                         </button>
                                     )}
                                 </div>
 
-                                {/* Comment Input at Bottom - Instagram Reels Style */}
+                                {/* Comment Input at Bottom - acts as full-width trigger to open comments sheet */}
                                 <div className="pb-4 px-3 sm:px-4">
-                                    <form onSubmit={handleAddComment} className="flex items-center gap-2">
-                                        <Avatar
-                                            src={user?.avatarUrl}
-                                            name={user?.name || user?.handle || 'User'}
-                                            size="sm"
-                                            className="border border-white/50 flex-shrink-0"
-                                        />
-                                        <input
-                                            type="text"
-                                            value={commentText}
-                                            onChange={(e) => setCommentText(e.target.value)}
-                                            placeholder="Add Comment..."
-                                            className="flex-1 px-3 sm:px-4 py-2.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white text-sm placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/50 focus:bg-white/15 min-w-0"
-                                            disabled={isAddingComment || !user}
-                                        />
-                                        <button
-                                            type="submit"
-                                            disabled={!commentText.trim() || isAddingComment || !user}
-                                            className="px-3 sm:px-4 h-9 flex items-center justify-center text-white font-semibold text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80 transition-opacity flex-shrink-0 whitespace-nowrap"
-                                        >
-                                            {isAddingComment ? '...' : 'Post'}
-                                        </button>
-                                    </form>
+                                    <button
+                                        type="button"
+                                        onClick={handleCaptionClick}
+                                        className="w-full flex items-center px-4 py-2.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white text-sm text-left placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/50 focus:bg-white/15"
+                                    >
+                                        <span className="opacity-70">Add comment...</span>
+                                    </button>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* Bottom Sheet - Caption and Comments (Instagram Reels Style) */}
-                    {isCaptionExpanded && (
+                    {/* Comments panel - portaled so it displays correctly (not clipped by carousel overflow) */}
+                    {isCaptionExpanded && createPortal(
                         <>
-                            {/* Backdrop */}
+                            {/* Backdrop - only from 30vh down, so video stays visible at top */}
                             <div
-                                className="fixed inset-0 bg-black/50 z-40"
+                                className="fixed left-0 right-0 bottom-0 z-[110] bg-black/50"
+                                // Leave more space for the video at the top when comments sheet is open.
+                                style={{ top: '40vh' }}
                                 onClick={handleCaptionClick}
                             />
-                            {/* Bottom Sheet */}
+                            {/* Comments sheet - TikTok style: white card, fixed to viewport; only handle bar triggers drag */}
                             <div
                                 ref={sheetRef}
-                                className="fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-gray-900 rounded-t-3xl shadow-2xl transition-transform duration-300 ease-out flex flex-col"
+                                className="fixed left-0 right-0 bottom-0 z-[120] bg-white rounded-t-2xl flex flex-col shadow-[0_-4px_24px_rgba(0,0,0,0.2)]"
                                 style={{
                                     transform: `translateY(${Math.max(0, sheetDragY)}px)`,
-                                    maxHeight: '50vh',
-                                    height: sheetDragY > 0 ? `calc(50vh - ${sheetDragY}px)` : '50vh',
+                                    maxHeight: sheetHeight,
+                                    height: sheetDragY > 0 ? `calc(${sheetHeight} - ${sheetDragY}px)` : sheetHeight,
                                     paddingBottom: 'env(safe-area-inset-bottom, 0px)'
                                 }}
                                 onTouchStart={handleSheetTouchStart}
                                 onTouchMove={handleSheetTouchMove}
                                 onTouchEnd={handleSheetTouchEnd}
                             >
-                                {/* Drag Handle */}
-                                <div className="flex justify-center pt-3 pb-2 flex-shrink-0">
-                                    <div className="w-12 h-1 bg-gray-300 dark:bg-gray-600 rounded-full" />
+                                {/* Drag Handle - only this area starts sheet drag so list can scroll */}
+                                <div data-sheet-drag-handle className="flex justify-center pt-2 pb-1 flex-shrink-0 cursor-grab active:cursor-grabbing touch-none">
+                                    <div className="w-10 h-1 bg-gray-300 rounded-full" />
+                                </div>
+                                {/* Header - TikTok style: "X comments" + sort + close */}
+                                <div className="flex items-center justify-between px-4 pb-3 flex-shrink-0 border-b border-gray-200">
+                                    <h3 className="text-black font-semibold text-base">
+                                        {comments} {comments === 1 ? 'comment' : 'comments'}
+                                    </h3>
+                                    <div className="flex items-center gap-2">
+                                        <button type="button" className="p-2 -mr-1 text-gray-600 hover:text-gray-900" aria-label="Sort comments">
+                                            <FiChevronDown className="w-5 h-5" />
+                                        </button>
+                                        <button type="button" onClick={handleCaptionClick} className="p-2 -mr-1 text-gray-600 hover:text-gray-900" aria-label="Close comments">
+                                            <FiX className="w-5 h-5" />
+                                        </button>
+                                    </div>
                                 </div>
 
-                                {/* Content */}
-                                <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-                                    {/* Scrollable Content */}
-                                    <div className="flex-1 overflow-y-auto px-4 pb-4 min-h-0">
-                                        {/* Profile Section */}
-                                        <div className="flex items-center gap-3 mb-4 pt-2">
-                                            {/* Profile picture with rounded-md shape and animated white border */}
-                                            <div className="relative w-8 h-8 rounded-md overflow-visible">
-                                                {/* Animated white border wrapper */}
-                                                <div
-                                                    className="absolute inset-0 rounded-md p-0.5 overflow-hidden z-0"
-                                                    style={{
-                                                        background: 'white',
-                                                    }}
-                                                >
-                                                    {/* Overlay that covers border initially, then rotates to reveal it */}
-                                                    <div
-                                                        ref={profileBorderOverlayRef2}
-                                                        className="absolute inset-0 bg-white dark:bg-gray-900 rounded-md"
-                                                        style={{
-                                                            maskImage: 'conic-gradient(from 0deg, black 360deg)',
-                                                            WebkitMaskImage: 'conic-gradient(from 0deg, black 360deg)',
-                                                        }}
+                                {/* Scrollable Comments */}
+                                <div className="flex-1 overflow-y-auto min-h-0">
+                                    {(post.caption || post.text) && (
+                                        <div className="px-4 py-3 border-b border-gray-100">
+                                            <p className="text-gray-900 text-sm whitespace-pre-line break-words">
+                                                {post.caption || post.text}
+                                            </p>
+                                        </div>
+                                    )}
+                                    {isLoadingComments ? (
+                                        <div className="flex justify-center py-12">
+                                            <div className="w-6 h-6 border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
+                                        </div>
+                                    ) : commentsList.length === 0 ? (
+                                        <div className="text-center py-12 text-gray-500 text-sm">
+                                            No comments yet. Be the first to comment!
+                                        </div>
+                                    ) : (
+                                        <div className="px-4 py-2 space-y-4">
+                                            {commentsList.map((comment) => (
+                                                <div key={comment.id} className="flex gap-3">
+                                                    <Avatar
+                                                        src={
+                                                            comment.userHandle === user?.handle
+                                                                ? (user?.avatarUrl || getAvatarForHandle(comment.userHandle))
+                                                                : getAvatarForHandle(comment.userHandle)
+                                                        }
+                                                        name={comment.userHandle?.split('@')[0] || 'User'}
+                                                        size="sm"
+                                                        className="flex-shrink-0 ring-1 ring-gray-200"
                                                     />
-                                                    <div className="w-full h-full rounded-md bg-white dark:bg-gray-900" />
-                                                </div>
-                                                {/* Profile picture content - positioned above border */}
-                                                <div className="absolute inset-[2px] rounded-md overflow-hidden flex items-center justify-center bg-white dark:bg-gray-900 z-10">
-                                                    {getAvatarForHandle(post.userHandle) ? (
-                                                        <img
-                                                src={getAvatarForHandle(post.userHandle)}
-                                                            alt={post.userHandle.split('@')[0]}
-                                                            className="w-full h-full object-cover"
-                                                            onError={(e) => {
-                                                                (e.target as HTMLImageElement).style.display = 'none';
-                                                            }}
-                                                        />
-                                                    ) : null}
-                                                    {/* Fallback initials if no image */}
-                                                    {!getAvatarForHandle(post.userHandle) && (
-                                                        <div className="w-full h-full bg-gray-700 flex items-center justify-center">
-                                                            <span className="text-white text-xs font-semibold">
-                                                                {post.userHandle.split('@')[0].charAt(0).toUpperCase()}
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-baseline gap-2 mb-0.5">
+                                                            <span className="font-semibold text-sm text-gray-900">
+                                                                {comment.userHandle}
+                                                            </span>
+                                                            <span className="text-xs text-gray-500">
+                                                                {timeAgo(comment.createdAt)}
                                                             </span>
                                                         </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                            <div className="flex-1">
-                                                <button className="text-gray-900 dark:text-white font-semibold text-sm hover:opacity-80">
-                                                    {post.userHandle}
-                                                </button>
-                                                {post.locationLabel && (
-                                                    <div className="text-gray-500 dark:text-gray-400 text-xs flex items-center gap-1 mt-0.5">
-                                                        <FiMapPin className="w-3 h-3" />
-                                                        {post.locationLabel}
-                                                    </div>
-                                                )}
-                                            </div>
-                                            {!isFollowing && !hasPendingRequest && (
-                                                <button
-                                                    onClick={handleFollow}
-                                                    disabled={busy}
-                                                    className="px-4 py-1.5 bg-black dark:bg-white text-white dark:text-black text-sm font-semibold rounded-md hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-                                                >
-                                                    {busy ? 'Following...' : 'Follow'}
-                                                </button>
-                                            )}
-                                            {!isFollowing && hasPendingRequest && (
-                                                <span className="px-4 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-sm font-semibold rounded-md cursor-default" aria-label="Follow request sent">
-                                                    Requested
-                                                </span>
-                                            )}
-                                            {isFollowing && (
-                                                <button
-                                                    onClick={handleFollow}
-                                                    disabled={busy}
-                                                    className="px-4 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-semibold rounded-md hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-                                                >
-                                                    {busy ? 'Unfollowing...' : 'Following'}
-                                                </button>
-                                            )}
-                                        </div>
-
-                                        {/* Full Caption */}
-                                        {(post.caption || post.text) && (
-                                            <div className="mb-6">
-                                                <p className="text-gray-900 dark:text-white text-sm whitespace-pre-line break-words">
-                                                    {post.caption || post.text}
-                                                </p>
-                                            </div>
-                                        )}
-
-                                        {/* Comments Section */}
-                                        <div className="mb-4">
-                                            <h3 className="text-gray-900 dark:text-white font-semibold text-base mb-4">
-                                                Comments ({comments})
-                                            </h3>
-
-                                            {isLoadingComments ? (
-                                                <div className="flex justify-center py-8">
-                                                    <div className="w-6 h-6 border-2 border-gray-300 dark:border-gray-600 border-t-black dark:border-t-white rounded-full animate-spin" />
-                                                </div>
-                                            ) : commentsList.length === 0 ? (
-                                                <div className="text-center py-8 text-gray-500 dark:text-gray-400 text-sm">
-                                                    No comments yet. Be the first to comment!
-                                                </div>
-                                            ) : (
-                                                <div className="space-y-4">
-                                                    {commentsList.map((comment) => (
-                                                        <div key={comment.id} className="flex gap-3">
-                                                            <Avatar
-                                                                name={comment.userHandle?.split('@')[0] || 'User'}
-                                                                size="sm"
-                                                            />
-                                                            <div className="flex-1">
-                                                                <div className="flex items-center gap-2 mb-1">
-                                                                    <span className="font-semibold text-sm text-gray-900 dark:text-white">
-                                                                        {comment.userHandle}
-                                                                    </span>
-                                                                    <span className="text-xs text-gray-500 dark:text-gray-400">
-                                                                        {timeAgo(comment.createdAt)}
-                                                                    </span>
-                                                                </div>
-                                                                <p className="text-sm text-gray-800 dark:text-gray-200 mb-2">
-                                                                    {comment.text}
-                                                                </p>
-                                                                <div className="flex items-center gap-4">
-                                                                    <button className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white">
-                                                                        <FiHeart className="w-3.5 h-3.5" />
-                                                                        {comment.likes || 0}
-                                                                    </button>
-                                                                    <button className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white">
-                                                                        Reply
-                                                                    </button>
-                                                                </div>
+                                                        <p className="text-sm text-gray-900 mb-2">{comment.text}</p>
+                                                        <div className="flex items-center justify-between">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setReplyingToCommentId(replyingToCommentId === comment.id ? null : comment.id)}
+                                                                className="text-xs text-gray-500 hover:text-gray-900 font-medium"
+                                                            >
+                                                                Reply
+                                                            </button>
+                                                            <div className="flex items-center gap-1 text-gray-500">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleLikeComment(comment.id)}
+                                                                    disabled={likingCommentId === comment.id}
+                                                                    className="p-0.5 hover:text-red-500 disabled:opacity-50 disabled:pointer-events-none"
+                                                                    aria-label={comment.userLiked ? 'Unlike' : 'Like'}
+                                                                >
+                                                                    {comment.userLiked ? (
+                                                                        <AiFillHeart className="w-4 h-4 text-red-500" />
+                                                                    ) : (
+                                                                        <FiHeart className="w-4 h-4" />
+                                                                    )}
+                                                                </button>
+                                                                <span className="text-xs">{comment.likes || 0}</span>
                                                             </div>
                                                         </div>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
+                                                        {/* Reply input for this comment */}
+                                                        {replyingToCommentId === comment.id && (
+                                                            <div className="mt-2 flex items-center gap-2">
+                                                                <input
+                                                                    type="text"
+                                                                    value={replyInputText}
+                                                                    onChange={(e) => setReplyInputText(e.target.value)}
+                                                                    placeholder="Write a reply..."
+                                                                    className="flex-1 min-w-0 px-3 py-2 rounded-full bg-gray-100 text-gray-900 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-300"
+                                                                    disabled={!!submittingReplyId}
+                                                                    autoFocus
+                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleReplyToComment(comment.id, replyInputText)}
+                                                                    disabled={!replyInputText.trim() || !!submittingReplyId}
+                                                                    className="p-2 text-gray-900 hover:text-black disabled:opacity-40"
+                                                                >
+                                                                    <FiSend className="w-5 h-5" />
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                        {/* Replies - nested under parent comment (collapsed by default) */}
+                                                        {(comment.replies?.length ?? 0) > 0 && (
+                                                            <div className="mt-2 ml-2">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() =>
+                                                                        setExpandedReplyThreads(prev => ({
+                                                                            ...prev,
+                                                                            [comment.id]: !prev[comment.id]
+                                                                        }))
+                                                                    }
+                                                                    className="text-xs font-medium text-gray-500 hover:text-gray-800"
+                                                                >
+                                                                    {expandedReplyThreads[comment.id]
+                                                                        ? `Hide replies (${comment.replies!.length})`
+                                                                        : `View replies (${comment.replies!.length})`}
+                                                                </button>
 
-                                    {/* Comment Input at Bottom */}
-                                    <div className="border-t border-gray-200 dark:border-gray-700 px-4 sm:px-6 pt-4 pb-6 bg-white dark:bg-gray-900 flex-shrink-0 safe-area-inset-bottom">
-                                        <form onSubmit={handleAddComment} className="flex items-center gap-3 sm:gap-4">
+                                                                {expandedReplyThreads[comment.id] && (
+                                                                    <div className="mt-2 pl-4 border-l-2 border-gray-200 bg-gray-50/80 rounded-r-md py-2 space-y-3">
+                                                                        {comment.replies!.map((reply) => (
+                                                                            <div key={reply.id} className="flex gap-2">
+                                                                                <Avatar
+                                                                                    src={
+                                                                                        reply.userHandle === user?.handle
+                                                                                            ? (user?.avatarUrl || getAvatarForHandle(reply.userHandle))
+                                                                                            : getAvatarForHandle(reply.userHandle)
+                                                                                    }
+                                                                                    name={reply.userHandle?.split('@')[0] || 'User'}
+                                                                                    size="sm"
+                                                                                    className="flex-shrink-0 ring-1 ring-gray-200 w-6 h-6"
+                                                                                />
+                                                                                <div className="flex-1 min-w-0">
+                                                                                    <div className="flex items-baseline gap-2 mb-0.5">
+                                                                                        <span className="font-semibold text-xs text-gray-900">{reply.userHandle}</span>
+                                                                                        <span className="text-xs text-gray-400">{timeAgo(reply.createdAt)}</span>
+                                                                                    </div>
+                                                                                    <p className="text-xs text-gray-900 mb-1">{reply.text}</p>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => handleLikeReply(comment.id, reply.id)}
+                                                                                        disabled={likingReplyKey === `${comment.id}-${reply.id}`}
+                                                                                        className="flex items-center gap-1 text-xs text-gray-500 hover:text-red-500 disabled:opacity-50 disabled:pointer-events-none"
+                                                                                        aria-label={reply.userLiked ? 'Unlike reply' : 'Like reply'}
+                                                                                        title={(reply.likes ?? 0) === 0 ? 'Like this reply' : `${reply.likes ?? 0} likes`}
+                                                                                    >
+                                                                                        {reply.userLiked ? (
+                                                                                            <AiFillHeart className="w-3.5 h-3.5 text-red-500" />
+                                                                                        ) : (
+                                                                                            <FiHeart className="w-3.5 h-3.5" />
+                                                                                        )}
+                                                                                        <span className="text-xs" title="Likes on this reply">{reply.likes ?? 0}</span>
+                                                                                    </button>
+                                                                                </div>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Comment Input - TikTok style: avatar | Add comment... | icons.
+                                    Hidden while replying to keep only one focused input on screen. */}
+                                {replyingToCommentId === null && (
+                                    <div className="px-4 py-3 flex-shrink-0 border-t border-gray-200 bg-white safe-area-inset-bottom">
+                                        <form
+                                            onSubmit={(e) => { e.preventDefault(); handleAddComment(); }}
+                                            className="flex items-center gap-2"
+                                        >
                                             <Avatar
                                                 src={user?.avatarUrl}
                                                 name={user?.name || user?.handle || 'User'}
                                                 size="sm"
-                                                className="border border-gray-200 dark:border-gray-700 flex-shrink-0"
+                                                className="flex-shrink-0 ring-1 ring-gray-200"
                                             />
-                                            <div className="relative flex-1 rounded min-w-0">
-                                                <div className="pointer-events-none absolute inset-0 rounded bg-gray-100 dark:bg-gray-800"></div>
-                                                <input
-                                                    type="text"
-                                                    value={commentText}
-                                                    onChange={(e) => setCommentText(e.target.value)}
-                                                    placeholder="Add a comment..."
-                                                    className="relative w-full px-3 sm:px-4 py-2 rounded bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white text-sm placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white focus:bg-white dark:focus:bg-gray-700"
-                                                    disabled={isAddingComment || !user}
-                                                />
-                                            </div>
-                                            <button
-                                                type="submit"
-                                                disabled={!commentText.trim() || isAddingComment || !user}
-                                                className="px-4 sm:px-5 h-9 sm:h-10 flex items-center justify-center text-black dark:text-white font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80 transition-opacity border-2 border-black dark:border-white rounded-full flex-shrink-0"
-                                            >
-                                                {isAddingComment ? '...' : 'Post'}
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={async () => {
-                                                    if (!post.userHandle || !user?.handle || !user?.id) return;
-                                                    if (post.userHandle === user.handle) return;
-                                                    
-                                                    // Check privacy and follow status
-                                                    const followedUsers = await getFollowedUsers(user.id);
-                                                    const profilePrivate = isProfilePrivate(post.userHandle);
-                                                    const canMessage = canSendMessage(user.handle, post.userHandle, followedUsers);
-                                                    const hasPending = hasPendingFollowRequest(user.handle, post.userHandle);
-                                                    
-                                                    if (!canMessage && profilePrivate) {
-                                                        // Show SweetAlert explaining they need to follow
-                                                        if (hasPending) {
-                                                            await Swal.fire({
-                                                                title: 'Gazetteer says',
-                                                                customClass: { title: 'gazetteer-shimmer' },
-                                                                html: `
-                                                                    <p style="font-weight: 600; font-size: 1.1em; margin: 0 0 12px 0;">Follow Request Pending</p>
-                                                                    <div style="text-align: center; padding: 10px 0;">
-                                                                        <p style="color: #ffffff; font-size: 14px; line-height: 20px; margin: 0 0 20px 0;">
-                                                                            This user has a private profile. You have already sent a follow request. Once they accept, you'll be able to send them a message.
-                                                                        </p>
-                                                                    </div>
-                                                                `,
-                                                                icon: 'info',
-                                                                background: '#262626',
-                                                                color: '#ffffff',
-                                                                confirmButtonText: 'OK',
-                                                                confirmButtonColor: '#8B5CF6'
-                                                            });
-                                                            return;
-                                                        }
-                                                        
-                                                        const result = await Swal.fire({
-                                                            title: 'Cannot Send Message',
-                                                            html: `
-                                                                <div style="text-align: center; padding: 10px 0;">
-                                                                    <p style="color: #ffffff; font-size: 14px; line-height: 20px; margin: 0 0 20px 0;">
-                                                                        This user has a private profile. You must follow them and have your follow request accepted before you can send them a message.
-                                                                    </p>
-                                                                </div>
-                                                            `,
-                                                            icon: 'warning',
-                                                            background: '#262626',
-                                                            color: '#ffffff',
-                                                            showCancelButton: true,
-                                                            confirmButtonText: 'Request to Follow',
-                                                            confirmButtonColor: '#8B5CF6',
-                                                            cancelButtonText: 'Cancel',
-                                                            cancelButtonColor: '#6B7280'
-                                                        });
-                                                        
-                                                        if (result.isConfirmed) {
-                                                            createFollowRequest(user.handle, post.userHandle);
-                                                            if (user?.id) setFollowState(user.id, post.userHandle, false);
-                                                            Swal.fire({
-                                                                title: 'Gazetteer says',
-                                                                customClass: { title: 'gazetteer-shimmer' },
-                                                                html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Follow Request Sent</p><p style="color: #ffffff; font-size: 14px; margin: 0;">You will be notified when they accept your request.</p>`,
-                                                                icon: 'success',
-                                                                timer: 2000,
-                                                                showConfirmButton: false,
-                                                                background: '#262626',
-                                                                color: '#ffffff'
-                                                            });
-                                                        }
-                                                        return;
+                                            <input
+                                                ref={expandedCommentInputRef}
+                                                type="text"
+                                                value={commentText}
+                                                onChange={(e) => setCommentText(e.target.value)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter' && !e.shiftKey && commentText.trim() && user) {
+                                                        e.preventDefault();
+                                                        handleAddComment(commentText.trim());
                                                     }
-                                                    
-                                                    // If they can message, navigate to DM page
-                                                    window.scrollTo(0, 0);
-                                                    navigate(`/messages/${encodeURIComponent(post.userHandle)}`);
-                                                    onClose();
                                                 }}
-                                                disabled={!user || post.userHandle === user?.handle}
-                                                className="ml-3 sm:ml-4 p-2 h-9 sm:h-10 flex items-center justify-center text-black dark:text-white disabled:opacity-30 disabled:cursor-not-allowed hover:opacity-80 transition-opacity flex-shrink-0"
-                                                aria-label="Send direct message"
-                                            >
-                                                <FiSend className="w-5 h-5 sm:w-6 sm:h-6" />
-                                            </button>
+                                                placeholder="Add comment..."
+                                                className="flex-1 min-w-0 px-4 py-2.5 rounded-full bg-gray-100 text-gray-900 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-300 focus:bg-gray-50"
+                                                disabled={isAddingComment || !user}
+                                            />
+                                            <div className="flex items-center gap-1 flex-shrink-0 relative">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowCommentEmojiPicker((v) => !v)}
+                                                    className={`p-2 rounded-full ${showCommentEmojiPicker ? 'bg-gray-200 text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}
+                                                    aria-label="Add emoji"
+                                                >
+                                                    <FiSmile className="w-5 h-5" />
+                                                </button>
+                                                {showCommentEmojiPicker && (
+                                                    <div className="absolute bottom-full left-0 mb-1 w-[min(100vw,320px)] h-[220px] min-h-[220px] p-2 rounded-xl bg-white border border-gray-200 shadow-xl z-[130] overflow-y-auto flex flex-col">
+                                                        <div className="grid grid-cols-8 gap-1 flex-none" style={{ gridAutoRows: 'minmax(36px, 36px)' }}>
+                                                            {['😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '🙃', '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😋', '😛', '😜', '🤪', '😝', '🤗', '🤔', '😐', '😑', '😏', '😒', '🙄', '😬', '😌', '😔', '😪', '😴', '😷', '🤒', '🤕', '🤢', '🤮', '😵', '🤯', '😎', '🤓', '😕', '😟', '🙁', '😮', '😯', '😲', '😳', '🥺', '😦', '😧', '😨', '😢', '😭', '😤', '😡', '🤬', '💀', '💩', '👍', '👎', '👏', '🙌', '🤝', '🙏', '❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '💔', '💕', '💖', '💗', '💘', '😺', '😸', '😹', '😻', '😼', '😽', '🙀', '😿', '😾'].map((emoji) => (
+                                                                <button
+                                                                    key={emoji}
+                                                                    type="button"
+                                                                    className="flex items-center justify-center w-full h-9 text-xl hover:bg-gray-100 rounded touch-manipulation"
+                                                                    onClick={() => {
+                                                                        setCommentText((prev) => prev + emoji);
+                                                                    }}
+                                                                >
+                                                                    {emoji}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                <button
+                                                    type="submit"
+                                                    disabled={!commentText.trim() || isAddingComment || !user}
+                                                    className="p-2 text-gray-900 hover:text-black disabled:opacity-40 disabled:cursor-not-allowed"
+                                                    aria-label="Send comment"
+                                                >
+                                                    <FiSend className="w-5 h-5" />
+                                                </button>
+                                            </div>
                                         </form>
                                     </div>
-                                </div>
+                                )}
                             </div>
-                        </>
+                        </>,
+                        document.body
                     )}
+                                </div>
+                                {carouselNextPost && (
+                                    <div className="w-full flex items-center justify-center bg-black" style={{ height: vh }}>
+                                        <CarouselSlidePreview p={carouselNextPost} />
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    ) : null}
                 </div>
             )}
             {/* Share Modal - Render in portal outside ScenesModal */}
