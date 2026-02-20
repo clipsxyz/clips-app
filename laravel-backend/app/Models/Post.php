@@ -31,6 +31,7 @@ class Post extends Model
         'media_url',
         'media_type',
         'location_label',
+        'venue',
         'tags',
         'likes_count',
         'views_count',

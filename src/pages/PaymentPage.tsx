@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { FiArrowLeft, FiLock, FiCreditCard } from 'react-icons/fi';
 import Swal from 'sweetalert2';
+import { bottomSheet } from '../utils/swalBottomSheet';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { useAuth } from '../context/Auth';
@@ -161,24 +162,14 @@ export default function PaymentPage() {
     const { post, feedType, price } = state;
 
     const showSuccessAndNavigate = async () => {
-        const result = await Swal.fire({
+        const result = await Swal.fire(bottomSheet({
+            title: 'Payment Complete!',
+            message: `Your payment is complete and your post is boosted for 6 hours in the ${getFeedTypeLabel(feedType)}. Thank you for using our boost service!`,
             icon: 'success',
-            title: 'Gazetteer says',
-            html: `
-                <p style="font-weight: 600; font-size: 1.25em; margin: 0 0 1rem 0;">Payment Complete!</p>
-                <p style="margin: 1rem 0; color: #374151;">Your payment is complete and your post is boosted for <strong>6 hours</strong> in the <strong>${getFeedTypeLabel(feedType)}</strong>.</p>
-                <p style="margin-top: 1rem; color: #6B7280; font-size: 0.9rem;">Thank you for using our boost service!</p>
-            `,
             showCancelButton: true,
             confirmButtonText: 'Back to Newsfeed',
             cancelButtonText: 'Stay on Boost Page',
-            confirmButtonColor: '#8B5CF6',
-            cancelButtonColor: '#6B7280',
-            customClass: { popup: 'rounded-2xl', confirmButton: 'px-6 py-2 rounded-lg font-semibold', cancelButton: 'px-6 py-2 rounded-lg font-semibold' },
-            buttonsStyling: true,
-            allowOutsideClick: false,
-            allowEscapeKey: false
-        });
+        }));
         if (result.isConfirmed) {
             navigate('/feed', { state: { boostSuccess: true, postId: post.id, feedType } });
         } else {

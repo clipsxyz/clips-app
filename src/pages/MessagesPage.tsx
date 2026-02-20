@@ -19,6 +19,7 @@ import { timeAgo } from '../utils/timeAgo';
 import { showToast } from '../utils/toast';
 import { getSocket } from '../services/socketio';
 import Swal from 'sweetalert2';
+import { bottomSheet } from '../utils/swalBottomSheet';
 
 interface MessageUI extends ChatMessage {
     isFromMe: boolean;
@@ -1987,34 +1988,11 @@ export default function MessagesPage() {
                                                 
                                                 // If profile is private and already has pending request, show message
                                                 if (profilePrivate && hasPending) {
-                                                    Swal.fire({
-                                                        title: 'Gazetteer says',
-                                                        customClass: {
-                                                            title: 'gazetteer-shimmer',
-                                                            popup: '!rounded-2xl !shadow-xl !border-0',
-                                                            container: '!p-0',
-                                                            confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                                                        },
-                                                        html: `
-                                                            <div style="text-align: center; padding: 8px 0;">
-                                                                <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">
-                                                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                                                        <circle cx="12" cy="12" r="10"></circle>
-                                                                        <polyline points="12 6 12 12 16 14"></polyline>
-                                                                    </svg>
-                                                                </div>
-                                                                <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Already Sent</h3>
-                                                                <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">You have already sent a follow request to ${handle}. You will be notified when they respond.</p>
-                                                            </div>
-                                                        `,
-                                                        showConfirmButton: true,
-                                                        confirmButtonText: 'OK',
-                                                        confirmButtonColor: '#0095f6',
-                                                        background: '#ffffff',
-                                                        width: '400px',
-                                                        padding: '0',
-                                                        buttonsStyling: false
-                                                    });
+                                                    Swal.fire(bottomSheet({
+                                                        title: 'Follow Request Already Sent',
+                                                        message: `You have already sent a follow request to ${handle}. You will be notified when they respond.`,
+                                                        icon: 'alert',
+                                                    }));
                                                     setIsFollowLoading(false);
                                                     return;
                                                 }
@@ -2094,69 +2072,22 @@ export default function MessagesPage() {
                                 onClick={() => {
                                     // If no places traveled, show the "No Places Traveled" card
                                     if (!otherUserPlacesTraveled || otherUserPlacesTraveled.length === 0) {
-                                        Swal.fire({
-                                            title: '',
-                                            html: `
-                                                <p style="font-size: 12px; color: #6b7280; margin: 0 0 10px 0; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;">Gazetteer says</p>
-                                                <div style="text-align: center; padding: 8px 0;">
-                                                    <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
-                                                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-                                                            <circle cx="12" cy="10" r="3"></circle>
-                                                        </svg>
-                                                    </div>
-                                                    <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">No Places Traveled</h3>
-                                                    <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">${handle} hasn't added any places they've traveled to their profile yet.</p>
-                                                </div>
-                                            `,
-                                            showConfirmButton: true,
-                                            confirmButtonText: 'OK',
-                                            confirmButtonColor: '#0095f6',
-                                            background: '#ffffff',
-                                            width: '400px',
-                                            padding: '0',
-                                            customClass: {
-                                                popup: '!rounded-2xl !shadow-xl !border-0',
-                                                container: '!p-0',
-                                                confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                                            },
-                                            buttonsStyling: false
-                                        });
+                                        Swal.fire(bottomSheet({
+                                            title: 'No Places Traveled',
+                                            message: `${handle} hasn't added any places they've traveled to their profile yet.`,
+                                            icon: 'alert',
+                                        }));
                                     } else {
                                         // Show a places traveled card (SweetAlert) using the same data
                                         const placesHtml = otherUserPlacesTraveled
                                             .map(place => `<li style="padding: 6px 0; border-bottom: 1px solid #f3f4f6;">${place}</li>`)
                                             .join('');
 
-                                        Swal.fire({
-                                            title: 'Gazetteer says',
-                                            html: `
-                                                <div style="text-align: left; padding: 8px 0;">
-                                                    <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3);">
-                                                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-                                                            <circle cx="12" cy="10" r="3"></circle>
-                                                        </svg>
-                                                    </div>
-                                                    <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 12px 0; text-align: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Places Traveled</h3>
-                                                    <ul style="list-style: none; margin: 0; padding: 0 4px 0 4px; max-height: 260px; overflow-y: auto;">
-                                                        ${placesHtml}
-                                                    </ul>
-                                                </div>
-                                            `,
-                                            showConfirmButton: true,
-                                            confirmButtonText: 'OK',
-                                            confirmButtonColor: '#0095f6',
-                                            background: '#ffffff',
-                                            width: '400px',
-                                            padding: '0',
-                                            customClass: {
-                                                popup: '!rounded-2xl !shadow-xl !border-0',
-                                                container: '!p-0',
-                                                confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                                            },
-                                            buttonsStyling: false
-                                        });
+                                        Swal.fire(bottomSheet({
+                                            title: 'Places Traveled',
+                                            html: `<ul class="swal-bottom-sheet-message" style="list-style: none; margin: 0; padding: 0 4px; max-height: 260px; overflow-y: auto;">${placesHtml}</ul>`,
+                                            icon: 'none',
+                                        }));
                                     }
                                 }}
                                 title="View places traveled"

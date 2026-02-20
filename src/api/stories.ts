@@ -654,7 +654,8 @@ export async function createStory(
     taggedUsers?: string[], // Tagged users (handles only)
     poll?: { question: string; option1: string; option2: string; option3?: string }, // Poll data
     taggedUsersPositions?: Array<{ handle: string; x: number; y: number }>, // Tagged users with positions
-    question?: string // Question prompt (e.g., "Ask me anything")
+    question?: string, // Question prompt (e.g., "Ask me anything")
+    venue?: string // Venue / place name (for metadata when story is shown on feed)
 ): Promise<Story> {
     // Use real Laravel API
     const { apiRequest } = await import('./client');
@@ -675,7 +676,8 @@ export async function createStory(
                 taggedUsers: taggedUsers || undefined, // Send tagged users to backend
                 taggedUsersPositions: taggedUsersPositions || undefined, // Send tagged users with positions
                 poll: poll || undefined,
-                question: question || undefined // Question prompt
+                question: question || undefined, // Question prompt
+                venue: venue || undefined
             }),
         });
 

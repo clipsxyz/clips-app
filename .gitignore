@@ -1,8 +1,14 @@
 node_modules
-node_modules
 env.zip
 src.zip
+.env
+.env.local
+dist/
 
 # PHPUnit coverage (Laravel backend)
 laravel-backend/coverage/
 laravel-backend/coverage.xml
+# Laravel local env and runtime
+laravel-backend/.env
+laravel-backend/database/database.sqlite
+laravel-backend/storage/

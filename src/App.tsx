@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiSend, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX } from 'react-icons/fi';
+import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiSend, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX, FiClock } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from './constants';
 import TopBar from './components/TopBar';
@@ -17,11 +17,12 @@ import { useOnline } from './hooks/useOnline';
 import { getUnreadTotal, appendMessage } from './api/messages';
 import { getUnreadNotificationCount } from './api/notifications';
 import { getStoryInsightsForUser } from './api/stories';
-import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, getFollowState, deletePost } from './api/posts';
+import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost } from './api/posts';
 import { updatePost, checkFollowsMe } from './api/client';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory } from './api/stories';
 import { enqueue, drain } from './utils/mutationQueue';
 import { loadFeed, saveFeed } from './utils/feedCache';
+import { getStableUserId } from './utils/userId';
 import { timeAgo } from './utils/timeAgo';
 import { getActiveAds, trackAdImpression, trackAdClick } from './api/ads';
 import { getActiveBoost, getBoostTimeRemaining } from './api/boost';
@@ -39,6 +40,7 @@ import ProgressiveImage from './components/ProgressiveImage';
 import ZoomableMedia from './components/ZoomableMedia';
 import { getInstagramImageDimensions, getImageSize } from './utils/imageDimensions';
 import Swal from 'sweetalert2';
+import { bottomSheet } from './utils/swalBottomSheet';
 
 // Global map to store video playback times per post ID for seamless transitions
 const videoTimesMap = new Map<string, number>();
@@ -728,7 +730,25 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
   const navigate = useNavigate();
   const [hasStory, setHasStory] = React.useState(false);
   const titleId = `post-title-${post.id}`;
-  const userId = user?.id ?? 'anon';
+  const userId = getStableUserId(user);
+
+  // Metadata carousel: location → venue → timestamp, one at a time
+  const metadataItems = React.useMemo(() => {
+    const out: Array<{ label: string; type: 'location' | 'venue' | 'timestamp' }> = [];
+    if (post.locationLabel && post.locationLabel !== 'Unknown Location') out.push({ label: post.locationLabel, type: 'location' });
+    if (post.venue) out.push({ label: post.venue, type: 'venue' });
+    const ts = post.createdAt != null ? (typeof post.createdAt === 'string' ? parseInt(post.createdAt, 10) : post.createdAt) : null;
+    if (typeof ts === 'number' && !Number.isNaN(ts)) out.push({ label: timeAgo(ts), type: 'timestamp' });
+    return out;
+  }, [post.locationLabel, post.venue, post.createdAt]);
+  const [metadataIndex, setMetadataIndex] = React.useState(0);
+  React.useEffect(() => {
+    if (metadataItems.length <= 1) return;
+    const t = setInterval(() => {
+      setMetadataIndex((i) => (i + 1) % metadataItems.length);
+    }, 3000);
+    return () => clearInterval(t);
+  }, [metadataItems.length]);
 
   // Check if this is the current user's post
   const isCurrentUser = user?.handle === post.userHandle;
@@ -926,7 +946,7 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
               </div>
             )}
           </div>
-          <div className="flex-1" onClick={(e) => e.stopPropagation()}>
+          <div className="flex-1 min-w-0 flex flex-col gap-0" onClick={(e) => e.stopPropagation()}>
             {/* Show reclip indicator if this is a reclipped post */}
             {isReclippedPost && (
               <div className={`text-xs mb-1 flex items-center gap-1 ${reclipColorClass}`}>
@@ -937,63 +957,57 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                // Navigate to original poster if reclipped, otherwise to reclipper
                 navigate(`/user/${isReclippedPost ? post.originalUserHandle : post.userHandle}`);
               }}
               className={`text-left transition-opacity w-full ${isOverlaid ? 'hover:opacity-80' : 'hover:opacity-70'}`}
             >
-              {/* Instagram-style feed header: 14px semibold (Instagram uses ~14px for username in app) */}
-              <h3 id={titleId} className={`text-sm font-semibold flex items-center gap-1.5 ${textColorClass}`} style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
-                <span>{isReclippedPost ? post.originalUserHandle : post.userHandle}</span>
+              <h3 id={titleId} className={`text-sm font-semibold flex items-center gap-1.5 leading-tight ${textColorClass}`} style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+                <span className="truncate">{isReclippedPost ? post.originalUserHandle : post.userHandle}</span>
                 <Flag
                   value={isCurrentUser ? (user?.countryFlag || '') : (getFlagForHandle(isReclippedPost ? post.originalUserHandle! : post.userHandle) || '')}
                   size={16}
                 />
               </h3>
             </button>
+            {/* One metadata at a time: location → venue → timestamp; icon per type */}
+            {metadataItems.length > 0 && (() => {
+              const current = metadataItems[metadataIndex];
+              const iconClass = `w-3 h-3 flex-shrink-0 ${isOverlaid ? 'text-white/90' : 'text-gray-500 dark:text-gray-400'}`;
+              const Icon = current.type === 'location' ? FiMapPin : current.type === 'venue' ? FiHome : FiClock;
+              return (
+                <div
+                  className="flex items-center gap-1 min-w-0 max-w-full self-start -mt-0.5"
+                  title={metadataItems.map((m) => m.label).join(' · ')}
+                >
+                  <Icon className={iconClass} />
+                  <span className={`text-xs font-medium whitespace-nowrap truncate max-w-[140px] ${isOverlaid ? 'text-white' : 'text-gray-600 dark:text-gray-400'}`}>
+                    {current.label}
+                  </span>
+                </div>
+              );
+            })()}
           </div>
         </div>
-        <div className="relative z-10 flex flex-col items-end gap-2">
-          {/* Location and 3 dots - side by side */}
-          <div className="flex items-center gap-2">
-            {/* Story location - display only (where story was captured), not a feed filter */}
-            {post.locationLabel && post.locationLabel !== 'Unknown Location' && (
-              <span
-                title={post.locationLabel}
-                className={`px-2 py-1 rounded-full text-[10px] font-medium flex items-center gap-1.5 max-w-[120px] pointer-events-none select-none ${isOverlaid
-                  ? 'bg-white/50 backdrop-blur-sm text-gray-800'
-                  : 'bg-white/50 backdrop-blur-sm text-gray-800'
-                  }`}
-              >
-                <span className="truncate whitespace-nowrap">{post.locationLabel}</span>
-                <FiCamera className="w-2.5 h-2.5 text-gray-800 flex-shrink-0" />
-              </span>
-            )}
-            {/* 3-dot menu button - no background, vertical dots */}
-            {onMenuClick && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  onMenuClick();
-                }}
-                onMouseDown={(e) => {
-                  e.stopPropagation();
-                }}
-                onTouchStart={(e) => {
-                  e.stopPropagation();
-                }}
-                className={`p-1 transition-all active:scale-[.98] z-50 relative ${isOverlaid
-                  ? 'text-white hover:opacity-70'
-                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
-                  }`}
-                aria-label="More options"
-                title="More options"
-              >
-                <FiMoreHorizontal className="w-4 h-4" />
-              </button>
-            )}
-          </div>
+        <div className="relative z-10 flex items-center flex-shrink-0">
+          {onMenuClick && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                onMenuClick();
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              className={`p-1 transition-all active:scale-[.98] z-50 relative ${isOverlaid
+                ? 'text-white hover:opacity-70'
+                : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
+              }`}
+              aria-label="More options"
+              title="More options"
+            >
+              <FiMoreHorizontal className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -1386,7 +1400,7 @@ function BottomCaptionOverlay({ caption, onExpand }: { caption: string; onExpand
   );
 }
 
-function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onCarouselIndexChange, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled: _videoCaptionsEnabled, videoCaptionText: _videoCaptionText, subtitlesEnabled, subtitleText: _subtitleText, postUserHandle, postLocationLabel, postCreatedAt, postId, priority = false }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onCarouselIndexChange?: (index: number) => void; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string; postId?: string; priority?: boolean }) {
+function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onCarouselIndexChange, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled: _videoCaptionsEnabled, videoCaptionText: _videoCaptionText, subtitlesEnabled, subtitleText: _subtitleText, postUserHandle, postLocationLabel: _postLocationLabel, postCreatedAt, postId, priority = false }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onCarouselIndexChange?: (index: number) => void; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string; postId?: string; priority?: boolean }) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [burst, setBurst] = React.useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -2089,20 +2103,11 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                             />
                           )}
                         </h3>
-                        <div className="text-xs text-gray-600 flex items-center gap-2 mt-0.5">
-                          {postLocationLabel && postLocationLabel !== 'Unknown Location' && (
-                            <>
-                              <span className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/80 backdrop-blur-sm text-gray-800 font-medium">
-                                <span>{postLocationLabel}</span>
-                                <FiCamera className="w-3.5 h-3.5 text-gray-800" />
-                              </span>
-                              {postCreatedAt && <span className="text-gray-400">·</span>}
-                            </>
-                          )}
-                          {postCreatedAt && (
+                        {postCreatedAt && (
+                          <div className="text-xs text-gray-600 mt-0.5">
                             <span>{timeAgo(typeof postCreatedAt === 'string' ? parseInt(postCreatedAt) : postCreatedAt)}</span>
-                          )}
-                        </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -2228,7 +2233,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                 </div>
               )}
 
-              {/* View in Scenes Button - Bottom right for video and image (kept below bottom nav z-index) */}
+              {/* View in Scenes Button - bottom-right (Scenes only for image/video; text-only posts won't show it) */}
               {!isLoading && !hasError && (currentItem.type === 'video' || currentItem.type === 'image') && onOpenScenes && (
                 <div className="absolute bottom-4 right-4 z-20 pointer-events-auto" style={{ touchAction: 'auto' }}>
                   <button
@@ -2767,35 +2772,13 @@ function EngagementBar({
     if (busy) return;
     
     // Show confirmation modal
-    const result = await Swal.fire({
-      title: 'Gazetteer says',
-      html: `
-        <p style="color: #ffffff; font-size: 18px; font-weight: 600; margin: 0 0 12px 0;">Reshare this to followers?</p>
-        <div style="text-align: center; padding: 20px 0;">
-          <p style="color: #ffffff; font-size: 14px; line-height: 20px; margin: 0;">
-            This post will be shared to your followers in their Following feed.
-          </p>
-        </div>
-      `,
+    const result = await Swal.fire(bottomSheet({
+      title: 'Reshare this to followers?',
+      message: 'This post will be shared to your followers in their Following feed.',
       showCancelButton: true,
       confirmButtonText: 'OK',
       cancelButtonText: 'Cancel',
-      confirmButtonColor: '#0095f6',
-      cancelButtonColor: '#8e8e8e',
-      background: '#262626',
-      color: '#ffffff',
-      customClass: {
-        popup: 'instagram-style-modal',
-        title: 'instagram-modal-title',
-        htmlContainer: 'instagram-modal-content',
-        confirmButton: 'instagram-confirm-btn',
-        cancelButton: 'instagram-cancel-btn',
-        actions: 'instagram-modal-actions'
-      },
-      buttonsStyling: true,
-      allowOutsideClick: true,
-      allowEscapeKey: true
-    });
+    }));
 
     // Only proceed if user clicked OK
     if (!result.isConfirmed) {
@@ -3342,16 +3325,11 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
           </div>
         ) : null}
       </div>
-      {/* Caption and time for image/video posts */}
+      {/* Caption for image/video posts (timestamp is in header carousel) */}
       {(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0)) && (
         <div className="px-4 py-3">
           {(post.caption || post.text) && (
             <CaptionText caption={post.caption || post.text || ''} />
-          )}
-          {post.createdAt && (
-            <div className="mt-1 text-[10px] text-gray-500">
-              {timeAgo(post.createdAt)}
-            </div>
           )}
         </div>
       )}
@@ -3603,7 +3581,7 @@ const AdCard = React.memo(function AdCard({ ad, onImpression, onClick }: {
 
 function FeedPageWrapper() {
   const { user } = useAuth();
-  const userId = user?.id ?? 'anon';
+  const userId = getStableUserId(user);
   const online = useOnline();
   const routerLocation = useLocation();
   const navigate = useNavigate();
@@ -3664,6 +3642,8 @@ function FeedPageWrapper() {
   const [dmSheetMessage, setDmSheetMessage] = React.useState('');
   const dmSheetInputRef = React.useRef<HTMLTextAreaElement | null>(null);
   const pagesLoadedForFilterRef = React.useRef<string | null>(null);
+  // When we clear Following feed after a follow, cursor stays 0 so the load effect doesn't re-run. This forces a refetch.
+  const [discoverRefreshTrigger, setDiscoverRefreshTrigger] = React.useState(0);
 
   // Per-location "notify me when this feed wakes up" preferences (stored by lowercase name)
   const [notifyLocations, setNotifyLocations] = React.useState<string[]>([]);
@@ -3877,7 +3857,7 @@ function FeedPageWrapper() {
       }
     })();
     return () => { cancelled = true; };
-  }, [cursor, currentFilter, userId, routerLocation.search, customLocation]);
+  }, [cursor, currentFilter, userId, routerLocation.search, customLocation, discoverRefreshTrigger]);
 
   // Sync with TopBar dropdown and Discover page
   React.useEffect(() => {
@@ -4001,6 +3981,37 @@ function FeedPageWrapper() {
     window.addEventListener('postCreated', handlePostCreated);
     return () => window.removeEventListener('postCreated', handlePostCreated);
   }, []);
+
+  // Sync feed when user follows/unfollows from profile (or elsewhere) so newsfeed cards stay correct
+  React.useEffect(() => {
+    const handler = (e: CustomEvent<{ handle: string; isFollowing: boolean }>) => {
+      const { handle: targetHandle, isFollowing } = e.detail || {};
+      if (!targetHandle) return;
+      const lower = targetHandle.toLowerCase();
+      setPages(prev => prev.map(page => page.map(p => 
+        p.userHandle && p.userHandle.toLowerCase() === lower ? { ...p, isFollowing } : p
+      )));
+    };
+    window.addEventListener('followToggled', handler as EventListener);
+    return () => window.removeEventListener('followToggled', handler as EventListener);
+  }, []);
+
+  // When landing on the feed (e.g. back from profile after unfollow), re-apply current follow state so UI matches
+  const syncedFollowStateOnFeedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (routerLocation.pathname !== '/feed') {
+      syncedFollowStateOnFeedRef.current = false;
+      return;
+    }
+    if (!userId || pages.length === 0) return;
+    if (syncedFollowStateOnFeedRef.current) return;
+    syncedFollowStateOnFeedRef.current = true;
+    const follows = getState(userId).follows || {};
+    setPages(prev => prev.map(page => page.map(p => ({
+      ...p,
+      isFollowing: getFollowState(follows, p.userHandle)
+    }))));
+  }, [routerLocation.pathname, userId, pages.length]);
 
   // Poll for new posts every 10 seconds
   React.useEffect(() => {
@@ -4203,6 +4214,7 @@ function FeedPageWrapper() {
   }, [currentFilter, user]);
 
   // Merge posts and ads; only show posts when they were loaded for the current filter (stops wrong feed flashing on Following)
+  // Re-decorate posts with current user state so isFollowing/likes/bookmarks stay correct after cache load or tab switch
   const flat = React.useMemo(() => {
     if (pagesLoadedForFilterRef.current !== currentFilter) return [];
     const flattened = pages.flat();
@@ -4223,11 +4235,12 @@ function FeedPageWrapper() {
       return true;
     }).map((p) => bestByKey.get(idKey(p))!);
 
-    // Dedupe already handled above; no need to log
+    // Apply current follow/like/bookmark state so UI is correct after cache or tab switch
+    const decoratedPosts = uniquePosts.map(p => decorateForUser(userId, p));
 
     // Merge posts and ads, sort by epoch time (createdAt) - newest first
     const feedItems: Array<{ type: 'post' | 'ad'; item: Post | Ad; createdAt: number }> = [
-      ...uniquePosts.map(p => ({ type: 'post' as const, item: p, createdAt: p.createdAt || 0 })),
+      ...decoratedPosts.map(p => ({ type: 'post' as const, item: p, createdAt: p.createdAt || 0 })),
       ...ads.map(a => ({ type: 'ad' as const, item: a, createdAt: a.createdAt || 0 }))
     ];
 
@@ -4235,10 +4248,25 @@ function FeedPageWrapper() {
     feedItems.sort((a, b) => b.createdAt - a.createdAt);
 
     return feedItems;
-  }, [pages, ads]);
+  }, [pages, ads, userId, currentFilter]);
 
-  // Posts only (no ads) - for Scenes carousel
-  const postsOnly = React.useMemo(() => flat.filter((f) => f.type === 'post').map((f) => f.item as Post), [flat]);
+  // Posts only (no ads) - for Scenes carousel (only posts that have media: image or video; exclude text-only)
+  const postsOnly = React.useMemo(() => {
+    const hasMedia = (p: Post) => {
+      // If there is a mediaItems array, allow when at least one item is image or video
+      if (p.mediaItems && p.mediaItems.length > 0) {
+        return p.mediaItems.some((m) => m.type === 'video' || m.type === 'image');
+      }
+      // Fallback to single mediaUrl/mediaType
+      if (p.mediaType === 'video' || p.mediaType === 'image') return true;
+      // If there's no mediaType but there is a mediaUrl, treat it as media
+      return !!p.mediaUrl;
+    };
+    return flat
+      .filter((f) => f.type === 'post')
+      .map((f) => f.item as Post)
+      .filter((p) => hasMedia(p));
+  }, [flat]);
 
   // Human-readable feed label for Scenes carousel header
   const feedLabelForScenes = React.useMemo(() => {
@@ -4277,8 +4305,8 @@ function FeedPageWrapper() {
           userRegional={user?.regional}
           userNational={user?.national}
           clipsCount={(() => {
-            const userId = user?.id ?? 'anon';
-            const userState = getState(userId);
+            const uid = getStableUserId(user);
+            const userState = getState(uid);
             return pages.flat().filter(p => {
               const isFollowing = getFollowState(userState.follows, p.userHandle);
               if (!isFollowing) return false;
@@ -4424,6 +4452,7 @@ function FeedPageWrapper() {
                   setEnd(false);
                   setError(null);
                   requestTokenRef.current++;
+                  setDiscoverRefreshTrigger(t => t + 1);
                 }
                 return;
               }
@@ -4449,6 +4478,24 @@ function FeedPageWrapper() {
                 navigate(`/user/${p.userHandle}`);
                 return;
               }
+
+              // Mock-only: keep follow state local, refresh Following feed, no API call (avoids delay and state overwrite)
+              const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+              if (!useLaravelApi) {
+                const newFollowing = !wasFollowing;
+                setFollowState(userId, p.userHandle, newFollowing);
+                updateOne(p.id, post => ({ ...post, isFollowing: newFollowing }));
+                window.dispatchEvent(new CustomEvent('followToggled', { detail: { handle: p.userHandle, isFollowing: newFollowing } }));
+                if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
+                  setPages([]);
+                  setCursor(0);
+                  setEnd(false);
+                  setError(null);
+                  requestTokenRef.current++;
+                  setDiscoverRefreshTrigger(t => t + 1);
+                }
+                return;
+              }
               
               let isActuallyFollowing = p.isFollowing;
               if (user?.id) {
@@ -4463,7 +4510,7 @@ function FeedPageWrapper() {
               
               if (isActuallyFollowing && wasFollowing) {
                 if (user?.handle) removeFollowRequest(user.handle, p.userHandle);
-                const updated = await toggleFollowForPost(userId, p.id);
+                const updated = await toggleFollowForPost(userId, p.id, p.userHandle);
                 updateOne(p.id, _post => ({ ...updated }));
                 setFollowState(userId, p.userHandle, !!updated.isFollowing);
                 return;
@@ -4507,35 +4554,11 @@ function FeedPageWrapper() {
               });
               
               if (profilePrivate && hasPending && user?.handle) {
-                const Swal = (await import('sweetalert2')).default;
-                Swal.fire({
-                  title: 'Gazetteer says',
-                  customClass: {
-                    title: 'gazetteer-shimmer',
-                    popup: '!rounded-2xl !shadow-xl !border-0',
-                    container: '!p-0',
-                    confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                  },
-                  html: `
-                    <div style="text-align: center; padding: 8px 0;">
-                      <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                          <circle cx="12" cy="12" r="10"></circle>
-                          <polyline points="12 6 12 12 16 14"></polyline>
-                        </svg>
-                      </div>
-                      <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Already Sent</h3>
-                      <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">You have already sent a follow request to ${p.userHandle}. You will be notified when they respond.</p>
-                    </div>
-                  `,
-                  showConfirmButton: true,
-                  confirmButtonText: 'OK',
-                  confirmButtonColor: '#0095f6',
-                  background: '#ffffff',
-                  width: '400px',
-                  padding: '0',
-                  buttonsStyling: false
-                });
+                await Swal.fire(bottomSheet({
+                  title: 'Follow Request Already Sent',
+                  message: `You have already sent a follow request to ${p.userHandle}. You will be notified when they respond.`,
+                  icon: 'alert',
+                }));
                 return;
               } else if (profilePrivate && !hasPending && user?.handle) {
                 // Private profile - create follow request
@@ -4549,35 +4572,11 @@ function FeedPageWrapper() {
                 const doubleCheckPending = hasPendingFollowRequest(user?.handle || '', p.userHandle);
                 if (doubleCheckPending) {
                   console.warn('Found pending request on double-check, showing pending message instead of creating new request');
-                  const Swal = (await import('sweetalert2')).default;
-                  Swal.fire({
-                    title: 'Gazetteer says',
-                    customClass: {
-                      title: 'gazetteer-shimmer',
-                      popup: '!rounded-2xl !shadow-xl !border-0',
-                      container: '!p-0',
-                      confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                    },
-                    html: `
-                      <div style="text-align: center; padding: 8px 0;">
-                        <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">
-                          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <circle cx="12" cy="12" r="10"></circle>
-                            <polyline points="12 6 12 12 16 14"></polyline>
-                          </svg>
-                        </div>
-                        <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Already Sent</h3>
-                        <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">You have already sent a follow request to ${p.userHandle}. You will be notified when they respond.</p>
-                      </div>
-                    `,
-                    showConfirmButton: true,
-                    confirmButtonText: 'OK',
-                    confirmButtonColor: '#0095f6',
-                    background: '#ffffff',
-                    width: '400px',
-                    padding: '0',
-                    buttonsStyling: false
-                  });
+                  await Swal.fire(bottomSheet({
+                    title: 'Follow Request Already Sent',
+                    message: `You have already sent a follow request to ${p.userHandle}. You will be notified when they respond.`,
+                    icon: 'alert',
+                  }));
                   return;
                 }
                 
@@ -4603,38 +4602,11 @@ function FeedPageWrapper() {
                       console.warn('Failed to create follow request notification:', error);
                     }
                     
-                    // Show Instagram-style popup
-                    const Swal = (await import('sweetalert2')).default;
-                    Swal.fire({
-                      title: 'Gazetteer says',
-                      customClass: {
-                        title: 'gazetteer-shimmer',
-                        popup: '!rounded-2xl !shadow-xl !border-0',
-                        container: '!p-0',
-                        confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                      },
-                      html: `
-                        <div style="text-align: center; padding: 8px 0;">
-                          <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                              <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                              <circle cx="8.5" cy="7" r="4"></circle>
-                              <line x1="20" y1="8" x2="20" y2="14"></line>
-                              <line x1="23" y1="11" x2="17" y2="11"></line>
-                            </svg>
-                          </div>
-                          <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Sent</h3>
-                          <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Your follow request has been sent. You will be notified when they accept.</p>
-                        </div>
-                      `,
-                      showConfirmButton: true,
-                      confirmButtonText: 'OK',
-                      confirmButtonColor: '#0095f6',
-                      background: '#ffffff',
-                      width: '400px',
-                      padding: '0',
-                      buttonsStyling: false
-                    });
+                    await Swal.fire(bottomSheet({
+                      title: 'Follow Request Sent',
+                      message: 'Your follow request has been sent. You will be notified when they accept.',
+                      icon: 'alert',
+                    }));
                     
                     // Don't update isFollowing to true - keep it false for pending request
                     updateOne(p.id, post => ({ ...post, isFollowing: false }));
@@ -4656,35 +4628,11 @@ function FeedPageWrapper() {
                     const recheckPending = hasPendingFollowRequest(user.handle, p.userHandle);
                     if (recheckPending) {
                       console.log('Mock fallback: Found pending request on recheck, showing pending message');
-                      const Swal = (await import('sweetalert2')).default;
-                      Swal.fire({
-                        title: 'Gazetteer says',
-                        customClass: {
-                          title: 'gazetteer-shimmer',
-                          popup: '!rounded-2xl !shadow-xl !border-0',
-                          container: '!p-0',
-                          confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                        },
-                        html: `
-                          <div style="text-align: center; padding: 8px 0;">
-                            <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">
-                              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <circle cx="12" cy="12" r="10"></circle>
-                                <polyline points="12 6 12 12 16 14"></polyline>
-                              </svg>
-                            </div>
-                            <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Already Sent</h3>
-                            <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">You have already sent a follow request to ${p.userHandle}. You will be notified when they respond.</p>
-                          </div>
-                        `,
-                        showConfirmButton: true,
-                        confirmButtonText: 'OK',
-                        confirmButtonColor: '#0095f6',
-                        background: '#ffffff',
-                        width: '400px',
-                        padding: '0',
-                        buttonsStyling: false
-                      });
+                      await Swal.fire(bottomSheet({
+                        title: 'Follow Request Already Sent',
+                        message: `You have already sent a follow request to ${p.userHandle}. You will be notified when they respond.`,
+                        icon: 'alert',
+                      }));
                       return;
                     }
                     
@@ -4709,43 +4657,17 @@ function FeedPageWrapper() {
                         console.warn('Failed to create follow request notification:', error);
                       }
                       
-                      const Swal = (await import('sweetalert2')).default;
-                      Swal.fire({
-                        title: 'Gazetteer says',
-                        customClass: {
-                          title: 'gazetteer-shimmer',
-                          popup: '!rounded-2xl !shadow-xl !border-0',
-                          container: '!p-0',
-                          confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                        },
-                        html: `
-                          <div style="text-align: center; padding: 8px 0;">
-                            <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
-                              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                                <circle cx="8.5" cy="7" r="4"></circle>
-                                <line x1="20" y1="8" x2="20" y2="14"></line>
-                                <line x1="23" y1="11" x2="17" y2="11"></line>
-                              </svg>
-                            </div>
-                            <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Sent</h3>
-                            <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Your follow request has been sent. You will be notified when they accept.</p>
-                          </div>
-                        `,
-                        showConfirmButton: true,
-                        confirmButtonText: 'OK',
-                        confirmButtonColor: '#0095f6',
-                        background: '#ffffff',
-                        width: '400px',
-                        padding: '0',
-                        buttonsStyling: false
-                      });
+                      await Swal.fire(bottomSheet({
+                        title: 'Follow Request Sent',
+                        message: 'Your follow request has been sent. You will be notified when they accept.',
+                        icon: 'alert',
+                      }));
                       
                       updateOne(p.id, post => ({ ...post, isFollowing: false }));
                     }
                   } else {
                     // For other errors, fall back to normal follow
-                    const updated = await toggleFollowForPost(userId, p.id);
+                    const updated = await toggleFollowForPost(userId, p.id, p.userHandle);
                     updateOne(p.id, _post => ({ ...updated }));
                   }
                 }
@@ -4766,20 +4688,27 @@ function FeedPageWrapper() {
 
                   if (isConnectionError) {
                     try {
-                      const updated = await toggleFollowForPost(userId, p.id);
+                      const updated = await toggleFollowForPost(userId, p.id, p.userHandle);
                       updateOne(p.id, _post => ({ ...updated }));
                       setFollowState(userId, p.userHandle, !!updated.isFollowing);
                     } catch {
-                      setFollowState(userId, p.userHandle, wasFollowing);
-                      updateOne(p.id, post => ({ ...post, isFollowing: wasFollowing }));
+                      // Keep optimistic follow (e.g. post not in global list when feed from cache)
+                      setFollowState(userId, p.userHandle, true);
+                      updateOne(p.id, post => ({ ...post, isFollowing: true }));
                     }
                   } else if (is404 || apiError?.status >= 400) {
                     setFollowState(userId, p.userHandle, true);
                     updateOne(p.id, post => ({ ...post, isFollowing: true }));
                   } else {
-                    setFollowState(userId, p.userHandle, wasFollowing);
-                    updateOne(p.id, post => ({ ...post, isFollowing: wasFollowing }));
-                    throw apiError;
+                    // Any other error (e.g. CORS, timeout on phone): persist follow locally so + works on phone too
+                    try {
+                      const updated = await toggleFollowForPost(userId, p.id, p.userHandle);
+                      updateOne(p.id, _post => ({ ...updated }));
+                      setFollowState(userId, p.userHandle, !!updated.isFollowing);
+                    } catch {
+                      setFollowState(userId, p.userHandle, true);
+                      updateOne(p.id, post => ({ ...post, isFollowing: true }));
+                    }
                   }
                 }
               }
@@ -4813,52 +4742,25 @@ function FeedPageWrapper() {
               }
             }}
             onReclip={async () => {
-              // Prevent users from reclipping their own posts
-              if (p.userHandle === user?.handle) {
-                console.log('Cannot reclip your own post');
-                return;
-              }
-              // Check if already reclipped - prevent multiple reclips
-              if (p.userReclipped) {
-                console.log('Post already reclipped by user, ignoring reclip request');
-                return;
-              }
-              
+              if (p.userHandle === user?.handle || p.userReclipped) return;
+              const newReclipsCount = p.stats.reclips + 1;
+              const optimisticPost = { ...p, userReclipped: true, stats: { ...p.stats, reclips: newReclipsCount } };
+              setReclipState(userId, p.id, true);
+              updateOne(p.id, () => optimisticPost);
+              window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`, { detail: { reclips: newReclipsCount } }));
               if (!online) {
-                // Optimistically update userReclipped and reclip count
-                updateOne(p.id, post => ({
-                  ...post,
-                  userReclipped: true,
-                  stats: { ...post.stats, reclips: post.stats.reclips + 1 }
-                }));
                 await enqueue({ type: 'reclip', postId: p.id, userId, userHandle: user?.handle || 'Unknown@Unknown' });
-                window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`));
                 return;
               }
-              const { originalPost: updatedOriginalPost, reclippedPost } = await reclipPost(userId, p.id, user?.handle || 'Unknown@Unknown');
-
-              // Check if user already reclipped (reclippedPost will be null)
-              if (!reclippedPost) {
-                console.log('Post already reclipped by user, ignoring reclip request');
-                // Still update the UI to reflect the current state
-                updateOne(p.id, post => ({
-                  ...post,
-                  userReclipped: updatedOriginalPost.userReclipped,
-                  stats: updatedOriginalPost.stats
-                }));
-                return;
+              try {
+                const { originalPost: updatedOriginalPost } = await reclipPost(userId, p.id, user?.handle || 'Unknown@Unknown');
+                updateOne(p.id, () => ({ ...p, userReclipped: updatedOriginalPost.userReclipped, stats: updatedOriginalPost.stats }));
+                if (updatedOriginalPost.stats.reclips !== newReclipsCount) {
+                  window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`, { detail: { reclips: updatedOriginalPost.stats.reclips } }));
+                }
+              } catch (err) {
+                console.warn('Reclip failed (UI already updated):', err);
               }
-
-              // New reclip was created - update the original post
-              // Note: Reclipped posts only appear in the Following feed for users who follow the reclipper
-              // They should NOT be added to the current feed to avoid duplicates
-              updateOne(p.id, post => ({
-                ...post,
-                userReclipped: updatedOriginalPost.userReclipped,
-                stats: updatedOriginalPost.stats
-              }));
-              // Notify EngagementBar to update reclip count
-              window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`));
             }}
             onOpenScenes={() => {
               // Get current video time from the videoTimesMap for seamless transition
@@ -4878,58 +4780,25 @@ function FeedPageWrapper() {
               setBoostModalOpen(true);
             } : undefined}
             onDelete={user?.handle === p.userHandle && !p.originalUserHandle ? async () => {
-              const result = await Swal.fire({
-                title: 'Gazetteer says',
-                html: `
-                  <div style="text-align: center; padding: 8px 0;">
-                    <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);">
-                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="3 6 5 6 21 6"></polyline>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                        <line x1="10" y1="11" x2="10" y2="17"></line>
-                        <line x1="14" y1="11" x2="14" y2="17"></line>
-                      </svg>
-                    </div>
-                    <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Delete post?</h3>
-                    <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">This can't be undone.</p>
-                  </div>
-                `,
+              const result = await Swal.fire(bottomSheet({
+                title: 'Delete post?',
+                message: "This can't be undone.",
+                icon: 'alert',
                 showCancelButton: true,
                 confirmButtonText: 'Delete',
                 cancelButtonText: 'Cancel',
-                confirmButtonColor: '#dc2626',
-                cancelButtonColor: '#6b7280',
-                background: '#ffffff',
-                width: '400px',
-                padding: '0',
-                customClass: {
-                  popup: '!rounded-2xl !shadow-xl !border-0',
-                  container: '!p-0',
-                  confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#dc2626] !hover:bg-[#b91c1c] !text-white !transition-colors',
-                  cancelButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#f3f4f6] !hover:bg-[#e5e7eb] !text-[#374151] !transition-colors'
-                },
-                buttonsStyling: false
-              });
+              }));
               if (!result.isConfirmed) return;
               try {
                 await deletePost(userId, p.id, user?.handle);
                 setPages(cur => cur.map(group => group.filter(x => x.id !== p.id)));
               } catch (err) {
                 console.error('Delete post failed:', err);
-                await Swal.fire({
-                  title: 'Gazetteer says',
-                  html: `
-                    <div style="text-align: center; padding: 8px 0;">
-                      <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0;">Could not delete post</h3>
-                      <p style="font-size: 14px; color: #8e8e8e; margin: 0;">${err instanceof Error ? err.message : 'Please try again.'}</p>
-                    </div>
-                  `,
-                  confirmButtonText: 'OK',
-                  background: '#ffffff',
-                  width: '400px',
-                  customClass: { popup: '!rounded-2xl !shadow-xl !border-0', confirmButton: '!rounded-lg !px-6 !py-2 !bg-[#0095f6] !hover:bg-[#0084d4] !text-white' },
-                  buttonsStyling: false
-                });
+                await Swal.fire(bottomSheet({
+                  title: 'Could not delete post',
+                  message: err instanceof Error ? err.message : 'Please try again.',
+                  icon: 'alert',
+                }));
               }
             } : undefined}
             onOpenDM={user?.handle ? (handle) => {
@@ -5259,34 +5128,11 @@ function FeedPageWrapper() {
               if (profilePrivate && user?.handle) {
                 const hasPending = hasPendingFollowRequest(user.handle, p.userHandle);
                 if (hasPending) {
-                  const Swal = (await import('sweetalert2')).default;
-                  await Swal.fire({
-                    title: 'Gazetteer says',
-                    html: `
-                      <div style="text-align: center; padding: 8px 0;">
-                        <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">
-                          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <circle cx="12" cy="12" r="10"></circle>
-                            <polyline points="12 6 12 12 16 14"></polyline>
-                          </svg>
-                        </div>
-                        <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Already Sent</h3>
-                        <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">You have already sent a follow request to ${p.userHandle}. You will be notified when they respond.</p>
-                      </div>
-                    `,
-                    showConfirmButton: true,
-                    confirmButtonText: 'OK',
-                    confirmButtonColor: '#0095f6',
-                    background: '#ffffff',
-                    width: '400px',
-                    padding: '0',
-                    customClass: {
-                      popup: '!rounded-2xl !shadow-xl !border-0',
-                      container: '!p-0',
-                      confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                    },
-                    buttonsStyling: false
-                  });
+                  await Swal.fire(bottomSheet({
+                    title: 'Follow Request Already Sent',
+                    message: `You have already sent a follow request to ${p.userHandle}. You will be notified when they respond.`,
+                    icon: 'alert',
+                  }));
                   return false; // not following yet – request pending
                 }
 
@@ -5304,45 +5150,39 @@ function FeedPageWrapper() {
                   // non-fatal
                 }
                 try {
-                  const Swal = (await import('sweetalert2')).default;
-                  await Swal.fire({
-                    title: 'Gazetteer says',
-                    html: `
-                    <div style="text-align: center; padding: 8px 0;">
-                      <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                          <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                          <circle cx="8.5" cy="7" r="4"></circle>
-                          <line x1="20" y1="8" x2="20" y2="14"></line>
-                          <line x1="23" y1="11" x2="17" y2="11"></line>
-                        </svg>
-                      </div>
-                      <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Sent</h3>
-                      <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Your follow request has been sent. You will be notified when they accept.</p>
-                    </div>
-                  `,
-                    showConfirmButton: true,
-                    confirmButtonText: 'OK',
-                    confirmButtonColor: '#0095f6',
-                    background: '#ffffff',
-                    width: '400px',
-                    padding: '0',
-                    customClass: {
-                      popup: '!rounded-2xl !shadow-xl !border-0',
-                      container: '!p-0',
-                      confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                    },
-                    buttonsStyling: false
-                  });
+                  await Swal.fire(bottomSheet({
+                    title: 'Follow Request Sent',
+                    message: 'Your follow request has been sent. You will be notified when they accept.',
+                    icon: 'alert',
+                  }));
                 } catch {
                   // ensure we still return false if Swal fails
                 }
                 return false; // not following yet – request sent, awaiting acceptance
               }
 
-              // PUBLIC PROFILES
+              // PUBLIC PROFILES – in mock-only mode skip API and use local follow state
+              const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+              if (!useLaravelApi) {
+                const updated = await toggleFollowForPost(userId, p.id, p.userHandle);
+                updateOne(p.id, post => ({ ...post, isFollowing: updated.isFollowing }));
+                setSelectedPostForScenes(prev => (prev && prev.id === p.id) ? { ...prev, isFollowing: updated.isFollowing } : prev);
+                if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
+                  const doRefresh = () => {
+                    setPages([]);
+                    setCursor(0);
+                    setEnd(false);
+                    setError(null);
+                    requestTokenRef.current++;
+                    setDiscoverRefreshTrigger(t => t + 1);
+                  };
+                  if (selectedPostForScenes) setTimeout(doRefresh, 100);
+                  else doRefresh();
+                }
+                return;
+              }
+
               if (!online) {
-                // Pure offline: toggle in shared follow state and UI
                 updateOne(p.id, post => ({ ...post, isFollowing: !post.isFollowing }));
                 setFollowState(userId, p.userHandle, !p.isFollowing);
                 await enqueue({ type: 'follow', postId: p.id, userId });
@@ -5350,13 +5190,15 @@ function FeedPageWrapper() {
               }
 
               try {
-                // Use backend as source of truth
                 const result = await toggleFollow(p.userHandle);
                 const newFollowingState =
                   result?.status === 'accepted' || result?.following === true;
 
                 setFollowState(userId, p.userHandle, newFollowingState);
+                // Update main feed copy
                 updateOne(p.id, post => ({ ...post, isFollowing: newFollowingState }));
+                // Update Scenes modal copy only when it's the same post (never set to null)
+                setSelectedPostForScenes(prev => (prev && prev.id === p.id) ? { ...prev, isFollowing: newFollowingState } : prev);
               } catch (apiError: any) {
                 const isConnectionError =
                   apiError?.message === 'CONNECTION_REFUSED' ||
@@ -5365,19 +5207,26 @@ function FeedPageWrapper() {
 
                 if (isConnectionError) {
                   // Backend not available – fall back to mock follow toggling
-                  const updated = await toggleFollowForPost(userId, p.id);
-                  updateOne(p.id, _post => ({ ...updated }));
+                  const updated = await toggleFollowForPost(userId, p.id, p.userHandle);
+                  updateOne(p.id, post => ({ ...post, isFollowing: updated.isFollowing }));
+                  setSelectedPostForScenes(prev => (prev && prev.id === p.id) ? { ...prev, isFollowing: updated.isFollowing } : prev);
                 } else {
                   throw apiError;
                 }
               }
 
+              // Defer feed refresh so Scenes modal doesn't see empty feed and stay responsive
               if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
-                setPages([]);
-                setCursor(0);
-                setEnd(false);
-                setError(null);
-                requestTokenRef.current++;
+                const doRefresh = () => {
+                  setPages([]);
+                  setCursor(0);
+                  setEnd(false);
+                  setError(null);
+                  requestTokenRef.current++;
+                  setDiscoverRefreshTrigger(t => t + 1);
+                };
+                if (selectedPostForScenes) setTimeout(doRefresh, 100);
+                else doRefresh();
               }
             }}
             onShare={async () => {
@@ -5387,73 +5236,32 @@ function FeedPageWrapper() {
             onOpenComments={() => handleOpenComments(p.id)}
             onBoost={user?.handle === p.userHandle && !p.originalUserHandle ? () => { setSelectedPostForBoost(p); setBoostModalOpen(true); } : undefined}
             onReclip={async () => {
-              // Prevent users from reclipping their own posts
-              if (p.userHandle === user?.handle) {
-                console.log('Cannot reclip your own post');
-                return;
-              }
-              // Check if already reclipped - prevent multiple reclips
-              if (p.userReclipped) {
-                console.log('Post already reclipped by user, ignoring reclip request');
-                return;
-              }
-              
-              // Note: Confirmation modal is already shown in EngagementBar's reclipClick function
-              // No need to show it again here
-              
+              if (p.userHandle === user?.handle) return;
+              if (p.userReclipped) return;
+
               const newReclipsCount = p.stats.reclips + 1;
+              const optimisticPost = { ...p, userReclipped: true, stats: { ...p.stats, reclips: newReclipsCount } };
+
+              // Optimistic update first so the button goes green immediately (no delay)
+              setReclipState(userId, p.id, true);
+              updateOne(p.id, () => optimisticPost);
+              setSelectedPostForScenes(prev => (prev && prev.id === p.id) ? optimisticPost : prev);
+              window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`, { detail: { reclips: newReclipsCount } }));
+
               if (!online) {
-                // Optimistically update userReclipped and reclip count
-                const optimisticPost = { ...p, userReclipped: true, stats: { ...p.stats, reclips: newReclipsCount } };
-                updateOne(p.id, post => ({
-                  ...post,
-                  userReclipped: true,
-                  stats: { ...post.stats, reclips: newReclipsCount }
-                }));
-                // Update selectedPostForScenes if this post is currently open in Scenes
-                if (selectedPostForScenes?.id === p.id) {
-                  setSelectedPostForScenes(optimisticPost);
-                }
                 await enqueue({ type: 'reclip', postId: p.id, userId, userHandle: user?.handle || 'Unknown@Unknown' });
-                window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`, {
-                  detail: { reclips: newReclipsCount }
-                }));
                 return;
               }
-              const { originalPost: updatedOriginalPost, reclippedPost } = await reclipPost(userId, p.id, user?.handle || 'Unknown@Unknown');
-
-              // Check if user already reclipped (reclippedPost will be null)
-              if (!reclippedPost) {
-                console.log('Post already reclipped by user, ignoring reclip request');
-                // Still update the UI to reflect the current state
-                updateOne(p.id, post => ({
-                  ...post,
-                  userReclipped: updatedOriginalPost.userReclipped,
-                  stats: updatedOriginalPost.stats
-                }));
-                // Update selectedPostForScenes if this post is currently open in Scenes
-                if (selectedPostForScenes?.id === p.id) {
-                  setSelectedPostForScenes(updatedOriginalPost);
+              try {
+                const { originalPost: updatedOriginalPost, reclippedPost } = await reclipPost(userId, p.id, user?.handle || 'Unknown@Unknown');
+                updateOne(p.id, () => ({ ...p, userReclipped: updatedOriginalPost.userReclipped, stats: updatedOriginalPost.stats }));
+                setSelectedPostForScenes(prev => (prev && prev.id === p.id) ? { ...prev, ...updatedOriginalPost } : prev);
+                if (updatedOriginalPost.stats.reclips !== newReclipsCount) {
+                  window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`, { detail: { reclips: updatedOriginalPost.stats.reclips } }));
                 }
-                return;
+              } catch (err) {
+                console.warn('Reclip API failed (UI already updated):', err);
               }
-
-              // New reclip was created - update the original post
-              // Note: Reclipped posts only appear in the Following feed for users who follow the reclipper
-              // They should NOT be added to the current feed to avoid duplicates
-              updateOne(p.id, post => ({
-                ...post,
-                userReclipped: updatedOriginalPost.userReclipped,
-                stats: updatedOriginalPost.stats
-              }));
-              // Update selectedPostForScenes if this post is currently open in Scenes
-              if (selectedPostForScenes?.id === p.id) {
-                setSelectedPostForScenes(updatedOriginalPost);
-              }
-              // Notify UI to update reclip count with the new value
-              window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`, {
-                detail: { reclips: updatedOriginalPost.stats.reclips }
-              }));
             }}
           />
         );
@@ -5464,7 +5272,7 @@ function FeedPageWrapper() {
 
 function BoostPageWrapper() {
   const { user } = useAuth();
-  const userId = user?.id ?? 'anon';
+  const userId = getStableUserId(user);
   const online = useOnline();
   const navigate = useNavigate();
   const [posts, setPosts] = React.useState<Post[]>([]);
@@ -5650,12 +5458,11 @@ function BoostPageWrapper() {
             onBoost={async () => {
               const existing = await getActiveBoost(p.id);
               if (existing?.isActive) {
-                Swal.fire({
-                  icon: 'info',
+                Swal.fire(bottomSheet({
                   title: 'Already boosted',
-                  text: 'This post is already boosted. It will expire in 6 hours.',
-                  confirmButtonColor: '#8B5CF6',
-                });
+                  message: 'This post is already boosted. It will expire in 6 hours.',
+                  icon: 'alert',
+                }));
                 return;
               }
               setSelectedPostForBoost(p);
@@ -5730,58 +5537,25 @@ function BoostPageWrapper() {
               setScenesOpen(true);
             }}
             onDelete={async () => {
-              const result = await Swal.fire({
-                  title: 'Gazetteer says',
-                  html: `
-                  <div style="text-align: center; padding: 8px 0;">
-                    <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);">
-                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="3 6 5 6 21 6"></polyline>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                        <line x1="10" y1="11" x2="10" y2="17"></line>
-                        <line x1="14" y1="11" x2="14" y2="17"></line>
-                      </svg>
-                    </div>
-                    <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Delete post?</h3>
-                    <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">This can't be undone.</p>
-                  </div>
-                `,
+              const result = await Swal.fire(bottomSheet({
+                title: 'Delete post?',
+                message: "This can't be undone.",
+                icon: 'alert',
                 showCancelButton: true,
                 confirmButtonText: 'Delete',
                 cancelButtonText: 'Cancel',
-                confirmButtonColor: '#dc2626',
-                cancelButtonColor: '#6b7280',
-                background: '#ffffff',
-                width: '400px',
-                padding: '0',
-                customClass: {
-                  popup: '!rounded-2xl !shadow-xl !border-0',
-                  container: '!p-0',
-                  confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#dc2626] !hover:bg-[#b91c1c] !text-white !transition-colors',
-                  cancelButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#f3f4f6] !hover:bg-[#e5e7eb] !text-[#374151] !transition-colors'
-                },
-                buttonsStyling: false
-              });
+              }));
               if (!result.isConfirmed) return;
               try {
                 await deletePost(userId, p.id, user?.handle);
                 setPosts(cur => cur.filter(x => x.id !== p.id));
               } catch (err) {
                 console.error('Delete post failed:', err);
-                await Swal.fire({
-                  title: 'Gazetteer says',
-                  html: `
-                    <div style="text-align: center; padding: 8px 0;">
-                      <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0;">Could not delete post</h3>
-                      <p style="font-size: 14px; color: #8e8e8e; margin: 0;">${err instanceof Error ? err.message : 'Please try again.'}</p>
-                    </div>
-                  `,
-                  confirmButtonText: 'OK',
-                  background: '#ffffff',
-                  width: '400px',
-                  customClass: { popup: '!rounded-2xl !shadow-xl !border-0', confirmButton: '!rounded-lg !px-6 !py-2 !bg-[#0095f6] !hover:bg-[#0084d4] !text-white' },
-                  buttonsStyling: false
-                });
+                await Swal.fire(bottomSheet({
+                  title: 'Could not delete post',
+                  message: err instanceof Error ? err.message : 'Please try again.',
+                  icon: 'alert',
+                }));
               }
             }}
           />

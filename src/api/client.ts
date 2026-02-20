@@ -125,6 +125,9 @@ export async function fetchPost(postId: string, userId?: string) {
 
 /** Check if the user with the given handle follows the current viewer (for mutual-follow DM icon). Requires auth. */
 export async function checkFollowsMe(handle: string): Promise<{ follows_me: boolean }> {
+    if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API === 'false') {
+        return Promise.resolve({ follows_me: false });
+    }
     const params = new URLSearchParams({ handle });
     return apiRequest(`/users/check-follows-me?${params}`);
 }
@@ -132,6 +135,7 @@ export async function checkFollowsMe(handle: string): Promise<{ follows_me: bool
 export async function createPost(postData: {
     text?: string;
     location?: string;
+    venue?: string;
     mediaUrl?: string;
     mediaType?: 'image' | 'video';
     caption?: string;

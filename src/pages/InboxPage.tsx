@@ -22,6 +22,7 @@ type Question = {
 import { listConversations, seedMockDMs, type ConversationSummary, pinConversation, unpinConversation, acceptMessageRequest } from '../api/messages';
 import { timeAgo } from '../utils/timeAgo';
 import Swal from 'sweetalert2';
+import { bottomSheet } from '../utils/swalBottomSheet';
 import { acceptFollowRequest as acceptFollowRequestLocal, denyFollowRequest as denyFollowRequestLocal, removeFollowRequest } from '../api/privacy';
 import { showToast } from '../utils/toast';
 import { getFollowedUsers } from '../api/posts';
@@ -354,34 +355,11 @@ export default function InboxPage() {
             
             // If profile is private and already has pending request, show message
             if (profilePrivate && hasPending) {
-                Swal.fire({
-                    title: 'Gazetteer says',
-                    customClass: {
-                        title: 'gazetteer-shimmer',
-                        popup: '!rounded-2xl !shadow-xl !border-0',
-                        container: '!p-0',
-                        confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                    },
-                    html: `
-                        <div style="text-align: center; padding: 8px 0;">
-                            <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">
-                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <circle cx="12" cy="12" r="10"></circle>
-                                    <polyline points="12 6 12 12 16 14"></polyline>
-                                </svg>
-                            </div>
-                                    <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Already Sent</h3>
-                                    <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">You have already sent a follow request to ${handle}. You will be notified when they respond.</p>
-                        </div>
-                    `,
-                    showConfirmButton: true,
-                    confirmButtonText: 'OK',
-                    confirmButtonColor: '#0095f6',
-                    background: '#ffffff',
-                    width: '400px',
-                    padding: '0',
-                    buttonsStyling: false
-                });
+                Swal.fire(bottomSheet({
+                    title: 'Follow Request Already Sent',
+                    message: `You have already sent a follow request to ${handle}. You will be notified when they respond.`,
+                    icon: 'alert',
+                }));
                 return;
             }
             
@@ -406,36 +384,11 @@ export default function InboxPage() {
                             console.warn('Failed to create follow request notification:', error);
                         }
                         
-                        // Show Instagram-style popup
-                        Swal.fire({
-                            title: 'Gazetteer says',
-                            html: `
-                                <div style="text-align: center; padding: 8px 0;">
-                                    <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
-                                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                                            <circle cx="8.5" cy="7" r="4"></circle>
-                                            <line x1="20" y1="8" x2="20" y2="14"></line>
-                                            <line x1="23" y1="11" x2="17" y2="11"></line>
-                                        </svg>
-                                    </div>
-                                    <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Sent</h3>
-                                    <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Your follow request has been sent. You will be notified when they accept.</p>
-                                </div>
-                            `,
-                            showConfirmButton: true,
-                            confirmButtonText: 'OK',
-                            confirmButtonColor: '#0095f6',
-                            background: '#ffffff',
-                            width: '400px',
-                            padding: '0',
-                            customClass: {
-                                popup: '!rounded-2xl !shadow-xl !border-0',
-                                container: '!p-0',
-                                confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                            },
-                            buttonsStyling: false
-                        });
+                        Swal.fire(bottomSheet({
+                            title: 'Follow Request Sent',
+                            message: 'Your follow request has been sent. You will be notified when they accept.',
+                            icon: 'alert',
+                        }));
                         
                         await loadData();
                         return;
@@ -464,36 +417,11 @@ export default function InboxPage() {
                             console.warn('Failed to create follow request notification:', error);
                         }
                         
-                        Swal.fire({
-                            title: 'Gazetteer says',
-                            customClass: {
-                                title: 'gazetteer-shimmer',
-                                popup: '!rounded-2xl !shadow-xl !border-0',
-                                container: '!p-0',
-                                confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                            },
-                            html: `
-                                <div style="text-align: center; padding: 8px 0;">
-                                    <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
-                                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                                            <circle cx="8.5" cy="7" r="4"></circle>
-                                            <line x1="20" y1="8" x2="20" y2="14"></line>
-                                            <line x1="23" y1="11" x2="17" y2="11"></line>
-                                        </svg>
-                                    </div>
-                                    <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Sent</h3>
-                                    <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Your follow request has been sent. You will be notified when they accept.</p>
-                                </div>
-                            `,
-                            showConfirmButton: true,
-                            confirmButtonText: 'OK',
-                            confirmButtonColor: '#0095f6',
-                            background: '#ffffff',
-                            width: '400px',
-                            padding: '0',
-                            buttonsStyling: false
-                        });
+                        Swal.fire(bottomSheet({
+                            title: 'Follow Request Sent',
+                            message: 'Your follow request has been sent. You will be notified when they accept.',
+                            icon: 'alert',
+                        }));
                         
                         await loadData();
                         return;
@@ -519,11 +447,7 @@ export default function InboxPage() {
             await loadData();
         } catch (error) {
             console.error('Error toggling follow:', error);
-            Swal.fire({
-                title: 'Gazetteer says',
-                html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Failed to follow/unfollow user</p>`,
-                icon: 'error'
-            });
+            Swal.fire(bottomSheet({ title: 'Error', message: 'Failed to follow/unfollow user', icon: 'alert' }));
         }
     }, [user, loadData]);
 
@@ -628,40 +552,14 @@ export default function InboxPage() {
             await deleteNotification(notif.id, user.handle);
             await loadData();
             
-            Swal.fire({
-                title: 'Gazetteer says',
-                html: `
-                    <div style="text-align: center; padding: 8px 0;">
-                        <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);">
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                                <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                            </svg>
-                        </div>
-                        <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Accepted</h3>
-                        <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">You are now following ${notif.fromHandle}</p>
-                    </div>
-                `,
-                showConfirmButton: true,
-                confirmButtonText: 'OK',
-                confirmButtonColor: '#0095f6',
-                background: '#ffffff',
-                width: '400px',
-                padding: '0',
-                customClass: {
-                    popup: '!rounded-2xl !shadow-xl !border-0',
-                    container: '!p-0',
-                    confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                },
-                buttonsStyling: false
-            });
+            Swal.fire(bottomSheet({
+                title: 'Follow Request Accepted',
+                message: `You are now following ${notif.fromHandle}`,
+                icon: 'success',
+            }));
         } catch (error) {
             console.error('Error accepting follow request:', error);
-            Swal.fire({
-                title: 'Error',
-                text: 'Failed to accept follow request',
-                icon: 'error'
-            });
+            Swal.fire(bottomSheet({ title: 'Error', message: 'Failed to accept follow request', icon: 'alert' }));
         }
     };
 
@@ -696,11 +594,7 @@ export default function InboxPage() {
             await loadData();
         } catch (error) {
             console.error('Error denying follow request:', error);
-            Swal.fire({
-                title: 'Gazetteer says',
-                html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Failed to deny follow request</p>`,
-                icon: 'error'
-            });
+            Swal.fire(bottomSheet({ title: 'Error', message: 'Failed to deny follow request', icon: 'alert' }));
         }
     };
 

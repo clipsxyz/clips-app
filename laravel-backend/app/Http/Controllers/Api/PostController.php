@@ -210,6 +210,7 @@ class PostController extends Controller
         $validator = Validator::make($request->all(), [
             'text' => 'nullable|string|max:500',
             'location' => 'nullable|string|max:200',
+            'venue' => 'nullable|string|max:200',
             'mediaUrl' => 'nullable|url',
             'mediaType' => 'nullable|in:image,video',
             'caption' => 'nullable|string|max:500',
@@ -254,6 +255,7 @@ class PostController extends Controller
                 'media_url' => $request->mediaUrl,
                 'media_type' => $request->mediaType,
                 'location_label' => $request->location,
+                'venue' => $request->venue,
                 'caption' => $request->caption,
                 'image_text' => $request->imageText,
                 'banner_text' => $request->bannerText,
@@ -341,6 +343,7 @@ class PostController extends Controller
         $validator = Validator::make($request->all(), [
             'text' => 'nullable|string|max:500',
             'location' => 'nullable|string|max:200',
+            'venue' => 'nullable|string|max:200',
         ]);
 
         if ($validator->fails()) {
@@ -355,12 +358,15 @@ class PostController extends Controller
             return response()->json(['error' => 'Unauthorized'], 403);
         }
 
-        // Update only text and location
+        // Update only text, location, and venue
         if ($request->has('text')) {
             $post->text_content = $request->text;
         }
         if ($request->has('location')) {
             $post->location_label = $request->location;
+        }
+        if ($request->has('venue')) {
+            $post->venue = $request->venue;
         }
 
         $post->save();

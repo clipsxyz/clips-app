@@ -77,6 +77,7 @@ export default function CreatePage() {
     const MAX_VIDEO_SECONDS = 90;
     const [text, setText] = useState(''); // Main text - used for text-only posts OR captions for image posts
     const [location, setLocation] = useState('');
+    const [venue, setVenue] = useState('');
     const [selectedMedia, setSelectedMedia] = useState<string | null>(null);
     const [mediaType, setMediaType] = useState<'image' | 'video' | null>(null);
     const [imageText, setImageText] = useState(''); // Text overlay for images
@@ -250,6 +251,8 @@ export default function CreatePage() {
                     if (locationState.templateLocation) {
                         setLocation(locationState.templateLocation);
                     }
+                    const templateVenue = (locationState as { templateVenue?: string }).templateVenue;
+                    if (templateVenue) setVenue(templateVenue);
 
                     // Set stickers if provided from template
                     if (locationState.templateStickers && locationState.templateStickers.length > 0) {
@@ -771,7 +774,8 @@ export default function CreatePage() {
                 undefined, // subtitlesEnabled
                 undefined, // subtitleText
                 editTimeline, // Pass editTimeline for hybrid pipeline
-                locationState?.musicTrackId || selectedMusicTrack?.id // Pass music track ID from locationState (InstantCreatePage) or selected track (CreatePage)
+                locationState?.musicTrackId || selectedMusicTrack?.id, // Pass music track ID from locationState (InstantCreatePage) or selected track (CreatePage)
+                venue.trim() || undefined // Venue for metadata carousel
             );
 
             // Dispatch event to refresh feed with render job info if available
@@ -826,6 +830,7 @@ export default function CreatePage() {
                 // Reset form
                 setText('');
                 setLocation('');
+                setVenue('');
                 setSelectedMedia(null);
                 setMediaType(null);
                 setImageText('');
@@ -1335,6 +1340,23 @@ export default function CreatePage() {
                         value={location}
                         onChange={(e) => setLocation(e.target.value)}
                         placeholder="Add location"
+                        className="w-full px-0 py-1.5 text-[15px] text-gray-900 dark:text-gray-100 bg-transparent border-none focus:outline-none placeholder-gray-400 dark:placeholder-gray-500 transition-colors duration-200"
+                    />
+                </div>
+
+                {/* Venue Input - Shown in metadata carousel on feed */}
+                <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-800">
+                    <div className="flex items-center gap-2 mb-2">
+                        <FiMapPin className="w-4 h-4 text-gray-400 dark:text-gray-500" />
+                        <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                            Venue
+                        </label>
+                    </div>
+                    <input
+                        type="text"
+                        value={venue}
+                        onChange={(e) => setVenue(e.target.value)}
+                        placeholder="Add venue (e.g. café, stadium)"
                         className="w-full px-0 py-1.5 text-[15px] text-gray-900 dark:text-gray-100 bg-transparent border-none focus:outline-none placeholder-gray-400 dark:placeholder-gray-500 transition-colors duration-200"
                     />
                 </div>

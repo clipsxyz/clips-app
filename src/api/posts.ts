@@ -31,6 +31,7 @@ import type { BoostFeedType } from '../components/BoostSelectionModal';
  * - mediaUrl -> media_url
  * - mediaType -> media_type
  * - locationLabel -> location_label
+ * - venue -> venue
  * - userLocal/userRegional/userNational -> stored in User model, not in posts
  */
 
@@ -473,11 +474,51 @@ type UserState = {
 
 const userState: Record<string, UserState> = {};
 
+const FOLLOWS_STORAGE_KEY = (uid: string) => `clips_app_follows_${uid}`;
+
+function loadFollowsFromStorage(userId: string): Record<string, boolean> {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(FOLLOWS_STORAGE_KEY(userId)) : null;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') return parsed;
+    }
+  } catch (_) {}
+  return {};
+}
+
+function saveFollowsToStorage(userId: string, follows: Record<string, boolean>): void {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(FOLLOWS_STORAGE_KEY(userId), JSON.stringify(follows));
+    }
+  } catch (_) {}
+}
+
 export function getState(userId: string): UserState {
-  if (!userState[userId]) {
-    userState[userId] = { likes: {}, bookmarks: {}, follows: {}, reclips: {}, lastViewed: {} };
+  const uid = typeof userId === 'string' ? userId : String(userId);
+  if (!userState[uid]) {
+    let follows = loadFollowsFromStorage(uid);
+    // If this is a real user (not anon), merge in any follows stored under 'anon' so we don't lose them, then clear anon
+    if (uid !== 'anon') {
+      const anonFollows = loadFollowsFromStorage('anon');
+      if (Object.keys(anonFollows).length > 0) {
+        follows = { ...anonFollows, ...follows };
+        saveFollowsToStorage(uid, follows);
+        try {
+          if (typeof localStorage !== 'undefined') localStorage.removeItem(FOLLOWS_STORAGE_KEY('anon'));
+        } catch (_) {}
+      }
+    }
+    userState[uid] = {
+      likes: {},
+      bookmarks: {},
+      follows,
+      reclips: {},
+      lastViewed: {}
+    };
   }
-  return userState[userId];
+  return userState[uid];
 }
 
 const delay = (ms = 0) => new Promise(r => setTimeout(r, ms));
@@ -512,22 +553,32 @@ export async function getFollowedUsers(userId: string): Promise<string[]> {
   return Object.keys(s.follows).filter(handle => s.follows[handle] === true);
 }
 
-// Explicitly set follow state for a given handle.
-// This keeps getFollowedUsers() and decorateForUser() in sync when follow is
-// toggled from places that don't go through toggleFollowForPost.
+// Explicitly set follow state for a given handle. Persists to localStorage.
 export function setFollowState(userId: string, handle: string, isFollowing: boolean): void {
-  const s = getState(userId);
+  const uid = typeof userId === 'string' ? userId : String(userId);
+  const s = getState(uid);
   setFollowStateKey(s.follows, handle, isFollowing);
+  saveFollowsToStorage(uid, s.follows);
 }
 
-// compute view for a user
+/** Set whether the user has reclipped a post (so decorateForUser shows green). Used for optimistic UI. */
+export function setReclipState(userId: string, postId: string, reclipped: boolean): void {
+  const s = getState(userId);
+  if (reclipped) s.reclips[postId] = true;
+  else delete s.reclips[postId];
+}
+
+// compute view for a user: show following if local state OR API says so (so backend signups and + taps both work)
 export function decorateForUser(userId: string, p: Post): Post {
   const s = getState(userId);
+  const fromLocal = getFollowState(s.follows, p.userHandle);
+  const fromApi = p.isFollowing === true;
+  const isFollowing = fromLocal || fromApi;
   const decorated = {
     ...p,
     userLiked: !!s.likes[p.id],
     isBookmarked: !!s.bookmarks[p.id],
-    isFollowing: getFollowState(s.follows, p.userHandle),
+    isFollowing,
     userReclipped: !!s.reclips[p.id],
     // Explicitly preserve taggedUsers, textStyle, stickers, etc.
     taggedUsers: p.taggedUsers || undefined, // Preserve taggedUsers even if empty array
@@ -579,6 +630,7 @@ function transformLaravelPost(response: any): Post {
     id: response.id,
     userHandle: response.user_handle || response.userHandle,
     locationLabel: response.location_label || response.locationLabel || 'Unknown Location',
+    venue: response.venue || undefined,
     tags: response.tags || [],
     // Use final_video_url if available, else media_url, else first media_items item (for still-image posts)
     mediaUrl: resolvedMediaUrl,
@@ -701,6 +753,28 @@ function getAvaNormalPost(): Post {
   } as Post;
 }
 
+/** Ava's sponsored (boosted) post for Following feed so laptop shows it when user follows Ava. */
+function getAvaBoostedPost(): Post {
+  const ts = Date.now() - 7200000;
+  return {
+    id: 'ava-boosted-discover-demo',
+    userHandle: 'Ava@galway',
+    locationLabel: 'Galway, Ireland',
+    tags: [],
+    mediaUrl: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=800',
+    mediaType: 'image',
+    caption: 'Sunset by the Corrib — boosted post so you can see how Sponsored looks in the feed! 🌅',
+    createdAt: ts,
+    stats: { likes: 128, views: 892, comments: 24, shares: 12, reclips: 8 },
+    isBookmarked: false,
+    isFollowing: false,
+    userLiked: false,
+    userLocal: 'Galway',
+    userRegional: 'Galway',
+    userNational: 'Ireland',
+  } as Post;
+}
+
 /**
  * Map feed tab to boost feed type for promoted posts. Returns null for discover (no boosted injection).
  * Uses shared worldwide location lists.
@@ -762,13 +836,12 @@ function postMatchesLocationTab(p: Post, tab: string): boolean {
 }
 
 export async function fetchPostsPage(tab: string, cursor: number | null, limit = 5, userId = 'me', _userLocal = '', _userRegional = '', _userNational = '', currentUserHandle = ''): Promise<Page> {
-  // Try Laravel API first, fallback to mock if it fails
+  const t = tab.toLowerCase();
+  // When API is off, use mock for all feeds (including Following) so Following loads fast and shows posts from in-memory follow state.
   const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
 
   if (useLaravelAPI) {
     try {
-      const t = tab.toLowerCase();
-
       // Map frontend tab names to Laravel filter values
       let filter: string;
       if (t === 'discover') {
@@ -812,48 +885,22 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
         })
         .filter((x: Post | null): x is Post => x !== null);
 
-      // Tighten "Following" (discover) feed on the frontend as well so it only shows:
-      // - Original posts from people you actually follow
-      // - Reclips which YOU created (your handle is the reclipper)
-      // This avoids confusing cases where the backend might return extra items.
+      // Following (discover): trust the backend – it returns only posts from people the logged-in user follows (from auth token).
+      // Do NOT filter by local follow state here: for backend signups local state is empty and we would empty the feed.
       if (t === 'discover') {
         const stateUserId = userId || 'me';
-        const userState = getState(stateUserId);
-        const follows = userState.follows || {};
-        const anyFollowing = Object.values(follows).some(v => v === true);
-
-        transformedItems = transformedItems.filter((p) => {
-          const isFollowing = getFollowState(follows, p.userHandle);
-          const isReclipped = (p as any).isReclipped;
-          // Treat as "my reclip" ONLY when local state says I reclipped it
-          const isMyReclip =
-            !!currentUserHandle &&
-            p.userHandle === currentUserHandle &&
-            (p as any).userReclipped === true;
-
-          // If user follows nobody yet: show ONLY their own reclips (if any), otherwise nothing.
-          if (!anyFollowing) {
-            return isReclipped && isMyReclip;
-          }
-
-          // Reclipped posts: only show if you follow the reclipper OR you are the reclipper
-          if (isReclipped) {
-            return isFollowing || isMyReclip;
-          }
-
-          // Original posts: only show if you follow the author
-          return isFollowing;
-        });
-
-        // On first page, prepend Ava demo post so she appears on localhost/Following (user can follow & DM)
+        const follows = getState(stateUserId).follows || {};
         const isFirstPageDiscover = cursor === null || cursor === 0;
-        if (isFirstPageDiscover && !transformedItems.some((p) => p.id === 'ava-normal-ireland-demo')) {
+        const followsAva = getFollowState(follows, 'Ava@galway');
+        if (isFirstPageDiscover && followsAva && !transformedItems.some((p) => p.id === 'ava-normal-ireland-demo')) {
           const avaNormal = getAvaNormalPost();
-          const decorated = decorateForUser(stateUserId, { ...avaNormal, isBoosted: false, boostFeedType: undefined });
-          transformedItems = [decorated, ...transformedItems];
-          if (!posts.find((p) => p.id === avaNormal.id)) {
-            posts.push(avaNormal);
-          }
+          transformedItems = [decorateForUser(stateUserId, { ...avaNormal, isBoosted: false, boostFeedType: undefined }), ...transformedItems];
+          if (!posts.find((p) => p.id === avaNormal.id)) posts.push(avaNormal);
+        }
+        if (isFirstPageDiscover && followsAva && !transformedItems.some((p) => p.id === 'ava-boosted-discover-demo')) {
+          const avaBoosted = getAvaBoostedPost();
+          transformedItems = [decorateForUser(stateUserId, { ...avaBoosted, isBoosted: true, boostFeedType: 'regional' }), ...transformedItems];
+          if (!posts.find((p) => p.id === avaBoosted.id)) posts.push(avaBoosted);
         }
       }
 
@@ -876,9 +923,10 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       let items = [...dedupedUserCreated, ...dedupedMock, ...transformedItems];
       const itemIds = new Set(items.map(p => p.id));
 
-      // Inject Ava's demo post on first page so she appears on localhost (all location tabs + discover); Laravel DB often has no Ava
-      const injectAvaTabs = ['ireland', 'dublin', 'finglas', 'discover'];
-      if (isFirstPage && injectAvaTabs.includes(t) && !itemIds.has('ava-normal-ireland-demo')) {
+      // Inject Ava on first page for location tabs; for discover only if user follows Ava
+      const injectAvaTabs = ['ireland', 'dublin', 'finglas'];
+      const injectAvaDiscover = t === 'discover' && isFirstPage && !itemIds.has('ava-normal-ireland-demo') && getFollowState(getState(userId || 'me').follows || {}, 'Ava@galway');
+      if (isFirstPage && (injectAvaTabs.includes(t) || injectAvaDiscover) && !itemIds.has('ava-normal-ireland-demo')) {
         const avaNormal = getAvaNormalPost();
         const stateUserId = userId || 'me';
         const decorated = decorateForUser(stateUserId, { ...avaNormal, isBoosted: false, boostFeedType: undefined });
@@ -932,8 +980,6 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
 
     await delay(0);
     const t = tab.toLowerCase();
-
-    // Debug: Log posts array state
 
     // Feed rules (by design):
     // - Location tabs (Dublin, Ireland, Finglas, etc.): show posts by AUTHOR LOCATION only (who posted from that place). No follow check.
@@ -1055,6 +1101,18 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       if (!hasAvaNormal) {
         const avaNormal = getAvaNormalPost();
         sorted = [avaNormal, ...sorted];
+      }
+    }
+
+    // Following (discover) mock path: if user follows Ava but she's not in the list (e.g. not in global posts), prepend her
+    if (t === 'discover' && (cursor === null || cursor === 0)) {
+      const userState = getState(userId);
+      const followsAva = getFollowState(userState.follows || {}, 'Ava@galway');
+      const hasAva = sorted.some(p => p.id === 'ava-normal-ireland-demo' || (p.userHandle && p.userHandle.toLowerCase() === 'ava@galway'));
+      if (followsAva && !hasAva) {
+        const avaNormal = getAvaNormalPost();
+        sorted = [avaNormal, ...sorted];
+        if (!posts.find((p) => p.id === avaNormal.id)) posts.push(avaNormal);
       }
     }
 
@@ -1216,25 +1274,31 @@ export async function toggleBookmark(userId: string, id: string): Promise<Post> 
   return decorateForUser(userId, p);
 }
 
-export async function toggleFollowForPost(userId: string, id: string): Promise<Post> {
+export async function toggleFollowForPost(userId: string, id: string, userHandle?: string): Promise<Post> {
   await delay(150);
-  const p = posts.find(x => x.id === id)!;
-  if (!p) {
+  const p = posts.find(x => x.id === id);
+  const handle = p?.userHandle ?? userHandle;
+  if (!handle) {
     throw new Error('Post not found');
   }
   const s = getState(userId);
-  const wasFollowing = getFollowState(s.follows, p.userHandle);
-  setFollowStateKey(s.follows, p.userHandle, !wasFollowing);
+  const wasFollowing = getFollowState(s.follows, handle);
+  setFollowStateKey(s.follows, handle, !wasFollowing);
+  saveFollowsToStorage(userId, s.follows);
 
-  // Debug: Log the state after update
-  console.log('FOLLOW STATE UPDATED:', {
-    userId,
-    userHandle: p.userHandle,
-    nowFollowing: getFollowState(s.follows, p.userHandle),
-    allFollows: Object.keys(s.follows).filter(h => s.follows[h] === true)
-  });
-
-  return decorateForUser(userId, p);
+  if (p) return decorateForUser(userId, p);
+  // Post not in global list (e.g. from cache or API-only) – return minimal shape so UI stays in sync
+  return {
+    id,
+    userHandle: handle,
+    locationLabel: '',
+    tags: [],
+    createdAt: Date.now(),
+    stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+    isBookmarked: false,
+    isFollowing: !wasFollowing,
+    userLiked: false
+  } as Post;
 }
 
 export async function incrementViews(userId: string, id: string): Promise<Post> {
@@ -1389,10 +1453,28 @@ export async function incrementReclips(userId: string, id: string): Promise<Post
 }
 
 export async function reclipPost(userId: string, originalPostId: string, userHandle: string): Promise<{ originalPost: Post; reclippedPost: Post | null }> {
+  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+
+  if (useLaravelAPI) {
+    try {
+      const response = await apiClient.reclipPost(originalPostId);
+      const transformed = transformLaravelPost(response);
+      const s = getState(userId);
+      s.reclips[originalPostId] = true;
+      return { originalPost: decorateForUser(userId, transformed), reclippedPost: null };
+    } catch (error: any) {
+      if (error?.name === 'ConnectionRefused' || error?.message?.includes('CONNECTION_REFUSED') || error?.message?.includes('Failed to fetch')) {
+        // Fall through to mock
+      } else {
+        throw error;
+      }
+    }
+  }
+
   await delay(200);
   const originalPost = posts.find(x => x.id === originalPostId);
   if (!originalPost) {
-    console.error('Original post not found for reclipPost:', originalPostId);
+    console.error('Original post not found for reclipPost (mock):', originalPostId);
     throw new Error(`Original post with id ${originalPostId} not found`);
   }
 
@@ -1405,7 +1487,6 @@ export async function reclipPost(userId: string, originalPostId: string, userHan
   // Check if user has already reclipped this post
   const s = getState(userId);
   if (s.reclips[originalPostId]) {
-    // User has already reclipped this post - return the original post decorated
     console.log('User has already reclipped this post:', originalPostId);
     return { originalPost: decorateForUser(userId, originalPost), reclippedPost: null };
   }
@@ -1420,25 +1501,21 @@ export async function reclipPost(userId: string, originalPostId: string, userHan
   const reclippedPost: Post = {
     ...originalPost,
     id: `reclip-${userId}-${originalPostId}-${Date.now()}`,
-    userHandle: userHandle, // Current user's handle (person who reclipped it)
-    originalUserHandle: originalPost.userHandle, // Store original poster's handle
+    userHandle: userHandle,
+    originalUserHandle: originalPost.userHandle,
     isReclipped: true,
     originalPostId: originalPostId,
     reclippedBy: userId,
     isBookmarked: false,
     isFollowing: false,
     userLiked: false,
-    userReclipped: false, // Reclipped post itself is not reclipped by the user
-    stats: { ...originalPost.stats } // Copy stats but don't inherit user interactions
+    userReclipped: false,
+    stats: { ...originalPost.stats }
   };
 
-  // Add to posts array
   posts.push(reclippedPost);
-
-  // Save to localStorage for persistence
   savePostsToStorage(posts);
 
-  // Return both the updated original post (decorated) and the new reclipped post
   return {
     originalPost: decorateForUser(userId, originalPost),
     reclippedPost: decorateForUser(userId, reclippedPost)
@@ -1679,7 +1756,8 @@ export async function createPost(
   subtitlesEnabled?: boolean, // Whether video subtitles are enabled
   subtitleText?: string, // Subtitle text to display on video
   editTimeline?: any, // Edit timeline for hybrid editing pipeline (clips, trims, transitions, etc.)
-  musicTrackId?: number // Library music track ID
+  musicTrackId?: number, // Library music track ID
+  venue?: string // Venue / place name for metadata carousel
 ): Promise<Post> {
   // Use real Laravel API
   const { createPost: createPostAPI } = await import('./client');
@@ -1688,6 +1766,7 @@ export async function createPost(
     const response = await createPostAPI({
       text: text || undefined,
       location: location || undefined,
+      venue: venue || undefined,
       mediaUrl: imageUrl || undefined,
       mediaType: mediaType || undefined,
       caption: caption || undefined,
@@ -1714,6 +1793,7 @@ export async function createPost(
       id: response.id,
       userHandle: response.user_handle || response.userHandle,
       locationLabel: response.location_label || response.locationLabel || location || 'Unknown Location',
+      venue: response.venue || venue || undefined,
       tags: response.tags || [],
       // Use final_video_url if available (from completed render job), otherwise use original media_url
       mediaUrl: finalVideoUrl || originalMediaUrl,
@@ -1884,6 +1964,7 @@ export async function createPost(
       id: `${randomUUID()}-${postCreatedAt}`,
       userHandle,
       locationLabel: location || 'Unknown Location',
+      venue: venue || undefined,
       tags: [],
       // Only set mediaUrl if we have actual media (not empty string for text-only posts)
       mediaUrl: persistentImageUrl && persistentImageUrl.trim() !== '' ? persistentImageUrl : undefined,

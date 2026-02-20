@@ -5,6 +5,7 @@ import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { createStory } from '../api/stories';
 import ScenesModal from '../components/ScenesModal';
+import { reclipPost } from '../api/posts';
 import { getPostById } from '../api/posts';
 import GifPicker from '../components/GifPicker';
 import StickerPicker from '../components/StickerPicker';
@@ -332,6 +333,7 @@ export default function ClipPage() {
   const [taggedUsers, setTaggedUsers] = React.useState<Array<{ handle: string; x: number; y: number; id: string }>>([]);
   const [selectedTaggedUser, setSelectedTaggedUser] = React.useState<string | null>(null);
   const [storyLocation, setStoryLocation] = React.useState('');
+  const [venue, setVenue] = React.useState('');
   // New media editing mode states
   const [showTextCard, setShowTextCard] = React.useState(false);
   const [showLocationCard, setShowLocationCard] = React.useState(false);
@@ -631,7 +633,8 @@ export default function ClipPage() {
         taggedUsers.length > 0 ? taggedUsers.map(tu => tu.handle) : undefined, // taggedUsers (send handles for API compatibility)
         undefined, // poll
         taggedUsers.length > 0 ? taggedUsers.map(tu => ({ handle: tu.handle, x: tu.x, y: tu.y })) : undefined, // taggedUsersPositions
-        undefined // question
+        undefined, // question
+        venue.trim() || undefined // venue for metadata carousel
       );
       
       // Mark question as replied if this was a question reply
@@ -2879,6 +2882,21 @@ export default function ClipPage() {
               />
             </div>
 
+            {/* Venue Input - shown in metadata carousel when story appears on feed */}
+            <div>
+              <label className="block text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
+                <FiMapPin className="w-4 h-4" />
+                Add Venue
+              </label>
+              <input
+                type="text"
+                value={venue}
+                onChange={(e) => setVenue(e.target.value)}
+                placeholder="e.g. café, stadium, park"
+                className="w-full px-4 py-3 rounded-xl bg-gray-900 text-white placeholder-gray-500 focus:ring-2 focus:ring-green-500 focus:border-transparent"
+              />
+            </div>
+
             {/* Info */}
             <div className="rounded-2xl bg-gray-900/50 p-4 text-center">
               <div className="text-sm text-gray-400">
@@ -2939,7 +2957,8 @@ export default function ClipPage() {
             // Mock comments handler for scenes
           }}
           onReclip={async () => {
-            // Mock reclip handler for scenes
+            if (!fullPost || !user?.id || !user?.handle) return;
+            await reclipPost(user.id, fullPost.id, user.handle);
           }}
         />
       )}

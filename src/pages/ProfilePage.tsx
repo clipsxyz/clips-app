@@ -8,6 +8,7 @@ import { getUserCollections } from '../api/collections';
 import type { Collection } from '../types';
 import { posts } from '../api/posts';
 import Swal from 'sweetalert2';
+import { bottomSheet } from '../utils/swalBottomSheet';
 import { setProfilePrivacy } from '../api/privacy';
 import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMaps';
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
@@ -425,35 +426,13 @@ export default function ProfilePage() {
       
       // Show warning when setting to public
       if (!newPrivacyState) {
-        const result = await Swal.fire({
+        const result = await Swal.fire(bottomSheet({
           title: 'Set Profile to Public?',
-          html: `
-            <div style="text-align: center; padding: 20px 0;">
-              <p style="color: #ffffff; font-size: 14px; line-height: 20px; margin: 0;">
-                Your posts and stories will still be public on locations news feed.
-              </p>
-            </div>
-          `,
+          message: 'Your posts and stories will still be public on locations news feed.',
           showCancelButton: true,
           confirmButtonText: 'Set to Public',
           cancelButtonText: 'Cancel',
-          confirmButtonColor: '#0095f6',
-          cancelButtonColor: '#ffffff',
-          background: '#262626',
-          color: '#ffffff',
-          customClass: {
-            popup: 'instagram-style-modal',
-            title: 'instagram-modal-title',
-            htmlContainer: 'instagram-modal-content',
-            confirmButton: 'instagram-confirm-btn',
-            cancelButton: 'instagram-cancel-btn',
-            actions: 'instagram-modal-actions'
-          },
-          buttonsStyling: true,
-          reverseButtons: false,
-          focusConfirm: false,
-          focusCancel: false
-        });
+        }));
 
         if (!result.isConfirmed) {
           setIsTogglingPrivacy(false);
@@ -471,42 +450,17 @@ export default function ProfilePage() {
         setProfilePrivacy(user.handle, newPrivacyState);
       }
 
-      Swal.fire({
-        title: '',
-          html: `
-          <p style="font-size: 12px; color: #6b7280; margin: 0 0 10px 0; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;">Gazetteer says</p>
-          <p style="font-weight: 600; font-size: 1.1em; margin: 0 0 12px 0;">${newPrivacyState ? 'Profile Set to Private' : 'Profile Set to Public'}</p>
-          <div style="text-align: center; padding: 20px 0;">
-            <p style="color: #ffffff; font-size: 14px; line-height: 20px; margin: 0;">
-              ${newPrivacyState 
-                ? 'Your profile is now private. Only approved followers can view your profile and send you messages.' 
-                : 'Your profile is now public. Anyone can view your profile and send you messages.'}
-            </p>
-          </div>
-        `,
-        showConfirmButton: true,
+      Swal.fire(bottomSheet({
+        title: newPrivacyState ? 'Profile Set to Private' : 'Profile Set to Public',
+        message: newPrivacyState
+          ? 'Your profile is now private. Only approved followers can view your profile and send you messages.'
+          : 'Your profile is now public. Anyone can view your profile and send you messages.',
+        icon: 'success',
         confirmButtonText: 'Done',
-        confirmButtonColor: '#0095f6',
-        background: '#262626',
-        color: '#ffffff',
-        customClass: {
-          popup: 'instagram-style-modal',
-          title: 'instagram-modal-title',
-          htmlContainer: 'instagram-modal-content',
-          confirmButton: 'instagram-confirm-btn',
-          actions: 'instagram-modal-actions'
-        },
-        buttonsStyling: true,
-        timer: 3000,
-        timerProgressBar: false
-      });
+      }));
     } catch (error) {
       console.error('Error toggling privacy:', error);
-      Swal.fire({
-        title: 'Error',
-        text: 'Failed to update privacy settings',
-        icon: 'error'
-      });
+      Swal.fire(bottomSheet({ title: 'Error', message: 'Failed to update privacy settings', icon: 'alert' }));
     } finally {
       setIsTogglingPrivacy(false);
     }
@@ -920,18 +874,18 @@ export default function ProfilePage() {
               onClick={() => setSelectedCard(null)}
             />
             
-            {/* Bottom Sheet */}
+            {/* Bottom Sheet - flex so content area scrolls */}
             <div
-              className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-3xl shadow-2xl transition-transform duration-300 ease-out translate-y-0"
+              className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-3xl shadow-2xl transition-transform duration-300 ease-out translate-y-0 flex flex-col"
               style={{ maxHeight: '85vh' }}
             >
               {/* Handle Bar */}
-              <div className="flex items-center justify-center pt-3 pb-2">
+              <div className="flex-shrink-0 flex items-center justify-center pt-3 pb-2">
                 <div className="w-12 h-1 bg-gray-300 rounded-full" />
               </div>
 
               {/* Header - title and X close for all cards */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 gap-3">
+              <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-gray-200 gap-3">
                 <h2 className="text-xl font-bold text-gray-900 flex-1 min-w-0">
                   {selectedCard === 'bio' && 'Edit Bio'}
                   {selectedCard === 'social' && 'Social Links'}
@@ -953,8 +907,8 @@ export default function ProfilePage() {
                 </button>
               </div>
 
-              {/* Content */}
-              <div className="flex-1 overflow-y-auto px-6 py-4">
+              {/* Content - scrollable */}
+              <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4 pb-8">
                 {/* Followers List */}
                 {selectedCard === 'followers' && (
                   <div className="py-2">
@@ -1319,21 +1273,11 @@ export default function ProfilePage() {
                     <button
                       onClick={() => {
                         if (!national || !regional || !local) {
-                          Swal.fire({
-                            title: 'Gazetteer says',
-                            html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Missing Information</p><p style="margin: 0;">Please fill in all location fields (National, Regional, and Local)</p>`,
-                            icon: 'warning',
-                            confirmButtonColor: '#0095f6',
-                            background: '#262626',
-                            color: '#ffffff',
-                            customClass: {
-                              popup: 'instagram-style-modal',
-                              title: 'instagram-modal-title',
-                              htmlContainer: 'instagram-modal-content',
-                              confirmButton: 'instagram-confirm-btn',
-                              actions: 'instagram-modal-actions'
-                            }
-                          });
+                          Swal.fire(bottomSheet({
+                            title: 'Missing Information',
+                            message: 'Please fill in all location fields (National, Regional, and Local)',
+                            icon: 'alert',
+                          }));
                           return;
                         }
                         const updatedUser = { ...user, national, regional, local };
@@ -1571,14 +1515,11 @@ export default function ProfilePage() {
                       <button
                         onClick={() => {
                           testBrowserNotification();
-                          Swal.fire({
-                            icon: 'info',
+                          Swal.fire(bottomSheet({
                             title: 'Test Notification Sent',
-                            text: 'Check your browser for a test notification. Make sure notifications are enabled!',
-                            confirmButtonColor: '#0095f6',
-                            background: '#262626',
-                            color: '#ffffff',
-                          });
+                            message: 'Check your browser for a test notification. Make sure notifications are enabled!',
+                            icon: 'alert',
+                          }));
                         }}
                         className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
                         title="Test single notification"
@@ -1588,14 +1529,11 @@ export default function ProfilePage() {
                       <button
                         onClick={() => {
                           testNotificationTypes();
-                          Swal.fire({
-                            icon: 'info',
-                            title: '',
-                            html: `<p style="font-size: 12px; color: #6b7280; margin: 0 0 10px 0; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;">Gazetteer says</p><p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Test Sequence Started</p><p style="margin: 0;">You will receive 4 different notification types (DM, Like, Comment, Follow). Watch your notifications!</p>`,
-                            confirmButtonColor: '#0095f6',
-                            background: '#262626',
-                            color: '#ffffff',
-                          });
+                          Swal.fire(bottomSheet({
+                            title: 'Test Sequence Started',
+                            message: 'You will receive 4 different notification types (DM, Like, Comment, Follow). Watch your notifications!',
+                            icon: 'alert',
+                          }));
                         }}
                         className="px-3 py-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
                         title="Test multiple notification types"
@@ -1621,24 +1559,18 @@ export default function ProfilePage() {
                           setIsInitializingNotifications(true);
                           try {
                             await initializeNotifications();
-                            Swal.fire({
-                              icon: 'success',
+                            Swal.fire(bottomSheet({
                               title: 'Notifications Enabled',
-                              text: 'You will now receive browser notifications',
-                              confirmButtonColor: '#0095f6',
-                              background: '#262626',
-                              color: '#ffffff',
-                            });
+                              message: 'You will now receive browser notifications',
+                              icon: 'success',
+                            }));
                           } catch (error) {
                             console.error('Error initializing notifications:', error);
-                            Swal.fire({
-                              icon: 'error',
-                              title: 'Gazetteer says',
-                              html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Failed to enable notifications. Please check your browser settings.</p>`,
-                              confirmButtonColor: '#0095f6',
-                              background: '#262626',
-                              color: '#ffffff',
-                            });
+                            Swal.fire(bottomSheet({
+                              title: 'Error',
+                              message: 'Failed to enable notifications. Please check your browser settings.',
+                              icon: 'alert',
+                            }));
                           } finally {
                             setIsInitializingNotifications(false);
                           }

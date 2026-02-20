@@ -34,6 +34,8 @@ export type Post = {
   user_id?: string; // Backend field
   userHandle: string;
   locationLabel: string;
+  /** Venue / place name (e.g. café, stadium); shown in metadata carousel on feed */
+  venue?: string;
   tags: string[];
   mediaUrl?: string; // Optional for text-only posts (deprecated, use mediaItems for carousel)
   finalVideoUrl?: string; // Final rendered video URL from backend (after processing)

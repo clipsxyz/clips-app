@@ -7,10 +7,12 @@ import { useAuth } from '../context/Auth';
 import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle, voteOnPoll, addQuestionAnswer } from '../api/stories';
 import { appendMessage } from '../api/messages';
 import Swal from 'sweetalert2';
+import { bottomSheet } from '../utils/swalBottomSheet';
 import { isProfilePrivate, canSendMessage, createFollowRequest } from '../api/privacy';
-import { getFollowedUsers, getPostById, toggleFollowForPost, getState, setFollowState } from '../api/posts';
+import { getFollowedUsers, getPostById, toggleFollowForPost, getState, setFollowState, getFollowState } from '../api/posts';
 import { showToast } from '../utils/toast';
 import ScenesModal from '../components/ScenesModal';
+import { reclipPost } from '../api/posts';
 import { getFlagForHandle, getAvatarForHandle } from '../api/users';
 import Flag from '../components/Flag';
 import { timeAgo } from '../utils/timeAgo';
@@ -2764,12 +2766,26 @@ export default function StoriesPage() {
                                             e.stopPropagation();
                                             if (!currentGroup?.userHandle || isFollowLoading || !user?.id) return;
                                             
-                                            setIsFollowLoading(true);
                                             const handle = currentGroup.userHandle;
+                                            const wasFollowing = isFollowingStoryUser;
+                                            // Optimistic update: show new state immediately
+                                            setIsFollowingStoryUser(!wasFollowing);
+                                            setFollowState(user.id, handle, !wasFollowing);
+                                            setIsFollowLoading(true);
+                                            
+                                            const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+                                            // Mock-only: no API call, update local state and finish (no delay)
+                                            if (!useLaravelApi) {
+                                                window.dispatchEvent(new CustomEvent('followToggled', { detail: { handle, isFollowing: !wasFollowing } }));
+                                                setIsFollowLoading(false);
+                                                if (!wasFollowing) showToast?.('Following');
+                                                else showToast?.('Unfollowed');
+                                                return;
+                                            }
                                             
                                             try {
                                                 const followedUsers = await getFollowedUsers(user.id);
-                                                const isCurrentlyFollowing = followedUsers.includes(handle);
+                                                const isCurrentlyFollowing = followedUsers.some((h: string) => h.toLowerCase() === handle.toLowerCase());
                                                 const profilePrivate = isProfilePrivate(handle);
                                                 
                                                 // Private profile + trying to follow = request only, do not add to follow list
@@ -2777,14 +2793,11 @@ export default function StoriesPage() {
                                                     createFollowRequest(user.handle, handle);
                                                     setFollowState(user.id, handle, false);
                                                     setIsFollowingStoryUser(false);
-                                                    Swal.fire({
-                                                        title: '',
-                                                        html: '<p style="font-size: 12px; color: #6b7280; margin: 0 0 10px 0; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;">Gazetteer says</p><p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Follow Request Sent</p><p style="color:#262626;font-size:14px;">Your follow request has been sent. You will be notified when they accept.</p>',
-                                                        confirmButtonText: 'OK',
-                                                        confirmButtonColor: '#0095f6',
-                                                        background: '#ffffff',
-                                                        width: '360px'
-                                                    });
+                                                    Swal.fire(bottomSheet({
+                                                        title: 'Follow Request Sent',
+                                                        message: 'Your follow request has been sent. You will be notified when they accept.',
+                                                        icon: 'alert',
+                                                    }));
                                                     return;
                                                 }
                                                 
@@ -2799,13 +2812,11 @@ export default function StoriesPage() {
                                                     showToast?.('Unfollowed');
                                                 } else if (result.status === 'pending') {
                                                     setIsFollowingStoryUser(false);
-                                                    Swal.fire({
-                                                        title: 'Gazetteer says',
-                                                        html: '<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Follow Request Sent</p><p style="margin: 0;">Your follow request has been sent.</p>',
+                                                    Swal.fire(bottomSheet({
+                                                        title: 'Follow Request Sent',
+                                                        message: 'Your follow request has been sent.',
                                                         icon: 'success',
-                                                        timer: 2000,
-                                                        showConfirmButton: false
-                                                    });
+                                                    }));
                                                 } else if (result.status === 'accepted' || result.following === true) {
                                                     setIsFollowingStoryUser(true);
                                                     showToast?.('Following');
@@ -2818,7 +2829,7 @@ export default function StoriesPage() {
                                                 setTimeout(async () => {
                                                     try {
                                                         const updatedFollowedUsers = await getFollowedUsers(user.id);
-                                                        setIsFollowingStoryUser(updatedFollowedUsers.includes(handle));
+                                                        setIsFollowingStoryUser(updatedFollowedUsers.some((h: string) => h.toLowerCase() === handle.toLowerCase()));
                                                     } catch (refreshError) {
                                                         console.error('Error refreshing follow status:', refreshError);
                                                     }
@@ -2838,7 +2849,7 @@ export default function StoriesPage() {
                                                 if (isConnectionError) {
                                                     console.log('Backend not available, using local state fallback');
                                                     const userState = getState(user.id);
-                                                    const wasFollowing = userState.follows[handle] === true;
+                                                    const wasFollowing = getFollowState(userState.follows || {}, handle);
                                                     const profilePrivate = isProfilePrivate(handle);
                                                     
                                                     // Private profile + trying to follow = request only, do not add to follow list
@@ -2846,24 +2857,21 @@ export default function StoriesPage() {
                                                         createFollowRequest(user.handle, handle);
                                                         setFollowState(user.id, handle, false);
                                                         setIsFollowingStoryUser(false);
-                                                        Swal.fire({
-                                                            title: 'Gazetteer says',
-                                                            html: '<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Follow Request Sent</p><p style="color:#262626;font-size:14px;">Your follow request has been sent. You will be notified when they accept.</p>',
-                                                            confirmButtonText: 'OK',
-                                                            confirmButtonColor: '#0095f6',
-                                                            background: '#ffffff',
-                                                            width: '360px'
-                                                        });
+                                                        Swal.fire(bottomSheet({
+                                                            title: 'Follow Request Sent',
+                                                            message: 'Your follow request has been sent. You will be notified when they accept.',
+                                                            icon: 'alert',
+                                                        }));
                                                         return;
                                                     }
                                                     
                                                     try {
-                                                        userState.follows[handle] = !wasFollowing;
+                                                        const newFollowingState = !wasFollowing;
+                                                        setFollowState(user.id, handle, newFollowingState);
                                                         const userPost = currentStory?.sharedFromPost ? originalPost : null;
                                                         if (userPost?.id) {
-                                                            await toggleFollowForPost(user.id, userPost.id);
+                                                            await toggleFollowForPost(user.id, userPost.id, handle);
                                                         }
-                                                        const newFollowingState = !wasFollowing;
                                                         setIsFollowingStoryUser(newFollowingState);
                                                         if (newFollowingState) {
                                                             showToast?.('Following');
@@ -3205,11 +3213,11 @@ export default function StoriesPage() {
                                             if (user?.id && user?.handle && currentGroup.userHandle) {
                                                 const followedUsers = await getFollowedUsers(user.id);
                                                 if (!canSendMessage(user.handle, currentGroup.userHandle, followedUsers)) {
-                                                    Swal.fire({
+                                                    Swal.fire(bottomSheet({
                                                         title: 'Cannot Send Message',
-                                                        text: 'You must follow this user to send them a message.',
-                                                        icon: 'warning'
-                                                    });
+                                                        message: 'You must follow this user to send them a message.',
+                                                        icon: 'alert',
+                                                    }));
                                                     return;
                                                 }
                                             }
@@ -3539,14 +3547,11 @@ export default function StoriesPage() {
                             if (profilePrivate) {
                                 createFollowRequest(user.handle, handle);
                                 setFollowState(user.id, handle, false);
-                                await Swal.fire({
-                                    title: 'Gazetteer says',
-                                    html: '<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Follow Request Sent</p><p style="color:#262626;font-size:14px;">Your follow request has been sent. You will be notified when they accept.</p>',
-                                    confirmButtonText: 'OK',
-                                    confirmButtonColor: '#0095f6',
-                                    background: '#ffffff',
-                                    width: '360px'
-                                });
+                                await Swal.fire(bottomSheet({
+                                    title: 'Follow Request Sent',
+                                    message: 'Your follow request has been sent. You will be notified when they accept.',
+                                    icon: 'alert',
+                                }));
                                 return false;
                             }
                             const userPost = fullPost.id ? await getPostById(fullPost.id) : null;
@@ -3560,7 +3565,9 @@ export default function StoriesPage() {
                             // Mock comments handler for scenes
                         }}
                         onReclip={async () => {
-                            // Mock reclip handler for scenes
+                            if (!fullPost || !user?.id || !user?.handle) return;
+                            // Use the same backend reclip logic as the main feed
+                            await reclipPost(user.id, fullPost.id, user.handle);
                         }}
                     />
                 )}

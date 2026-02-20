@@ -32,6 +32,7 @@ import {
     incrementViews,
     toggleBookmark,
     reclipPost,
+    setReclipState,
     addComment,
     fetchComments,
     incrementShares,
@@ -954,7 +955,29 @@ function FeedScreen({ navigation }: { navigation?: any }) {
             }}
             onFollow={async () => {
                 if (!user) return;
-                const updated = await toggleFollowForPost(userId, post.id);
+                try {
+                    // Use mock/local follow state as source of truth so it always works,
+                    // even if the backend is offline or slow.
+                    const updated = await toggleFollowForPost(userId, post.id, post.userHandle);
+                    // Update the local feed state so Follow / Following changes immediately
+                    setPages(prev =>
+                        prev.map(page =>
+                            page.map(p => (p.id === post.id ? updated : p))
+                        )
+                    );
+                } catch (err) {
+                    console.error('Error toggling follow in FeedScreen:', err);
+                    // Fallback: optimistic toggle if something went wrong
+                    setPages(prev =>
+                        prev.map(page =>
+                            page.map(p =>
+                                p.id === post.id
+                                    ? { ...p, isFollowing: !p.isFollowing }
+                                    : p
+                            )
+                        )
+                    );
+                }
                 // Refresh feed if viewing following feed
                 if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
                     setPages([]);
@@ -996,17 +1019,17 @@ function FeedScreen({ navigation }: { navigation?: any }) {
                     Alert.alert('Already reclipped', 'You have already reclipped this post');
                     return;
                 }
+                const newReclips = post.stats.reclips + 1;
+                setReclipState(userId, post.id, true);
+                updatePost(post.id, p => ({
+                    ...p,
+                    userReclipped: true,
+                    stats: { ...p.stats, reclips: newReclips }
+                }));
                 try {
-                    const { originalPost, reclippedPost } = await reclipPost(userId, post.id, user.handle);
-                    updatePost(post.id, p => ({
-                        ...p,
-                        userReclipped: originalPost.userReclipped,
-                        stats: originalPost.stats
-                    }));
-                    // Note: Reclipped posts only appear in the Following feed for users who follow the reclipper
-                    // They should NOT be added to the current feed to avoid duplicates
+                    await reclipPost(userId, post.id, user.handle);
                 } catch (err: any) {
-                    Alert.alert('Error', err.message || 'Failed to reclip post');
+                    console.warn('Reclip failed (UI already updated):', err);
                 }
             }}
             onBookmark={async () => {

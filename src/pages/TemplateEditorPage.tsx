@@ -16,6 +16,7 @@ import type { EffectConfig } from '../utils/effects';
 import { pickFiles, filterFilesByPlatform, type PlatformType } from '../utils/filePicker';
 import { isWeb } from '../utils/platform';
 import Swal from 'sweetalert2';
+import { bottomSheet } from '../utils/swalBottomSheet';
 
 type UserMedia = {
     clipId: string;
@@ -550,13 +551,11 @@ export default function TemplateEditorPage() {
                 // Web: Use custom file picker with filtering
                 const files = await pickFiles(platformType);
                 if (files.length === 0) {
-                    Swal.fire({
-                        icon: 'info',
-                        title: 'Gazetteer says',
-                        html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">No files selected</p><p style="margin: 0;">Please select a video or image file.</p>`,
-                        timer: 3000,
-                        showConfirmButton: false
-                    });
+                    Swal.fire(bottomSheet({
+                        title: 'No files selected',
+                        message: 'Please select a video or image file.',
+                        icon: 'alert',
+                    }));
                     return;
                 }
                 
@@ -570,13 +569,11 @@ export default function TemplateEditorPage() {
                 // React Native: Use native picker
                 const results = await pickFiles(platformType);
                 if (results.length === 0) {
-                    Swal.fire({
-                        icon: 'info',
-                        title: 'Gazetteer says',
-                        html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">No files selected</p><p style="margin: 0;">Please select a video or image file.</p>`,
-                        timer: 3000,
-                        showConfirmButton: false
-                    });
+                    Swal.fire(bottomSheet({
+                        title: 'No files selected',
+                        message: 'Please select a video or image file.',
+                        icon: 'alert',
+                    }));
                     return;
                 }
                 
@@ -587,13 +584,11 @@ export default function TemplateEditorPage() {
                 const url = result.path || result.uri;
                 
                 if (!url) {
-                    Swal.fire({
-                        icon: 'error',
+                    Swal.fire(bottomSheet({
                         title: 'Error',
-                        text: 'Could not access file path.',
-                        timer: 2000,
-                        showConfirmButton: false
-                    });
+                        message: 'Could not access file path.',
+                        icon: 'alert',
+                    }));
                     return;
                 }
 
@@ -632,13 +627,11 @@ export default function TemplateEditorPage() {
             }
         } catch (error) {
             console.error('Error selecting platform files:', error);
-            Swal.fire({
-                icon: 'error',
-                title: 'Gazetteer says',
-                html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Failed to select files. Please try again.</p>`,
-                timer: 2000,
-                showConfirmButton: false
-            });
+            Swal.fire(bottomSheet({
+                title: 'Error',
+                message: 'Failed to select files. Please try again.',
+                icon: 'alert',
+            }));
         }
     }
 
@@ -653,13 +646,11 @@ export default function TemplateEditorPage() {
             // Only warn if it's not a video/image at all, otherwise allow it
             const isVideoOrImage = file.type.startsWith('video/') || file.type.startsWith('image/');
             if (!isVideoOrImage) {
-                Swal.fire({
-                    icon: 'warning',
+                Swal.fire(bottomSheet({
                     title: 'Invalid file type',
-                    text: 'Please select a video or image file.',
-                    timer: 3000,
-                    showConfirmButton: false
-                });
+                    message: 'Please select a video or image file.',
+                    icon: 'alert',
+                }));
                 return;
             }
             // Allow the file even if it doesn't match platform patterns (filtering is now lenient)
@@ -1416,13 +1407,11 @@ export default function TemplateEditorPage() {
                                                             const files = Array.from(e.target.files || []);
                                                             const filtered = filterFilesByPlatform(files, platformType);
                                                             if (filtered.length === 0) {
-                                                                Swal.fire({
-                                                                    icon: 'warning',
-                                                                    title: 'Gazetteer says',
-                                                                    html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">No matching files</p><p style="margin: 0;">No ${platformType === 'tiktok' ? 'TikTok' : platformType === 'instagram' ? 'Instagram' : 'YouTube Shorts'} videos found. Please select files with matching filenames.</p>`,
-                                                                    timer: 3000,
-                                                                    showConfirmButton: false
-                                                                });
+                                                                Swal.fire(bottomSheet({
+                                                                    title: 'No matching files',
+                                                                    message: `No ${platformType === 'tiktok' ? 'TikTok' : platformType === 'instagram' ? 'Instagram' : 'YouTube Shorts'} videos found. Please select files with matching filenames.`,
+                                                                    icon: 'alert',
+                                                                }));
                                                                 e.target.value = '';
                                                                 return;
                                                             }

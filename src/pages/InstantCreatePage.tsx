@@ -5,6 +5,7 @@ import { saveDraft } from '../api/drafts';
 import { getTemplate } from '../api/templates';
 import { TEMPLATE_IDS } from '../constants';
 import Swal from 'sweetalert2';
+import { bottomSheet } from '../utils/swalBottomSheet';
 
 export default function InstantCreatePage() {
     const navigate = useNavigate();
@@ -159,22 +160,11 @@ export default function InstantCreatePage() {
                     hostname: window.location.hostname
                 });
                 
-                Swal.fire({
-                    icon: 'error',
+                Swal.fire(bottomSheet({
                     title: 'Camera Not Available',
-                    html: `
-                        <div class="text-left">
-                            <p class="mb-2">Camera access is not available. This usually happens because:</p>
-                            <ul class="list-disc list-inside mb-4 space-y-1 text-sm">
-                                <li>Android Chrome requires HTTPS for camera access</li>
-                                <li>The "Insecure origins" flag may need a browser restart</li>
-                                <li>Camera permissions may be blocked</li>
-                            </ul>
-                            <p class="text-sm"><strong>Solution:</strong> Use the "Take Photo/Video" button below, which works on HTTP.</p>
-                        </div>
-                    `,
-                    confirmButtonColor: '#8B5CF6',
-                });
+                    message: 'Camera access is not available (e.g. Android Chrome needs HTTPS, or permissions blocked). Use the "Take Photo/Video" button below, which works on HTTP.',
+                    icon: 'alert',
+                }));
                 return;
             }
 
@@ -194,12 +184,11 @@ export default function InstantCreatePage() {
             }
         } catch (e: any) {
             console.error('Stream init error:', e);
-            Swal.fire({
-                icon: 'error',
-                title: 'Gazetteer says',
-                html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Camera Access Failed</p><p style="margin: 0;">${e.name === 'NotAllowedError' ? 'Please allow camera access in your browser settings' : `Error: ${e.message || e.name || 'Unknown error'}`}</p>`,
-                confirmButtonColor: '#8B5CF6',
-            });
+            Swal.fire(bottomSheet({
+                title: 'Camera Access Failed',
+                message: e.name === 'NotAllowedError' ? 'Please allow camera access in your browser settings' : `Error: ${e.message || e.name || 'Unknown error'}`,
+                icon: 'alert',
+            }));
         }
     }
 
@@ -238,12 +227,11 @@ export default function InstantCreatePage() {
                 }
 
                 if (!getUserMedia) {
-                    Swal.fire({
-                        icon: 'error',
+                    Swal.fire(bottomSheet({
                         title: 'Camera Not Supported',
-                        text: 'Your browser does not support camera access.',
-                        confirmButtonColor: '#8B5CF6',
-                    });
+                        message: 'Your browser does not support camera access.',
+                        icon: 'alert',
+                    }));
                     setDualCamera(false);
                     return;
                 }
@@ -906,12 +894,11 @@ export default function InstantCreatePage() {
 
                     // Enforce 90 second limit in Instant Create preview (only if duration is valid)
                     if (duration > MAX_VIDEO_SECONDS) {
-                        Swal.fire({
-                            icon: 'warning',
-                            title: 'Gazetteer says',
-                            html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Video too long</p><p style="margin: 0;">Videos created here must be ${MAX_VIDEO_SECONDS} seconds or less. Please record or select a shorter clip.</p>`,
-                            confirmButtonText: 'OK'
-                        });
+                        Swal.fire(bottomSheet({
+                            title: 'Video too long',
+                            message: `Videos created here must be ${MAX_VIDEO_SECONDS} seconds or less. Please record or select a shorter clip.`,
+                            icon: 'alert',
+                        }));
                         setPreviewUrl(null);
                         setCurrentTime(0);
                         setIsPlaying(false);
@@ -1076,32 +1063,12 @@ export default function InstantCreatePage() {
                 trimEnd,
             });
             
-            // Show success feedback with SweetAlert
-            await Swal.fire({
+            await Swal.fire(bottomSheet({
                 title: 'Saved to Drafts!',
-                html: `
-                  <div style="text-align: center; padding: 20px 0;">
-                    <p style="color: #ffffff; font-size: 14px; line-height: 20px; margin: 0;">
-                      Your video has been saved. You can find it in your profile page.
-                    </p>
-                  </div>
-                `,
-                showConfirmButton: true,
+                message: 'Your video has been saved. You can find it in your profile page.',
+                icon: 'success',
                 confirmButtonText: 'Done',
-                confirmButtonColor: '#0095f6',
-                background: '#262626',
-                color: '#ffffff',
-                customClass: {
-                  popup: 'instagram-style-modal',
-                  title: 'instagram-modal-title',
-                  htmlContainer: 'instagram-modal-content',
-                  confirmButton: 'instagram-confirm-btn',
-                  actions: 'instagram-modal-actions'
-                },
-                buttonsStyling: true,
-                timer: 3000,
-                timerProgressBar: false
-            });
+            }));
             
             // Navigate back to feed
             if (streamRef.current) {
@@ -1115,31 +1082,11 @@ export default function InstantCreatePage() {
             navigate('/feed');
         } catch (error) {
             console.error('Error saving draft:', error);
-            Swal.fire({
-                title: '',
-                html: `
-                  <p style="font-size: 12px; color: #6b7280; margin: 0 0 10px 0; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;">Gazetteer says</p>
-                  <p style="font-weight: 600; font-size: 1.1em; margin: 0 0 12px 0;">Failed to Save</p>
-                  <div style="text-align: center; padding: 20px 0;">
-                    <p style="color: #ffffff; font-size: 14px; line-height: 20px; margin: 0;">
-                      There was an error saving your draft. Please try again.
-                    </p>
-                  </div>
-                `,
-                showConfirmButton: true,
-                confirmButtonText: 'OK',
-                confirmButtonColor: '#0095f6',
-                background: '#262626',
-                color: '#ffffff',
-                customClass: {
-                  popup: 'instagram-style-modal',
-                  title: 'instagram-modal-title',
-                  htmlContainer: 'instagram-modal-content',
-                  confirmButton: 'instagram-confirm-btn',
-                  actions: 'instagram-modal-actions'
-                },
-                buttonsStyling: true
-            });
+            Swal.fire(bottomSheet({
+                title: 'Failed to Save',
+                message: 'There was an error saving your draft. Please try again.',
+                icon: 'alert',
+            }));
         }
     }
 
@@ -1716,23 +1663,19 @@ export default function InstantCreatePage() {
                                         state: { template: tiktokTemplate }
                                     });
                                 } else {
-                                    Swal.fire({
-                                        icon: 'error',
+                                    Swal.fire(bottomSheet({
                                         title: 'Error',
-                                        text: 'Could not load TikTok template',
-                                        timer: 2000,
-                                        showConfirmButton: false
-                                    });
+                                        message: 'Could not load TikTok template',
+                                        icon: 'alert',
+                                    }));
                                 }
                             } catch (error) {
                                 console.error('Error loading TikTok template:', error);
-                                Swal.fire({
-                                    icon: 'error',
-                                    title: 'Gazetteer says',
-                                    html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Failed to load TikTok template</p>`,
-                                    timer: 2000,
-                                    showConfirmButton: false
-                                });
+                                Swal.fire(bottomSheet({
+                                    title: 'Error',
+                                    message: 'Failed to load TikTok template',
+                                    icon: 'alert',
+                                }));
                             }
                         }}
                         className="w-10 h-10 rounded-lg bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/20 hover:bg-black/80 active:scale-95 transition-all cursor-pointer"
@@ -1753,23 +1696,19 @@ export default function InstantCreatePage() {
                                         state: { template: instagramTemplate }
                                     });
                                 } else {
-                                    Swal.fire({
-                                        icon: 'error',
+                                    Swal.fire(bottomSheet({
                                         title: 'Error',
-                                        text: 'Could not load Instagram template',
-                                        timer: 2000,
-                                        showConfirmButton: false
-                                    });
+                                        message: 'Could not load Instagram template',
+                                        icon: 'alert',
+                                    }));
                                 }
                             } catch (error) {
                                 console.error('Error loading Instagram template:', error);
-                                Swal.fire({
-                                    icon: 'error',
-                                    title: '',
-                                    html: `<p style="font-size: 12px; color: #6b7280; margin: 0 0 10px 0; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;">Gazetteer says</p><p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Failed to load Instagram template</p>`,
-                                    timer: 2000,
-                                    showConfirmButton: false
-                                });
+                                Swal.fire(bottomSheet({
+                                    title: 'Error',
+                                    message: 'Failed to load Instagram template',
+                                    icon: 'alert',
+                                }));
                             }
                         }}
                         className="w-10 h-10 rounded-lg bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/20 hover:bg-black/80 active:scale-95 transition-all cursor-pointer"
@@ -1790,23 +1729,19 @@ export default function InstantCreatePage() {
                                         state: { template: youtubeShortsTemplate }
                                     });
                                 } else {
-                                    Swal.fire({
-                                        icon: 'error',
-                                        title: 'Gazetteer says',
-                                        html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Could not load YouTube Shorts template</p>`,
-                                        timer: 2000,
-                                        showConfirmButton: false
-                                    });
+                                    Swal.fire(bottomSheet({
+                                        title: 'Error',
+                                        message: 'Could not load YouTube Shorts template',
+                                        icon: 'alert',
+                                    }));
                                 }
                             } catch (error) {
                                 console.error('Error loading YouTube Shorts template:', error);
-                                Swal.fire({
-                                    icon: 'error',
-                                    title: '',
-                                    html: `<p style="font-size: 12px; color: #6b7280; margin: 0 0 10px 0; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;">Gazetteer says</p><p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Failed to load YouTube Shorts template</p>`,
-                                    timer: 2000,
-                                    showConfirmButton: false
-                                });
+                                Swal.fire(bottomSheet({
+                                    title: 'Error',
+                                    message: 'Failed to load YouTube Shorts template',
+                                    icon: 'alert',
+                                }));
                             }
                         }}
                         className="w-10 h-10 rounded-lg bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/20 hover:bg-black/80 active:scale-95 transition-all cursor-pointer"
@@ -1843,23 +1778,19 @@ export default function InstantCreatePage() {
                                         state: { template: gazetteerTemplate }
                                     });
                                 } else {
-                                    Swal.fire({
-                                        icon: 'error',
+                                    Swal.fire(bottomSheet({
                                         title: 'Error',
-                                        text: 'Could not load Gazetteer template',
-                                        timer: 2000,
-                                        showConfirmButton: false
-                                    });
+                                        message: 'Could not load Gazetteer template',
+                                        icon: 'alert',
+                                    }));
                                 }
                             } catch (error) {
                                 console.error('Error loading Gazetteer template:', error);
-                                Swal.fire({
-                                    icon: 'error',
-                                    title: 'Gazetteer says',
-                                    html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Failed to load Gazetteer template</p>`,
-                                    timer: 2000,
-                                    showConfirmButton: false
-                                });
+                                Swal.fire(bottomSheet({
+                                    title: 'Error',
+                                    message: 'Failed to load Gazetteer template',
+                                    icon: 'alert',
+                                }));
                             }
                         }}
                         className="text-white text-sm font-medium hover:opacity-70 transition-opacity cursor-pointer"
@@ -1987,14 +1918,11 @@ export default function InstantCreatePage() {
                                         }
                                     } else {
                                         // No video to edit, show message
-                                        Swal.fire({
-                                            icon: 'info',
+                                        Swal.fire(bottomSheet({
                                             title: 'No Video to Edit',
-                                            text: 'Please record or select a video first',
-                                            confirmButtonColor: '#6366f1',
-                                            background: '#1f2937',
-                                            color: '#fff'
-                                        });
+                                            message: 'Please record or select a video first',
+                                            icon: 'alert',
+                                        }));
                                     }
                                     setShowEffectsCard(false);
                                 }}
@@ -2415,16 +2343,11 @@ export default function InstantCreatePage() {
                                             onClick={async () => {
                                                 setSelectedMusicTrackId(track.id);
                                                 setShowMusicCard(false);
-                                                Swal.fire({
+                                                Swal.fire(bottomSheet({
+                                                    title: 'Music Selected!',
+                                                    message: `"${track.title}" by ${track.artist || 'Unknown'}`,
                                                     icon: 'success',
-                                                    title: '',
-                                                    html: `<p style="font-size: 12px; color: #6b7280; margin: 0 0 10px 0; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;">Gazetteer says</p><p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Music Selected!</p><p style="margin: 0;">"${track.title}" by ${track.artist || 'Unknown'}</p>`,
-                                                    confirmButtonColor: '#fbbf24',
-                                                    background: '#1f2937',
-                                                    color: '#fff',
-                                                    timer: 2000,
-                                                    showConfirmButton: false
-                                                });
+                                                }));
                                             }}
                                             className={`w-full flex items-center gap-3 p-3 hover:bg-gray-800 rounded-lg transition-colors mb-2 ${
                                                 isSelected ? 'bg-yellow-500/20 border border-yellow-500/50' : ''
@@ -2474,14 +2397,11 @@ export default function InstantCreatePage() {
                                                 }
                                             } catch (error: any) {
                                                 console.error('Failed to load music library:', error);
-                                                Swal.fire({
-                                                    icon: 'error',
-                                                    title: '',
-                                                    html: `<p style="font-size: 12px; color: #6b7280; margin: 0 0 10px 0; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;">Gazetteer says</p><p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Load Failed</p><p style="margin: 0;">${error.message || 'Failed to load music library.'}</p>`,
-                                                    confirmButtonColor: '#fbbf24',
-                                                    background: '#1f2937',
-                                                    color: '#fff'
-                                                });
+                                                Swal.fire(bottomSheet({
+                                                    title: 'Load Failed',
+                                                    message: error.message || 'Failed to load music library.',
+                                                    icon: 'alert',
+                                                }));
                                             } finally {
                                                 setLibraryLoading(false);
                                             }
@@ -2523,23 +2443,19 @@ export default function InstantCreatePage() {
                                                 state: { template: gazetteerTemplate }
                                             });
                                         } else {
-                                            Swal.fire({
-                                                icon: 'error',
+                                            Swal.fire(bottomSheet({
                                                 title: 'Error',
-                                                text: 'Could not load Gazetteer template',
-                                                timer: 2000,
-                                                showConfirmButton: false
-                                            });
+                                                message: 'Could not load Gazetteer template',
+                                                icon: 'alert',
+                                            }));
                                         }
                                     } catch (error) {
                                         console.error('Error loading Gazetteer template:', error);
-                                        Swal.fire({
-                                            icon: 'error',
-                                            title: 'Gazetteer says',
-                                            html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Failed to load Gazetteer template</p>`,
-                                            timer: 2000,
-                                            showConfirmButton: false
-                                        });
+                                        Swal.fire(bottomSheet({
+                                            title: 'Error',
+                                            message: 'Failed to load Gazetteer template',
+                                            icon: 'alert',
+                                        }));
                                     }
                                 }}
                                 className="w-full p-4 rounded-xl bg-gradient-to-br from-green-500/20 to-white/10 border border-green-500/30 hover:border-green-500/50 transition-all text-left"
@@ -2712,12 +2628,11 @@ export default function InstantCreatePage() {
                                     console.log('Video duration:', duration);
                                     
                                     if (duration > MAX_VIDEO_SECONDS) {
-                                        Swal.fire({
-                                            icon: 'warning',
+                                        Swal.fire(bottomSheet({
                                             title: 'Video Too Long',
-                                            text: `Video "${file.name}" is ${Math.round(duration)}s. Maximum is ${MAX_VIDEO_SECONDS}s. It will be trimmed.`,
-                                            confirmButtonText: 'OK'
-                                        });
+                                            message: `Video "${file.name}" is ${Math.round(duration)}s. Maximum is ${MAX_VIDEO_SECONDS}s. It will be trimmed.`,
+                                            icon: 'alert',
+                                        }));
                                     }
                                     
                                     const newClip: Clip = {
@@ -2796,12 +2711,11 @@ export default function InstantCreatePage() {
                                     if (resolved) return;
                                     resolved = true;
                                     console.error('Error loading video:', file.name, err);
-                                    Swal.fire({
-                                        icon: 'error',
-                                        title: '',
-                                        html: `<p style="font-size: 12px; color: #6b7280; margin: 0 0 10px 0; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;">Gazetteer says</p><p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error Loading Video</p><p style="margin: 0;">Could not load "${file.name}". Please try a different file.</p>`,
-                                        confirmButtonText: 'OK'
-                                    });
+                                    Swal.fire(bottomSheet({
+                                        title: 'Error Loading Video',
+                                        message: `Could not load "${file.name}". Please try a different file.`,
+                                        icon: 'alert',
+                                    }));
                                     resolve();
                                 };
                                 
@@ -2927,12 +2841,11 @@ export default function InstantCreatePage() {
                             });
                         } else {
                             console.warn('File type not supported:', file.type);
-                            Swal.fire({
-                                icon: 'info',
-                                title: 'Gazetteer says',
-                                html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">File Type Not Supported</p><p style="margin: 0;">"${file.name}" is not a supported file type. Please select a video or image file.</p>`,
-                                confirmButtonText: 'OK'
-                            });
+                            Swal.fire(bottomSheet({
+                                title: 'File Type Not Supported',
+                                message: `"${file.name}" is not a supported file type. Please select a video or image file.`,
+                                icon: 'alert',
+                            }));
                         }
                     }
                     

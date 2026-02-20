@@ -20,6 +20,7 @@ import {
 import Swal from 'sweetalert2';
 import ShareProfileModal from '../components/ShareProfileModal';
 import { getStableUserId } from '../utils/userId';
+import { followRequestSentBottomSheet, accountIsPrivateBottomSheet, bottomSheet } from '../utils/swalBottomSheet';
 
 /** Parse place names from bio text. Splits on comma, semicolon, newline, "and", " - ", ":", ". " */
 function parsePlacesFromBio(bio: string): string[] {
@@ -98,23 +99,11 @@ export default function ViewProfilePage() {
     const handleFollow = async () => {
         if (!user?.id || !handle) {
             console.error('Missing required data for follow:', { userId: user?.id, handle });
-            Swal.fire({
-                title: 'Gazetteer says',
-                html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Unable to follow user. Please try again.</p>`,
-                icon: 'error',
-                timer: 2000,
-                showConfirmButton: false
-            });
+            Swal.fire(bottomSheet({ title: 'Error', message: 'Unable to follow user. Please try again.', icon: 'alert' }));
             return;
         }
         if (!user?.handle && isProfilePrivate(decodeURIComponent(handle))) {
-            Swal.fire({
-                title: 'Gazetteer says',
-                html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Unable to send follow request. Please sign in with a full profile.</p>`,
-                icon: 'error',
-                timer: 2000,
-                showConfirmButton: false
-            });
+            Swal.fire(bottomSheet({ title: 'Error', message: 'Unable to send follow request. Please sign in with a full profile.', icon: 'alert' }));
             return;
         }
         
@@ -143,7 +132,7 @@ export default function ViewProfilePage() {
                     const { createNotification } = await import('../api/notifications');
                     await createNotification({ type: 'follow_request', fromHandle: user.handle, toHandle: decodedHandle, message: `${user.handle} wants to follow you` });
                 } catch (_) {}
-                Swal.fire({ title: 'Gazetteer says', html: `<p style="font-weight:600;">Follow Request Sent</p><p style="color:#8e8e8e;">You will be notified when they accept.</p>`, confirmButtonText: 'OK', confirmButtonColor: '#0095f6', background: '#fff', width: '360px' });
+                Swal.fire(followRequestSentBottomSheet());
             } else {
                 setFollowState(followUserId, handleToUse, newFollowing);
                 setIsFollowing(newFollowing);
@@ -223,35 +212,7 @@ export default function ViewProfilePage() {
                             console.warn('Failed to create follow request notification:', error);
                         }
                         
-                        Swal.fire({
-                            title: 'Gazetteer says',
-                            html: `
-                                <div style="text-align: center; padding: 8px 0;">
-                                    <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
-                                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                                            <circle cx="8.5" cy="7" r="4"></circle>
-                                            <line x1="20" y1="8" x2="20" y2="14"></line>
-                                            <line x1="23" y1="11" x2="17" y2="11"></line>
-                                        </svg>
-                                    </div>
-                                    <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Sent</h3>
-                                    <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Your follow request has been sent. You will be notified when they accept.</p>
-                                </div>
-                            `,
-                            showConfirmButton: true,
-                            confirmButtonText: 'OK',
-                            confirmButtonColor: '#0095f6',
-                            background: '#ffffff',
-                            width: '400px',
-                            padding: '0',
-                            customClass: {
-                                popup: '!rounded-2xl !shadow-xl !border-0',
-                                container: '!p-0',
-                                confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                            },
-                            buttonsStyling: false
-                        });
+                        Swal.fire(followRequestSentBottomSheet());
                         return;
                     }
                     
@@ -361,35 +322,7 @@ export default function ViewProfilePage() {
                         console.warn('Failed to create follow request notification:', error);
                     }
                     
-                    Swal.fire({
-                        title: 'Gazetteer says',
-                        html: `
-                            <div style="text-align: center; padding: 8px 0;">
-                                <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
-                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                                        <circle cx="8.5" cy="7" r="4"></circle>
-                                        <line x1="20" y1="8" x2="20" y2="14"></line>
-                                        <line x1="23" y1="11" x2="17" y2="11"></line>
-                                    </svg>
-                                </div>
-                                <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Follow Request Sent</h3>
-                                <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Your follow request has been sent. You will be notified when they accept.</p>
-                            </div>
-                        `,
-                        showConfirmButton: true,
-                        confirmButtonText: 'OK',
-                        confirmButtonColor: '#0095f6',
-                        background: '#ffffff',
-                        width: '400px',
-                        padding: '0',
-                        customClass: {
-                            popup: '!rounded-2xl !shadow-xl !border-0',
-                            container: '!p-0',
-                            confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                        },
-                        buttonsStyling: false
-                    });
+                    Swal.fire(followRequestSentBottomSheet());
                 }
             } else if (result.status === 'accepted' || result.following === true) {
                 // Public profile - follow immediately
@@ -460,30 +393,14 @@ export default function ViewProfilePage() {
                 error?.message?.includes('NetworkError');
             
             if (isConnectionError) {
-                Swal.fire({
-                    title: 'Gazetteer says',
-                    html: `
-                        <p style="font-weight: 600; font-size: 1.1em; margin: 0 0 12px 0;">Backend Server Not Running</p>
-                        <p>The Laravel backend server is not running.</p>
-                        <p style="margin-top: 10px; font-size: 14px;">To enable the follow feature:</p>
-                        <ol style="text-align: left; margin-top: 10px; font-size: 14px;">
-                            <li>Open a terminal</li>
-                            <li>Navigate to: <code>laravel-backend</code></li>
-                            <li>Run: <code>php artisan serve</code></li>
-                        </ol>
-                    `,
-                    icon: 'warning',
+                Swal.fire(bottomSheet({
+                    title: 'Backend Server Not Running',
+                    html: `<p class="swal-bottom-sheet-message">The Laravel backend server is not running. To enable the follow feature: Open a terminal, navigate to <code>laravel-backend</code>, and run <code>php artisan serve</code>.</p>`,
+                    icon: 'alert',
                     confirmButtonText: 'OK',
-                    width: '500px'
-                });
+                }));
             } else {
-                Swal.fire({
-                    title: 'Gazetteer says',
-                    html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">${error?.message || 'Failed to follow user. Please try again.'}</p>`,
-                    icon: 'error',
-                    timer: 3000,
-                    showConfirmButton: false
-                });
+                Swal.fire(bottomSheet({ title: 'Error', message: error?.message || 'Failed to follow user. Please try again.', icon: 'alert' }));
             }
         }
     };
@@ -522,39 +439,9 @@ export default function ViewProfilePage() {
                     setIsFollowing(effectiveIsFollowing);
                     setHasPendingRequest(hasPending);
                     
-                    // Show SweetAlert if profile is private and user can't view
+                    // Show SweetAlert if profile is private and user can't view (same bottom-sheet style as Follow Request Sent)
                     if (!canView && profilePrivate && decodedHandle !== user.handle) {
-                        Swal.fire({
-                            title: 'Gazetteer says',
-                            customClass: {
-                                title: 'gazetteer-shimmer',
-                                popup: '!rounded-2xl !shadow-xl !border-0',
-                                container: '!p-0',
-                                confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors',
-                                cancelButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-transparent !text-[#8e8e8e] !hover:bg-gray-100 !transition-colors !border-0'
-                            },
-                            html: `
-                                <div style="text-align: center; padding: 8px 0;">
-                                    <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
-                                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                                        </svg>
-                                    </div>
-                                    <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">This Account is Private</h3>
-                                    <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">To view this user's profile you must be following them.</p>
-                                </div>
-                            `,
-                            showCancelButton: true,
-                            confirmButtonText: 'Follow',
-                            cancelButtonText: 'Cancel',
-                            confirmButtonColor: '#0095f6',
-                            cancelButtonColor: '#8e8e8e',
-                            background: '#ffffff',
-                            width: '400px',
-                            padding: '0',
-                            buttonsStyling: false
-                        }).then(async (result) => {
+                        Swal.fire(accountIsPrivateBottomSheet()).then(async (result) => {
                             // Only create follow request if user explicitly clicked "Follow"
                             // If they clicked "Cancel" (result.isDismissed or !result.isConfirmed), do nothing
                             if (result.isConfirmed && user?.id) {
@@ -976,32 +863,7 @@ export default function ViewProfilePage() {
                                 // Check if user can message (privacy check)
                                 const followedUsers = await getFollowedUsers(user?.id != null ? String(user.id) : getStableUserId(user));
                                 if (!canSendMessage(user?.handle || '', decodedHandle, followedUsers)) {
-                                    Swal.fire({
-                                        title: 'Gazetteer says',
-                                        html: `
-                                            <div style="text-align: center; padding: 8px 0;">
-                                                <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(245, 87, 108, 0.3);">
-                                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                                                    </svg>
-                                                </div>
-                                                <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">Cannot Send Message</h3>
-                                                <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">You must follow this user to send them a message.</p>
-                                            </div>
-                                        `,
-                                        showConfirmButton: true,
-                                        confirmButtonText: 'OK',
-                                        confirmButtonColor: '#0095f6',
-                                        background: '#ffffff',
-                                        width: '400px',
-                                        padding: '0',
-                                        customClass: {
-                                            popup: '!rounded-2xl !shadow-xl !border-0',
-                                            container: '!p-0',
-                                            confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                                        },
-                                        buttonsStyling: false
-                                    });
+                                    Swal.fire(bottomSheet({ title: 'Cannot Send Message', message: 'You must follow this user to send them a message.', icon: 'alert' }));
                                     return;
                                 }
                                 navigate(`/messages/${decodedHandle}`);
@@ -1020,33 +882,11 @@ export default function ViewProfilePage() {
                             const effectivePlaces = getEffectivePlacesWithStorageFallback(profileUser, user);
                             if (!effectivePlaces || effectivePlaces.length === 0) {
                                 const decodedHandle = handle ? decodeURIComponent(handle) : 'This user';
-                                Swal.fire({
-                                    title: 'Gazetteer says',
-                                    html: `
-                                        <div style="text-align: center; padding: 8px 0;">
-                                            <div style="width: 60px; height: 60px; margin: 0 auto 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);">
-                                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-                                                    <circle cx="12" cy="10" r="3"></circle>
-                                                </svg>
-                                            </div>
-                                            <h3 style="font-size: 20px; font-weight: 600; color: #262626; margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">No Places Traveled</h3>
-                                            <p style="font-size: 14px; color: #8e8e8e; margin: 0; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">${decodedHandle} hasn't added any places they've traveled to their profile yet.</p>
-                                        </div>
-                                    `,
-                                    showConfirmButton: true,
-                                    confirmButtonText: 'OK',
-                                    confirmButtonColor: '#0095f6',
-                                    background: '#ffffff',
-                                    width: '400px',
-                                    padding: '0',
-                                    customClass: {
-                                        popup: '!rounded-2xl !shadow-xl !border-0',
-                                        container: '!p-0',
-                                        confirmButton: '!rounded-lg !px-6 !py-2 !text-sm !font-semibold !mt-4 !mb-6 !bg-[#0095f6] !hover:bg-[#0084d4] !transition-colors'
-                                    },
-                                    buttonsStyling: false
-                                });
+                                Swal.fire(bottomSheet({
+                                    title: 'No Places Traveled',
+                                    message: `${decodedHandle} hasn't added any places they've traveled to their profile yet.`,
+                                    icon: 'alert',
+                                }));
                             } else {
                                 setPlacesForTravelModal(effectivePlaces);
                                 setShowTraveledModal(true);

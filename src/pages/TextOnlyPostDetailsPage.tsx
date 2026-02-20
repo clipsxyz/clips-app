@@ -15,6 +15,7 @@ export default function TextOnlyPostDetailsPage() {
     const textPreviewRef = useRef<HTMLDivElement>(null);
 
     const [locationText, setLocationText] = useState('');
+    const [venueText, setVenueText] = useState('');
     const [taggedUsers, setTaggedUsers] = useState<string[]>([]);
     const [showUserTagging, setShowUserTagging] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -125,7 +126,14 @@ export default function TextOnlyPostDetailsPage() {
                 undefined, // mediaItems
                 undefined, // bannerText
                 { color: '#ffffff', size: 'medium', background: '#000000' }, // textStyle
-                taggedUsers.length > 0 ? taggedUsers : undefined // taggedUsers
+                taggedUsers.length > 0 ? taggedUsers : undefined, // taggedUsers
+                undefined, // videoCaptionsEnabled
+                undefined, // videoCaptionText
+                undefined, // subtitlesEnabled
+                undefined, // subtitleText
+                undefined, // editTimeline
+                undefined, // musicTrackId
+                venueText.trim() || undefined // venue
             );
 
             window.dispatchEvent(new CustomEvent('postCreated'));
@@ -197,6 +205,18 @@ export default function TextOnlyPostDetailsPage() {
                         value={locationText}
                         onChange={(e) => setLocationText(e.target.value)}
                         placeholder="Add location"
+                        className="flex-1 bg-transparent text-white placeholder-gray-500 text-base border-none outline-none"
+                    />
+                </div>
+
+                {/* Venue Input - shown in metadata carousel on feed */}
+                <div className="flex items-center gap-3 p-4 rounded-xl bg-gray-900/30 border border-gray-800">
+                    <FiMapPin className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                    <input
+                        type="text"
+                        value={venueText}
+                        onChange={(e) => setVenueText(e.target.value)}
+                        placeholder="Add venue (e.g. café, stadium)"
                         className="flex-1 bg-transparent text-white placeholder-gray-500 text-base border-none outline-none"
                     />
                 </div>

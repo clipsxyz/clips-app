@@ -18,6 +18,7 @@ import { getCollectionsForPost } from '../api/collections';
 import { isProfilePrivate, canSendMessage, hasPendingFollowRequest, createFollowRequest } from '../api/privacy';
 import { getFollowedUsers, setFollowState } from '../api/posts';
 import Swal from 'sweetalert2';
+import { bottomSheet } from '../utils/swalBottomSheet';
 import type { Comment } from '../types';
 import { enqueue } from '../utils/mutationQueue';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
@@ -168,7 +169,9 @@ export default function ScenesModal({
     const [reclips, setReclips] = React.useState(post.stats.reclips);
     const [isFollowing, setIsFollowing] = React.useState(post.isFollowing);
     const [userReclipped, setUserReclipped] = React.useState(post.userReclipped || false);
-    const [busy, setBusy] = React.useState(false);
+    // Separate busy flags so Reclip doesn't visually affect Follow and vice versa
+    const [followBusy, setFollowBusy] = React.useState(false);
+    const [reclipBusy, setReclipBusy] = React.useState(false);
     const [commentText, setCommentText] = React.useState('');
     const [isAddingComment, setIsAddingComment] = React.useState(false);
     const [heartBurst, setHeartBurst] = React.useState(false);
@@ -529,7 +532,7 @@ export default function ScenesModal({
         setCurrentIndex(index);
     }
 
-    // Sync with post data changes
+    // Sync with post data changes without clobbering local optimistic reclip state
     React.useEffect(() => {
         setLiked(post.userLiked);
         setLikes(post.stats.likes);
@@ -537,8 +540,20 @@ export default function ScenesModal({
         setShares(post.stats.shares);
         setReclips(post.stats.reclips);
         setIsFollowing(post.isFollowing);
-        setUserReclipped(post.userReclipped || false);
-    }, [post.userLiked, post.stats.likes, post.stats.comments, post.stats.shares, post.stats.reclips, post.isFollowing, post.userReclipped]);
+        // Only ever turn userReclipped ON from the post; never force it OFF here,
+        // so a local optimistic reclip in Scenes is not immediately reset.
+        if (post.userReclipped) {
+            setUserReclipped(true);
+        }
+    }, [
+        post.userLiked,
+        post.stats.likes,
+        post.stats.comments,
+        post.stats.shares,
+        post.stats.reclips,
+        post.isFollowing,
+        post.userReclipped
+    ]);
 
     // Listen for engagement updates
     React.useEffect(() => {
@@ -654,8 +669,9 @@ export default function ScenesModal({
     }, [user?.id, post.id]);
 
     async function handleLike() {
-        if (busy) return;
-        setBusy(true);
+        // Reuse reclipBusy for like operations so they don't interfere with follow UI
+        if (reclipBusy) return;
+        setReclipBusy(true);
         let previousLiked: boolean = liked;
         try {
             // Optimistically update liked state immediately using functional updates
@@ -671,7 +687,7 @@ export default function ScenesModal({
             setLikes(prev => previousLiked ? prev + 1 : Math.max(0, prev - 1));
             console.error('Error toggling like:', error);
         } finally {
-            setBusy(false);
+            setReclipBusy(false);
         }
     }
 
@@ -760,8 +776,8 @@ export default function ScenesModal({
                 isProcessingDoubleTap.current = false;
             }, 1200);
 
-            if (!busy && !liked) {
-                setBusy(true);
+            if (!reclipBusy && !liked) {
+                setReclipBusy(true);
                 try {
                     // Optimistically update liked state immediately for double-tap
                     setLiked(true);
@@ -773,7 +789,7 @@ export default function ScenesModal({
                     setLikes(prev => Math.max(0, prev - 1));
                     console.error('Error toggling like:', error);
                 } finally {
-                    setBusy(false);
+                    setReclipBusy(false);
                 }
             }
             // Note: Processing flag is reset after 1200ms regardless of whether we liked or not
@@ -808,7 +824,7 @@ export default function ScenesModal({
             (lastTapRef as any).singleTapTimer = singleTapTimer;
         }
         lastTapRef.current = now;
-    }, [currentItem?.type, onLike, busy, liked]);
+    }, [currentItem?.type, onLike, reclipBusy, liked]);
 
     const handleMediaClick = React.useCallback((e: React.MouseEvent) => {
         if (touchHandledRef.current) {
@@ -889,8 +905,8 @@ export default function ScenesModal({
     }, [isCarousel, isCaptionExpanded, effectivePosts, post.id, onPostChange, currentItem?.type, vh]);
 
     async function handleFollow() {
-        if (busy) return;
-        setBusy(true);
+        if (followBusy) return;
+        setFollowBusy(true);
         try {
             const res = await onFollow();
             // If parent returns false (e.g. private profile – request sent, not following), keep Follow state
@@ -903,7 +919,7 @@ export default function ScenesModal({
             setIsFollowing(post.isFollowing);
             console.error('Error toggling follow:', error);
         } finally {
-            setBusy(false);
+            setFollowBusy(false);
         }
     }
 
@@ -923,21 +939,17 @@ export default function ScenesModal({
             e.stopPropagation();
             e.preventDefault();
         }
-        if (busy) return;
+        if (reclipBusy) return;
         if (post.userHandle === user?.handle) {
             return;
         }
         if (userReclipped) {
             return;
         }
-        setBusy(true);
-        try {
-            await onReclip();
-        } catch (error) {
-            console.error('Error reclipping post:', error);
-        } finally {
-            setBusy(false);
-        }
+        setReclipBusy(true);
+        setUserReclipped(true);
+        setReclips(prev => prev + 1);
+        onReclip().catch(error => console.warn('Reclip request failed:', error)).finally(() => setReclipBusy(false));
     }
 
     // Handle caption expansion
@@ -1004,14 +1016,11 @@ export default function ScenesModal({
         const text = (typeof textOrEvent === 'string' ? textOrEvent.trim() : commentText.trim());
         if (!text || isAddingComment) return;
         if (!user) {
-            Swal.fire({
+            Swal.fire(bottomSheet({
                 title: 'Log in to comment',
-                text: 'Please log in from Profile to post comments.',
-                icon: 'info',
-                background: '#262626',
-                color: '#ffffff',
-                confirmButtonColor: '#8B5CF6',
-            });
+                message: 'Please log in from Profile to post comments.',
+                icon: 'alert',
+            }));
             return;
         }
 
@@ -1056,14 +1065,11 @@ export default function ScenesModal({
             setCommentsList(prev => prev.filter(c => c.id !== tempId));
             const msg = error?.message || error?.response?.message || (error?.response?.error) || 'Could not post comment. Try again.';
             const isAuth = error?.status === 401 || (typeof msg === 'string' && (msg.toLowerCase().includes('unauthenticated') || msg.toLowerCase().includes('unauthorized')));
-            Swal.fire({
+            Swal.fire(bottomSheet({
                 title: 'Comment failed',
-                text: isAuth ? 'Please log in with the app login (Profile → Log in) to post comments.' : msg,
-                icon: 'error',
-                background: '#262626',
-                color: '#ffffff',
-                confirmButtonColor: '#8B5CF6',
-            });
+                message: isAuth ? 'Please log in with the app login (Profile → Log in) to post comments.' : msg,
+                icon: 'alert',
+            }));
         } finally {
             setIsAddingComment(false);
         }
@@ -1826,179 +1832,14 @@ export default function ScenesModal({
                         )}
                     </div>
 
-                    {/* Right Side Engagement Bar - centered vertically, no background scrim */}
-                    <div
-                        className="absolute right-0 top-1/2 -translate-y-1/2 z-20 flex flex-col items-center gap-6 px-3 pointer-events-none"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        {/* Content layer */}
-                        <div className="flex flex-col items-center gap-6 pointer-events-auto">
-                            {/* Like Button */}
-                            <div className="flex flex-col items-center gap-1.5">
-                                <button
-                                    ref={likeButtonRef}
-                                    onClick={handleLike}
-                                    className="flex items-center justify-center transition-all duration-200"
-                                    aria-label={liked ? 'Unlike' : 'Like'}
-                                >
-                                    {liked ? (
-                                        <AiFillHeart className="text-purple-500 w-7 h-7" />
-                                    ) : (
-                                        <AiFillHeart className="text-white w-7 h-7" />
-                                    )}
-                                </button>
-                                <span className="text-white text-[10px] font-semibold">{likes}</span>
-                            </div>
-
-                            {/* Share Button */}
-                            <div className="flex flex-col items-center gap-1.5">
-                                <button
-                                    onClick={handleShare}
-                                    className="flex items-center justify-center transition-colors"
-                                    aria-label="Share"
-                                >
-                                    <FiShare2 className="text-white w-7 h-7" />
-                                </button>
-                                <span className="text-white text-[10px] font-semibold">{shares}</span>
-                            </div>
-
-                            {/* Save to Collection Button */}
-                            <div className="flex flex-col items-center gap-1.5">
-                                <button
-                                    onClick={() => {
-                                        setSaveModalOpen(true);
-                                    }}
-                                    className="flex items-center justify-center transition-colors"
-                                    aria-label="Save to collection"
-                                >
-                                    <FiBookmark
-                                        className={`w-7 h-7 ${isSaved ? 'text-yellow-400 fill-yellow-400' : 'text-white'}`}
-                                    />
-                                </button>
-                                <span className="text-white text-[10px] font-semibold">
-                                    {isSaved ? 'Saved' : 'Save'}
-                                </span>
-                            </div>
-
-                            {/* Reclip Button */}
-                            <div className="flex flex-col items-center gap-1.5">
-                                <button
-                                    onClick={(e) => handleReclip(e)}
-                                    disabled={post.userHandle === user?.handle || userReclipped || busy}
-                                    className={`flex items-center justify-center transition-colors relative z-10 ${post.userHandle === user?.handle || busy ? 'opacity-30 cursor-not-allowed' : ''}`}
-                                    aria-label={post.userHandle === user?.handle ? "Cannot reclip your own post" : userReclipped ? "Post already reclipped" : "Reclip"}
-                                    title={post.userHandle === user?.handle ? "Cannot reclip your own post" : userReclipped ? "Post already reclipped" : "Reclip"}
-                                >
-                                    <FiRepeat className={`w-7 h-7 ${userReclipped ? 'text-green-500' : 'text-white'}`} />
-                                </button>
-                                <span className="text-white text-[10px] font-semibold">{reclips}</span>
-                            </div>
-
-                            {/* DM Button */}
-                            <div className="flex flex-col items-center gap-1.5">
-                                <button
-                                    onClick={async () => {
-                                        if (!post.userHandle || !user?.handle || !user?.id) return;
-                                        if (post.userHandle === user.handle) return;
-                                        
-                                        // Check privacy and follow status
-                                        const followedUsers = await getFollowedUsers(user.id);
-                                        const profilePrivate = isProfilePrivate(post.userHandle);
-                                        const canMessage = canSendMessage(user.handle, post.userHandle, followedUsers);
-                                        const hasPending = hasPendingFollowRequest(user.handle, post.userHandle);
-                                        
-                                        if (!canMessage && profilePrivate) {
-                                            // Show SweetAlert explaining they need to follow
-                                            if (hasPending) {
-                                                await Swal.fire({
-                                                    title: 'Gazetteer says',
-                                                    customClass: { title: 'gazetteer-shimmer' },
-                                                    html: `
-                                                        <p style="font-weight: 600; font-size: 1.1em; margin: 0 0 12px 0;">Follow Request Pending</p>
-                                                        <div style="text-align: center; padding: 10px 0;">
-                                                            <p style="color: #ffffff; font-size: 14px; line-height: 20px; margin: 0 0 20px 0;">
-                                                                This user has a private profile. You have already sent a follow request. Once they accept, you'll be able to send them a message.
-                                                            </p>
-                                                        </div>
-                                                    `,
-                                                    icon: 'info',
-                                                    background: '#262626',
-                                                    color: '#ffffff',
-                                                    confirmButtonText: 'OK',
-                                                    confirmButtonColor: '#8B5CF6'
-                                                });
-                                                return;
-                                            }
-                                            
-                                            const result = await Swal.fire({
-                                                title: 'Cannot Send Message',
-                                                html: `
-                                                    <div style="text-align: center; padding: 10px 0;">
-                                                        <p style="color: #ffffff; font-size: 14px; line-height: 20px; margin: 0 0 20px 0;">
-                                                            This user has a private profile. You must follow them and have your follow request accepted before you can send them a message.
-                                                        </p>
-                                                    </div>
-                                                `,
-                                                icon: 'warning',
-                                                background: '#262626',
-                                                color: '#ffffff',
-                                                showCancelButton: true,
-                                                confirmButtonText: 'Request to Follow',
-                                                confirmButtonColor: '#8B5CF6',
-                                                cancelButtonText: 'Cancel',
-                                                cancelButtonColor: '#6B7280'
-                                            });
-                                            
-                                            if (result.isConfirmed) {
-                                                createFollowRequest(user.handle, post.userHandle);
-                                                if (user?.id) setFollowState(user.id, post.userHandle, false);
-                                                Swal.fire({
-                                                    title: 'Gazetteer says',
-                                                    customClass: { title: 'gazetteer-shimmer' },
-                                                    html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Follow Request Sent</p><p style="color: #ffffff; font-size: 14px; margin: 0;">You will be notified when they accept your request.</p>`,
-                                                    icon: 'success',
-                                                    timer: 2000,
-                                                    showConfirmButton: false,
-                                                    background: '#262626',
-                                                    color: '#ffffff'
-                                                });
-                                            }
-                                            return;
-                                        }
-                                        
-                                        // If they can message, navigate to DM page
-                                        navigate(`/messages/${encodeURIComponent(post.userHandle)}`);
-                                        onClose();
-                                    }}
-                                    disabled={!user || post.userHandle === user?.handle}
-                                    className="flex items-center justify-center transition-colors disabled:opacity-30 disabled:cursor-not-allowed hover:opacity-80"
-                                    aria-label="Send direct message"
-                                >
-                                    <FiSend className="w-7 h-7 text-white" />
-                                </button>
-                            </div>
-
-                            {/* More Options (three dots) */}
-                            <div className="flex flex-col items-center gap-1.5">
-                                <button
-                                    onClick={() => setMenuOpen(true)}
-                                    className="flex items-center justify-center transition-colors"
-                                    aria-label="More options"
-                                >
-                                    <FiMoreHorizontal className="text-white w-7 h-7" />
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Bottom Section with Profile, Caption, and Comment Input - Instagram Reels Style */}
+                    {/* Bottom Section with Profile, Caption, and Bottom Action Bar (Bluesky-style) */}
                     {!isCaptionExpanded && (
                         <div className="absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black/90 via-black/70 to-transparent">
-                            <div className="max-w-md mx-auto px-4 pr-16 pb-safe">
+                            <div className="max-w-md mx-auto px-4 pb-safe">
                                 {/* Profile & Caption Section */}
                                 <div className="pt-12 pb-4">
                                     {/* Profile Section */}
-                                    <div className="flex items-center gap-3 mb-3">
+                                    <div className="flex items-center gap-3 mb-4">
                                         {/* Profile picture with rounded-md shape and animated white border */}
                                         <button
                                             onClick={() => {
@@ -2076,27 +1917,37 @@ export default function ScenesModal({
                                                 </div>
                                             )}
                                         </div>
+                                        {/* Follow / Following button – interactive on Scenes */}
                                         {!isFollowing && !hasPendingRequest && (
                                             <button
+                                                type="button"
                                                 onClick={handleFollow}
-                                                disabled={busy}
-                                                className="px-4 py-1.5 bg-white text-black text-sm font-semibold rounded-md hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                                                disabled={followBusy}
+                                                className={`px-4 py-1.5 bg-white/15 text-white text-sm font-semibold rounded-md ${
+                                                    followBusy ? 'opacity-60 cursor-not-allowed' : 'hover:bg-white/25'
+                                                }`}
                                             >
-                                                {busy ? 'Following...' : 'Follow'}
+                                                Follow
                                             </button>
                                         )}
                                         {!isFollowing && hasPendingRequest && (
-                                            <span className="px-4 py-1.5 bg-white/20 text-white text-sm font-semibold rounded-md cursor-default" aria-label="Follow request sent">
+                                            <span
+                                                className="px-4 py-1.5 bg-white/20 text-white text-sm font-semibold rounded-md cursor-default select-none"
+                                                aria-label="Follow request sent"
+                                            >
                                                 Requested
                                             </span>
                                         )}
                                         {isFollowing && (
                                             <button
+                                                type="button"
                                                 onClick={handleFollow}
-                                                disabled={busy}
-                                                className="px-4 py-1.5 bg-white/10 text-white text-sm font-semibold rounded-md hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                                                disabled={followBusy}
+                                                className={`px-4 py-1.5 bg-white/10 text-white text-sm font-semibold rounded-md ${
+                                                    followBusy ? 'opacity-60 cursor-not-allowed' : 'hover:bg-white/20'
+                                                }`}
                                             >
-                                                {busy ? 'Unfollowing...' : 'Following'}
+                                                Following
                                             </button>
                                         )}
                                     </div>
@@ -2154,6 +2005,149 @@ export default function ScenesModal({
                                             💬 Add the first comment
                                         </button>
                                     )}
+
+                                    {/* Bottom action bar: likes / shares / save / reclip (left), DM & more (right).
+                                        Extra top margin so it's clearly separated from the Follow button row above,
+                                        reducing accidental taps on Follow when aiming for Reclip on small screens. */}
+                                    <div className="flex items-center justify-between mt-3 mb-3">
+                                    <div className="flex items-center gap-6">
+                                            {/* Like */}
+                                            <button
+                                                ref={likeButtonRef}
+                                                onClick={handleLike}
+                                                className="flex items-center gap-1.5 text-gray-300 hover:text-white transition-opacity"
+                                                aria-label={liked ? 'Unlike' : 'Like'}
+                                            >
+                                                {liked ? (
+                                                    <AiFillHeart className="text-purple-500 w-6 h-6" />
+                                                ) : (
+                                                    <AiFillHeart className="text-gray-300 w-6 h-6" />
+                                                )}
+                                                <span className="text-xs font-semibold">{likes}</span>
+                                            </button>
+
+                                            {/* Share */}
+                                            <button
+                                                onClick={handleShare}
+                                                className="flex items-center gap-1.5 text-gray-300 hover:text-white transition-opacity"
+                                                aria-label="Share"
+                                            >
+                                                <FiShare2 className="w-5 h-5" />
+                                                <span className="text-xs font-semibold">{shares}</span>
+                                            </button>
+
+                                            {/* Save */}
+                                            <button
+                                                onClick={() => setSaveModalOpen(true)}
+                                                className="flex items-center gap-1.5 text-gray-300 hover:text-white transition-opacity"
+                                                aria-label="Save to collection"
+                                            >
+                                                <FiBookmark
+                                                    className={`w-5 h-5 ${isSaved ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300'}`}
+                                                />
+                                                <span className="text-xs font-semibold">
+                                                    {isSaved ? 'Saved' : 'Save'}
+                                                </span>
+                                            </button>
+
+                                            {/* Reclip */}
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleReclip(e);
+                                                }}
+                                                disabled={post.userHandle === user?.handle || userReclipped || reclipBusy}
+                                                className={`flex items-center gap-1.5 text-gray-300 hover:text-white transition-opacity ${
+                                                    post.userHandle === user?.handle || reclipBusy
+                                                        ? 'opacity-30 cursor-not-allowed'
+                                                        : ''
+                                                }`}
+                                                aria-label={
+                                                    post.userHandle === user?.handle
+                                                        ? "Cannot reclip your own post"
+                                                        : userReclipped
+                                                            ? "Post already reclipped"
+                                                            : "Reclip"
+                                                }
+                                                title={
+                                                    post.userHandle === user?.handle
+                                                        ? "Cannot reclip your own post"
+                                                        : userReclipped
+                                                            ? "Post already reclipped"
+                                                            : "Reclip"
+                                                }
+                                            >
+                                                <FiRepeat className={`w-5 h-5 ${userReclipped ? 'text-green-500' : 'text-gray-300'}`} />
+                                                <span className="text-xs font-semibold">{reclips}</span>
+                                            </button>
+                                        </div>
+
+                                        <div className="flex items-center gap-4">
+                                            {/* DM */}
+                                            <button
+                                                onClick={async () => {
+                                                    if (!post.userHandle || !user?.handle || !user?.id) return;
+                                                    if (post.userHandle === user.handle) return;
+                                                    
+                                                    // Check privacy and follow status
+                                                    const followedUsers = await getFollowedUsers(user.id);
+                                                    const profilePrivate = isProfilePrivate(post.userHandle);
+                                                    const canMessage = canSendMessage(user.handle, post.userHandle, followedUsers);
+                                                    const hasPending = hasPendingFollowRequest(user.handle, post.userHandle);
+                                                    
+                                                    if (!canMessage && profilePrivate) {
+                                                        // Show SweetAlert explaining they need to follow
+                                                        if (hasPending) {
+                                                            await Swal.fire(bottomSheet({
+                                                                title: 'Follow Request Pending',
+                                                                message: "This user has a private profile. You have already sent a follow request. Once they accept, you'll be able to send them a message.",
+                                                                icon: 'alert',
+                                                            }));
+                                                            return;
+                                                        }
+                                                        
+                                                        const result = await Swal.fire(bottomSheet({
+                                                            title: 'Cannot Send Message',
+                                                            message: "This user has a private profile. You must follow them and have your follow request accepted before you can send them a message.",
+                                                            icon: 'alert',
+                                                            showCancelButton: true,
+                                                            confirmButtonText: 'Request to Follow',
+                                                            cancelButtonText: 'Cancel',
+                                                        }));
+                                                        
+                                                        if (result.isConfirmed) {
+                                                            createFollowRequest(user.handle, post.userHandle);
+                                                            if (user?.id) setFollowState(user.id, post.userHandle, false);
+                                                            Swal.fire(bottomSheet({
+                                                                title: 'Follow Request Sent',
+                                                                message: "You will be notified when they accept your request.",
+                                                                icon: 'success',
+                                                            }));
+                                                        }
+                                                        return;
+                                                    }
+                                                    
+                                                    // If they can message, navigate to DM page
+                                                    navigate(`/messages/${encodeURIComponent(post.userHandle)}`);
+                                                    onClose();
+                                                }}
+                                                disabled={!user || post.userHandle === user?.handle}
+                                                className="flex items-center justify-center text-gray-300 hover:text-white transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
+                                                aria-label="Send direct message"
+                                            >
+                                                <FiSend className="w-5 h-5" />
+                                            </button>
+
+                                            {/* More Options (three dots) */}
+                                            <button
+                                                onClick={() => setMenuOpen(true)}
+                                                className="flex items-center justify-center text-gray-300 hover:text-white transition-opacity"
+                                                aria-label="More options"
+                                            >
+                                                <FiMoreHorizontal className="w-5 h-5" />
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
 
                                 {/* Comment Input at Bottom - acts as full-width trigger to open comments sheet */}

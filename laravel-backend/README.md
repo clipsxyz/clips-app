@@ -2,34 +2,21 @@
 
 ## ✅ Status: **COMPLETE WITH RELATIONSHIPS**
 
-All migrations, models, and controllers are set up with proper Eloquent relationships.
+All migrations, models, and controllers are set up with proper Eloquent relationships and match the database schema. **Yes: the backend controllers and models are still set up to work with the database schema—when you go live you can just swap out the mock API** (see **Going live** below). Migrations and seed files have been created for Laravel (see **Migrations** and **Seeders** below).
 
 ## 📊 Migrations Created
 
-All 14 migration files are in `database/migrations/`:
+All migration files are in `database/migrations/`. Core tables and follow-ups include:
 
-1. `2024_01_01_000001_create_users_table.php` - Users table
-2. `2024_01_01_000002_create_posts_table.php` - Posts table
-3. `2024_01_01_000003_create_comments_table.php` - Comments table
-4. `2024_01_01_000004_create_post_likes_table.php` - Post likes
-5. `2024_01_01_000005_create_comment_likes_table.php` - Comment likes
-6. `2024_01_01_000006_create_post_bookmarks_table.php` - Post bookmarks
-7. `2024_01_01_000007_create_user_follows_table.php` - User follows
-8. `2024_01_01_000008_create_post_shares_table.php` - Post shares
-9. `2024_01_01_000009_create_post_views_table.php` - Post views
-10. `2024_01_01_000010_create_post_reclips_table.php` - Post reclips
-11. `2024_01_01_000011_create_offline_queue_table.php` - Offline queue
-12. `2024_01_01_000012_create_feed_cache_table.php` - Feed cache (superseded: see below)
-13. `2025_02_01_000001_drop_feed_cache_table.php` - **Drops** `feed_cache`; feed is now cached via Laravel Cache (Memcached)
-14. `2024_01_01_000013_harden_constraints.php` - Additional constraints
-15. `2024_01_01_000014_add_original_user_handle_to_posts.php` - Adds `original_user_handle` field
+- **Core:** `create_users_table`, `create_posts_table`, `create_comments_table`
+- **Interactions:** `create_post_likes_table`, `create_comment_likes_table`, `create_post_bookmarks_table`, `create_post_shares_table`, `create_post_views_table`, `create_post_reclips_table`
+- **Social:** `create_user_follows_table`, `add_status_to_user_follows_table` (pending/accepted), `add_is_private_to_users_table`
+- **Content:** `add_original_user_handle_to_posts`, `add_tagged_users_to_posts` (post_tagged_users), `add_new_post_features`, `add_edit_timeline_to_posts`, `add_video_captions_and_subtitles_to_posts`, `add_text_style_and_stickers_to_stories`
+- **Stories / Messages / Notifications:** `create_stories_table`, `create_story_reactions_table`, `create_story_replies_table`, `create_story_views_table`, `create_messages_table` (with `add_read_at_to_messages_table`), `create_notifications_table`, `create_notification_preferences_table`
+- **Collections / Media / Jobs:** `create_collections_table`, `create_collection_posts_table`, `create_music_table`, `create_render_jobs_table`, `add_render_job_id_to_posts`, `add_music_track_id_to_posts`, `add_license_fields_to_music`, `add_soft_deletes_to_posts_table`, `add_soft_deletes_to_users_table`
+- **Other:** `create_fcm_tokens_table`, `create_offline_queue_table`, `drop_feed_cache_table`, `harden_constraints`, `create_boosts_table`
 
-### Cache (feed)
-
-- The **feed_cache** table has been removed. Feed responses are cached using **Laravel Cache** with **Memcached**.
-- **Production:** set `CACHE_DRIVER=memcached` in `.env` and run Memcached.
-- **Local dev:** default is `file`; set `CACHE_DRIVER=memcached` when Memcached is running.
-- Optional Memcached `.env` vars: `MEMCACHED_HOST`, `MEMCACHED_PORT` (default `127.0.0.1`, `11211`).
+Feed responses are cached via **Laravel Cache** (configurable: `file`, `redis`, or `memcached` in `.env`).
 
 ## 🔗 Eloquent Relationships Defined
 
@@ -75,9 +62,14 @@ All 14 migration files are in `database/migrations/`:
 ### UserController
 - ✅ Added `user_reclipped` flag to user profile posts
 
-## 📝 Seeder Available
+## 📝 Seeders
 
-- `database/seeders/GazetteerSeeder.php` - Seeds sample users, posts, and comments
+- **`database/seeders/DatabaseSeeder.php`** – Calls `GazetteerSeeder` (and can call others).
+- **`database/seeders/GazetteerSeeder.php`** – Seeds users (e.g. Ava@galway, Sarah@Artane, Bob@Ireland), posts, comments, notifications, messages, stories, story reactions/replies/views, and follow relationship (e.g. Ava follows Barry).
+- **`database/seeders/EnsureAvaFollowsBarrySeeder.php`** – Ensures Ava follows Barry (for mutual-follow DM).
+- **`database/seeders/MusicLibrarySeeder.php`** – Seeds music library data.
+
+Run all: `php artisan migrate --seed` or `php artisan db:seed`.
 
 ## 🚀 Running the server
 
@@ -112,4 +104,38 @@ All Eloquent relationships are properly defined in the models and match the data
 - Maintain data integrity with foreign keys and cascade deletes
 
 The Laravel backend is production-ready! 🎉
+
+---
+
+## 🚀 Going live (swap out mock API)
+
+The frontend uses a **mock API** when `VITE_USE_LARAVEL_API=false` (e.g. in `.env.local`). To go live with the real backend:
+
+1. **Backend:** Run migrations and (optionally) seeders: `php artisan migrate --seed`. Ensure Redis (and optionally queue/cache) are configured for production.
+2. **Frontend:** Set `VITE_USE_LARAVEL_API=true` (or remove `VITE_USE_LARAVEL_API=false`) and point the app at your Laravel API URL (e.g. `VITE_API_URL=https://your-api.example.com/api` or use the same origin proxy).
+3. **Auth:** Ensure Laravel Sanctum / auth is configured so the frontend can send the auth token and the backend accepts it (CORS, cookie domain, etc.).
+
+Controllers and models are already set up to work with the database schema; no backend code change is required to “switch” from mock to live—only frontend env and deployment.
+
+---
+
+## 📦 Redis for session storage
+
+Sessions are configured to use **Redis** by default:
+
+- **`config/session.php`:** `'driver' => env('SESSION_DRIVER', 'redis')`, `'connection' => env('SESSION_CONNECTION', 'session')`.
+- **`config/database.php`:** Redis connection `session` uses database index `REDIS_SESSION_DB` (default `2`).
+
+To use Redis for sessions:
+
+1. Install and run Redis.
+2. In `.env` set:
+   - `SESSION_DRIVER=redis`
+   - `SESSION_CONNECTION=session` (optional; this is the default in config)
+   - `REDIS_HOST=127.0.0.1` (or your Redis host)
+   - `REDIS_PORT=6379`
+   - `REDIS_PASSWORD=null` (or your password)
+   - `REDIS_SESSION_DB=2` (optional; keeps sessions in a separate DB index)
+
+If Redis is not available, set `SESSION_DRIVER=file` (or `database` / `cookie`) in `.env` so the app still runs.
 

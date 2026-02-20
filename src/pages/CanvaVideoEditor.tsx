@@ -8,6 +8,7 @@ import { createPost } from '../api/posts';
 import { uploadFile } from '../api/client';
 import { useAuth } from '../context/Auth';
 import Swal from 'sweetalert2';
+import { bottomSheet } from '../utils/swalBottomSheet';
 
 type Clip = {
     id: number;
@@ -89,11 +90,11 @@ export default function CanvaVideoEditor() {
                 setFfmpegLoaded(true);
             } catch (error) {
                 console.error('Failed to load FFmpeg:', error);
-                Swal.fire({
-                    icon: 'error',
-                    title: 'Gazetteer says',
-                    html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">FFmpeg Load Error</p><p style="margin: 0;">Failed to load video processing library. Please refresh the page.</p>`,
-                });
+                Swal.fire(bottomSheet({
+                    title: 'FFmpeg Load Error',
+                    message: 'Failed to load video processing library. Please refresh the page.',
+                    icon: 'alert',
+                }));
             }
         };
 
@@ -445,11 +446,11 @@ export default function CanvaVideoEditor() {
     // Export video
     const exportVideo = useCallback(async () => {
         if (!ffmpegRef.current || !ffmpegLoaded || clips.length === 0) {
-            Swal.fire({
-                icon: 'error',
+            Swal.fire(bottomSheet({
                 title: 'Export Error',
-                text: 'FFmpeg not loaded or no clips to export',
-            });
+                message: 'FFmpeg not loaded or no clips to export',
+                icon: 'alert',
+            }));
             return;
         }
 
@@ -517,11 +518,11 @@ export default function CanvaVideoEditor() {
 
             // Check size (50MB limit for data URLs)
             if (dataUrl.length > 50 * 1024 * 1024) {
-                Swal.fire({
-                    icon: 'warning',
-                    title: 'Gazetteer says',
-                    html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">File Too Large</p><p style="margin: 0;">Video is too large for local storage. Please start the backend server to upload.</p>`,
-                });
+                Swal.fire(bottomSheet({
+                    title: 'File Too Large',
+                    message: 'Video is too large for local storage. Please start the backend server to upload.',
+                    icon: 'alert',
+                }));
                 setIsExporting(false);
                 return;
             }
@@ -552,20 +553,20 @@ export default function CanvaVideoEditor() {
                 'Ireland'
             );
 
-            Swal.fire({
-                icon: 'success',
+            Swal.fire(bottomSheet({
                 title: 'Video Exported!',
-                text: 'Your video has been posted to the feed.',
-            });
+                message: 'Your video has been posted to the feed.',
+                icon: 'success',
+            }));
 
             navigate('/feed');
         } catch (error: any) {
             console.error('Export error:', error);
-            Swal.fire({
-                icon: 'error',
-                title: 'Gazetteer says',
-                html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Export Failed</p><p style="margin: 0;">${error?.message || 'Failed to export video'}</p>`,
-            });
+            Swal.fire(bottomSheet({
+                title: 'Export Failed',
+                message: error?.message || 'Failed to export video',
+                icon: 'alert',
+            }));
         } finally {
             setIsExporting(false);
         }

@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { activateBoost } from '../api/boost';
 import type { BoostFeedType } from '../components/BoostSelectionModal';
 import Swal from 'sweetalert2';
+import { bottomSheet } from '../utils/swalBottomSheet';
 
 const STORAGE_KEY = 'boostPaymentPending';
 
@@ -31,15 +32,14 @@ export default function PaymentSuccessPage() {
         }
 
         if (redirectStatus !== 'succeeded' || !paymentIntentId) {
-            Swal.fire({
-                icon: 'warning',
+            Swal.fire(bottomSheet({
                 title: 'Payment incomplete',
-                text: redirectStatus === 'requires_payment_method'
+                message: redirectStatus === 'requires_payment_method'
                     ? 'Payment could not be processed. Please try again with a different payment method.'
                     : 'Payment was not completed. Please try again.',
+                icon: 'alert',
                 confirmButtonText: 'Back to Boost',
-                confirmButtonColor: '#8B5CF6',
-            }).then(() => navigate('/boost'));
+            })).then(() => navigate('/boost'));
             return;
         }
 
@@ -47,13 +47,12 @@ export default function PaymentSuccessPage() {
         activateBoost(data.postId, data.userId, data.feedType, data.price, paymentIntentId)
             .then(() => {
                 const label = data.feedType === 'local' ? 'Local' : data.feedType === 'regional' ? 'Regional' : 'National';
-                return Swal.fire({
-                    icon: 'success',
+                return Swal.fire(bottomSheet({
                     title: 'Payment Complete!',
-                    html: `Your post is boosted for <strong>6 hours</strong> in the <strong>${label}</strong> feed.`,
+                    message: `Your post is boosted for 6 hours in the ${label} feed.`,
+                    icon: 'success',
                     confirmButtonText: 'OK',
-                    confirmButtonColor: '#8B5CF6',
-                });
+                }));
             })
             .then(() => {
                 navigate('/boost', { state: { boostSuccess: true, postId: data.postId, feedType: data.feedType } });

@@ -1,5 +1,5 @@
 import React from 'react';
-import { FiX, FiSend, FiMessageSquare, FiHeart, FiChevronDown, FiChevronUp } from 'react-icons/fi';
+import { FiX, FiSend, FiMessageSquare, FiHeart, FiChevronDown, FiChevronUp, FiSmile } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import { useAuth } from '../context/Auth';
 import { useOnline } from '../hooks/useOnline';
@@ -221,6 +221,8 @@ function CommentItem({
     );
 }
 
+const COMMENT_EMOJIS = ['😀', '😃', '😄', '😊', '🥰', '😍', '🤩', '😘', '😂', '🤣', '😅', '🙂', '😉', '😎', '🤔', '👍', '👏', '❤️', '🧡', '💛', '💚', '💙', '💜', '🔥', '✨', '🙌', '🙏'];
+
 function CommentInput({
     placeholder,
     onSubmit,
@@ -232,6 +234,7 @@ function CommentInput({
 }) {
     const { user } = useAuth();
     const [text, setText] = React.useState('');
+    const [showEmojiPicker, setShowEmojiPicker] = React.useState(false);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -242,31 +245,55 @@ function CommentInput({
     };
 
     return (
-        <form onSubmit={handleSubmit} className="flex items-center gap-2 p-3 border-t border-gray-200 bg-white">
-            <Avatar
-                src={user?.avatarUrl}
-                name={user?.name || 'User'}
-                size="sm"
-            />
-            {/* Left-to-right linear gradient border on focus (purple → baby blue) */}
-            <div className="flex-1 rounded-lg p-[2px] bg-gray-300 focus-within:bg-gradient-to-r focus-within:from-violet-600 focus-within:to-sky-300 transition-[background] duration-200">
-                <input
-                    type="text"
-                    value={text}
-                    onChange={(e) => setText(e.target.value)}
-                    placeholder={placeholder}
-                    className="w-full px-3 py-2 rounded-[6px] border-0 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-0"
-                    disabled={isLoading}
+        <div className="border-t border-gray-200 bg-white">
+            {showEmojiPicker && (
+                <div className="p-2 border-b border-gray-100 flex flex-wrap gap-1 max-h-24 overflow-y-auto">
+                    {COMMENT_EMOJIS.map((emoji) => (
+                        <button
+                            key={emoji}
+                            type="button"
+                            onClick={() => setText((prev) => prev + emoji)}
+                            className="w-8 h-8 flex items-center justify-center text-lg rounded hover:bg-gray-100"
+                            aria-label={`Add ${emoji}`}
+                        >
+                            {emoji}
+                        </button>
+                    ))}
+                </div>
+            )}
+            <form onSubmit={handleSubmit} className="flex items-center gap-2 p-3">
+                <Avatar
+                    src={user?.avatarUrl}
+                    name={user?.name || 'User'}
+                    size="sm"
                 />
-            </div>
-            <button
-                type="submit"
-                disabled={!text.trim() || isLoading}
-                className="p-2 rounded-lg bg-brand-600 text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-brand-700 transition-colors"
-            >
-                <FiSend size={16} />
-            </button>
-        </form>
+                <button
+                    type="button"
+                    onClick={() => setShowEmojiPicker((v) => !v)}
+                    className={`p-2 rounded-lg flex-shrink-0 ${showEmojiPicker ? 'bg-gray-200 text-gray-800' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'}`}
+                    aria-label="Add emoji"
+                >
+                    <FiSmile size={20} />
+                </button>
+                <div className="flex-1 rounded-lg p-[2px] bg-gray-300 focus-within:bg-gradient-to-r focus-within:from-violet-600 focus-within:to-sky-300 transition-[background] duration-200">
+                    <input
+                        type="text"
+                        value={text}
+                        onChange={(e) => setText(e.target.value)}
+                        placeholder={placeholder}
+                        className="w-full px-3 py-2 rounded-[6px] border-0 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-0"
+                        disabled={isLoading}
+                    />
+                </div>
+                <button
+                    type="submit"
+                    disabled={!text.trim() || isLoading}
+                    className="p-2 rounded-lg bg-brand-600 text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-brand-700 transition-colors"
+                >
+                    <FiSend size={16} />
+                </button>
+            </form>
+        </div>
     );
 }
 

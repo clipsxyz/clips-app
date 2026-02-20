@@ -187,6 +187,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     disconnectSocket();
     setUser(null);
     localStorage.removeItem('user');
+    try {
+      localStorage.removeItem('clips_app_stable_uid');
+    } catch (_) {}
     Sentry.setUser(null);
   };
 

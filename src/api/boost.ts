@@ -150,16 +150,19 @@ export async function getActiveBoost(postId: string): Promise<BoostedPost | null
 
 /**
  * Get post IDs that have an active boost for a given feed type (for promoting in feed).
- * Tries backend API first, falls back to in-memory when unavailable.
+ * Tries backend API first when Laravel is enabled, falls back to in-memory when disabled or unavailable.
  *
  * @param feedType - local | regional | national
  * @returns Array of post IDs that are currently boosted for this feed type
  */
 export async function getActiveBoostedPostIds(feedType: BoostFeedType): Promise<string[]> {
-    try {
-        return await apiClient.getActiveBoostedPostIdsApi(feedType);
-    } catch {
-        // Fallback to in-memory
+    const useLaravel = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+    if (useLaravel) {
+        try {
+            return await apiClient.getActiveBoostedPostIdsApi(feedType);
+        } catch {
+            // Backend down (e.g. ERR_CONNECTION_REFUSED) – use in-memory so feed still loads
+        }
     }
     const now = Date.now();
     const active = boostedPosts.filter(
