@@ -19,6 +19,7 @@ import {
 } from '../api/privacy';
 import Swal from 'sweetalert2';
 import ShareProfileModal from '../components/ShareProfileModal';
+import { getStableUserId } from '../utils/userId';
 
 /** Parse place names from bio text. Splits on comma, semicolon, newline, "and", " - ", ":", ". " */
 function parsePlacesFromBio(bio: string): string[] {
@@ -95,11 +96,21 @@ export default function ViewProfilePage() {
     const [showShareProfileModal, setShowShareProfileModal] = React.useState(false);
 
     const handleFollow = async () => {
-        if (!user?.id || !handle || !user?.handle) {
-            console.error('Missing required data for follow:', { userId: user?.id, handle, userHandle: user?.handle });
+        if (!user?.id || !handle) {
+            console.error('Missing required data for follow:', { userId: user?.id, handle });
             Swal.fire({
                 title: 'Gazetteer says',
                 html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Unable to follow user. Please try again.</p>`,
+                icon: 'error',
+                timer: 2000,
+                showConfirmButton: false
+            });
+            return;
+        }
+        if (!user?.handle && isProfilePrivate(decodeURIComponent(handle))) {
+            Swal.fire({
+                title: 'Gazetteer says',
+                html: `<p style="font-weight: 600; font-size: 1.1em; margin: 0 0 8px 0;">Error</p><p style="margin: 0;">Unable to send follow request. Please sign in with a full profile.</p>`,
                 icon: 'error',
                 timer: 2000,
                 showConfirmButton: false
@@ -111,24 +122,69 @@ export default function ViewProfilePage() {
         // Use canonical handle from profile when available so API and follow state stay in sync (e.g. Bob@Cork vs bob@cork).
         const decodedHandle = decodeURIComponent(handle);
         const handleToUse = profileUser?.handle || decodedHandle;
-        console.log('Follow button clicked for:', decodedHandle, 'using handle:', handleToUse);
-        
+
+        // Capture state at click time so mock path doesn't flip action after optimistic update
+        const wasFollowingBeforeClick = isFollowing;
+        const profilePrivate = isProfilePrivate(decodedHandle);
+
+        // Use same key as Stories/Scenes (user.id) so follow state is shared; fallback to getStableUserId when id missing
+        const followUserId = user?.id != null ? String(user.id) : getStableUserId(user);
+        const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+
+        // Mock-only: update state immediately and return (no API, no await) – same pattern as Stories so Follow always works
+        if (!useLaravelApi) {
+            const newFollowing = !wasFollowingBeforeClick;
+            if (profilePrivate && newFollowing && user?.handle) {
+                createFollowRequest(user.handle, handleToUse);
+                setHasPendingRequest(true);
+                setIsFollowing(false);
+                setFollowState(followUserId, handleToUse, false);
+                try {
+                    const { createNotification } = await import('../api/notifications');
+                    await createNotification({ type: 'follow_request', fromHandle: user.handle, toHandle: decodedHandle, message: `${user.handle} wants to follow you` });
+                } catch (_) {}
+                Swal.fire({ title: 'Gazetteer says', html: `<p style="font-weight:600;">Follow Request Sent</p><p style="color:#8e8e8e;">You will be notified when they accept.</p>`, confirmButtonText: 'OK', confirmButtonColor: '#0095f6', background: '#fff', width: '360px' });
+            } else {
+                setFollowState(followUserId, handleToUse, newFollowing);
+                setIsFollowing(newFollowing);
+                setHasPendingRequest(false);
+                if (!newFollowing) {
+                    setStats(prev => ({ ...prev, followers: Math.max(0, prev.followers - 1) }));
+                    if (profileUser) setProfileUser((prev: any) => ({ ...prev, stats: { ...prev.stats, followers: Math.max(0, (prev.stats?.followers || 0) - 1) } }));
+                } else {
+                    setStats(prev => ({ ...prev, followers: prev.followers + 1 }));
+                    if (profileUser) setProfileUser((prev: any) => ({ ...prev, stats: { ...prev.stats, followers: (prev.stats?.followers || 0) + 1 } }));
+                }
+                if (profilePrivate) setCanViewProfileState(newFollowing);
+            }
+            window.dispatchEvent(new CustomEvent('followToggled', { detail: { handle: handleToUse, isFollowing: profilePrivate && newFollowing ? false : newFollowing } }));
+            return;
+        }
+
+        // Optimistic update when using Laravel API
+        if (!wasFollowingBeforeClick && !profilePrivate) {
+            setIsFollowing(true);
+            setFollowState(followUserId, handleToUse, true);
+            setStats(prev => ({ ...prev, followers: prev.followers + 1 }));
+            if (profileUser) {
+                setProfileUser((prev: any) => ({
+                    ...prev,
+                    stats: {
+                        ...prev.stats,
+                        followers: (prev.stats?.followers || 0) + 1
+                    }
+                }));
+            }
+        }
+
         try {
-            const followedUsers = await getFollowedUsers(user.id);
+            const followedUsers = await getFollowedUsers(followUserId);
             const isCurrentlyFollowing = followedUsers.some(h => h.toLowerCase() === handleToUse.toLowerCase());
-            const profilePrivate = isProfilePrivate(decodedHandle);
             const hasPending = hasPendingFollowRequest(user?.handle || '', decodedHandle);
-            
-            console.log('Current follow state:', { isCurrentlyFollowing, profilePrivate, hasPending });
-            
-            // Try backend API first, fallback to mock if connection fails
+
             let result;
             let useMockFallback = false;
-            
             try {
-                // Call backend API to toggle follow.
-                // NOTE: toggleFollow internally encodes the handle for the URL,
-                // so we must pass the *decoded* handle here to avoid double-encoding.
                 console.log('Calling toggleFollow with decoded handle:', decodedHandle);
                 result = await toggleFollow(decodedHandle);
                 console.log('Toggle follow result:', result);
@@ -153,7 +209,7 @@ export default function ViewProfilePage() {
                         createFollowRequest(user.handle, handleToUse);
                         setHasPendingRequest(true);
                         setIsFollowing(false);
-                        setFollowState(user.id, handleToUse, false); // never add to follow list until accepted
+                        setFollowState(followUserId, handleToUse, false); // never add to follow list until accepted
                         
                         try {
                             const { createNotification } = await import('../api/notifications');
@@ -201,14 +257,14 @@ export default function ViewProfilePage() {
                     
                     // Normal follow/unfollow (public, or unfollow): update post state and shared follow state
                     if (posts[0]?.id) {
-                        await toggleFollowForPost(user.id, posts[0].id);
+                        await toggleFollowForPost(followUserId, posts[0].id);
                     } else {
                         const userPost = allPosts.find(p => p.userHandle?.toLowerCase() === handleToUse.toLowerCase());
                         if (userPost) {
-                            await toggleFollowForPost(user.id, userPost.id);
+                            await toggleFollowForPost(followUserId, userPost.id);
                         }
                     }
-                    setFollowState(user.id, handleToUse, newFollowingState);
+                    setFollowState(followUserId, handleToUse, newFollowingState);
                     
                     setIsFollowing(newFollowingState);
                     setHasPendingRequest(false);
@@ -274,10 +330,10 @@ export default function ViewProfilePage() {
                 // Unfollow
                 // Also update local state for consistency
                 if (posts[0]?.id) {
-                    await toggleFollowForPost(user.id, posts[0].id);
+                    await toggleFollowForPost(followUserId, posts[0].id);
                 }
                 setIsFollowing(false);
-                setFollowState(user.id, handleToUse, false);
+                setFollowState(followUserId, handleToUse, false);
                 setHasPendingRequest(false);
                 removeFollowRequest(user.handle, handleToUse);
                 
@@ -339,10 +395,10 @@ export default function ViewProfilePage() {
                 // Public profile - follow immediately
                 // Also update local state for consistency
                 if (posts[0]?.id) {
-                    await toggleFollowForPost(user.id, posts[0].id);
+                    await toggleFollowForPost(followUserId, posts[0].id);
                 }
                 setIsFollowing(true);
-                setFollowState(user.id, decodedHandle, true);
+                setFollowState(followUserId, decodedHandle, true);
                 setHasPendingRequest(false);
                 setCanViewProfileState(true);
             } else {
@@ -352,7 +408,7 @@ export default function ViewProfilePage() {
                 const newFollowingState = !isCurrentlyFollowing;
                 setIsFollowing(newFollowingState);
                 setHasPendingRequest(false);
-                setFollowState(user.id, decodedHandle, newFollowingState);
+                setFollowState(followUserId, decodedHandle, newFollowingState);
                 if (newFollowingState && profilePrivate) {
                     setCanViewProfileState(true);
                 } else if (!newFollowingState && profilePrivate) {
@@ -365,34 +421,35 @@ export default function ViewProfilePage() {
                 detail: { handle: handleToUse, isFollowing: !isCurrentlyFollowing }
             }));
 
-            // Refresh profile data to update counts
-            try {
-                const userProfileData = await fetchUserProfile(handleToUse, user?.id);
+            // Refresh profile counts in background (don't block UI)
+            fetchUserProfile(handleToUse, user?.id).then((userProfileData) => {
                 const followingCount = userProfileData.following_count || 0;
                 const followersCount = userProfileData.followers_count || 0;
-                
-                setStats(prev => ({
-                    ...prev,
-                    following: followingCount,
-                    followers: followersCount
-                }));
-
-                // Update profileUser state if it exists
+                setStats(prev => ({ ...prev, following: followingCount, followers: followersCount }));
                 if (profileUser) {
                     setProfileUser((prev: any) => ({
                         ...prev,
-                        stats: {
-                            ...prev.stats,
-                            following: followingCount,
-                            followers: followersCount
-                        }
+                        stats: { ...prev.stats, following: followingCount, followers: followersCount }
                     }));
                 }
-            } catch (error) {
+            }).catch((error) => {
                 console.error('Error refreshing profile counts:', error);
-            }
+            });
         } catch (error: any) {
             console.error('Error toggling follow:', error);
+
+            // Revert optimistic update only when we had set "Following" and the API then failed
+            if (!profilePrivate && isFollowing) {
+                setIsFollowing(false);
+                setFollowState(followUserId, handleToUse, false);
+                setStats(prev => ({ ...prev, followers: Math.max(0, prev.followers - 1) }));
+                if (profileUser) {
+                    setProfileUser((prev: any) => ({
+                        ...prev,
+                        stats: { ...prev.stats, followers: Math.max(0, (prev.stats?.followers || 0) - 1) }
+                    }));
+                }
+            }
             
             // Check if it's a connection error (backend not running)
             const isConnectionError = 
@@ -444,7 +501,8 @@ export default function ViewProfilePage() {
                 setProfileIsPrivate(profilePrivate);
                 
                 if (user?.id && user?.handle) {
-                    const followedUsers = await getFollowedUsers(user.id);
+                    const followUserId = user.id != null ? String(user.id) : getStableUserId(user);
+                    const followedUsers = await getFollowedUsers(followUserId);
                     const canView = canViewProfile(user?.handle || '', decodedHandle, followedUsers);
                     const isFollowingUser = followedUsers.some(h => h.toLowerCase() === decodedHandle.toLowerCase());
                     const hasPending = hasPendingFollowRequest(user?.handle || '', decodedHandle);
@@ -605,43 +663,40 @@ export default function ViewProfilePage() {
                 const totalLikes = uniquePosts.reduce((sum, post) => sum + (post.stats?.likes || 0), 0);
                 const totalViews = uniquePosts.reduce((sum, post) => sum + (post.stats?.views || 0), 0);
 
-                // Fetch user profile data from API to get actual following/followers counts
+                // Fetch user profile data from API only when Laravel is enabled (avoids long timeouts when backend is off)
                 let followingCount = 0;
                 let followersCount = 0;
-                try {
-                    const userProfileData = await fetchUserProfile(decodedHandle, user?.id);
-                    followingCount = userProfileData.following_count || 0;
-                    followersCount = userProfileData.followers_count || 0;
-                    
-                    // Update avatar and bio from API if available
-                    if (userProfileData.avatar_url && !avatarUrl) {
-                        avatarUrl = userProfileData.avatar_url;
+                const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+                if (useLaravelApi) {
+                    try {
+                        const userProfileData = await fetchUserProfile(decodedHandle, user?.id);
+                        followingCount = userProfileData.following_count || 0;
+                        followersCount = userProfileData.followers_count || 0;
+
+                        if (userProfileData.avatar_url && !avatarUrl) avatarUrl = userProfileData.avatar_url;
+                        if (userProfileData.bio && !bio) bio = userProfileData.bio;
+                        if (userProfileData.social_links && !socialLinks) socialLinks = userProfileData.social_links;
+                        if (decodedHandle !== user?.handle && (userProfileData as any).places_traveled) {
+                            placesTraveled = (userProfileData as any).places_traveled;
+                        }
+                    } catch (error: any) {
+                        const isConnectionError =
+                            error?.message === 'CONNECTION_REFUSED' ||
+                            error?.name === 'ConnectionRefused' ||
+                            error?.message?.includes('Failed to fetch') ||
+                            error?.message?.includes('ERR_CONNECTION_REFUSED') ||
+                            error?.message?.includes('NetworkError');
+                        if (!isConnectionError) console.error('Error fetching user profile data:', error);
                     }
-                    if (userProfileData.bio && !bio) {
-                        bio = userProfileData.bio;
-                    }
-                    if (userProfileData.social_links && !socialLinks) {
-                        socialLinks = userProfileData.social_links;
-                    }
-                    // Get placesTraveled from API only when viewing someone else's profile.
-                    // For own profile, keep user.placesTraveled from Auth (saved in Profile → Travel Info);
-                    // the API may not return or persist it, and overwriting would show "No places traveled" incorrectly.
-                    if (decodedHandle !== user?.handle && (userProfileData as any).places_traveled) {
-                        placesTraveled = (userProfileData as any).places_traveled;
-                    }
-                } catch (error: any) {
-                    // Check if it's a connection error (backend not running)
-                    const isConnectionError = 
-                        error?.message === 'CONNECTION_REFUSED' ||
-                        error?.name === 'ConnectionRefused' ||
-                        error?.message?.includes('Failed to fetch') ||
-                        error?.message?.includes('ERR_CONNECTION_REFUSED') ||
-                        error?.message?.includes('NetworkError');
-                    
-                    if (!isConnectionError) {
-                        console.error('Error fetching user profile data:', error);
-                    }
-                    // Fallback to 0 if API call fails - local data will be used instead
+                }
+
+                // When API failed or mock: if current user follows this profile, show at least 1 follower
+                if (user?.id && decodedHandle !== user?.handle) {
+                    try {
+                        const followedList = await getFollowedUsers(user?.id != null ? String(user.id) : getStableUserId(user));
+                        const followsThisProfile = followedList.some(h => h.toLowerCase() === decodedHandle.toLowerCase());
+                        if (followsThisProfile && followersCount < 1) followersCount = 1;
+                    } catch (_) {}
                 }
 
                 // When viewing own profile, ensure following count is at least the frontend follow list size
@@ -649,7 +704,7 @@ export default function ViewProfilePage() {
                 const isOwnProfile = decodedHandle === user?.handle;
                 if (isOwnProfile && user?.id) {
                     try {
-                        const followedList = await getFollowedUsers(user.id);
+                        const followedList = await getFollowedUsers(user?.id != null ? String(user.id) : getStableUserId(user));
                         if (followedList.length > followingCount) {
                             followingCount = followedList.length;
                         }
@@ -895,20 +950,22 @@ export default function ViewProfilePage() {
                     </div>
                 </div>
 
-                {/* Action Buttons */}
+                {/* Action Buttons - hide Follow/Message when viewing own profile (show when no user.handle so button isn't hidden) */}
                 <div className="flex gap-2 mb-4 relative z-10">
+                    {handle && (!user?.handle || decodeURIComponent(handle) !== user.handle) && (
                     <button
                         onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            console.log('Follow button clicked');
                             handleFollow();
                         }}
                         className="flex-1 py-2 rounded-lg font-semibold transition-colors bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                        disabled={!user?.id || !handle || !user?.handle}
+                        disabled={!user?.id || !handle}
                     >
                         {hasPendingRequest ? 'Requested' : isFollowing ? 'Following' : 'Follow'}
                     </button>
+                    )}
+                    {handle && (!user?.handle || decodeURIComponent(handle) !== user.handle) && (
                     <button
                         onClick={async (e) => {
                             e.stopPropagation();
@@ -917,7 +974,7 @@ export default function ViewProfilePage() {
                                 // Decode the handle from URL
                                 const decodedHandle = decodeURIComponent(handle);
                                 // Check if user can message (privacy check)
-                                const followedUsers = await getFollowedUsers(user.id);
+                                const followedUsers = await getFollowedUsers(user?.id != null ? String(user.id) : getStableUserId(user));
                                 if (!canSendMessage(user?.handle || '', decodedHandle, followedUsers)) {
                                     Swal.fire({
                                         title: 'Gazetteer says',
@@ -954,6 +1011,7 @@ export default function ViewProfilePage() {
                     >
                         Message
                     </button>
+                    )}
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
@@ -1301,8 +1359,8 @@ export default function ViewProfilePage() {
                         onClick={() => setShowProfileMenu(false)}
                     />
 
-                    {/* Menu */}
-                    <div className="relative bg-[#262626] dark:bg-[#1a1a1a] rounded-3xl p-4 sm:p-6 shadow-2xl mx-4 max-w-full">
+                    {/* Menu - stopPropagation so backdrop doesn't steal click */}
+                    <div className="relative bg-[#262626] dark:bg-[#1a1a1a] rounded-3xl p-4 sm:p-6 shadow-2xl mx-4 max-w-full" onClick={(e) => e.stopPropagation()}>
                         <div className="flex flex-row flex-wrap gap-3 sm:gap-6 items-center justify-center">
                             {/* View Stories - only show if user has stories */}
                             {hasStory && (
@@ -1320,11 +1378,14 @@ export default function ViewProfilePage() {
                                 </button>
                             )}
 
-                            {/* Follow */}
+                            {/* Follow - only show when viewing someone else's profile */}
+                            {handle && user?.handle && decodeURIComponent(handle) !== user.handle && (
                             <button
-                                onClick={async () => {
-                                    setShowProfileMenu(false);
+                                onClick={async (e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
                                     await handleFollow();
+                                    setShowProfileMenu(false);
                                 }}
                                 className="flex flex-col items-center gap-1.5 sm:gap-2 min-w-[60px] sm:min-w-0"
                             >
@@ -1333,6 +1394,7 @@ export default function ViewProfilePage() {
                                 </div>
                                 <span className="text-[10px] sm:text-xs text-white font-medium text-center">{isFollowing ? 'Unfollow' : 'Follow'}</span>
                             </button>
+                            )}
 
                             {/* Share Profile */}
                             <button

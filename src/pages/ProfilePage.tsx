@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import Avatar from '../components/Avatar';
-import { FiCamera, FiBookmark, FiMessageCircle, FiLock, FiUnlock, FiX, FiUser, FiMapPin, FiHeart, FiGlobe, FiEdit3, FiLink2, FiTwitter, FiInstagram, FiVideo, FiSettings, FiFileText } from 'react-icons/fi';
+import { FiCamera, FiBookmark, FiMessageCircle, FiLock, FiUnlock, FiX, FiUser, FiMapPin, FiHeart, FiGlobe, FiEdit3, FiLink2, FiUsers, FiUserCheck, FiPlus, FiTwitter, FiInstagram, FiVideo, FiSettings, FiFileText } from 'react-icons/fi';
 import Flag from '../components/Flag';
 import { getUserCollections } from '../api/collections';
 import type { Collection } from '../types';
@@ -12,6 +12,9 @@ import { setProfilePrivacy } from '../api/privacy';
 import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMaps';
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
 import { getUnreadTotal } from '../api/messages';
+import { getFollowedUsers } from '../api/posts';
+import { fetchFollowers, fetchFollowing } from '../api/client';
+import { getAvatarForHandle } from '../api/users';
 import { 
   getNotificationPreferences, 
   saveNotificationPreferences, 
@@ -19,6 +22,46 @@ import {
   initializeNotifications
 } from '../services/notifications';
 import { testBrowserNotification, testNotificationTypes, testImageNotification } from '../utils/testNotifications';
+
+// Card image: show illustration from /profile-cards/ when present (.svg or .png), else fall back to icon
+function ProfileCardImage({ imagePath, icon }: { imagePath: string; icon: React.ReactNode }) {
+  const [useFallback, setUseFallback] = React.useState(false);
+  const [src, setSrc] = React.useState(imagePath);
+  React.useEffect(() => {
+    setSrc(imagePath);
+    setUseFallback(false);
+  }, [imagePath]);
+  const tryAlternate = () => {
+    if (src.endsWith('.svg')) setSrc(src.replace(/\.svg$/, '.png'));
+    else setUseFallback(true);
+  };
+  const showImage = imagePath && !useFallback;
+  return (
+    <div className="p-3 rounded-xl bg-gray-50 flex items-center justify-center min-h-[48px] min-w-[48px]">
+      {showImage ? (
+        <img
+          src={src}
+          alt=""
+          className="w-12 h-12 object-contain"
+          onError={tryAlternate}
+        />
+      ) : (
+        icon
+      )}
+    </div>
+  );
+}
+
+const PROFILE_CARD_IMAGES = {
+  followers: '/profile-cards/followers.svg',
+  following: '/profile-cards/following.svg',
+  bio: '/profile-cards/bio.svg',
+  social: '/profile-cards/social-links.svg',
+  personal: '/profile-cards/travel-info.svg',
+  location: '/profile-cards/location.svg',
+  interests: '/profile-cards/interests.svg',
+  flag: '/profile-cards/country-flag.svg',
+};
 
 // Notification Toggle Component
 function NotificationToggle({ 
@@ -35,13 +78,13 @@ function NotificationToggle({
   return (
     <div className="flex items-center justify-between py-2">
       <div className="flex-1 pr-4">
-        <p className="font-medium text-gray-900 dark:text-gray-100 text-sm">{label}</p>
-        <p className="text-xs text-gray-500 dark:text-gray-400">{description}</p>
+        <p className="font-medium text-gray-900 text-sm">{label}</p>
+        <p className="text-xs text-gray-500">{description}</p>
       </div>
       <button
         onClick={() => onChange(!enabled)}
         className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 ${
-          enabled ? 'bg-brand-600' : 'bg-gray-200 dark:bg-gray-700'
+          enabled ? 'bg-brand-600' : 'bg-gray-200'
         }`}
       >
         <span
@@ -73,7 +116,13 @@ export default function ProfilePage() {
   const [drafts, setDrafts] = React.useState<Draft[]>([]);
   const [isPrivate, setIsPrivate] = React.useState(user?.is_private || false);
   const [isTogglingPrivacy, setIsTogglingPrivacy] = React.useState(false);
-  const [selectedCard, setSelectedCard] = React.useState<'bio' | 'social' | 'personal' | 'location' | 'interests' | 'flag' | null>(null);
+  const [selectedCard, setSelectedCard] = React.useState<'bio' | 'social' | 'personal' | 'location' | 'interests' | 'flag' | 'followers' | 'following' | null>(null);
+  const [followersCount, setFollowersCount] = React.useState(0);
+  const [followingCount, setFollowingCount] = React.useState(0);
+  const [followersList, setFollowersList] = React.useState<string[]>([]);
+  const [followingList, setFollowingList] = React.useState<string[]>([]);
+  const [loadingFollowers, setLoadingFollowers] = React.useState(false);
+  const [loadingFollowing, setLoadingFollowing] = React.useState(false);
   const [unreadCount, setUnreadCount] = React.useState(0);
   const [placesTraveled, setPlacesTraveled] = React.useState<string>(user?.placesTraveled?.join(', ') || '');
   const [showProfilePictureModal, setShowProfilePictureModal] = React.useState(false);
@@ -265,6 +314,80 @@ export default function ProfilePage() {
     };
   }, [user?.handle]);
 
+  // Load following count (from local state)
+  React.useEffect(() => {
+    if (!user?.id) return;
+    const uid = String(user.id);
+    getFollowedUsers(uid).then((handles) => {
+      setFollowingList(handles);
+      setFollowingCount(handles.length);
+    });
+  }, [user?.id]);
+
+  // Load followers count (from API when available; mock shows 0)
+  React.useEffect(() => {
+    if (!user?.handle) return;
+    const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+    if (!useLaravelApi) {
+      setFollowersCount(0);
+      setFollowersList([]);
+      return;
+    }
+    fetchFollowers(user.handle, 0, 100)
+      .then((res: any) => {
+        const list = Array.isArray(res?.data) ? res.data : res?.followers ?? [];
+        const handles = list.map((u: any) => u?.handle ?? u?.user_handle ?? String(u)).filter(Boolean);
+        setFollowersList(handles);
+        setFollowersCount(handles.length);
+      })
+      .catch(() => {
+        setFollowersCount(0);
+        setFollowersList([]);
+      });
+  }, [user?.handle]);
+
+  // When opening Followers or Following modal, refresh list
+  React.useEffect(() => {
+    if (!user?.id) return;
+    const uid = String(user.id);
+    if (selectedCard === 'following') {
+      setLoadingFollowing(true);
+      getFollowedUsers(uid).then((handles) => {
+        setFollowingList(handles);
+        setFollowingCount(handles.length);
+        setLoadingFollowing(false);
+      });
+    }
+    if (selectedCard === 'followers' && user?.handle) {
+      const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+      if (useLaravelApi) {
+        setLoadingFollowers(true);
+        fetchFollowers(user.handle, 0, 200)
+          .then((res: any) => {
+            const list = Array.isArray(res?.data) ? res.data : res?.followers ?? [];
+            const handles = list.map((u: any) => u?.handle ?? u?.user_handle ?? String(u)).filter(Boolean);
+            setFollowersList(handles);
+            setFollowersCount(handles.length);
+            setLoadingFollowers(false);
+          })
+          .catch(() => setLoadingFollowers(false));
+      }
+    }
+  }, [selectedCard, user?.id, user?.handle]);
+
+  // Refresh following count when user follows/unfollows elsewhere (e.g. feed or view profile)
+  React.useEffect(() => {
+    if (!user?.id) return;
+    const handler = () => {
+      getFollowedUsers(String(user.id)).then((handles) => {
+        setFollowingList(handles);
+        setFollowingCount(handles.length);
+      });
+    };
+    window.addEventListener('followToggled', handler);
+    return () => window.removeEventListener('followToggled', handler);
+  }, [user?.id]);
+
   async function loadCollections() {
     if (!user?.id) return;
     try {
@@ -431,15 +554,15 @@ export default function ProfilePage() {
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-brand-50 to-brand-100 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="w-16 h-16 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4">
+          <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
             </svg>
           </div>
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">Not Signed In</h2>
-          <p className="text-gray-600 dark:text-gray-400 mb-4">Please sign in to view your profile</p>
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">Not Signed In</h2>
+          <p className="text-gray-600 mb-4">Please sign in to view your profile</p>
           <button
             onClick={() => nav('/login')}
             className="px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 text-white font-semibold rounded-xl shadow-lg hover:from-brand-600 hover:to-brand-700 transition-all duration-200"
@@ -452,25 +575,36 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-brand-50 to-brand-100 dark:from-gray-900 dark:to-gray-800">
-      {/* Header - Sticky */}
-      <div className="sticky top-0 z-[100] bg-gradient-to-br from-brand-50/95 to-brand-100/95 dark:from-gray-900/95 dark:to-gray-800/95 backdrop-blur-md border-b border-gray-200/50 dark:border-gray-700/50 shadow-sm">
+    <div className="min-h-screen bg-gray-50">
+      {/* Header - Sticky (light mode only) */}
+      <div className="sticky top-0 z-[100] bg-white/95 backdrop-blur-md border-b border-gray-200 shadow-sm">
         <div className="max-w-2xl mx-auto px-4 py-3">
           <div className="flex items-center justify-between">
-            {/* Left: Profile Picture */}
-            <div className="flex-shrink-0">
-              <Avatar
-                src={user?.avatarUrl}
-                name={user?.name || 'User'}
-                size="sm"
-                className="cursor-pointer"
+            {/* Left: Profile Picture with + to show you can change it */}
+            <div className="flex-shrink-0 relative">
+              <button
+                type="button"
                 onClick={() => setShowProfilePictureModal(true)}
-              />
+                className="block cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 rounded-full"
+                aria-label="Change profile picture"
+              >
+                <Avatar
+                  src={user?.avatarUrl}
+                  name={user?.name || 'User'}
+                  size="sm"
+                  className="pointer-events-none"
+                />
+                <span className="absolute -bottom-0.5 -right-0.5 w-5 h-5 bg-brand-600 rounded-full flex items-center justify-center border-2 border-white shadow-sm">
+                  <FiPlus className="w-3 h-3 text-white" strokeWidth={2.5} />
+                </span>
+              </button>
             </div>
 
-            {/* Center: Passport Title */}
-            <div className="flex-1 flex justify-center">
-              <h1 className="text-2xl font-bold passport-shimmer">Passport</h1>
+            {/* Center: User name */}
+            <div className="flex-1 flex justify-center min-w-0 px-2">
+              <h1 className="text-xl font-bold text-gray-900 truncate" title={user?.name}>
+                {user?.name || 'Passport'}
+              </h1>
             </div>
 
             {/* Right: Private/Public Toggle */}
@@ -478,21 +612,21 @@ export default function ProfilePage() {
               <button
                 onClick={handleTogglePrivacy}
                 disabled={isTogglingPrivacy}
-                className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                className="p-2 rounded-full hover:bg-gray-100 transition-colors"
                 title={isPrivate ? 'Profile is private - Click to make public' : 'Profile is public - Click to make private'}
                 aria-label={isPrivate ? 'Make profile public' : 'Make profile private'}
               >
                 {isPrivate ? (
-                  <FiLock className="w-5 h-5 text-gray-700 dark:text-gray-300" />
+                  <FiLock className="w-5 h-5 text-gray-700" />
                 ) : (
-                  <FiUnlock className="w-5 h-5 text-gray-700 dark:text-gray-300" />
+                  <FiUnlock className="w-5 h-5 text-gray-700" />
                 )}
               </button>
             </div>
           </div>
 
           {/* Tabs: Messages, Drafts, Collections, Settings */}
-          <div className="flex items-center justify-around border-t border-gray-200/50 dark:border-gray-700/50 mt-3 pt-3">
+          <div className="flex items-center justify-around border-t border-gray-200 mt-3 pt-3">
             <button
               type="button"
               onClick={(e) => {
@@ -500,10 +634,10 @@ export default function ProfilePage() {
                 e.stopPropagation();
                 nav('/inbox');
               }}
-              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors relative pointer-events-auto"
+              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors relative pointer-events-auto"
             >
-              <FiMessageCircle className="w-5 h-5 text-gray-700 dark:text-gray-300" />
-              <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Messages</span>
+              <FiMessageCircle className="w-5 h-5 text-gray-700" />
+              <span className="text-xs font-medium text-gray-700">Messages</span>
               {unreadCount > 0 && (
                 <span className="absolute top-0 right-0 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
                   {unreadCount > 9 ? '9+' : unreadCount}
@@ -522,10 +656,10 @@ export default function ProfilePage() {
                 // Then open drafts
                 setDraftsOpen(true);
               }}
-              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors relative pointer-events-auto"
+              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors relative pointer-events-auto"
             >
-              <FiFileText className="w-5 h-5 text-gray-700 dark:text-gray-300" />
-              <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Drafts</span>
+              <FiFileText className="w-5 h-5 text-gray-700" />
+              <span className="text-xs font-medium text-gray-700">Drafts</span>
               {drafts.length > 0 && (
                 <span className="absolute top-0 right-0 w-5 h-5 bg-blue-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
                   {drafts.length > 9 ? '9+' : drafts.length}
@@ -545,10 +679,10 @@ export default function ProfilePage() {
                 loadCollections(); // Refresh collections before opening
                 setCollectionsOpen(true);
               }}
-              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors relative pointer-events-auto"
+              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors relative pointer-events-auto"
             >
-              <FiBookmark className="w-5 h-5 text-gray-700 dark:text-gray-300" />
-              <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Collections</span>
+              <FiBookmark className="w-5 h-5 text-gray-700" />
+              <span className="text-xs font-medium text-gray-700">Collections</span>
               {collections.length > 0 && (
                 <span className="absolute top-0 right-0 w-5 h-5 bg-purple-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
                   {collections.length > 9 ? '9+' : collections.length}
@@ -567,10 +701,10 @@ export default function ProfilePage() {
                 // Then open settings
                 setSettingsOpen(true);
               }}
-              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors pointer-events-auto"
+              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors pointer-events-auto"
             >
-              <FiSettings className="w-5 h-5 text-gray-700 dark:text-gray-300" />
-              <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Settings</span>
+              <FiSettings className="w-5 h-5 text-gray-700" />
+              <span className="text-xs font-medium text-gray-700">Settings</span>
             </button>
           </div>
         </div>
@@ -591,7 +725,7 @@ export default function ProfilePage() {
               >
                 {/* Enlarged Profile Picture */}
                 <div className="relative">
-                  <div className="w-48 h-48 rounded-full overflow-hidden border-4 border-white dark:border-gray-800 shadow-2xl">
+                  <div className="w-48 h-48 rounded-full overflow-hidden border-4 border-white shadow-2xl">
                     {user.avatarUrl ? (
                       <img
                         src={user.avatarUrl}
@@ -599,7 +733,7 @@ export default function ProfilePage() {
                         className="w-full h-full object-cover"
                       />
                     ) : (
-                      <div className="w-full h-full bg-gray-800 flex items-center justify-center">
+                      <div className="w-full h-full bg-gray-300 flex items-center justify-center">
                         <span className="text-6xl font-bold text-white">
                           {user.name?.charAt(0).toUpperCase() || 'U'}
                         </span>
@@ -610,9 +744,9 @@ export default function ProfilePage() {
                 
                 {/* Change Button */}
                 <label className="cursor-pointer">
-                  <div className="flex flex-col items-center gap-2 px-6 py-3 bg-white dark:bg-gray-800 rounded-full shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105">
-                    <FiCamera className="w-6 h-6 text-gray-700 dark:text-gray-300" />
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Change</span>
+                  <div className="flex flex-col items-center gap-2 px-6 py-3 bg-white rounded-full shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105">
+                    <FiCamera className="w-6 h-6 text-gray-700" />
+                    <span className="text-sm font-medium text-gray-700">Change</span>
                   </div>
                   <input
                     type="file"
@@ -639,104 +773,138 @@ export default function ProfilePage() {
           </>
         )}
 
-        {/* User Info */}
-        <div className="text-center mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-1">{user.name}</h1>
-          <p className="text-brand-600 dark:text-brand-400 font-medium">@{user.handle}</p>
-          {isPrivate && (
-            <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 flex items-center justify-center gap-1">
+        {/* Private profile notice only (name/handle in header) */}
+        {isPrivate && (
+          <div className="text-center mb-4">
+            <p className="text-xs text-amber-600 flex items-center justify-center gap-1">
               <FiLock className="w-3 h-3" />
               Your profile is private
             </p>
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* Profile Cards - Styled like CreatePage templates */}
+        {/* Profile Cards - Airbnb style: white, rounded, subtle shadow, side-by-side */}
         <div className="px-4 py-4">
-          <div className="grid grid-cols-2 gap-3">
-            {/* Bio Card - Pink */}
+          <div className="grid grid-cols-2 gap-4">
+            {/* Followers Card - top left */}
+            <button
+              onClick={() => setSelectedCard('followers')}
+              className="flex flex-col items-center gap-3 p-5 rounded-2xl cursor-pointer bg-white border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 text-left w-full"
+            >
+              <ProfileCardImage
+                imagePath={PROFILE_CARD_IMAGES.followers}
+                icon={<FiUsers className="w-6 h-6 text-gray-600" />}
+              />
+              <div className="text-center w-full">
+                <div className="font-semibold text-sm text-gray-900">Followers</div>
+                <div className="text-lg font-bold text-gray-900 mt-0.5">{followersCount}</div>
+              </div>
+            </button>
+
+            {/* Following Card - top right */}
+            <button
+              onClick={() => setSelectedCard('following')}
+              className="flex flex-col items-center gap-3 p-5 rounded-2xl cursor-pointer bg-white border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 text-left w-full"
+            >
+              <ProfileCardImage
+                imagePath={PROFILE_CARD_IMAGES.following}
+                icon={<FiUserCheck className="w-6 h-6 text-gray-600" />}
+              />
+              <div className="text-center w-full">
+                <div className="font-semibold text-sm text-gray-900">Following</div>
+                <div className="text-lg font-bold text-gray-900 mt-0.5">{followingCount}</div>
+              </div>
+            </button>
+
+            {/* Bio Card */}
             <button
               onClick={() => setSelectedCard('bio')}
-              className="flex flex-col items-center gap-2 p-4 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-all duration-200 group border-2 border-dashed border-pink-400 dark:border-pink-500 hover:border-pink-500 dark:hover:border-pink-400"
+              className="flex flex-col items-center gap-3 p-5 rounded-2xl cursor-pointer bg-white border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 text-left w-full"
             >
-              <div className="p-3 rounded-xl bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-700 group-hover:from-pink-100 group-hover:to-pink-200 dark:group-hover:from-pink-900 dark:group-hover:to-pink-800 transition-all duration-200">
-                <FiEdit3 className="w-6 h-6 text-gray-600 dark:text-gray-400 group-hover:text-pink-600 dark:group-hover:text-pink-400 transition-colors" />
-              </div>
-              <div className="text-center">
-                <div className="font-semibold text-sm text-gray-900 dark:text-gray-100">Bio</div>
-                <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              <ProfileCardImage
+                imagePath={PROFILE_CARD_IMAGES.bio}
+                icon={<FiEdit3 className="w-6 h-6 text-gray-600" />}
+              />
+              <div className="text-center w-full">
+                <div className="font-semibold text-sm text-gray-900">Bio</div>
+                <div className="text-xs text-gray-500 mt-0.5">
                   {bio ? 'Edit bio' : 'Add bio'}
                 </div>
               </div>
             </button>
 
-            {/* Social Links Card - Green */}
+            {/* Social Links Card */}
             <button
               onClick={() => setSelectedCard('social')}
-              className="flex flex-col items-center gap-2 p-4 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-all duration-200 group border-2 border-dashed border-green-400 dark:border-green-500 hover:border-green-500 dark:hover:border-green-400"
+              className="flex flex-col items-center gap-3 p-5 rounded-2xl cursor-pointer bg-white border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 text-left w-full"
             >
-              <div className="p-3 rounded-xl bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-700 group-hover:from-green-100 group-hover:to-green-200 dark:group-hover:from-green-900 dark:group-hover:to-green-800 transition-all duration-200">
-                <FiLink2 className="w-6 h-6 text-gray-600 dark:text-gray-400 group-hover:text-green-600 dark:group-hover:text-green-400 transition-colors" />
-              </div>
-              <div className="text-center">
-                <div className="font-semibold text-sm text-gray-900 dark:text-gray-100">Social Links</div>
-                <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Add links</div>
+              <ProfileCardImage
+                imagePath={PROFILE_CARD_IMAGES.social}
+                icon={<FiLink2 className="w-6 h-6 text-gray-600" />}
+              />
+              <div className="text-center w-full">
+                <div className="font-semibold text-sm text-gray-900">Social Links</div>
+                <div className="text-xs text-gray-500 mt-0.5">Add links</div>
               </div>
             </button>
 
-            {/* Travel Info Card - Orange */}
+            {/* Travel Info Card */}
             <button
               onClick={() => setSelectedCard('personal')}
-              className="flex flex-col items-center gap-2 p-4 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-all duration-200 group border-2 border-dashed border-orange-400 dark:border-orange-500 hover:border-orange-500 dark:hover:border-orange-400"
+              className="flex flex-col items-center gap-3 p-5 rounded-2xl cursor-pointer bg-white border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 text-left w-full"
             >
-              <div className="p-3 rounded-xl bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-700 group-hover:from-orange-100 group-hover:to-orange-200 dark:group-hover:from-orange-900 dark:group-hover:to-orange-800 transition-all duration-200">
-                <FiUser className="w-6 h-6 text-gray-600 dark:text-gray-400 group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors" />
-              </div>
-              <div className="text-center">
-                <div className="font-semibold text-sm text-gray-900 dark:text-gray-100">Travel Info</div>
-                <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Edit details</div>
+              <ProfileCardImage
+                imagePath={PROFILE_CARD_IMAGES.personal}
+                icon={<FiUser className="w-6 h-6 text-gray-600" />}
+              />
+              <div className="text-center w-full">
+                <div className="font-semibold text-sm text-gray-900">Travel Info</div>
+                <div className="text-xs text-gray-500 mt-0.5">Edit details</div>
               </div>
             </button>
 
-            {/* Location Card - Blue */}
+            {/* Location Card */}
             <button
               onClick={() => setSelectedCard('location')}
-              className="flex flex-col items-center gap-2 p-4 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-all duration-200 group border-2 border-dashed border-blue-400 dark:border-blue-500 hover:border-blue-500 dark:hover:border-blue-400"
+              className="flex flex-col items-center gap-3 p-5 rounded-2xl cursor-pointer bg-white border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 text-left w-full"
             >
-              <div className="p-3 rounded-xl bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-700 group-hover:from-blue-100 group-hover:to-blue-200 dark:group-hover:from-blue-900 dark:group-hover:to-blue-800 transition-all duration-200">
-                <FiMapPin className="w-6 h-6 text-gray-600 dark:text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" />
-              </div>
-              <div className="text-center">
-                <div className="font-semibold text-sm text-gray-900 dark:text-gray-100">Location</div>
-                <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Set location</div>
+              <ProfileCardImage
+                imagePath={PROFILE_CARD_IMAGES.location}
+                icon={<FiMapPin className="w-6 h-6 text-gray-600" />}
+              />
+              <div className="text-center w-full">
+                <div className="font-semibold text-sm text-gray-900">Location</div>
+                <div className="text-xs text-gray-500 mt-0.5">Set location</div>
               </div>
             </button>
 
-            {/* Interests Card - Yellow */}
+            {/* Interests Card */}
             <button
               onClick={() => setSelectedCard('interests')}
-              className="flex flex-col items-center gap-2 p-4 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-all duration-200 group border-2 border-dashed border-yellow-400 dark:border-yellow-500 hover:border-yellow-500 dark:hover:border-yellow-400"
+              className="flex flex-col items-center gap-3 p-5 rounded-2xl cursor-pointer bg-white border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 text-left w-full"
             >
-              <div className="p-3 rounded-xl bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-700 group-hover:from-yellow-100 group-hover:to-yellow-200 dark:group-hover:from-yellow-900 dark:group-hover:to-yellow-800 transition-all duration-200">
-                <FiHeart className="w-6 h-6 text-gray-600 dark:text-gray-400 group-hover:text-yellow-600 dark:group-hover:text-yellow-400 transition-colors" />
-              </div>
-              <div className="text-center">
-                <div className="font-semibold text-sm text-gray-900 dark:text-gray-100">Interests</div>
-                <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Add interests</div>
+              <ProfileCardImage
+                imagePath={PROFILE_CARD_IMAGES.interests}
+                icon={<FiHeart className="w-6 h-6 text-gray-600" />}
+              />
+              <div className="text-center w-full">
+                <div className="font-semibold text-sm text-gray-900">Interests</div>
+                <div className="text-xs text-gray-500 mt-0.5">Add interests</div>
               </div>
             </button>
 
-            {/* Country Flag Card - Red */}
+            {/* Country Flag Card */}
             <button
               onClick={() => setSelectedCard('flag')}
-              className="flex flex-col items-center gap-2 p-4 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-all duration-200 group border-2 border-dashed border-red-400 dark:border-red-500 hover:border-red-500 dark:hover:border-red-400"
+              className="flex flex-col items-center gap-3 p-5 rounded-2xl cursor-pointer bg-white border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 text-left w-full"
             >
-              <div className="p-3 rounded-xl bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-700 group-hover:from-red-100 group-hover:to-red-200 dark:group-hover:from-red-900 dark:group-hover:to-red-800 transition-all duration-200">
-                <FiGlobe className="w-6 h-6 text-gray-600 dark:text-gray-400 group-hover:text-red-600 dark:group-hover:text-red-400 transition-colors" />
-              </div>
-              <div className="text-center">
-                <div className="font-semibold text-sm text-gray-900 dark:text-gray-100">Country Flag</div>
-                <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Select flag</div>
+              <ProfileCardImage
+                imagePath={PROFILE_CARD_IMAGES.flag}
+                icon={<FiGlobe className="w-6 h-6 text-gray-600" />}
+              />
+              <div className="text-center w-full">
+                <div className="font-semibold text-sm text-gray-900">Country Flag</div>
+                <div className="text-xs text-gray-500 mt-0.5">Select flag</div>
               </div>
             </button>
           </div>
@@ -754,69 +922,137 @@ export default function ProfilePage() {
             
             {/* Bottom Sheet */}
             <div
-              className="fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-gray-900 rounded-t-3xl shadow-2xl transition-transform duration-300 ease-out translate-y-0"
+              className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-3xl shadow-2xl transition-transform duration-300 ease-out translate-y-0"
               style={{ maxHeight: '85vh' }}
             >
               {/* Handle Bar */}
               <div className="flex items-center justify-center pt-3 pb-2">
-                <div className="w-12 h-1 bg-gray-300 dark:bg-gray-600 rounded-full" />
+                <div className="w-12 h-1 bg-gray-300 rounded-full" />
               </div>
 
-              {/* Header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
+              {/* Header - title and X close for all cards */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 gap-3">
+                <h2 className="text-xl font-bold text-gray-900 flex-1 min-w-0">
                   {selectedCard === 'bio' && 'Edit Bio'}
                   {selectedCard === 'social' && 'Social Links'}
                   {selectedCard === 'personal' && 'Travel Information'}
                   {selectedCard === 'location' && 'Location Settings'}
                   {selectedCard === 'interests' && 'Interests'}
                   {selectedCard === 'flag' && 'Country Flag'}
+                  {selectedCard === 'followers' && 'Followers'}
+                  {selectedCard === 'following' && 'Following'}
                 </h2>
                 <button
+                  type="button"
                   onClick={() => setSelectedCard(null)}
-                  className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                  className="flex-shrink-0 p-2.5 rounded-full hover:bg-gray-100 border border-gray-200 transition-colors"
                   aria-label="Close"
+                  title="Close"
                 >
-                  <FiX className="w-6 h-6 text-gray-600 dark:text-gray-400" />
+                  <FiX className="w-6 h-6 text-gray-700" />
                 </button>
               </div>
 
               {/* Content */}
               <div className="flex-1 overflow-y-auto px-6 py-4">
+                {/* Followers List */}
+                {selectedCard === 'followers' && (
+                  <div className="py-2">
+                    {loadingFollowers ? (
+                      <div className="flex items-center justify-center py-12">
+                        <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
+                        <span className="ml-3 text-gray-500">Loading…</span>
+                      </div>
+                    ) : followersList.length === 0 ? (
+                      <p className="text-center text-gray-500 py-8">No followers yet</p>
+                    ) : (
+                      <ul className="divide-y divide-gray-100">
+                        {followersList.map((handle) => (
+                          <li key={handle}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedCard(null);
+                                nav(`/user/${encodeURIComponent(handle)}`);
+                              }}
+                              className="w-full flex items-center gap-3 py-3 px-2 rounded-lg hover:bg-gray-50 text-left"
+                            >
+                              <Avatar src={getAvatarForHandle(handle)} name={handle} size="sm" />
+                              <span className="font-medium text-gray-900">{handle}</span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+
+                {/* Following List */}
+                {selectedCard === 'following' && (
+                  <div className="py-2">
+                    {loadingFollowing ? (
+                      <div className="flex items-center justify-center py-12">
+                        <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
+                        <span className="ml-3 text-gray-500">Loading…</span>
+                      </div>
+                    ) : followingList.length === 0 ? (
+                      <p className="text-center text-gray-500 py-8">Not following anyone yet</p>
+                    ) : (
+                      <ul className="divide-y divide-gray-100">
+                        {followingList.map((handle) => (
+                          <li key={handle}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedCard(null);
+                                nav(`/user/${encodeURIComponent(handle)}`);
+                              }}
+                              className="w-full flex items-center gap-3 py-3 px-2 rounded-lg hover:bg-gray-50 text-left"
+                            >
+                              <Avatar src={getAvatarForHandle(handle)} name={handle} size="sm" />
+                              <span className="font-medium text-gray-900">{handle}</span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+
                 {/* Bio Form */}
                 {selectedCard === 'bio' && (
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
                         Bio
                       </label>
                       <textarea
                         value={bio}
                         onChange={(e) => setBio(e.target.value)}
                         placeholder="Tell us about yourself..."
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 resize-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-500 resize-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
                         rows={6}
                       />
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                      <p className="text-xs text-gray-500 mt-2">
                         This will be visible on your profile
                       </p>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
                         Email
                       </label>
                       <input
                         type="email"
                         value={user.email || ''}
                         disabled
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 cursor-not-allowed"
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-100 text-gray-500 cursor-not-allowed"
                       />
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      <p className="text-xs text-gray-500 mt-1">
                         Email cannot be changed
                       </p>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
                         Age
                       </label>
                       <input
@@ -827,14 +1063,14 @@ export default function ProfilePage() {
                           login({ ...user, age });
                         }}
                         placeholder="Enter your age"
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
                         Status
                       </label>
-                      <div className="inline-flex items-center px-3 py-1.5 rounded-full text-sm font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                      <div className="inline-flex items-center px-3 py-1.5 rounded-full text-sm font-medium bg-green-100 text-green-800">
                         Active
                       </div>
                     </div>
@@ -855,7 +1091,7 @@ export default function ProfilePage() {
                 {selectedCard === 'social' && (
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
                         Website
                       </label>
                       <input
@@ -863,11 +1099,11 @@ export default function ProfilePage() {
                         value={socialLinks.website}
                         onChange={(e) => setSocialLinks({ ...socialLinks, website: e.target.value })}
                         placeholder="https://example.com"
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
                         X (Twitter)
                       </label>
                       <input
@@ -875,11 +1111,11 @@ export default function ProfilePage() {
                         value={socialLinks.x}
                         onChange={(e) => setSocialLinks({ ...socialLinks, x: e.target.value })}
                         placeholder="@username"
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
                         Instagram
                       </label>
                       <input
@@ -887,11 +1123,11 @@ export default function ProfilePage() {
                         value={socialLinks.instagram}
                         onChange={(e) => setSocialLinks({ ...socialLinks, instagram: e.target.value })}
                         placeholder="@username"
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
                         TikTok
                       </label>
                       <input
@@ -899,7 +1135,7 @@ export default function ProfilePage() {
                         value={socialLinks.tiktok}
                         onChange={(e) => setSocialLinks({ ...socialLinks, tiktok: e.target.value })}
                         placeholder="@username"
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
                       />
                     </div>
                     <button
@@ -919,7 +1155,7 @@ export default function ProfilePage() {
                 {selectedCard === 'personal' && (
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
                         Places You've Traveled To
                       </label>
                       <input
@@ -927,15 +1163,15 @@ export default function ProfilePage() {
                         value={placesTraveled}
                         onChange={(e) => setPlacesTraveled(e.target.value)}
                         placeholder="e.g., Paris, London, Tokyo, New York"
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
                       />
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                      <p className="text-xs text-gray-500 mt-2">
                         Separate multiple places with commas
                       </p>
                     </div>
                     {user.placesTraveled && user.placesTraveled.length > 0 && (
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
                           Current Places
                         </label>
                         <div className="flex flex-wrap gap-2">
@@ -969,7 +1205,7 @@ export default function ProfilePage() {
                   <div className="space-y-4">
                     {/* National (Country) - First */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
                         National (Country) <span className="text-red-500">*</span>
                       </label>
                       <select
@@ -977,7 +1213,7 @@ export default function ProfilePage() {
                         onChange={(e) => {
                           setNational(e.target.value);
                         }}
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-900 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
                       >
                         <option value="">Select a country</option>
                         {nationalOptions.map(country => (
@@ -990,13 +1226,13 @@ export default function ProfilePage() {
 
                     {/* Regional (State/Province/City) - Second */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
                         Regional (State/Province/City) <span className="text-red-500">*</span>
                       </label>
                       {loadingRegions ? (
-                        <div className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex items-center justify-center">
+                        <div className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 flex items-center justify-center">
                           <div className="w-5 h-5 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
-                          <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">Loading regions...</span>
+                          <span className="ml-2 text-sm text-gray-500">Loading regions...</span>
                         </div>
                       ) : regionalOptions.length > 0 ? (
                         <select
@@ -1005,7 +1241,7 @@ export default function ProfilePage() {
                             setRegional(e.target.value);
                           }}
                           disabled={!national}
-                          className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-brand-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-900 focus:ring-2 focus:ring-brand-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           <option value="">Select a region</option>
                           {regionalOptions.map(region => (
@@ -1020,7 +1256,7 @@ export default function ProfilePage() {
                           value={regional}
                           onChange={(e) => setRegional(e.target.value)}
                           placeholder="e.g., Dublin, Paris, London"
-                          className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
                         />
                       ) : (
                         <input
@@ -1029,20 +1265,20 @@ export default function ProfilePage() {
                           onChange={(e) => setRegional(e.target.value)}
                           placeholder="Select country first"
                           disabled
-                          className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 placeholder-gray-400 dark:placeholder-gray-500 cursor-not-allowed"
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-500 placeholder-gray-400 cursor-not-allowed"
                         />
                       )}
                     </div>
 
                     {/* Local (Neighborhood/Town) - Last */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
                         Local (Neighborhood/Town) <span className="text-red-500">*</span>
                       </label>
                       {loadingCities ? (
-                        <div className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex items-center justify-center">
+                        <div className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 flex items-center justify-center">
                           <div className="w-5 h-5 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
-                          <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">Loading local areas...</span>
+                          <span className="ml-2 text-sm text-gray-500">Loading local areas...</span>
                         </div>
                       ) : localOptions.length > 0 ? (
                         <select
@@ -1051,7 +1287,7 @@ export default function ProfilePage() {
                             setLocal(e.target.value);
                           }}
                           disabled={!regional}
-                          className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-brand-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-900 focus:ring-2 focus:ring-brand-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           <option value="">Select a local area</option>
                           {localOptions.map(area => (
@@ -1066,7 +1302,7 @@ export default function ProfilePage() {
                           value={local}
                           onChange={(e) => setLocal(e.target.value)}
                           placeholder="e.g., Finglas, Montmartre, Camden"
-                          className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
                         />
                       ) : (
                         <input
@@ -1075,7 +1311,7 @@ export default function ProfilePage() {
                           onChange={(e) => setLocal(e.target.value)}
                           placeholder="Select region first"
                           disabled
-                          className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 placeholder-gray-400 dark:placeholder-gray-500 cursor-not-allowed"
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-500 placeholder-gray-400 cursor-not-allowed"
                         />
                       )}
                     </div>
@@ -1119,7 +1355,7 @@ export default function ProfilePage() {
                 {selectedCard === 'interests' && (
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
                         Interests (comma-separated)
                       </label>
                       <input
@@ -1130,15 +1366,15 @@ export default function ProfilePage() {
                           login({ ...user, interests });
                         }}
                         placeholder="e.g., Technology, Travel, Food"
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
                       />
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                      <p className="text-xs text-gray-500 mt-2">
                         Separate multiple interests with commas
                       </p>
                     </div>
                     {user.interests && user.interests.length > 0 && (
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
                           Current Interests
                         </label>
                         <div className="flex flex-wrap gap-2">
@@ -1166,7 +1402,7 @@ export default function ProfilePage() {
                 {selectedCard === 'flag' && (
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
                         Pick a flag
                       </label>
                       <div className="grid grid-cols-8 gap-2">
@@ -1178,7 +1414,7 @@ export default function ProfilePage() {
                               setCountryFlag(f);
                               login({ ...user, countryFlag: f });
                             }}
-                            className={`h-12 rounded-md flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${countryFlag === f ? 'ring-2 ring-brand-500 bg-brand-50 dark:bg-brand-900/20' : ''} px-1`}
+                            className={`h-12 rounded-md flex items-center justify-center hover:bg-gray-100 transition-colors ${countryFlag === f ? 'ring-2 ring-brand-500 bg-brand-50' : ''} px-1`}
                             aria-label={`Select flag ${f}`}
                           >
                             <Flag value={f} size={24} />
@@ -1187,7 +1423,7 @@ export default function ProfilePage() {
                       </div>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
                         Or paste your flag emoji
                       </label>
                       <input
@@ -1195,9 +1431,9 @@ export default function ProfilePage() {
                         onChange={(e) => setCountryFlag(e.target.value)}
                         maxLength={8}
                         placeholder="🇮🇪"
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent text-2xl"
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-brand-500 focus:border-transparent text-2xl"
                       />
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                      <p className="text-xs text-gray-500 mt-2">
                         This flag shows beside your handle on feed and profile.
                       </p>
                     </div>
@@ -1220,40 +1456,40 @@ export default function ProfilePage() {
         {/* Drafts Modal */}
         {draftsOpen && (
           <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setDraftsOpen(false)}>
-            <div className="bg-white dark:bg-gray-900 rounded-2xl max-w-md w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-              <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Drafts</h2>
-                <button onClick={() => setDraftsOpen(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors">
-                  <FiX className="w-6 h-6 text-gray-600 dark:text-gray-400" />
+            <div className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+                <h2 className="text-xl font-bold text-gray-900">Drafts</h2>
+                <button onClick={() => setDraftsOpen(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                  <FiX className="w-6 h-6 text-gray-600" />
                 </button>
               </div>
               <div className="p-6">
                 {drafts.length > 0 ? (
                   <div className="space-y-3">
                     {drafts.map((draft) => (
-                      <div key={draft.id} className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                      <div key={draft.id} className="p-4 bg-gray-50 rounded-lg">
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex-1">
-                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">
+                            <p className="text-sm text-gray-600 mb-1">
                               {new Date(draft.createdAt).toLocaleDateString()}
                             </p>
-                            <p className="text-gray-900 dark:text-gray-100 line-clamp-2">
+                            <p className="text-gray-900 line-clamp-2">
                               {draft.caption || 'No text'}
                             </p>
                           </div>
                           <button
                             onClick={() => handleDeleteDraft(draft.id)}
-                            className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-full transition-colors"
+                            className="p-2 hover:bg-red-100 rounded-full transition-colors"
                             title="Delete draft"
                           >
-                            <FiX className="w-5 h-5 text-red-600 dark:text-red-400" />
+                            <FiX className="w-5 h-5 text-red-600" />
                           </button>
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-center text-gray-500 dark:text-gray-400 py-8">No drafts yet</p>
+                  <p className="text-center text-gray-500 py-8">No drafts yet</p>
                 )}
               </div>
             </div>
@@ -1263,11 +1499,11 @@ export default function ProfilePage() {
         {/* Collections Modal */}
         {collectionsOpen && (
           <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setCollectionsOpen(false)}>
-            <div className="bg-white dark:bg-gray-900 rounded-2xl max-w-md w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-              <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Collections</h2>
-                <button onClick={() => setCollectionsOpen(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors">
-                  <FiX className="w-6 h-6 text-gray-600 dark:text-gray-400" />
+            <div className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+                <h2 className="text-xl font-bold text-gray-900">Collections</h2>
+                <button onClick={() => setCollectionsOpen(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                  <FiX className="w-6 h-6 text-gray-600" />
                 </button>
               </div>
               <div className="p-6">
@@ -1282,7 +1518,7 @@ export default function ProfilePage() {
                             setCollectionsOpen(false);
                             nav(`/collection/${collection.id}`, { state: { collectionName: collection.name } });
                           }}
-                          className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left"
+                          className="w-full p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors text-left"
                         >
                           <div className="flex items-center gap-3">
                             {collection.thumbnailUrl ? (
@@ -1292,13 +1528,13 @@ export default function ProfilePage() {
                                 className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
                               />
                             ) : (
-                              <div className="w-16 h-16 rounded-lg bg-gray-200 dark:bg-gray-700 flex items-center justify-center flex-shrink-0">
-                                <FiBookmark className="w-8 h-8 text-gray-400 dark:text-gray-500" />
+                              <div className="w-16 h-16 rounded-lg bg-gray-200 flex items-center justify-center flex-shrink-0">
+                                <FiBookmark className="w-8 h-8 text-gray-400" />
                               </div>
                             )}
                             <div className="flex-1 min-w-0">
-                              <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-1 truncate">{collection.name}</h3>
-                              <p className="text-sm text-gray-600 dark:text-gray-400">
+                              <h3 className="font-semibold text-gray-900 mb-1 truncate">{collection.name}</h3>
+                              <p className="text-sm text-gray-600">
                                 {postCount} {postCount === 1 ? 'post' : 'posts'}
                               </p>
                             </div>
@@ -1308,7 +1544,7 @@ export default function ProfilePage() {
                     })}
                   </div>
                 ) : (
-                  <p className="text-center text-gray-500 dark:text-gray-400 py-8">No collections yet</p>
+                  <p className="text-center text-gray-500 py-8">No collections yet</p>
                 )}
               </div>
             </div>
@@ -1318,18 +1554,18 @@ export default function ProfilePage() {
         {/* Settings Modal */}
         {settingsOpen && (
           <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setSettingsOpen(false)}>
-            <div className="bg-white dark:bg-gray-900 rounded-2xl max-w-md w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-              <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Settings</h2>
-                <button onClick={() => setSettingsOpen(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors">
-                  <FiX className="w-6 h-6 text-gray-600 dark:text-gray-400" />
+            <div className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+                <h2 className="text-xl font-bold text-gray-900">Settings</h2>
+                <button onClick={() => setSettingsOpen(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                  <FiX className="w-6 h-6 text-gray-600" />
                 </button>
               </div>
               <div className="p-6 space-y-6">
                 {/* Notification Settings Section */}
                 <div>
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Push Notifications</h3>
+                    <h3 className="text-lg font-semibold text-gray-900">Push Notifications</h3>
                     {/* Test Notification Buttons */}
                     <div className="flex gap-2">
                       <button
@@ -1370,10 +1606,10 @@ export default function ProfilePage() {
                   </div>
                   
                   {/* Master Toggle */}
-                  <div className="flex items-center justify-between py-3 border-b border-gray-200 dark:border-gray-700 mb-4">
+                  <div className="flex items-center justify-between py-3 border-b border-gray-200 mb-4">
                     <div className="flex-1">
-                      <p className="font-medium text-gray-900 dark:text-gray-100">Enable Notifications</p>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">Receive push notifications on this device</p>
+                      <p className="font-medium text-gray-900">Enable Notifications</p>
+                      <p className="text-sm text-gray-500">Receive push notifications on this device</p>
                     </div>
                     <button
                       onClick={async () => {
@@ -1410,7 +1646,7 @@ export default function ProfilePage() {
                       }}
                       disabled={isInitializingNotifications}
                       className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 ${
-                        notificationPrefs.enabled ? 'bg-brand-600' : 'bg-gray-200 dark:bg-gray-700'
+                        notificationPrefs.enabled ? 'bg-brand-600' : 'bg-gray-200'
                       }`}
                     >
                       <span
@@ -1529,7 +1765,7 @@ export default function ProfilePage() {
                 </div>
 
                 {/* Logout Button */}
-                <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+                <div className="pt-4 border-t border-gray-200">
                   <button
                     onClick={() => {
                       logout();
