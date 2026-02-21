@@ -1,5 +1,5 @@
 import React from 'react';
-import { FiX, FiCamera, FiImage, FiLayers } from 'react-icons/fi';
+import { FiX, FiCamera, FiImage, FiLayers, FiType } from 'react-icons/fi';
 import Avatar from './Avatar';
 import { useAuthOptional } from '../context/Auth';
 
@@ -93,6 +93,22 @@ export default function CreateModal({ isOpen, onClose, onNavigate }: CreateModal
                             <div className="font-semibold text-gray-900 dark:text-gray-100">Create Post</div>
                             <div className="text-sm text-gray-600 dark:text-gray-400">
                                 Share to your newsfeed with text, photos, or videos
+                            </div>
+                        </div>
+                    </button>
+
+                    {/* Text only post (replaces Reel in create menu) */}
+                    <button
+                        onClick={() => handleNavigate('/create/text-only')}
+                        className="w-full flex items-center gap-4 p-4 rounded-xl bg-gray-50 dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                    >
+                        <div className="w-14 h-14 rounded-full bg-gray-200 dark:bg-gray-800 flex items-center justify-center">
+                            <FiType className="w-6 h-6 text-gray-700 dark:text-gray-300" />
+                        </div>
+                        <div className="flex-1 text-left">
+                            <div className="font-semibold text-gray-900 dark:text-gray-100">Text only post</div>
+                            <div className="text-sm text-gray-600 dark:text-gray-400">
+                                Share a text-only post to your newsfeed
                             </div>
                         </div>
                     </button>

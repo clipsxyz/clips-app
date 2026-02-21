@@ -533,13 +533,12 @@ export default function CreatePage() {
 
         setIsUploading(true);
         try {
-            // Build editTimeline for hybrid editing pipeline (if we have trim data or video)
+            // Build editTimeline only for multi-clip (no video editing/trim for single video)
             let editTimeline: any = undefined;
             if (mediaType === 'video' && selectedMedia) {
-                // Check if we have multiple clips
                 const clips = locationState?.clips;
-                
-                if (clips && clips.length > 0) {
+                // Only use edit pipeline for multiple clips; single video is posted as-is with stickers/filters only
+                if (clips && clips.length > 1) {
                     // Multi-clip timeline
                     const timelineClips = [];
                     let currentStartTime = 0;
@@ -602,59 +601,8 @@ export default function CreatePage() {
                         overlays: overlays,
                         totalDuration: totalDuration
                     };
-                } else if (locationState?.trimStart !== undefined || locationState?.trimEnd !== undefined) {
-                    // Single clip with trim
-                    const trimStart = locationState?.trimStart ?? 0;
-                    const trimEnd = locationState?.trimEnd ?? (locationState?.videoDuration ?? 0);
-                    const originalDuration = locationState?.videoDuration ?? 0;
-                    const clipDuration = Math.min(trimEnd - trimStart, 90); // Enforce 90s max
-                    
-                    // Get speed and reverse values from locationState
-                    const speed = (locationState as { speed?: number })?.speed ?? 1.0;
-                    const reverse = (locationState as { reverse?: boolean })?.reverse ?? false;
-                    
-                    // Include stickers as overlays with timing
-                    const overlays = (stickers || []).map(sticker => ({
-                        id: sticker.id,
-                        type: 'sticker' as const,
-                        stickerId: sticker.stickerId,
-                        sticker: sticker.sticker,
-                        x: sticker.x,
-                        y: sticker.y,
-                        scale: sticker.scale,
-                        rotation: sticker.rotation,
-                        opacity: sticker.opacity,
-                        startTime: sticker.startTime ? sticker.startTime / 1000 : 0, // Convert ms to seconds
-                        endTime: sticker.endTime ? sticker.endTime / 1000 : clipDuration, // Convert ms to seconds
-                        // Text content if it's a text sticker
-                        textContent: (sticker as any).textContent,
-                        textColor: (sticker as any).textColor,
-                        fontSize: (sticker as any).fontSize
-                    }));
-
-                    editTimeline = {
-                        clips: [{
-                            id: `clip-${Date.now()}`,
-                            mediaUrl: selectedMedia,
-                            type: 'video',
-                            startTime: 0, // Position in timeline (always 0 for single clip)
-                            duration: clipDuration,
-                            trimStart: trimStart,
-                            trimEnd: trimEnd,
-                            speed: speed,
-                            reverse: reverse,
-                            originalDuration: originalDuration
-                        }],
-                        transitions: [],
-                        overlays: overlays,
-                        voiceoverUrl: locationState?.voiceoverUrl, // Voiceover audio
-                        greenScreen: locationState?.greenScreenEnabled ? {
-                            enabled: true,
-                            backgroundUrl: locationState?.greenScreenBackgroundUrl
-                        } : undefined,
-                        totalDuration: clipDuration
-                    };
                 }
+                // Single video: no editTimeline (no trim); stickers and filters only
             }
 
             // For media with blob URLs, we need a persistent URL before sending to Laravel:
@@ -1228,7 +1176,10 @@ export default function CreatePage() {
                                             video.style.visibility = 'visible';
                                         }}
                                         onError={(e) => {
-                                            console.error('Video error:', e.currentTarget.error);
+                                            const err = e.currentTarget.error;
+                                            console.error('Video error:', err);
+                                            showToast('Video could not be loaded. It may be unsupported or the file is missing.');
+                                            removeMedia();
                                         }}
                                         onLoadStart={() => {
                                             console.log('Video load started');

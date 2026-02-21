@@ -193,7 +193,7 @@ export default function App() {
         <div className={isLoginPage ? 'flex-1 min-h-0 overflow-hidden flex flex-col' : undefined}>
           <Outlet context={{ activeTab, setActiveTab, customLocation, setCustomLocation }} />
         </div>
-        {loc.pathname !== '/discover' && loc.pathname !== '/create/filters' && loc.pathname !== '/create/instant' && loc.pathname !== '/payment' && loc.pathname !== '/clip' && loc.pathname !== '/create' && loc.pathname !== '/template-editor' && loc.pathname !== '/login' && (
+        {loc.pathname !== '/discover' && loc.pathname !== '/create/filters' && loc.pathname !== '/create/instant' && loc.pathname !== '/create/gallery-preview' && loc.pathname !== '/payment' && loc.pathname !== '/clip' && loc.pathname !== '/create' && loc.pathname !== '/template-editor' && loc.pathname !== '/login' && (
           <BottomNav onCreateClick={() => navigate('/create/instant')} />
         )}
       </main>

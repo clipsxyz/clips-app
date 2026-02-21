@@ -1,11 +1,12 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FiArrowLeft, FiCircle, FiX, FiCheck, FiPlay, FiPause, FiRotateCw, FiMic, FiMicOff, FiImage, FiMusic, FiLayers, FiZap, FiGrid, FiUser, FiFilter, FiRefreshCw, FiEdit3, FiSearch, FiBookmark, FiUpload, FiSliders, FiDroplet, FiVideo, FiVideoOff, FiCopy, FiSave, FiPlus, FiType } from 'react-icons/fi';
+import { FiArrowLeft, FiCircle, FiX, FiCheck, FiPlay, FiPause, FiRotateCw, FiMic, FiMicOff, FiImage, FiMusic, FiLayers, FiZap, FiGrid, FiUser, FiFilter, FiRefreshCw, FiEdit3, FiSearch, FiBookmark, FiUpload, FiSliders, FiDroplet, FiVideo, FiVideoOff, FiCopy, FiSave, FiPlus, FiType, FiCamera } from 'react-icons/fi';
 import { saveDraft } from '../api/drafts';
 import { getTemplate } from '../api/templates';
 import { TEMPLATE_IDS } from '../constants';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
+import { setGalleryPreviewMedia } from '../utils/galleryPreviewCache';
 
 export default function InstantCreatePage() {
     const navigate = useNavigate();
@@ -36,9 +37,8 @@ export default function InstantCreatePage() {
     const [countdown, setCountdown] = React.useState<number | null>(null);
     const [greenEnabled, setGreenEnabled] = React.useState(false);
     const [bgUrl, setBgUrl] = React.useState<string | null>(null);
-    const [showGreenScreenMenu, setShowGreenScreenMenu] = React.useState(false);
-    const bgInputRef = React.useRef<HTMLInputElement | null>(null);
     const cameraRollInputRef = React.useRef<HTMLInputElement | null>(null);
+    const bgInputRef = React.useRef<HTMLInputElement | null>(null);
     const greenCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
     const segRef = React.useRef<any>(null);
     const segTimerRef = React.useRef<number | null>(null);
@@ -452,21 +452,6 @@ export default function InstantCreatePage() {
         };
     }, [greenEnabled, bgUrl]);
 
-    // Close green screen menu when clicking outside
-    React.useEffect(() => {
-        if (!showGreenScreenMenu) return;
-        
-        const handleClickOutside = (e: MouseEvent) => {
-            const target = e.target as HTMLElement;
-            if (!target.closest('.green-screen-menu-container')) {
-                setShowGreenScreenMenu(false);
-            }
-        };
-        
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [showGreenScreenMenu]);
-
     React.useEffect(() => {
         isMountedRef.current = true;
         
@@ -660,21 +645,20 @@ export default function InstantCreatePage() {
                                     videoRef.current.pause();
                                     videoRef.current.srcObject = null;
                                 }
-                                navigate('/create/filters', {
+                                navigate('/create', {
                                     state: {
                                         videoUrl: clipsToPass[0].url,
                                         videoDuration: clipsToPass[0].duration,
-                                        trimStart: clipsToPass[0].trimStart,
-                                        trimEnd: clipsToPass[0].trimEnd,
-                                        speed: clipsToPass[0].speed,
-                                        reverse: clipsToPass[0].reverse,
-                                        selectedFilter: selectedFilter,
-                                        brightness: brightness,
-                                        contrast: contrast,
-                                        saturation: saturation,
-                                        hue: hue,
-                                        clips: clipsToPass,
-                                        mediaType: 'video', // Recorded videos
+                                        filterInfo: {
+                                            active: selectedFilter,
+                                            brightness,
+                                            contrast,
+                                            saturation,
+                                            hue,
+                                            exportFailed: false
+                                        },
+                                        filtered: selectedFilter !== 'None' || brightness !== 1 || contrast !== 1 || saturation !== 1 || hue !== 0,
+                                        mediaType: 'video',
                                         musicTrackId: selectedMusicTrackId
                                     }
                                 });
@@ -1032,23 +1016,22 @@ export default function InstantCreatePage() {
 
         // For now, pass the first clip's URL for preview in filters page
         // The full clips array will be passed through to CreatePage
-        navigate('/create/filters', { 
-            state: { 
-                videoUrl: clipsToPass[0].url, // First clip for preview
+        navigate('/create', {
+            state: {
+                videoUrl: clipsToPass[0].url,
                 videoDuration: clipsToPass[0].duration,
-                trimStart: clipsToPass[0].trimStart,
-                trimEnd: clipsToPass[0].trimEnd,
-                speed: clipsToPass[0].speed,
-                reverse: clipsToPass[0].reverse,
-                selectedFilter: selectedFilter,
-                brightness: brightness,
-                contrast: contrast,
-                saturation: saturation,
-                hue: hue,
-                clips: clipsToPass, // Pass all clips for multi-clip support
-                mediaType: 'video', // Recorded videos
+                filterInfo: {
+                    active: selectedFilter,
+                    brightness,
+                    contrast,
+                    saturation,
+                    hue,
+                    exportFailed: false
+                },
+                filtered: selectedFilter !== 'None' || brightness !== 1 || contrast !== 1 || saturation !== 1 || hue !== 0,
+                mediaType: 'video',
                 musicTrackId: selectedMusicTrackId
-            } 
+            }
         });
     }
 
@@ -1281,130 +1264,23 @@ export default function InstantCreatePage() {
                     >
                         <span className="text-xs font-semibold">G</span>
                     </button>
-                    <div className="relative green-screen-menu-container">
-                        <button
-                            title={greenEnabled ? 'Green screen options' : 'Enable green screen'}
-                            className={`p-2 rounded-lg ${greenEnabled ? 'bg-green-600 shadow-lg shadow-green-500/50' : 'bg-black/60'} text-white hover:bg-green-600/80 active:scale-95 transition-all duration-200`}
-                            onClick={() => setShowGreenScreenMenu(!showGreenScreenMenu)}
-                        >
-                            <span className="text-xs font-semibold">GS</span>
-                        </button>
-                        
-                        {/* 60 Second Timer - Circular Progress Bar (Absolute positioned below GS icon) */}
+                    {/* 60 Second Timer - Circular Progress Bar when recording */}
+                    <div className="relative">
                         {recording && (
                             <div className="absolute top-12 left-1/2 -translate-x-1/2 w-12 h-12 z-50">
                                 <svg className="w-12 h-12 transform -rotate-90" viewBox="0 0 48 48">
-                                    {/* Background circle */}
+                                    <circle cx="24" cy="24" r="20" stroke="rgba(255, 255, 255, 0.2)" strokeWidth="4" fill="none" />
                                     <circle
-                                        cx="24"
-                                        cy="24"
-                                        r="20"
-                                        stroke="rgba(255, 255, 255, 0.2)"
-                                        strokeWidth="4"
-                                        fill="none"
-                                    />
-                                    {/* Progress circle */}
-                                    <circle
-                                        cx="24"
-                                        cy="24"
-                                        r="20"
-                                        stroke="rgba(255, 255, 255, 0.9)"
-                                        strokeWidth="4"
-                                        fill="none"
+                                        cx="24" cy="24" r="20"
+                                        stroke="rgba(255, 255, 255, 0.9)" strokeWidth="4" fill="none"
                                         strokeDasharray={`${2 * Math.PI * 20}`}
                                         strokeDashoffset={`${2 * Math.PI * 20 * (1 - (60 - recordingTime) / 60)}`}
                                         strokeLinecap="round"
                                     />
                                 </svg>
-                                {/* Countdown text in center */}
                                 <div className="absolute inset-0 flex items-center justify-center">
                                     <span className="text-white text-xs font-bold">{recordingTime}</span>
                                 </div>
-                            </div>
-                        )}
-                        
-                        {/* Hidden file input for green screen background */}
-                        <input
-                            ref={bgInputRef}
-                            type="file"
-                            accept="image/*,video/*"
-                            className="hidden"
-                            onChange={(e) => {
-                                const f = e.target.files?.[0];
-                                if (!f) return;
-                                const url = URL.createObjectURL(f);
-                                console.log('GS: File selected', { type: f.type, size: f.size, name: f.name });
-                                setBgUrl(url);
-                                setGreenEnabled(true);
-                                setShowGreenScreenMenu(false);
-                            }}
-                        />
-                        
-                        {/* Green Screen Menu */}
-                        {showGreenScreenMenu && (
-                            <div className="absolute top-12 right-0 z-50 bg-black/90 backdrop-blur-sm rounded-xl border border-white/20 shadow-2xl p-2 min-w-[200px] green-screen-menu-container">
-                                {!greenEnabled ? (
-                                    <>
-                                        <button
-                                            onClick={() => {
-                                                bgInputRef.current?.click();
-                                                setShowGreenScreenMenu(false);
-                                            }}
-                                            className="w-full p-3 rounded-lg bg-gray-800/80 hover:bg-gray-700 text-white flex items-center gap-3 transition-all duration-200 text-left"
-                                        >
-                                            <FiImage className="w-5 h-5 text-green-400" />
-                                            <span className="text-sm font-medium">Choose Image</span>
-                                        </button>
-                                        <button
-                                            onClick={() => {
-                                                const list = presets.current;
-                                                setBgUrl(list[presetIdxRef.current]);
-                                                setGreenEnabled(true);
-                                                setShowGreenScreenMenu(false);
-                                            }}
-                                            className="w-full p-3 rounded-lg bg-gray-800/80 hover:bg-gray-700 text-white flex items-center gap-3 transition-all duration-200 text-left mt-2"
-                                        >
-                                            <FiDroplet className="w-5 h-5 text-purple-400" />
-                                            <span className="text-sm font-medium">Use Preset</span>
-                                        </button>
-                                    </>
-                                ) : (
-                                    <>
-                                        <button
-                                            onClick={() => {
-                                                bgInputRef.current?.click();
-                                                setShowGreenScreenMenu(false);
-                                            }}
-                                            className="w-full p-3 rounded-lg bg-gray-800/80 hover:bg-gray-700 text-white flex items-center gap-3 transition-all duration-200 text-left"
-                                        >
-                                            <FiImage className="w-5 h-5 text-green-400" />
-                                            <span className="text-sm font-medium">Change Image</span>
-                                        </button>
-                                        <button
-                                            onClick={() => {
-                                                const list = presets.current;
-                                                presetIdxRef.current = (presetIdxRef.current + 1) % list.length;
-                                                setBgUrl(list[presetIdxRef.current]);
-                                                setShowGreenScreenMenu(false);
-                                            }}
-                                            className="w-full p-3 rounded-lg bg-gray-800/80 hover:bg-gray-700 text-white flex items-center gap-3 transition-all duration-200 text-left mt-2"
-                                        >
-                                            <FiDroplet className="w-5 h-5 text-purple-400" />
-                                            <span className="text-sm font-medium">Next Preset</span>
-                                        </button>
-                                        <button
-                                            onClick={() => {
-                                                setGreenEnabled(false);
-                                                setBgUrl(null);
-                                                setShowGreenScreenMenu(false);
-                                            }}
-                                            className="w-full p-3 rounded-lg bg-red-600/80 hover:bg-red-600 text-white flex items-center gap-3 transition-all duration-200 text-left mt-2"
-                                        >
-                                            <FiX className="w-5 h-5" />
-                                            <span className="text-sm font-medium">Disable</span>
-                                        </button>
-                                    </>
-                                )}
                             </div>
                         )}
                     </div>
@@ -1448,6 +1324,31 @@ export default function InstantCreatePage() {
                                 className="absolute bottom-20 right-4 w-32 h-48 rounded-xl border-2 border-white/30 shadow-2xl object-cover z-20"
                             />
                         )}
+
+                        {/* Footer: Gallery, Stories, Text - small dashed icons */}
+                        <div className="absolute bottom-0 left-0 right-0 z-30 flex items-center justify-between px-8 py-2.5 bg-gradient-to-t from-black/60 to-transparent border-t border-white/5">
+                            <button
+                                onClick={() => cameraRollInputRef.current?.click()}
+                                className="flex flex-col items-center gap-0.5 p-2 rounded-xl border border-dashed border-white/60 bg-black/20 backdrop-blur-sm text-white/90 hover:bg-white/15 hover:border-white/80 transition-colors"
+                            >
+                                <FiUpload className="w-4 h-4" />
+                                <span className="text-[9px] font-medium">Gallery</span>
+                            </button>
+                            <button
+                                onClick={() => navigate('/clip')}
+                                className="flex flex-col items-center gap-0.5 p-2 rounded-xl border border-dashed border-white/60 bg-black/20 backdrop-blur-sm text-white/90 hover:bg-white/15 hover:border-white/80 transition-colors"
+                            >
+                                <FiCamera className="w-4 h-4" />
+                                <span className="text-[9px] font-medium">Stories</span>
+                            </button>
+                            <button
+                                onClick={() => navigate('/create/text-only')}
+                                className="flex flex-col items-center gap-0.5 p-2 rounded-xl border border-dashed border-white/60 bg-black/20 backdrop-blur-sm text-white/90 hover:bg-white/15 hover:border-white/80 transition-colors"
+                            >
+                                <FiType className="w-4 h-4" />
+                                <span className="text-[9px] font-medium">Text</span>
+                            </button>
+                        </div>
                     </>
                 ) : (
                     <div
@@ -1544,19 +1445,6 @@ export default function InstantCreatePage() {
                                     <div className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-100"
                                         style={{ width: `${videoDuration > 0 ? (currentTime / videoDuration) * 100 : 0}%` }}
                                     />
-                                    {/* Trim markers */}
-                                    {videoDuration > 0 && (
-                                        <>
-                                            <div 
-                                                className="absolute top-0 bottom-0 w-0.5 bg-yellow-400 shadow-lg"
-                                                style={{ left: `${(trimStart / videoDuration) * 100}%` }}
-                                            />
-                                            <div 
-                                                className="absolute top-0 bottom-0 w-0.5 bg-yellow-400 shadow-lg"
-                                                style={{ left: `${((trimEnd || videoDuration) / videoDuration) * 100}%` }}
-                                            />
-                                        </>
-                                    )}
                                 </div>
                             </div>
 
@@ -1751,79 +1639,9 @@ export default function InstantCreatePage() {
                             <path d="M17.77 10.32c-.77-.32-1.2-.5-1.2-.5L18 9.06c1.84-.96 2.53-3.23 1.56-5.06s-3.24-2.53-5.07-1.56L6 6.94c-1.29.68-2.07 2.04-2 3.49.07 1.42.93 2.67 2.22 3.25.03.01 1.2.5 1.2.5L6 14.94c-1.84.96-2.53 3.23-1.56 5.06.97 1.83 3.24 2.53 5.07 1.56l8.5-4.5c1.29-.68 2.06-2.04 1.99-3.49-.06-1.42-.92-2.67-2.21-3.25zM10 14.65v-5.3L15 12l-5 2.65z"/>
                         </svg>
                     </button>
-                    
-                    {/* Text Icon - Underneath Shorts Icon */}
-                    <button
-                        onClick={() => {
-                            navigate('/create/text-only');
-                        }}
-                        className="w-10 h-10 rounded-lg bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/20 hover:bg-black/80 active:scale-95 transition-all cursor-pointer"
-                        aria-label="Create text post"
-                    >
-                        <FiType className="w-6 h-6 text-white" />
-                    </button>
                 </div>
             )}
 
-            {/* Platform Icons Footer - Centered 3 Options */}
-            {!previewUrl && (
-                <div className="absolute bottom-0 left-0 right-0 z-50 flex items-center justify-center gap-6 pb-4 bg-gradient-to-t from-black/80 via-black/60 to-transparent pt-6">
-                    {/* Gazetteer Options - Carousel */}
-                    <button
-                        onClick={async () => {
-                            try {
-                                const gazetteerTemplate = await getTemplate(TEMPLATE_IDS.GAZETTEER);
-                                if (gazetteerTemplate) {
-                                    navigate('/template-editor', {
-                                        state: { template: gazetteerTemplate }
-                                    });
-                                } else {
-                                    Swal.fire(bottomSheet({
-                                        title: 'Error',
-                                        message: 'Could not load Gazetteer template',
-                                        icon: 'alert',
-                                    }));
-                                }
-                            } catch (error) {
-                                console.error('Error loading Gazetteer template:', error);
-                                Swal.fire(bottomSheet({
-                                    title: 'Error',
-                                    message: 'Failed to load Gazetteer template',
-                                    icon: 'alert',
-                                }));
-                            }
-                        }}
-                        className="text-white text-sm font-medium hover:opacity-70 transition-opacity cursor-pointer"
-                        aria-label="Create a carousel"
-                    >
-                        Carousel
-                    </button>
-                    
-                    {/* Gazetteer Options - Scenes */}
-                    <button
-                        onClick={() => {
-                            gazetteerCameraRollInputRef.current?.click();
-                        }}
-                        className="text-white text-sm font-medium hover:opacity-70 transition-opacity cursor-pointer"
-                        aria-label="Create a scenes"
-                    >
-                        Scenes
-                    </button>
-                    
-                    {/* Gazetteer Options - Stories */}
-                    <button
-                        onClick={() => {
-                            navigate('/clip');
-                        }}
-                        className="text-white text-sm font-medium hover:opacity-70 transition-opacity cursor-pointer"
-                        aria-label="Create stories"
-                    >
-                        Stories
-                    </button>
-                </div>
-            )}
-
-            {/* No preview controls - auto-navigates to edit page */}
 
 
             {/* Effects Card - Slides up from bottom */}
@@ -1897,21 +1715,20 @@ export default function InstantCreatePage() {
                                                 videoRef.current.srcObject = null;
                                             }
 
-                                            navigate('/create/filters', {
+                                            navigate('/create', {
                                                 state: {
                                                     videoUrl: clipsToPass[0].url,
                                                     videoDuration: clipsToPass[0].duration,
-                                                    trimStart: clipsToPass[0].trimStart,
-                                                    trimEnd: clipsToPass[0].trimEnd,
-                                                    speed: clipsToPass[0].speed,
-                                                    reverse: clipsToPass[0].reverse,
-                                                    selectedFilter: selectedFilter,
-                                                    brightness: brightness,
-                                                    contrast: contrast,
-                                                    saturation: saturation,
-                                                    hue: hue,
-                                                    clips: clipsToPass,
-                                                    mediaType: 'video', // From Effects Card Edit button
+                                                    filterInfo: {
+                                                        active: selectedFilter,
+                                                        brightness,
+                                                        contrast,
+                                                        saturation,
+                                                        hue,
+                                                        exportFailed: false
+                                                    },
+                                                    filtered: selectedFilter !== 'None' || brightness !== 1 || contrast !== 1 || saturation !== 1 || hue !== 0,
+                                                    mediaType: 'video',
                                                     musicTrackId: selectedMusicTrackId
                                                 }
                                             });
@@ -2569,13 +2386,12 @@ export default function InstantCreatePage() {
                         }
                     }
                     
-                    // Navigate to filters page with clips
+                    // Navigate to create page with first clip (no video editing)
                     if (clips.length > 0) {
-                        navigate('/create/filters', {
+                        navigate('/create', {
                             state: {
-                                videoUrl: clips[0].url, // Required for backward compatibility
+                                videoUrl: clips[0].url,
                                 videoDuration: clips[0].duration,
-                                clips: clips,
                                 mediaType: clips[0].blob?.type.startsWith('image/') ? 'image' : 'video',
                                 fromGazetteer: true
                             }
@@ -2657,48 +2473,35 @@ export default function InstantCreatePage() {
                                             setTrimStart(0);
                                             setTrimEnd(newClip.duration);
                                             
-                                            // Auto-navigate to edit page after selecting from camera roll
+                                            // Navigate to gallery preview (filters + stickers, no music/edits)
                                             setTimeout(() => {
                                                 const clipsToPass = updated.length > 0 ? updated : [newClip];
                                                 if (clipsToPass.length > 0) {
-                                                    console.log('Navigating to edit page with clips:', clipsToPass);
-                                                    
-                                                    // Stop camera stream before navigating
                                                     if (streamRef.current) {
                                                         streamRef.current.getTracks().forEach(t => t.stop());
                                                         streamRef.current = null;
                                                     }
-                                                    // Stop video playback
                                                     if (videoRef.current) {
                                                         videoRef.current.pause();
                                                         videoRef.current.srcObject = null;
                                                     }
-                                                    navigate('/create/filters', {
+                                                    const mediaType = file.type.startsWith('image/') ? 'image' : 'video';
+                                                    setGalleryPreviewMedia(file, mediaType, clipsToPass[0].duration);
+                                                    navigate('/create/gallery-preview', {
                                                         state: {
-                                                            videoUrl: clipsToPass[0].url,
-                                                            videoDuration: clipsToPass[0].duration,
-                                                            trimStart: clipsToPass[0].trimStart,
-                                                            trimEnd: clipsToPass[0].trimEnd,
-                                                            speed: clipsToPass[0].speed,
-                                                            reverse: clipsToPass[0].reverse,
-                                                            selectedFilter: selectedFilter,
-                                                            brightness: brightness,
-                                                            contrast: contrast,
-                                                            saturation: saturation,
-                                                            hue: hue,
-                                                            clips: clipsToPass,
-                                                            mediaType: file.type.startsWith('image/') ? 'image' : 'video',
-                                                            musicTrackId: selectedMusicTrackId
+                                                            mediaUrl: clipsToPass[0].url,
+                                                            mediaType,
+                                                            videoDuration: clipsToPass[0].duration
                                                         }
                                                     });
                                                 }
-                                            }, 500); // Small delay to ensure state is set
+                                            }, 500);
                                         }
                                         return updated;
                                     });
                                     resolve();
                                 };
-                                
+
                                 tempVideo.onloadedmetadata = handleLoaded;
                                 tempVideo.oncanplay = () => {
                                     if (!resolved) {
@@ -2744,22 +2547,20 @@ export default function InstantCreatePage() {
                                                 setTrimEnd(newClip.duration);
                                                 
                                                 setTimeout(() => {
-                                                    navigate('/create/filters', {
+                                                    if (streamRef.current) {
+                                                        streamRef.current.getTracks().forEach(t => t.stop());
+                                                        streamRef.current = null;
+                                                    }
+                                                    if (videoRef.current) {
+                                                        videoRef.current.pause();
+                                                        videoRef.current.srcObject = null;
+                                                    }
+                                                    setGalleryPreviewMedia(file, 'video', newClip.duration);
+                                                    navigate('/create/gallery-preview', {
                                                         state: {
-                                                            videoUrl: newClip.url,
-                                                            videoDuration: newClip.duration,
-                                                            trimStart: 0,
-                                                            trimEnd: newClip.duration,
-                                                            speed: 1.0,
-                                                            reverse: false,
-                                                            selectedFilter: selectedFilter,
-                                                            brightness: brightness,
-                                                            contrast: contrast,
-                                                            saturation: saturation,
-                                                            hue: hue,
-                                                            clips: [newClip],
-                                                            mediaType: file.type.startsWith('image/') ? 'image' : 'video',
-                                                            musicTrackId: selectedMusicTrackId
+                                                            mediaUrl: newClip.url,
+                                                            mediaType: 'video',
+                                                            videoDuration: newClip.duration
                                                         }
                                                     });
                                                 }, 500);
@@ -2800,42 +2601,28 @@ export default function InstantCreatePage() {
                                     setTrimStart(0);
                                     setTrimEnd(newClip.duration);
                                     
-                                    // Auto-navigate to edit page after selecting from camera roll
+                                    // Navigate to gallery preview
                                     setTimeout(() => {
                                         const clipsToPass = updated.length > 0 ? updated : [newClip];
                                         if (clipsToPass.length > 0) {
-                                            console.log('Navigating to edit page with image clip:', clipsToPass);
-                                            
-                                            // Stop camera stream before navigating
                                             if (streamRef.current) {
                                                 streamRef.current.getTracks().forEach(t => t.stop());
                                                 streamRef.current = null;
                                             }
-                                            // Stop video playback
                                             if (videoRef.current) {
                                                 videoRef.current.pause();
                                                 videoRef.current.srcObject = null;
                                             }
-                                            navigate('/create/filters', {
+                                            setGalleryPreviewMedia(file, 'image', clipsToPass[0].duration);
+                                            navigate('/create/gallery-preview', {
                                                 state: {
-                                                    videoUrl: clipsToPass[0].url,
-                                                    videoDuration: clipsToPass[0].duration,
-                                                    trimStart: clipsToPass[0].trimStart,
-                                                    trimEnd: clipsToPass[0].trimEnd,
-                                                    speed: clipsToPass[0].speed,
-                                                    reverse: clipsToPass[0].reverse,
-                                                    selectedFilter: selectedFilter,
-                                                    brightness: brightness,
-                                                    contrast: contrast,
-                                                    saturation: saturation,
-                                                    hue: hue,
-                                                    clips: clipsToPass,
-                                                    mediaType: file.type.startsWith('image/') ? 'image' : 'video',
-                                                    musicTrackId: selectedMusicTrackId
+                                                    mediaUrl: clipsToPass[0].url,
+                                                    mediaType: 'image',
+                                                    videoDuration: clipsToPass[0].duration
                                                 }
                                             });
                                         }
-                                    }, 500); // Small delay to ensure state is set
+                                    }, 500);
                                 }
                                 return updated;
                             });
