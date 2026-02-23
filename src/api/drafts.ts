@@ -3,6 +3,7 @@ import type { Post } from '../types';
 
 export interface Draft {
   id: string;
+  /** Persistent media URL (data URL or http(s)); supports both image and video. Empty for text-only drafts. */
   videoUrl: string;
   videoDuration: number;
   createdAt: number;
@@ -12,6 +13,18 @@ export interface Draft {
   tags?: string[];
   trimStart?: number;
   trimEnd?: number;
+  /** When saving from gallery: 'image' | 'video'. Omit = treat as video (InstantCreate). */
+  mediaType?: 'image' | 'video';
+  /** Optional full carousel for multi-media drafts. */
+  mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>;
+  /** True when this draft is text-only (no media). */
+  isTextOnly?: boolean;
+  /** Main post text for text-only drafts. */
+  textBody?: string;
+  /** Venue for text-only (and other) drafts. */
+  venue?: string;
+  /** Tagged user handles for text-only (and other) drafts. */
+  taggedUsers?: string[];
 }
 
 const DRAFTS_KEY = 'user_drafts';

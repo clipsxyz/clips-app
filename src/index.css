@@ -266,6 +266,23 @@ video {
   }
 }
 
+/* Metadata carousel (location / venue / timestamp) transition options */
+@keyframes metadataFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes metadataSlideUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes metadataSlideLeft {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.metadata-carousel-fade { animation: metadataFadeIn 0.85s ease-out; }
+.metadata-carousel-slide-up { animation: metadataSlideUp 0.85s ease-out; }
+.metadata-carousel-slide-left { animation: metadataSlideLeft 0.85s ease-out; }
+
 /* Respect users who prefer less motion */
 @media (prefers-reduced-motion: reduce) {
   * {
@@ -525,34 +542,47 @@ video {
   }
 }
 
-/* Heart pop-up animation for double-tap like */
+/* YouTube Shorts-style: big thumbs-up flash (scale + fade; position is centered by parent) */
 @keyframes heartPopUp {
   0% {
     opacity: 0;
-    transform: translate(-50%, -50%) scale(0);
+    transform: scale(0.3);
   }
-
-  20% {
+  12% {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1.2);
+    transform: scale(1.08);
   }
-
-  40% {
-    transform: translate(-50%, -50%) scale(0.95);
-  }
-
-  60% {
-    transform: translate(-50%, -50%) scale(1.05);
-  }
-
-  80% {
+  25% {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
+    transform: scale(1);
   }
-
+  70% {
+    opacity: 1;
+    transform: scale(1);
+  }
   100% {
     opacity: 0;
-    transform: translate(-50%, -50%) scale(0.8);
+    transform: scale(0.95);
+  }
+}
+
+/* Radiating lines burst (red/pink) around thumb - YouTube Shorts style */
+@keyframes shortsThumbGlow {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.4);
+  }
+  18% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.05);
+  }
+  50% {
+    opacity: 0.95;
+    transform: translate(-50%, -50%) scale(1.15);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.25);
   }
 }
 
@@ -756,6 +786,7 @@ video {
 .swal2-container:has(.swal-bottom-sheet-popup) {
   align-items: flex-end !important;
   padding-bottom: 0 !important;
+  z-index: 99999 !important;
 }
 
 .swal-bottom-sheet-popup {

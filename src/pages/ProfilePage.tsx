@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import Avatar from '../components/Avatar';
-import { FiCamera, FiBookmark, FiMessageCircle, FiLock, FiUnlock, FiX, FiUser, FiMapPin, FiHeart, FiGlobe, FiEdit3, FiLink2, FiUsers, FiUserCheck, FiPlus, FiTwitter, FiInstagram, FiVideo, FiSettings, FiFileText } from 'react-icons/fi';
+import { FiCamera, FiBookmark, FiMessageCircle, FiLock, FiUnlock, FiX, FiUser, FiMapPin, FiHeart, FiGlobe, FiEdit3, FiLink2, FiUsers, FiUserCheck, FiPlus, FiTwitter, FiInstagram, FiVideo, FiSettings, FiFileText, FiLayers, FiType } from 'react-icons/fi';
 import Flag from '../components/Flag';
 import { getUserCollections } from '../api/collections';
 import type { Collection } from '../types';
@@ -417,6 +417,43 @@ export default function ProfilePage() {
     }
   }
 
+  function handleOpenDraft(draft: Draft) {
+    setDraftsOpen(false);
+
+    if (draft.isTextOnly) {
+      nav('/create/text-only', {
+        state: {
+          fromDraft: true,
+          draftId: draft.id,
+          text: draft.textBody ?? '',
+          location: draft.location ?? '',
+          venue: draft.venue ?? '',
+          taggedUsers: draft.taggedUsers ?? [],
+        },
+      });
+      return;
+    }
+
+    if (!draft.videoUrl) return;
+
+    const firstItem = draft.mediaItems && draft.mediaItems.length > 0 ? draft.mediaItems[0] : null;
+    const mediaType: 'image' | 'video' =
+      firstItem?.type ?? draft.mediaType ?? (draft.videoUrl.startsWith('data:image/') ? 'image' : 'video');
+
+    nav('/create/gallery-preview', {
+      state: {
+        fromDraft: true,
+        draftId: draft.id,
+        draftMediaUrl: draft.videoUrl,
+        draftMediaType: mediaType,
+        draftCaption: draft.caption ?? '',
+        draftLocation: draft.location ?? '',
+        draftVideoDuration: draft.videoDuration ?? 0,
+        draftMediaItems: draft.mediaItems ?? undefined,
+      },
+    });
+  }
+
   const handleTogglePrivacy = async () => {
     if (isTogglingPrivacy || !user) return;
     
@@ -607,6 +644,8 @@ export default function ProfilePage() {
                 // Close other modals first
                 setSettingsOpen(false);
                 setCollectionsOpen(false);
+                // Refresh drafts each time before opening
+                loadDrafts();
                 // Then open drafts
                 setDraftsOpen(true);
               }}
@@ -1411,25 +1450,57 @@ export default function ProfilePage() {
                 {drafts.length > 0 ? (
                   <div className="space-y-3">
                     {drafts.map((draft) => (
-                      <div key={draft.id} className="p-4 bg-gray-50 rounded-lg">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1">
-                            <p className="text-sm text-gray-600 mb-1">
-                              {new Date(draft.createdAt).toLocaleDateString()}
-                            </p>
-                            <p className="text-gray-900 line-clamp-2">
-                              {draft.caption || 'No text'}
-                            </p>
+                      <button
+                        key={draft.id}
+                        type="button"
+                        onClick={() => handleOpenDraft(draft)}
+                        className="w-full text-left p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+                      >
+                        <div className="flex items-start gap-3">
+                          {/* Thumbnail preview */}
+                          <div className="relative w-14 h-14 rounded-lg bg-gray-200 flex items-center justify-center overflow-hidden flex-shrink-0">
+                            {draft.isTextOnly ? (
+                              <div className="w-full h-full flex items-center justify-center bg-gray-300 text-gray-600">
+                                <FiType className="w-6 h-6" />
+                              </div>
+                            ) : (() => {
+                              const thumbUrl = draft.mediaItems?.[0]?.url ?? draft.videoUrl;
+                              const isImage = (draft.mediaItems && draft.mediaItems[0]?.type === 'image') || (!draft.mediaItems && (draft.mediaType === 'image' || draft.videoUrl.startsWith('data:image/')));
+                              return isImage ? (
+                                <img src={thumbUrl} alt={draft.caption || 'Draft'} className="w-full h-full object-cover" />
+                              ) : (
+                                <video src={thumbUrl} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                              );
+                            })()}
+                            {draft.mediaItems && draft.mediaItems.length > 1 && (
+                              <div className="absolute bottom-0 right-0 p-1 rounded-tl bg-black/70 text-white flex items-center justify-center" title="Carousel">
+                                <FiLayers className="w-4 h-4" />
+                              </div>
+                            )}
                           </div>
-                          <button
-                            onClick={() => handleDeleteDraft(draft.id)}
-                            className="p-2 hover:bg-red-100 rounded-full transition-colors"
-                            title="Delete draft"
-                          >
-                            <FiX className="w-5 h-5 text-red-600" />
-                          </button>
+                          <div className="flex-1 flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm text-gray-600 mb-1">
+                                {new Date(draft.createdAt).toLocaleDateString()}
+                              </p>
+                              <p className="text-gray-900 line-clamp-2">
+                                {draft.isTextOnly ? (draft.textBody || 'Text post') : (draft.caption || 'No text')}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteDraft(draft.id);
+                              }}
+                              className="p-2 hover:bg-red-100 rounded-full transition-colors"
+                              title="Delete draft"
+                            >
+                              <FiX className="w-5 h-5 text-red-600" />
+                            </button>
+                          </div>
                         </div>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 ) : (

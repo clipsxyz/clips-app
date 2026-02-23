@@ -149,14 +149,14 @@ export default function PostMenuModal({
         const Icon = item.icon;
         const isDanger = item.danger;
         const isHighlight = item.highlight;
-        const textClass = isDanger ? 'text-red-500' : isHighlight ? 'text-amber-400' : 'text-white';
-        const iconClass = isDanger ? 'text-red-500' : isHighlight ? 'text-amber-400' : 'text-gray-300';
+        const textClass = isDanger ? 'text-red-400' : isHighlight ? 'text-amber-400' : 'text-white';
+        const iconClass = isDanger ? 'text-red-400' : isHighlight ? 'text-amber-400' : 'text-white/60';
         return (
             <button
                 key={index}
                 onClick={() => item.action && handleAction(item.action)}
                 disabled={isProcessing}
-                className="flex w-full items-center justify-between py-3.5 px-4 active:bg-white/5 transition-colors disabled:opacity-50"
+                className="flex w-full items-center justify-between py-3.5 px-4 active:bg-white/10 transition-colors disabled:opacity-50"
             >
                 <span className={`text-[15px] font-medium ${textClass}`}>{item.label}</span>
                 <Icon className={`w-5 h-5 flex-shrink-0 ${iconClass}`} />
@@ -166,21 +166,21 @@ export default function PostMenuModal({
 
     return (
         <>
-            <div className="fixed inset-0 z-[200] flex items-end">
-                {/* Backdrop */}
+            <div className="fixed inset-0 z-[200] flex items-end justify-center">
+                {/* Backdrop – same as new Swal */}
                 <div
-                    className="absolute inset-0 bg-black/50"
+                    className="absolute inset-0 bg-black/60 backdrop-blur-sm"
                     onClick={onClose}
                 />
 
-                {/* Threads-style bottom sheet: handle, rounded top, dark, list rows */}
-                <div className="relative w-full bg-[#262626] rounded-t-2xl shadow-2xl max-h-[85vh] overflow-hidden flex flex-col animate-in slide-in-from-bottom duration-300">
+                {/* Bottom sheet: same style as new Swal (#1a1a1a, rounded-t-24px, max-width) */}
+                <div className="relative w-full max-w-[min(400px,calc(100vw-32px))] bg-[#1a1a1a] rounded-t-[24px] shadow-2xl max-h-[85vh] overflow-hidden flex flex-col animate-in slide-in-from-bottom duration-300">
                     {/* Drag handle */}
-                    <div className="flex justify-center pt-2.5 pb-1">
-                        <div className="w-10 h-0.5 bg-gray-500 rounded-full" />
+                    <div className="flex justify-center pt-2.5 pb-2">
+                        <div className="w-10 h-0.5 bg-white/30 rounded-full" />
                     </div>
 
-                    <div className="flex-1 overflow-y-auto pb-6">
+                    <div className="flex-1 overflow-y-auto pb-6 px-0">
                         {/* Own post: Copy link, Save/Unsave, Share, Boost, then divider and rest */}
                         {isCurrentUser ? (
                             <>
@@ -196,7 +196,7 @@ export default function PostMenuModal({
                                         </React.Fragment>
                                     ))}
                                 </div>
-                                <div className="mx-4 border-t border-gray-600/80" />
+                                <div className="mx-4 border-t border-white/10" />
                                 <div className="py-1">
                                     {menuItems.filter(m => m.label !== 'Copy Link').map((item, index) => renderRow(item, index))}
                                 </div>
@@ -216,14 +216,14 @@ export default function PostMenuModal({
                                         </React.Fragment>
                                     ))}
                                 </div>
-                                <div className="mx-4 border-t border-gray-600/80" />
+                                <div className="mx-4 border-t border-white/10" />
                                 <div className="py-1">
                                     {(() => {
                                         const rest = menuItems.filter(m => m.label !== 'Copy Link');
                                         return rest.map((item, index) => (
                                             <React.Fragment key={`${item.label}-${index}`}>
                                                 {index > 0 && !rest[index - 1].danger && item.danger ? (
-                                                    <div className="mx-4 border-t border-gray-600/80" />
+                                                    <div className="mx-4 border-t border-white/10" />
                                                 ) : null}
                                                 {renderRow(item, index)}
                                             </React.Fragment>

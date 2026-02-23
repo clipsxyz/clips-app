@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { FiArrowLeft, FiCircle, FiX, FiCheck, FiPlay, FiPause, FiRotateCw, FiMic, FiMicOff, FiImage, FiMusic, FiLayers, FiZap, FiGrid, FiUser, FiFilter, FiRefreshCw, FiEdit3, FiSearch, FiBookmark, FiUpload, FiSliders, FiDroplet, FiVideo, FiVideoOff, FiCopy, FiSave, FiPlus, FiType, FiCamera } from 'react-icons/fi';
 import { saveDraft } from '../api/drafts';
 import { getTemplate } from '../api/templates';
@@ -10,6 +10,7 @@ import { setGalleryPreviewMedia } from '../utils/galleryPreviewCache';
 
 export default function InstantCreatePage() {
     const navigate = useNavigate();
+    const location = useLocation();
     const videoRef = React.useRef<HTMLVideoElement | null>(null);
     const previewVideoRef = React.useRef<HTMLVideoElement | null>(null);
     const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
@@ -103,6 +104,27 @@ export default function InstantCreatePage() {
     const MAX_VIDEO_SECONDS = 60;
     const [recordingTime, setRecordingTime] = React.useState(60); // Countdown from 60 to 0
     const recordingTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+
+    // Load draft when navigated from profile drafts
+    React.useEffect(() => {
+        const state = location.state as {
+            draftId?: string;
+            draftVideoUrl?: string;
+            draftVideoDuration?: number;
+            trimStart?: number;
+            trimEnd?: number;
+        } | null;
+
+        if (state?.draftVideoUrl) {
+            const duration = state.draftVideoDuration ?? 0;
+            const start = state.trimStart ?? 0;
+            const end = state.trimEnd ?? duration;
+            setPreviewUrl(state.draftVideoUrl);
+            setVideoDuration(duration);
+            setTrimStart(start);
+            setTrimEnd(end);
+        }
+    }, [location.state]);
 
     async function initStream(mode: 'user' | 'environment', audio: boolean, video: boolean = true) {
         try {
@@ -1039,11 +1061,34 @@ export default function InstantCreatePage() {
         if (!previewUrl) return;
         
         try {
+            let persistentUrl = previewUrl;
+            if (previewUrl.startsWith('blob:')) {
+                try {
+                    const res = await fetch(previewUrl);
+                    const blob = await res.blob();
+                    persistentUrl = await new Promise<string>((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve(reader.result as string);
+                        reader.onerror = reject;
+                        reader.readAsDataURL(blob);
+                    });
+                } catch (e) {
+                    console.error('Failed to convert previewUrl blob to data URL for draft:', e);
+                    Swal.fire(bottomSheet({
+                        title: 'Could not save draft',
+                        message: 'Video could not be stored. Try again.',
+                        icon: 'alert',
+                    }));
+                    return;
+                }
+            }
+
             await saveDraft({
-                videoUrl: previewUrl,
+                videoUrl: persistentUrl,
                 videoDuration,
                 trimStart,
                 trimEnd,
+                mediaType: 'video',
             });
             
             await Swal.fire(bottomSheet({
@@ -1287,7 +1332,7 @@ export default function InstantCreatePage() {
                 </div>
             )}
 
-            {/* Back Button - Below Icons */}
+            {/* Back / Next - Below Icons */}
             <div className="absolute top-16 left-0 right-0 z-50 p-4 flex items-center justify-between">
                 <button
                     onClick={() => navigate('/feed')}
@@ -1295,7 +1340,16 @@ export default function InstantCreatePage() {
                 >
                     <FiArrowLeft className="w-6 h-6" />
                 </button>
-                <div className="w-10"></div>
+                {previewUrl ? (
+                    <button
+                        onClick={handleNext}
+                        className="px-4 py-2 rounded-full bg-white text-black text-sm font-semibold hover:bg-gray-100 transition-colors"
+                    >
+                        Next: post to feed
+                    </button>
+                ) : (
+                    <div className="w-10" />
+                )}
             </div>
 
             {/* Video Preview - Full Screen */}
@@ -1326,27 +1380,27 @@ export default function InstantCreatePage() {
                         )}
 
                         {/* Footer: Gallery, Stories, Text - small dashed icons */}
-                        <div className="absolute bottom-0 left-0 right-0 z-30 flex items-center justify-between px-8 py-2.5 bg-gradient-to-t from-black/60 to-transparent border-t border-white/5">
+                        <div className="absolute bottom-0 left-0 right-0 z-30 flex items-center justify-between px-4 py-2.5 bg-gradient-to-t from-black/60 to-transparent border-t border-white/5 gap-2">
                             <button
                                 onClick={() => cameraRollInputRef.current?.click()}
-                                className="flex flex-col items-center gap-0.5 p-2 rounded-xl border border-dashed border-white/60 bg-black/20 backdrop-blur-sm text-white/90 hover:bg-white/15 hover:border-white/80 transition-colors"
+                                className="flex flex-row items-center justify-center gap-1.5 px-3 py-1.5 rounded-full border border-transparent bg-white text-black font-medium text-[11px] backdrop-blur-sm hover:bg-gray-100 active:scale-95 transition-all flex-1"
                             >
                                 <FiUpload className="w-4 h-4" />
-                                <span className="text-[9px] font-medium">Gallery</span>
+                                <span>Gallery +10</span>
                             </button>
                             <button
                                 onClick={() => navigate('/clip')}
-                                className="flex flex-col items-center gap-0.5 p-2 rounded-xl border border-dashed border-white/60 bg-black/20 backdrop-blur-sm text-white/90 hover:bg-white/15 hover:border-white/80 transition-colors"
+                                className="flex flex-row items-center justify-center gap-1.5 px-3 py-1.5 rounded-full border border-white/30 bg-black/30 backdrop-blur-sm text-white/90 hover:bg-white/10 active:scale-95 transition-all flex-1"
                             >
                                 <FiCamera className="w-4 h-4" />
-                                <span className="text-[9px] font-medium">Stories</span>
+                                <span className="text-[11px] font-medium">Story</span>
                             </button>
                             <button
                                 onClick={() => navigate('/create/text-only')}
-                                className="flex flex-col items-center gap-0.5 p-2 rounded-xl border border-dashed border-white/60 bg-black/20 backdrop-blur-sm text-white/90 hover:bg-white/15 hover:border-white/80 transition-colors"
+                                className="flex flex-row items-center justify-center gap-1.5 px-3 py-1.5 rounded-full border border-white/30 bg-black/30 backdrop-blur-sm text-white/90 hover:bg-white/10 active:scale-95 transition-all flex-1"
                             >
                                 <FiType className="w-4 h-4" />
-                                <span className="text-[9px] font-medium">Text</span>
+                                <span className="text-[11px] font-medium">Text post</span>
                             </button>
                         </div>
                     </>
@@ -2418,225 +2472,133 @@ export default function InstantCreatePage() {
                         console.log('No files selected');
                         return;
                     }
-                    
-                    console.log('📁 Files selected:', files.length, Array.from(files).map(f => ({ name: f.name, type: f.type, size: f.size })));
-                    
-                    // Process each file (video or image)
-                    for (const file of Array.from(files)) {
-                        console.log('Processing file:', file.name, file.type);
-                        
-                        if (file.type.startsWith('video/')) {
+
+                    const MAX_ITEMS = 10;
+                    const selectedFiles = Array.from(files).filter((file) =>
+                        file.type.startsWith('image/') || file.type.startsWith('video/')
+                    );
+
+                    if (selectedFiles.length === 0) {
+                        Swal.fire(bottomSheet({
+                            title: 'No Supported Files',
+                            message: 'Please select images or videos from your gallery.',
+                            icon: 'alert',
+                        }));
+                        if (cameraRollInputRef.current) {
+                            cameraRollInputRef.current.value = '';
+                        }
+                        return;
+                    }
+
+                    if (selectedFiles.length > MAX_ITEMS) {
+                        Swal.fire(bottomSheet({
+                            title: 'Too Many Items',
+                            message: `You can select up to ${MAX_ITEMS} items for a carousel.`,
+                            icon: 'alert',
+                        }));
+                    }
+
+                    const itemsToProcess = selectedFiles.slice(0, MAX_ITEMS);
+                    console.log('📁 Gallery files selected for carousel:', itemsToProcess.length, itemsToProcess.map(f => ({
+                        name: f.name,
+                        type: f.type,
+                        size: f.size,
+                    })));
+
+                    const galleryItems: { blob: Blob; mediaType: 'image' | 'video'; videoDuration: number }[] = [];
+
+                    for (const file of itemsToProcess) {
+                        if (file.type.startsWith('image/')) {
+                            galleryItems.push({
+                                blob: file,
+                                mediaType: 'image',
+                                videoDuration: 3,
+                            });
+                        } else if (file.type.startsWith('video/')) {
                             const url = URL.createObjectURL(file);
-                            console.log('Created blob URL:', url);
-                            
                             const tempVideo = document.createElement('video');
                             tempVideo.src = url;
                             tempVideo.preload = 'metadata';
-                            
-                            await new Promise<void>((resolve) => {
+
+                            // Measure duration with timeout fallback
+                            const duration = await new Promise<number>((resolve) => {
                                 let resolved = false;
-                                
-                                const handleLoaded = () => {
+
+                                const finalize = (dur: number) => {
                                     if (resolved) return;
                                     resolved = true;
-                                    
-                                    const duration = tempVideo.duration && isFinite(tempVideo.duration) ? tempVideo.duration : 5;
-                                    console.log('Video duration:', duration);
-                                    
-                                    if (duration > MAX_VIDEO_SECONDS) {
+                                    URL.revokeObjectURL(url);
+                                    resolve(dur);
+                                };
+
+                                tempVideo.onloadedmetadata = () => {
+                                    const dur = tempVideo.duration && isFinite(tempVideo.duration) ? tempVideo.duration : 5;
+                                    if (dur > MAX_VIDEO_SECONDS) {
                                         Swal.fire(bottomSheet({
                                             title: 'Video Too Long',
-                                            message: `Video "${file.name}" is ${Math.round(duration)}s. Maximum is ${MAX_VIDEO_SECONDS}s. It will be trimmed.`,
+                                            message: `Video "${file.name}" is ${Math.round(dur)}s. Maximum is ${MAX_VIDEO_SECONDS}s. It will be trimmed in the editor.`,
                                             icon: 'alert',
                                         }));
                                     }
-                                    
-                                    const newClip: Clip = {
-                                        id: `clip-${Date.now()}-${Math.random()}`,
-                                        url: url,
-                                        duration: Math.min(duration, MAX_VIDEO_SECONDS),
-                                        trimStart: 0,
-                                        trimEnd: Math.min(duration, MAX_VIDEO_SECONDS),
-                                        speed: 1.0,
-                                        reverse: false,
-                                        blob: file // Store the file blob
-                                    };
-                                    
-                                    console.log('Created clip:', newClip);
-                                    
-                                    setClips(prev => {
-                                        const updated = [...prev, newClip];
-                                        // Set the first clip as preview
-                                        if (updated.length === 1) {
-                                            setPreviewUrl(newClip.url);
-                                            setVideoDuration(newClip.duration);
-                                            setTrimStart(0);
-                                            setTrimEnd(newClip.duration);
-                                            
-                                            // Navigate to gallery preview (filters + stickers, no music/edits)
-                                            setTimeout(() => {
-                                                const clipsToPass = updated.length > 0 ? updated : [newClip];
-                                                if (clipsToPass.length > 0) {
-                                                    if (streamRef.current) {
-                                                        streamRef.current.getTracks().forEach(t => t.stop());
-                                                        streamRef.current = null;
-                                                    }
-                                                    if (videoRef.current) {
-                                                        videoRef.current.pause();
-                                                        videoRef.current.srcObject = null;
-                                                    }
-                                                    const mediaType = file.type.startsWith('image/') ? 'image' : 'video';
-                                                    setGalleryPreviewMedia(file, mediaType, clipsToPass[0].duration);
-                                                    navigate('/create/gallery-preview', {
-                                                        state: {
-                                                            mediaUrl: clipsToPass[0].url,
-                                                            mediaType,
-                                                            videoDuration: clipsToPass[0].duration
-                                                        }
-                                                    });
-                                                }
-                                            }, 500);
-                                        }
-                                        return updated;
-                                    });
-                                    resolve();
+                                    finalize(Math.min(dur, MAX_VIDEO_SECONDS));
                                 };
 
-                                tempVideo.onloadedmetadata = handleLoaded;
-                                tempVideo.oncanplay = () => {
-                                    if (!resolved) {
-                                        console.log('Video can play, using fallback duration');
-                                        handleLoaded();
-                                    }
+                                tempVideo.onerror = () => {
+                                    console.error('Error loading video:', file.name);
+                                    finalize(5);
                                 };
-                                
-                                tempVideo.onerror = (err) => {
-                                    if (resolved) return;
-                                    resolved = true;
-                                    console.error('Error loading video:', file.name, err);
-                                    Swal.fire(bottomSheet({
-                                        title: 'Error Loading Video',
-                                        message: `Could not load "${file.name}". Please try a different file.`,
-                                        icon: 'alert',
-                                    }));
-                                    resolve();
-                                };
-                                
-                                // Timeout fallback
+
                                 setTimeout(() => {
                                     if (!resolved) {
-                                        console.log('Video loading timeout, using default duration');
-                                        resolved = true;
-                                        const newClip: Clip = {
-                                            id: `clip-${Date.now()}-${Math.random()}`,
-                                            url: url,
-                                            duration: 5, // Default duration
-                                            trimStart: 0,
-                                            trimEnd: 5,
-                                            speed: 1.0,
-                                            reverse: false,
-                                            blob: file
-                                        };
-                                        
-                                        setClips(prev => {
-                                            const updated = [...prev, newClip];
-                                            if (updated.length === 1) {
-                                                setPreviewUrl(newClip.url);
-                                                setVideoDuration(newClip.duration);
-                                                setTrimStart(0);
-                                                setTrimEnd(newClip.duration);
-                                                
-                                                setTimeout(() => {
-                                                    if (streamRef.current) {
-                                                        streamRef.current.getTracks().forEach(t => t.stop());
-                                                        streamRef.current = null;
-                                                    }
-                                                    if (videoRef.current) {
-                                                        videoRef.current.pause();
-                                                        videoRef.current.srcObject = null;
-                                                    }
-                                                    setGalleryPreviewMedia(file, 'video', newClip.duration);
-                                                    navigate('/create/gallery-preview', {
-                                                        state: {
-                                                            mediaUrl: newClip.url,
-                                                            mediaType: 'video',
-                                                            videoDuration: newClip.duration
-                                                        }
-                                                    });
-                                                }, 500);
-                                            }
-                                            return updated;
-                                        });
-                                        resolve();
+                                        console.log('Video metadata timeout, using default duration for', file.name);
+                                        finalize(5);
                                     }
-                                }, 5000); // 5 second timeout
+                                }, 5000);
                             });
-                        } else if (file.type.startsWith('image/')) {
-                            // Handle image files
-                            const url = URL.createObjectURL(file);
-                            console.log('Created image blob URL:', url);
-                            
-                            // Images get a default duration of 3 seconds
-                            const imageDuration = 3;
-                            
-                            const newClip: Clip = {
-                                id: `clip-${Date.now()}-${Math.random()}`,
-                                url: url,
-                                duration: imageDuration,
-                                trimStart: 0,
-                                trimEnd: imageDuration,
-                                speed: 1.0,
-                                reverse: false,
-                                blob: file // Store the file blob
-                            };
-                            
-                            console.log('Created image clip:', newClip);
-                            
-                            setClips(prev => {
-                                const updated = [...prev, newClip];
-                                // Set the first clip as preview
-                                if (updated.length === 1) {
-                                    setPreviewUrl(newClip.url);
-                                    setVideoDuration(newClip.duration);
-                                    setTrimStart(0);
-                                    setTrimEnd(newClip.duration);
-                                    
-                                    // Navigate to gallery preview
-                                    setTimeout(() => {
-                                        const clipsToPass = updated.length > 0 ? updated : [newClip];
-                                        if (clipsToPass.length > 0) {
-                                            if (streamRef.current) {
-                                                streamRef.current.getTracks().forEach(t => t.stop());
-                                                streamRef.current = null;
-                                            }
-                                            if (videoRef.current) {
-                                                videoRef.current.pause();
-                                                videoRef.current.srcObject = null;
-                                            }
-                                            setGalleryPreviewMedia(file, 'image', clipsToPass[0].duration);
-                                            navigate('/create/gallery-preview', {
-                                                state: {
-                                                    mediaUrl: clipsToPass[0].url,
-                                                    mediaType: 'image',
-                                                    videoDuration: clipsToPass[0].duration
-                                                }
-                                            });
-                                        }
-                                    }, 500);
-                                }
-                                return updated;
+
+                            galleryItems.push({
+                                blob: file,
+                                mediaType: 'video',
+                                videoDuration: duration,
                             });
-                        } else {
-                            console.warn('File type not supported:', file.type);
-                            Swal.fire(bottomSheet({
-                                title: 'File Type Not Supported',
-                                message: `"${file.name}" is not a supported file type. Please select a video or image file.`,
-                                icon: 'alert',
-                            }));
                         }
                     }
-                    
-                    // Reset input so same file can be selected again
+
+                    if (galleryItems.length === 0) {
+                        Swal.fire(bottomSheet({
+                            title: 'No Supported Files',
+                            message: 'Unable to use the selected files. Please try different photos or videos.',
+                            icon: 'alert',
+                        }));
+                        if (cameraRollInputRef.current) {
+                            cameraRollInputRef.current.value = '';
+                        }
+                        return;
+                    }
+
+                    // Stop camera stream and clear live preview before navigating
+                    if (streamRef.current) {
+                        streamRef.current.getTracks().forEach(t => t.stop());
+                        streamRef.current = null;
+                    }
+                    if (videoRef.current) {
+                        videoRef.current.pause();
+                        videoRef.current.srcObject = null;
+                    }
+
+                    // Cache gallery items for GalleryPreviewPage and navigate once
+                    setGalleryPreviewMedia(galleryItems);
+
+                    const firstItem = galleryItems[0];
+                    navigate('/create/gallery-preview', {
+                        state: {
+                            mediaUrl: undefined,
+                            mediaType: firstItem.mediaType,
+                            videoDuration: firstItem.videoDuration,
+                        },
+                    });
+
+                    // Reset input so same files can be selected again
                     if (cameraRollInputRef.current) {
                         cameraRollInputRef.current.value = '';
                     }

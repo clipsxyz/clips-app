@@ -6,7 +6,7 @@ import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react'
 import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
-import { FiFilter, FiSmile, FiMapPin, FiBookmark, FiSend, FiArrowLeft, FiUser, FiLayers, FiPlus, FiX } from 'react-icons/fi';
+import { FiFilter, FiSmile, FiMapPin, FiBookmark, FiSend, FiArrowLeft, FiUser, FiLayers, FiPlus, FiX, FiType } from 'react-icons/fi';
 import { createPost } from '../api/posts';
 import { saveDraft } from '../api/drafts';
 import Swal from 'sweetalert2';
@@ -54,29 +54,59 @@ export default function GalleryPreviewPage() {
         mediaUrl?: string;
         mediaType?: 'image' | 'video';
         videoDuration?: number;
+        fromDraft?: boolean;
+        draftMediaUrl?: string;
+        draftMediaType?: 'image' | 'video';
+        draftCaption?: string;
+        draftLocation?: string;
+        draftVideoDuration?: number;
+        draftId?: string;
+        draftMediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>;
     } | null) || {};
 
-    const [resolvedMediaUrl, setResolvedMediaUrl] = useState(state.mediaUrl ?? '');
-    const [resolvedMediaType, setResolvedMediaType] = useState<'image' | 'video'>(state.mediaType ?? 'video');
-    const [resolvedVideoDuration, setResolvedVideoDuration] = useState(state.videoDuration ?? 0);
+    const isFromDraft = !!(state.fromDraft && state.draftMediaUrl);
+    const [resolvedMediaUrl, setResolvedMediaUrl] = useState(isFromDraft ? state.draftMediaUrl! : (state.mediaUrl ?? ''));
+    const [resolvedMediaType, setResolvedMediaType] = useState<'image' | 'video'>(
+        isFromDraft ? (state.draftMediaType ?? 'image') : (state.mediaType ?? 'video')
+    );
+    const [resolvedVideoDuration, setResolvedVideoDuration] = useState(
+        state.draftVideoDuration ?? state.videoDuration ?? 0
+    );
     const [hasCheckedCache, setHasCheckedCache] = useState(false);
-    const blobUrlToRevokeRef = useRef<string | null>(null);
+    const blobUrlsToRevokeRef = useRef<string[]>([]);
 
     useEffect(() => {
         const cached = getGalleryPreviewMedia();
-        if (cached) {
-            const url = URL.createObjectURL(cached.blob);
-            blobUrlToRevokeRef.current = url;
-            setResolvedMediaUrl(url);
-            setResolvedMediaType(cached.mediaType);
-            setResolvedVideoDuration(cached.videoDuration);
+        if (cached && cached.length > 0) {
+            const urls: string[] = [];
+            const initialItems: CarouselItem[] = cached.map((item, index) => {
+                const url = URL.createObjectURL(item.blob);
+                urls.push(url);
+                return {
+                    id: `item-${Date.now()}-${index}-${Math.random()}`,
+                    url,
+                    type: item.mediaType,
+                    duration: item.videoDuration || (item.mediaType === 'image' ? 3 : 0),
+                };
+            });
+
+            blobUrlsToRevokeRef.current = urls;
+
+            // Seed carousel with cached items (up to CAROUSEL_MAX handled in cache)
+            setCarouselItems(initialItems);
+            // Also seed resolved media for preview fallbacks
+            const first = initialItems[0];
+            setResolvedMediaUrl(first.url);
+            setResolvedMediaType(first.type);
+            setResolvedVideoDuration(first.duration);
+
             clearGalleryPreviewMedia();
         }
         setHasCheckedCache(true);
         return () => {
-            if (blobUrlToRevokeRef.current) {
-                URL.revokeObjectURL(blobUrlToRevokeRef.current);
-                blobUrlToRevokeRef.current = null;
+            if (blobUrlsToRevokeRef.current.length > 0) {
+                blobUrlsToRevokeRef.current.forEach((url) => URL.revokeObjectURL(url));
+                blobUrlsToRevokeRef.current = [];
             }
             clearGalleryPreviewMedia();
         };
@@ -87,7 +117,28 @@ export default function GalleryPreviewPage() {
     const carouselInitializedRef = useRef(false);
 
     useEffect(() => {
-        if (carouselInitializedRef.current || !resolvedMediaUrl) return;
+        if (carouselInitializedRef.current) return;
+
+        // From draft with full carousel
+        if (isFromDraft && state.draftMediaItems && state.draftMediaItems.length > 0) {
+            carouselInitializedRef.current = true;
+            setCarouselItems(
+                state.draftMediaItems.map((item, index) => ({
+                    id: `draft-item-${index}`,
+                    url: item.url,
+                    type: item.type,
+                    duration: item.duration ?? (item.type === 'image' ? 3 : resolvedVideoDuration || 0),
+                }))
+            );
+            return;
+        }
+
+        // Fallback: single media
+        if (!resolvedMediaUrl) return;
+        if (carouselItems.length > 0) {
+            carouselInitializedRef.current = true;
+            return;
+        }
         carouselInitializedRef.current = true;
         setCarouselItems([{
             id: `item-${Date.now()}`,
@@ -95,15 +146,16 @@ export default function GalleryPreviewPage() {
             type: resolvedMediaType,
             duration: resolvedVideoDuration || 0,
         }]);
-    }, [resolvedMediaUrl, resolvedMediaType, resolvedVideoDuration]);
+    }, [isFromDraft, state.draftMediaItems, resolvedMediaUrl, resolvedMediaType, resolvedVideoDuration, carouselItems.length]);
 
     const currentItem = carouselItems[currentCarouselIndex];
     const mediaUrl = currentItem?.url ?? resolvedMediaUrl;
     const mediaType = currentItem?.type ?? resolvedMediaType;
     const videoDuration = currentItem?.duration ?? resolvedVideoDuration;
 
-    const [cardTab, setCardTab] = useState<'filters' | 'stickers' | 'location' | 'carousel'>('filters');
-    const [storyLocation, setStoryLocation] = useState('');
+    const [cardTab, setCardTab] = useState<'caption' | 'filters' | 'stickers' | 'location' | 'carousel'>('caption');
+    const [caption, setCaption] = useState(isFromDraft ? (state.draftCaption ?? '') : '');
+    const [storyLocation, setStoryLocation] = useState(isFromDraft ? (state.draftLocation ?? '') : '');
     const [venue, setVenue] = useState('');
     const [taggedUsers, setTaggedUsers] = useState<string[]>([]);
     const [showTagUserModal, setShowTagUserModal] = useState(false);
@@ -118,12 +170,14 @@ export default function GalleryPreviewPage() {
     const [stickerList, setStickerList] = useState<Sticker[]>([]);
     const [stickersLoading, setStickersLoading] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
+    const [isSavingDraft, setIsSavingDraft] = useState(false);
     const [cardBodyExpanded, setCardBodyExpanded] = useState(true);
     const containerRef = useRef<HTMLDivElement>(null);
     const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
     const videoRef = useRef<HTMLVideoElement>(null);
     const carouselInputRef = useRef<HTMLInputElement>(null);
     const [videoFrameDataUrl, setVideoFrameDataUrl] = useState<string | null>(null);
+    const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
     const dragStartYRef = useRef<number>(0);
     const dragTriggeredRef = useRef<boolean>(false);
     const dragThreshold = 24;
@@ -266,29 +320,97 @@ export default function GalleryPreviewPage() {
     }, []);
 
     const handleSaveToDrafts = useCallback(async () => {
-        if (!mediaUrl) return;
+        const effectiveUrl = mediaUrl || (carouselItems.length > 0 ? carouselItems[0]?.url : null);
+        if (!effectiveUrl) {
+            showToast('No media to save.');
+            return;
+        }
+        if (isSavingDraft) return;
+
+        setIsSavingDraft(true);
+        showToast('Saving draft...');
+
         try {
+            const baseItems: CarouselItem[] =
+                carouselItems.length > 0
+                    ? carouselItems
+                    : [{
+                        id: 'draft-item-0',
+                        url: effectiveUrl,
+                        type: mediaType,
+                        duration: videoDuration || 0,
+                    }];
+
+            const toPersistentUrl = async (url: string): Promise<string | null> => {
+                if (!url || (!url.startsWith('blob:') && (url.startsWith('data:') || url.startsWith('http')))) {
+                    return url || null;
+                }
+                if (!url.startsWith('blob:')) return url;
+                try {
+                    const res = await fetch(url);
+                    const blob = await res.blob();
+                    return await new Promise<string>((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve(reader.result as string);
+                        reader.onerror = reject;
+                        reader.readAsDataURL(blob);
+                    });
+                } catch {
+                    return null;
+                }
+            };
+
+            const results = await Promise.all(
+                baseItems.map(async (item) => {
+                    const url = await toPersistentUrl(item.url);
+                    return url ? { url, type: item.type as 'image' | 'video', duration: item.duration } : null;
+                })
+            );
+
+            const persistentItems = results.filter((r): r is { url: string; type: 'image' | 'video'; duration: number } => r !== null);
+
+            if (persistentItems.length === 0) {
+                showToast('Could not save media. Try again.');
+                Swal.fire(bottomSheet({
+                    title: 'Could Not Save',
+                    message: 'Media could not be prepared for the draft. Try again.',
+                    icon: 'alert',
+                    confirmButtonText: 'OK',
+                }));
+                return;
+            }
+
+            const first = persistentItems[0];
             await saveDraft({
-                videoUrl: mediaUrl,
-                videoDuration: videoDuration || 0,
+                videoUrl: first.url,
+                videoDuration: first.duration || 0,
                 location: storyLocation.trim() || undefined,
+                caption: caption.trim() || undefined,
+                mediaType: first.type,
+                mediaItems: persistentItems,
             });
+
+            /* Defer so the “saving” state has painted and Swal reliably shows above the card */
+            await new Promise<void>((r) => setTimeout(r, 50));
             await Swal.fire(bottomSheet({
                 title: 'Saved to Drafts!',
-                message: 'You can find it in your profile page.',
+                message: 'You can find it in your profile. Tap a draft to continue and post.',
                 icon: 'success',
                 confirmButtonText: 'Done',
             }));
             navigate('/feed');
         } catch (e) {
             console.error(e);
+            showToast('Failed to save draft. Please try again.');
             Swal.fire(bottomSheet({
                 title: 'Failed to Save',
                 message: 'Could not save draft. Please try again.',
                 icon: 'alert',
             }));
+        } finally {
+            setIsSavingDraft(false);
         }
-    }, [mediaUrl, videoDuration, storyLocation, navigate]);
+    }, [mediaUrl, carouselItems, videoDuration, storyLocation, caption, mediaType, navigate]);
 
     const handlePost = useCallback(async () => {
         if (!user) {
@@ -323,12 +445,12 @@ export default function GalleryPreviewPage() {
             await createPost(
                 user.id,
                 user.handle,
-                '',
+                caption.trim() || '',
                 storyLocation.trim() || '',
                 persistentMediaUrl,
                 mediaType,
                 undefined,
-                undefined,
+                caption.trim() || undefined,
                 user.local,
                 user.regional,
                 user.national,
@@ -491,21 +613,41 @@ export default function GalleryPreviewPage() {
                     onPointerLeave={() => { dragStartYRef.current = 0; dragTriggeredRef.current = false; }}
                     onPointerCancel={() => { dragStartYRef.current = 0; dragTriggeredRef.current = false; }}
                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCardBodyExpanded((e) => !e); } }}
-                    className="w-full pt-2 pb-3 flex flex-col items-center gap-1 cursor-grab active:cursor-grabbing active:bg-white/5 transition-colors select-none"
+                    className="w-full pt-2 pb-2 flex flex-col items-center gap-1 cursor-grab active:cursor-grabbing active:bg-white/5 transition-colors select-none"
                     style={{ touchAction: 'none' }}
                     aria-label={cardBodyExpanded ? 'Drag down to collapse or tap to toggle' : 'Tap to expand'}
                 >
                     <div className="w-16 h-1.5 bg-white/50 rounded-full pointer-events-none" />
                     <span className="text-[10px] text-white/60 pointer-events-none">{cardBodyExpanded ? 'Drag down to collapse' : 'Tap to expand'}</span>
                 </div>
-                {/* Card header: Carousel, Location, Filters, Stickers, then Save far right - all white icons */}
-                <div className="flex items-center gap-2 px-4 pb-2 border-b border-white/10 overflow-x-auto scrollbar-hide">
+                {/* Card header: Caption, Location, Carousel, Filters, then Save far right - all white icons */}
+                <div className="flex items-center gap-2 px-4 pb-2 mt-3 border-b border-white/10 overflow-x-auto scrollbar-hide">
+                    <button
+                        onClick={() => setCardTab('caption')}
+                        title="Caption"
+                        aria-label="Caption"
+                        className={`flex-shrink-0 flex items-center justify-center p-2.5 rounded-xl transition-colors text-white ${
+                            cardTab === 'caption' ? 'bg-white/20' : 'hover:bg-white/10'
+                        }`}
+                    >
+                        <FiType className="w-5 h-5" />
+                    </button>
+                    <button
+                        onClick={() => setCardTab('location')}
+                        title="Location, venue, tag user"
+                        aria-label="Location"
+                        className={`flex-shrink-0 flex items-center justify-center p-2.5 rounded-xl transition-colors text-white ${
+                            cardTab === 'location' ? 'bg-white/20' : 'hover:bg-white/10'
+                        }`}
+                    >
+                        <FiMapPin className="w-5 h-5" />
+                    </button>
                     <button
                         onClick={() => setCardTab('carousel')}
                         title="Add photos/videos (carousel, max 10)"
                         aria-label="Carousel"
                         className={`flex-shrink-0 flex items-center justify-center p-2.5 rounded-xl transition-colors relative text-white ${
-                            cardTab === 'carousel' ? 'bg-white/20 ring-2 ring-white/50' : 'hover:bg-white/10'
+                            cardTab === 'carousel' ? 'bg-white/20' : 'hover:bg-white/10'
                         }`}
                     >
                         <FiLayers className="w-5 h-5" />
@@ -516,39 +658,26 @@ export default function GalleryPreviewPage() {
                         )}
                     </button>
                     <button
-                        onClick={() => setCardTab('location')}
-                        title="Location, venue, tag user"
-                        aria-label="Location"
-                        className={`flex-shrink-0 flex items-center justify-center p-2.5 rounded-xl transition-colors text-white ${
-                            cardTab === 'location' ? 'bg-white/20 ring-2 ring-white/50' : 'hover:bg-white/10'
-                        }`}
-                    >
-                        <FiMapPin className="w-5 h-5" />
-                    </button>
-                    <button
                         onClick={() => setCardTab('filters')}
                         title="Filters"
                         aria-label="Filters"
                         className={`flex-shrink-0 flex items-center justify-center p-2.5 rounded-xl transition-colors text-white ${
-                            cardTab === 'filters' ? 'bg-white/20 ring-2 ring-white/50' : 'hover:bg-white/10'
+                            cardTab === 'filters' ? 'bg-white/20' : 'hover:bg-white/10'
                         }`}
                     >
                         <FiFilter className="w-5 h-5" />
                     </button>
                     <button
-                        onClick={() => setCardTab('stickers')}
-                        title="Stickers"
-                        aria-label="Stickers"
-                        className={`flex-shrink-0 flex items-center justify-center p-2.5 rounded-xl transition-colors text-white ${
-                            cardTab === 'stickers' ? 'bg-white/20 ring-2 ring-white/50' : 'hover:bg-white/10'
-                        }`}
-                    >
-                        <FiSmile className="w-5 h-5" />
-                    </button>
-                    <button
                         onClick={handleSaveToDrafts}
-                        className="flex-shrink-0 p-2.5 rounded-xl text-white hover:bg-white/10 transition-colors ml-auto"
-                        title="Save to drafts"
+                        disabled={!(mediaUrl || (carouselItems.length > 0 && carouselItems[0]?.url)) || isSavingDraft}
+                        className={`flex-shrink-0 p-2.5 rounded-xl ml-auto transition-colors ${
+                            isSavingDraft
+                                ? 'bg-white text-black'
+                                : (mediaUrl || (carouselItems.length > 0 && carouselItems[0]?.url))
+                                    ? 'text-white hover:bg-white/10'
+                                    : 'text-white/40 cursor-not-allowed'
+                        }`}
+                        title={isSavingDraft ? 'Saving to drafts…' : 'Save to drafts'}
                         aria-label="Save to drafts"
                     >
                         <FiBookmark className="w-5 h-5" />
@@ -559,6 +688,26 @@ export default function GalleryPreviewPage() {
                     className="overflow-hidden transition-[max-height] duration-300 ease-out overflow-y-auto px-4 py-4"
                     style={{ maxHeight: cardBodyExpanded ? '40vh' : 0 }}
                 >
+                    {cardTab === 'caption' && (
+                        <div className="space-y-2">
+                            <label className="block text-xs font-medium text-white/70">
+                                Caption
+                            </label>
+                            <textarea
+                                value={caption}
+                                onChange={(e) => setCaption(e.target.value)}
+                                placeholder="Write a caption..."
+                                rows={3}
+                                maxLength={500}
+                                className="w-full rounded-xl bg-white/5 border border-white/15 px-3 py-2 text-sm text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-white/60 focus:border-transparent resize-none"
+                            />
+                            <div className="flex justify-end">
+                                <span className="text-[11px] text-white/40">
+                                    {caption.length}/500
+                                </span>
+                            </div>
+                        </div>
+                    )}
                     {cardTab === 'filters' && (
                         <div className="flex flex-col gap-2 overflow-y-auto max-h-[35vh]">
                             {FILTER_NAMES.map((f) => {
@@ -682,7 +831,9 @@ export default function GalleryPreviewPage() {
                                     e.target.value = '';
                                 }}
                             />
-                            <p className="text-xs text-white/60">Add up to {CAROUSEL_MAX} images or videos for a carousel post.</p>
+                            <p className="text-xs text-white/60">
+                                Add up to {CAROUSEL_MAX} images or videos for a carousel post. Hold and drag a thumbnail to reorder.
+                            </p>
                             <button
                                 type="button"
                                 onClick={() => carouselInputRef.current?.click()}
@@ -696,7 +847,21 @@ export default function GalleryPreviewPage() {
                                 {carouselItems.map((item, idx) => (
                                     <div
                                         key={item.id}
-                                        className="relative w-14 h-14 rounded-lg overflow-hidden bg-white/10 flex-shrink-0 border-2 border-transparent"
+                                        draggable
+                                        onDragStart={() => setDraggingIndex(idx)}
+                                        onDragOver={(e) => {
+                                            e.preventDefault();
+                                            if (draggingIndex === null || draggingIndex === idx) return;
+                                            setCarouselItems((prev) => {
+                                                const updated = [...prev];
+                                                const [moved] = updated.splice(draggingIndex, 1);
+                                                updated.splice(idx, 0, moved);
+                                                return updated;
+                                            });
+                                            setDraggingIndex(idx);
+                                        }}
+                                        onDragEnd={() => setDraggingIndex(null)}
+                                        className="relative w-14 h-14 rounded-lg overflow-hidden bg-white/10 flex-shrink-0 border-2 border-transparent cursor-move"
                                         style={currentCarouselIndex === idx ? { borderColor: 'white' } : undefined}
                                     >
                                         {item.type === 'video' ? (

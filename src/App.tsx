@@ -1,7 +1,6 @@
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiSend, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX, FiClock } from 'react-icons/fi';
-import { AiFillHeart } from 'react-icons/ai';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from './constants';
 import TopBar from './components/TopBar';
 import CommentsModal from './components/CommentsModal';
@@ -9,6 +8,7 @@ import ShareModal from './components/ShareModal';
 import ScenesModal from './components/ScenesModal';
 import CreateModal from './components/CreateModal';
 import TaggedUsersBottomSheet from './components/TaggedUsersBottomSheet';
+import TaggedAvatars from './components/TaggedAvatars';
 import Avatar from './components/Avatar';
 import { useAuth } from './context/Auth';
 import { getFlagForHandle, getAvatarForHandle } from './api/users';
@@ -184,18 +184,35 @@ export default function App() {
   const isLoginPage = loc.pathname === '/login';
   return (
     <>
-      <main 
-        id="main" 
-        className={`mx-auto max-w-md md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800 ${isLoginPage ? 'h-screen min-h-[100dvh] overflow-hidden flex flex-col' : 'min-h-screen pb-[calc(64px+theme(spacing.safe))]'}`} 
+      <main
+        id="main"
+        className={`mx-auto max-w-md md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800 ${isLoginPage ? 'h-screen min-h-[100dvh] overflow-hidden flex flex-col' : 'min-h-screen pb-[calc(64px+theme(spacing.safe))]'}`}
         style={{ backgroundColor: '#030712' }}
       >
-        {loc.pathname !== '/login' && loc.pathname !== '/feed' && loc.pathname !== '/profile' && loc.pathname !== '/clip' && loc.pathname !== '/stories' && !loc.pathname.startsWith('/user/') && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
+        {loc.pathname !== '/login'
+          && loc.pathname !== '/feed'
+          && loc.pathname !== '/profile'
+          && loc.pathname !== '/clip'
+          && loc.pathname !== '/stories'
+          && !loc.pathname.startsWith('/user/')
+          && !loc.pathname.startsWith('/create/text-only')
+          && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
         <div className={isLoginPage ? 'flex-1 min-h-0 overflow-hidden flex flex-col' : undefined}>
           <Outlet context={{ activeTab, setActiveTab, customLocation, setCustomLocation }} />
         </div>
-        {loc.pathname !== '/discover' && loc.pathname !== '/create/filters' && loc.pathname !== '/create/instant' && loc.pathname !== '/create/gallery-preview' && loc.pathname !== '/payment' && loc.pathname !== '/clip' && loc.pathname !== '/create' && loc.pathname !== '/template-editor' && loc.pathname !== '/login' && (
-          <BottomNav onCreateClick={() => navigate('/create/instant')} />
-        )}
+        {loc.pathname !== '/discover'
+          && loc.pathname !== '/create/filters'
+          && loc.pathname !== '/create/instant'
+          && loc.pathname !== '/create/gallery-preview'
+          && loc.pathname !== '/create/text-only'
+          && loc.pathname !== '/create/text-only/details'
+          && loc.pathname !== '/payment'
+          && loc.pathname !== '/clip'
+          && loc.pathname !== '/create'
+          && loc.pathname !== '/template-editor'
+          && loc.pathname !== '/login' && (
+            <BottomNav onCreateClick={() => navigate('/create/instant')} />
+          )}
       </main>
 
       {/* Create Modal */}
@@ -369,7 +386,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
               style={{
                 background:
-                  'linear-gradient(90deg, red, yellow, red)',
+                  'linear-gradient(90deg, red, white, red)',
               }}
             >
               <div className="w-full h-full rounded-lg bg-black relative z-10" />
@@ -451,7 +468,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
               style={{
                 background:
-                  'linear-gradient(90deg, red, yellow, red)',
+                  'linear-gradient(90deg, red, white, red)',
               }}
             >
               <div className="w-full h-full rounded-lg bg-black relative z-10" />
@@ -742,6 +759,9 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
     return out;
   }, [post.locationLabel, post.venue, post.createdAt]);
   const [metadataIndex, setMetadataIndex] = React.useState(0);
+  // Transition style for carousel: 'none' | 'fade' | 'slide-up' | 'slide-left'
+  const metadataTransition: 'none' | 'fade' | 'slide-up' | 'slide-left' = 'slide-left';
+  const metadataTransitionClass = metadataTransition === 'fade' ? 'metadata-carousel-fade' : metadataTransition === 'slide-up' ? 'metadata-carousel-slide-up' : metadataTransition === 'slide-left' ? 'metadata-carousel-slide-left' : '';
   React.useEffect(() => {
     if (metadataItems.length <= 1) return;
     const t = setInterval(() => {
@@ -969,26 +989,29 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
                 />
               </h3>
             </button>
-            {/* One metadata at a time: location → venue → timestamp; icon per type */}
-            {metadataItems.length > 0 && (() => {
-              const current = metadataItems[metadataIndex];
-              const iconClass = `w-3 h-3 flex-shrink-0 ${isOverlaid ? 'text-white/90' : 'text-gray-500 dark:text-gray-400'}`;
-              const Icon = current.type === 'location' ? FiMapPin : current.type === 'venue' ? FiHome : FiClock;
-              return (
-                <div
-                  className="flex items-center gap-1 min-w-0 max-w-full self-start -mt-0.5"
-                  title={metadataItems.map((m) => m.label).join(' · ')}
-                >
+          </div>
+        </div>
+        <div className="relative z-10 flex flex-col items-end gap-0.5 flex-shrink-0">
+          {/* Story location on top: location → venue → timestamp */}
+          {metadataItems.length > 0 && (() => {
+            const current = metadataItems[metadataIndex];
+            const iconClass = `w-3 h-3 flex-shrink-0 text-white/90`;
+            const Icon = current.type === 'location' ? FiMapPin : current.type === 'venue' ? FiHome : FiClock;
+            return (
+              <div
+                className="flex items-center gap-1 min-w-0 max-w-[160px] justify-end min-h-[1.25rem] overflow-hidden"
+                title={metadataItems.map((m) => m.label).join(' · ')}
+              >
+                <div key={metadataIndex} className={`flex items-center gap-1 justify-end min-w-0 max-w-[160px] ${metadataTransitionClass}`}>
                   <Icon className={iconClass} />
-                  <span className={`text-xs font-medium whitespace-nowrap truncate max-w-[140px] ${isOverlaid ? 'text-white' : 'text-gray-600 dark:text-gray-400'}`}>
+                  <span className="text-xs font-medium whitespace-nowrap truncate text-white">
                     {current.label}
                   </span>
                 </div>
-              );
-            })()}
-          </div>
-        </div>
-        <div className="relative z-10 flex items-center flex-shrink-0">
+              </div>
+            );
+          })()}
+          {/* 3 dots underneath */}
           {onMenuClick && (
             <button
               onClick={(e) => {
@@ -1033,6 +1056,7 @@ function TagRow({ tags }: { tags: string[] }) {
 
 function TextCard({ text, onDoubleLike, textStyle, stickers }: { text: string; onDoubleLike: () => Promise<void>; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string }; stickers?: StickerOverlay[]; userHandle?: string; locationLabel?: string; createdAt?: string }) {
   const [burst, setBurst] = React.useState(false);
+  const [tapPosition, setTapPosition] = React.useState<{ x: number; y: number } | null>(null);
   const [isExpanded, setIsExpanded] = React.useState(false);
   const lastTap = React.useRef<number>(0);
   const touchHandled = React.useRef<boolean>(false);
@@ -1084,34 +1108,52 @@ function TextCard({ text, onDoubleLike, textStyle, stickers }: { text: string; o
   // Get text color from textStyle or default to white
   const textColor = textStyle?.color || 'white';
 
-  function handleTap() {
+  function getTapPosition(e: React.MouseEvent | React.TouchEvent): { x: number; y: number } | null {
+    if (!containerRef.current) return null;
+    const rect = containerRef.current.getBoundingClientRect();
+    let clientX: number;
+    let clientY: number;
+    if ('touches' in e && e.changedTouches?.length) {
+      clientX = e.changedTouches[0].clientX;
+      clientY = e.changedTouches[0].clientY;
+    } else if ('clientX' in e) {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    } else return null;
+    return { x: clientX - rect.left, y: clientY - rect.top };
+  }
+
+  function handleTap(e?: React.MouseEvent | React.TouchEvent) {
     const now = Date.now();
     const timeSinceLastTap = now - lastTap.current;
 
     if (timeSinceLastTap < 300) {
+      const pos = e ? getTapPosition(e) : null;
+      setTapPosition(pos ?? (containerRef.current ? { x: containerRef.current.offsetWidth / 2, y: containerRef.current.offsetHeight / 2 } : null));
       setBurst(true);
       onDoubleLike().catch(() => {});
-      setTimeout(() => setBurst(false), 600);
+      setTimeout(() => {
+        setBurst(false);
+        setTapPosition(null);
+      }, 500);
     }
     lastTap.current = now;
   }
 
-  function handleTouchEnd(_e: React.TouchEvent) {
+  function handleTouchEnd(e: React.TouchEvent) {
     touchHandled.current = true;
-    handleTap();
-    // Prevent click event from firing after touch
+    handleTap(e);
     setTimeout(() => {
       touchHandled.current = false;
     }, 300);
   }
 
   function handleClick(e: React.MouseEvent) {
-    // Prevent click if touch was already handled
     if (touchHandled.current) {
       e.preventDefault();
       return;
     }
-    handleTap();
+    handleTap(e);
   }
 
   function handleMoreClick(e: React.MouseEvent) {
@@ -1232,89 +1274,52 @@ function TextCard({ text, onDoubleLike, textStyle, stickers }: { text: string; o
           </>
         )}
 
-        {/* Enhanced heart burst animation */}
-        <div className={`absolute inset-0 flex items-center justify-center pointer-events-none transition-all duration-300 ${burst ? 'opacity-100 scale-100' : 'opacity-0 scale-50'}`}>
-          <div className="relative">
-            {/* Main heart with Gazetteer gradient */}
-            <svg className="w-20 h-20 drop-shadow-lg animate-pulse" viewBox="0 0 24 24">
-              <defs>
-                <linearGradient id="heartGradientMain" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#ff4ecb" />
-                  <stop offset="50%" stopColor="#8f5bff" />
-                  <stop offset="100%" stopColor="#ff4ecb" />
-                </linearGradient>
-              </defs>
-              <path
-                d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z"
-                fill="url(#heartGradientMain)"
-              />
-            </svg>
-
-            {/* Floating hearts with softer gradient */}
-            <div className="absolute inset-0">
-              <div className={`absolute top-2 left-2 w-4 h-4 transition-all duration-500 ${burst ? 'opacity-100 translate-y-[-20px]' : 'opacity-0 translate-y-0'}`}>
-                <svg viewBox="0 0 24 24">
-                  <defs>
-                    <linearGradient id="heartGradientSmall1" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#ff4ecb" stopOpacity="0.9" />
-                      <stop offset="100%" stopColor="#8f5bff" stopOpacity="0.9" />
-                    </linearGradient>
-                  </defs>
-                  <path
-                    d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z"
-                    fill="url(#heartGradientSmall1)"
-                  />
-                </svg>
-              </div>
-              <div className={`absolute top-4 right-2 w-3 h-3 transition-all duration-700 delay-100 ${burst ? 'opacity-100 translate-y-[-25px] translate-x-[10px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
-                <svg viewBox="0 0 24 24">
-                  <defs>
-                    <linearGradient id="heartGradientSmall2" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#ff4ecb" stopOpacity="0.8" />
-                      <stop offset="100%" stopColor="#8f5bff" stopOpacity="0.8" />
-                    </linearGradient>
-                  </defs>
-                  <path
-                    d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z"
-                    fill="url(#heartGradientSmall2)"
-                  />
-                </svg>
-              </div>
-              <div className={`absolute bottom-2 left-4 w-2 h-2 transition-all duration-600 delay-200 ${burst ? 'opacity-100 translate-y-[-15px] translate-x-[-8px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
-                <svg viewBox="0 0 24 24">
-                  <defs>
-                    <linearGradient id="heartGradientSmall3" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#ff4ecb" stopOpacity="0.7" />
-                      <stop offset="100%" stopColor="#8f5bff" stopOpacity="0.7" />
-                    </linearGradient>
-                  </defs>
-                  <path
-                    d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z"
-                    fill="url(#heartGradientSmall3)"
-                  />
-                </svg>
-              </div>
-              <div className={`absolute bottom-4 right-4 w-3 h-3 transition-all duration-500 delay-150 ${burst ? 'opacity-100 translate-y-[-20px] translate-x-[5px]' : 'opacity-0 translate-y-0 translate-x-0'}`}>
-                <svg viewBox="0 0 24 24">
-                  <defs>
-                    <linearGradient id="heartGradientSmall4" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#ff4ecb" stopOpacity="0.85" />
-                      <stop offset="100%" stopColor="#8f5bff" stopOpacity="0.85" />
-                    </linearGradient>
-                  </defs>
-                  <path
-                    d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z"
-                    fill="url(#heartGradientSmall4)"
-                  />
-                </svg>
-              </div>
+        {/* YouTube Shorts-style double-tap: thumbs-up + red/pink burst (same as image/video) */}
+        {tapPosition && (
+          <div
+            className="absolute pointer-events-none z-50"
+            style={{
+              left: `${tapPosition.x}px`,
+              top: `${tapPosition.y}px`,
+              transform: 'translate(-50%, -50%)',
+              width: 0,
+              height: 0,
+            }}
+          >
+            <div
+              className="absolute z-0"
+              style={{
+                left: '50%',
+                top: '50%',
+                width: '200px',
+                height: '200px',
+                transform: 'translate(-50%, -50%)',
+                animation: 'shortsThumbGlow 0.5s ease-out forwards',
+              }}
+            >
+              <ShortsLikeBurstLines />
             </div>
-
-            {/* Pulse rings */}
-            <div className={`absolute inset-0 border-2 border-red-400 rounded-full transition-all duration-1000 ${burst ? 'opacity-0 scale-150' : 'opacity-100 scale-100'}`}></div>
-            <div className={`absolute inset-0 border border-red-300 rounded-full transition-all duration-1200 delay-100 ${burst ? 'opacity-0 scale-200' : 'opacity-100 scale-100'}`}></div>
+            <div
+              className="absolute flex items-center justify-center z-10"
+              style={{
+                left: '50%',
+                top: '50%',
+                width: '96px',
+                height: '96px',
+                marginLeft: '-48px',
+                marginTop: '-48px',
+                animation: 'heartPopUp 0.5s cubic-bezier(0.34, 1.4, 0.64, 1) forwards',
+              }}
+            >
+              <svg className="w-full h-full flex-shrink-0" viewBox="0 0 24 24" fill="none" style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.4))' }}>
+                <path
+                  fill="#ffffff"
+                  d="M2 9H5V21H2C1.45 21 1 20.55 1 20V10C1 9.45 1.45 9 2 9ZM7.29 7.71L13.69 1.31C13.87 1.13 14.15 1.11 14.35 1.26L15.2 1.9C15.68 2.26 15.9 2.88 15.75 3.47L14.6 8H21C22.1 8 23 8.9 23 10V12.1C23 12.36 22.95 12.62 22.85 12.87L19.76 20.38C19.6 20.76 19.24 21 18.83 21H8C7.45 21 7 20.55 7 20V8.41C7 8.15 7.11 7.89 7.29 7.71Z"
+                />
+              </svg>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Speech bubble tail/pointer at bottom center */}
         <div
@@ -1397,6 +1402,52 @@ function BottomCaptionOverlay({ caption, onExpand }: { caption: string; onExpand
         </div>
       </div>
     </div>
+  );
+}
+
+/** Radiating red/pink lines burst for YouTube Shorts-style double-tap like (SVG from center). */
+function ShortsLikeBurstLines() {
+  const id = React.useId().replace(/:/g, '');
+  const cx = 50;
+  const cy = 50;
+  const count = 36;
+  const lines = React.useMemo(() => {
+    return Array.from({ length: count }, (_, i) => {
+      const angle = (i * 360) / count * (Math.PI / 180);
+      const r = 38 + (i % 3) * 4;
+      const x2 = cx + r * Math.cos(angle);
+      const y2 = cy + r * Math.sin(angle);
+      const stroke = i % 2 === 0 ? `url(#${id}-red)` : `url(#${id}-pink)`;
+      const strokeWidth = i % 2 === 0 ? 2.2 : 1.6;
+      return { x2, y2, stroke, strokeWidth };
+    });
+  }, [id]);
+  return (
+    <svg className="w-full h-full" viewBox="0 0 100 100" fill="none">
+      <defs>
+        <linearGradient id={`${id}-red`} x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="#ff1744" />
+          <stop offset="100%" stopColor="#e53935" />
+        </linearGradient>
+        <linearGradient id={`${id}-pink`} x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="#f48fb1" />
+          <stop offset="100%" stopColor="#ec407a" />
+        </linearGradient>
+      </defs>
+      <g strokeLinecap="round">
+        {lines.map((l, i) => (
+          <line
+            key={i}
+            x1={cx}
+            y1={cy}
+            x2={l.x2}
+            y2={l.y2}
+            stroke={l.stroke}
+            strokeWidth={l.strokeWidth}
+          />
+        ))}
+      </g>
+    </svg>
   );
 }
 
@@ -2494,30 +2545,53 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
             </div>
           </div>
         )}
-        {/* Heart pop-up animation at tap position - doubled size with white to purple gradient */}
+        {/* Double-tap like pop-up - YouTube Shorts: big white thumb + radiating red/pink lines */}
         {tapPosition && (
           <div
-            className="absolute pointer-events-none z-50 transition-opacity duration-300"
+            className="absolute pointer-events-none z-50"
             style={{
               left: `${tapPosition.x}px`,
               top: `${tapPosition.y}px`,
               transform: 'translate(-50%, -50%)',
-              animation: 'heartPopUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards'
+              width: 0,
+              height: 0,
             }}
           >
-            <svg className="w-40 h-40 drop-shadow-2xl" viewBox="0 0 24 24">
-              <defs>
-                <linearGradient id="heartGradientTap" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#ffffff" />
-                  <stop offset="50%" stopColor="#a855f7" />
-                  <stop offset="100%" stopColor="#8f5bff" />
-                </linearGradient>
-              </defs>
-              <path
-                d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z"
-                fill="url(#heartGradientTap)"
-              />
-            </svg>
+            {/* Radiating lines burst (red & pink) from center - behind thumb */}
+            <div
+              className="absolute z-0"
+              style={{
+                left: '50%',
+                top: '50%',
+                width: '200px',
+                height: '200px',
+                transform: 'translate(-50%, -50%)',
+                animation: 'shortsThumbGlow 0.5s ease-out forwards',
+              }}
+            >
+              <ShortsLikeBurstLines />
+            </div>
+            {/* Big white thumbs-up icon (center) - on top, always visible */}
+            <div
+              className="absolute flex items-center justify-center z-10"
+              style={{
+                left: '50%',
+                top: '50%',
+                width: '96px',
+                height: '96px',
+                marginLeft: '-48px',
+                marginTop: '-48px',
+                animation: 'heartPopUp 0.5s cubic-bezier(0.34, 1.4, 0.64, 1) forwards',
+              }}
+            >
+              <svg className="w-full h-full flex-shrink-0" viewBox="0 0 24 24" fill="none" style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.4))' }}>
+                {/* Material-style thumbs up: arm + thumb/fist so it reads clearly */}
+                <path
+                  fill="#ffffff"
+                  d="M2 9H5V21H2C1.45 21 1 20.55 1 20V10C1 9.45 1.45 9 2 9ZM7.29 7.71L13.69 1.31C13.87 1.13 14.15 1.11 14.35 1.26L15.2 1.9C15.68 2.26 15.9 2.88 15.75 3.47L14.6 8H21C22.1 8 23 8.9 23 10V12.1C23 12.36 22.95 12.62 22.85 12.87L19.76 20.38C19.6 20.76 19.24 21 18.83 21H8C7.45 21 7 20.55 7 20V8.41C7 8.15 7.11 7.89 7.29 7.71Z"
+                />
+              </svg>
+            </div>
           </div>
         )}
       </div>
@@ -2525,7 +2599,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   );
 }
 
-// Heart drop animation component - animates from tap position to like button
+// Thumb drop animation component - animates from tap position to like button
 function HeartDropAnimation({ startX, startY, targetElement, onComplete }: { startX: number; startY: number; targetElement: HTMLElement; onComplete: () => void }) {
   const [progress, setProgress] = React.useState(0);
   const [endPosition, setEndPosition] = React.useState<{ x: number; y: number } | null>(null);
@@ -2582,7 +2656,7 @@ function HeartDropAnimation({ startX, startY, targetElement, onComplete }: { sta
   const deltaY = endPosition.y - startY;
   const currentX = startX + deltaX * progress;
   const currentY = startY + deltaY * progress;
-  const scale = 1 - (progress * 0.7); // Scale from 1 to 0.3
+  const scale = 0.9 - (progress * 0.4); // Scale from 0.9 down toward ~0.5
   const opacity = 1 - progress;
 
   return (
@@ -2597,20 +2671,10 @@ function HeartDropAnimation({ startX, startY, targetElement, onComplete }: { sta
         transition: 'none'
       }}
     >
-      <svg
-        className="w-20 h-20 drop-shadow-lg"
-        viewBox="0 0 24 24"
-      >
-        <defs>
-          <linearGradient id="heartGradientDrop" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#ff4ecb" />
-            <stop offset="50%" stopColor="#8f5bff" />
-            <stop offset="100%" stopColor="#ff4ecb" />
-          </linearGradient>
-        </defs>
+      <svg className="w-10 h-10 drop-shadow-lg" viewBox="0 0 24 24" fill="none">
         <path
-          d="M12 21s-7.5-4.35-9.4-8.86C1.4 8.92 3.49 6 6.6 6c1.72 0 3.23.93 4.08 2.33C11.17 6.93 12.68 6 14.4 6c3.11 0 5.2 2.92 4.99 6.14C19.5 16.65 12 21 12 21z"
-          fill="url(#heartGradientDrop)"
+          fill="#ffffff"
+          d="M2 9H5V21H2C1.45 21 1 20.55 1 20V10C1 9.45 1.45 9 2 9ZM7.29 7.71L13.69 1.31C13.87 1.13 14.15 1.11 14.35 1.26L15.2 1.9C15.68 2.26 15.9 2.88 15.75 3.47L14.6 8H21C22.1 8 23 8.9 23 10V12.1C23 12.36 22.95 12.62 22.85 12.87L19.76 20.38C19.6 20.76 19.24 21 18.83 21H8C7.45 21 7 20.55 7 20V8.41C7 8.15 7.11 7.89 7.29 7.71Z"
         />
       </svg>
     </div>
@@ -2741,12 +2805,11 @@ function EngagementBar({
     window.addEventListener(`viewAdded-${post.id}`, handleViewAdded);
     window.addEventListener(`likeToggled-${post.id}`, handleLikeToggled as EventListener);
 
-    // Listen for post updates (text/location edits)
+    // Listen for post updates (text/location/venue edits)
     const handlePostUpdated = ((e: CustomEvent) => {
-      const { text, location } = e.detail;
-      // Update the post in the feed
+      const { text, location, venue } = e.detail;
       window.dispatchEvent(new CustomEvent(`updatePostInFeed-${post.id}`, {
-        detail: { text, location }
+        detail: { text, location, venue }
       }));
     }) as EventListener;
     window.addEventListener(`postUpdated-${post.id}`, handlePostUpdated);
@@ -2841,11 +2904,12 @@ function EngagementBar({
             aria-label={liked ? 'Unlike' : 'Like'}
             title={liked ? 'Unlike' : 'Like'}
           >
-            {liked ? (
-              <AiFillHeart className={`${iconSize} text-purple-500`} />
-            ) : (
-              <FiHeart className={`${iconSize} text-white`} />
-            )}
+            {/* YouTube Shorts-style: thumbs up, white outline when not liked, full white when liked */}
+            <span className={`inline-block ${iconSize}`}>
+              <svg className="w-full h-full text-white" viewBox="0 0 24 24" fill={liked ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={liked ? 0 : 1.5} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2 9H5V21H2C1.45 21 1 20.55 1 20V10C1 9.45 1.45 9 2 9ZM7.29 7.71L13.69 1.31C13.87 1.13 14.15 1.11 14.35 1.26L15.2 1.9C15.68 2.26 15.9 2.88 15.75 3.47L14.6 8H21C22.1 8 23 8.9 23 10V12.1C23 12.36 22.95 12.62 22.85 12.87L19.76 20.38C19.6 20.76 19.24 21 18.83 21H8C7.45 21 7 20.55 7 20V8.41C7 8.15 7.11 7.89 7.29 7.71Z" />
+              </svg>
+            </span>
             <span className="text-xs text-white tabular-nums">{likes}</span>
           </button>
 
@@ -3251,15 +3315,24 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
           </div>
         )}
         {isTextOnly ? (
-          <TextCard
-            text={post.text || ''}
-            onDoubleLike={onLike}
-            textStyle={post.textStyle}
-            stickers={post.stickers}
-            userHandle={post.userHandle}
-            locationLabel={post.locationLabel}
-            createdAt={post.createdAt?.toString()}
-          />
+          <>
+            <TextCard
+              text={post.text || ''}
+              onDoubleLike={onLike}
+              textStyle={post.textStyle}
+              stickers={post.stickers}
+              userHandle={post.userHandle}
+              locationLabel={post.locationLabel}
+              createdAt={post.createdAt?.toString()}
+            />
+            {/* Tagged users: first 3 profile pics + "X people tagged" for text-only posts */}
+            {post.taggedUsers && post.taggedUsers.length > 0 && (
+              <TaggedAvatars
+                taggedUserHandles={post.taggedUsers}
+                onShowTaggedUsers={() => setShowTaggedUsersModal(true)}
+              />
+            )}
+          </>
         ) : (
           <Media
             url={post.mediaUrl}
@@ -3452,12 +3525,10 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             post={post}
             isOpen={editModalOpen}
             onClose={() => setEditModalOpen(false)}
-            onSave={async (text: string, location: string) => {
+            onSave={async (text: string, location: string, venue: string) => {
               try {
-                // Try to update post via API
-                await updatePost(post.id, { text, location });
+                await updatePost(post.id, { text, location, venue: venue || undefined });
               } catch (err: any) {
-                // Check if it's a connection error (backend not running)
                 const isConnectionError =
                   err?.message === 'CONNECTION_REFUSED' ||
                   err?.name === 'ConnectionRefused' ||
@@ -3466,21 +3537,16 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
                   err?.message?.includes('NetworkError');
 
                 if (isConnectionError) {
-                  // If backend isn't running, update locally as fallback
                   console.warn('Backend not available, updating post locally');
-                  // Update the post in the feed directly
                   window.dispatchEvent(new CustomEvent(`updatePostInFeed-${post.id}`, {
-                    detail: { text, location }
+                    detail: { text, location, venue }
                   }));
-                  // Don't throw - allow the modal to close
                   return;
                 }
-                // Re-throw other errors
                 throw err;
               }
-              // Notify parent to update the post in the feed
               window.dispatchEvent(new CustomEvent(`postUpdated-${post.id}`, {
-                detail: { text, location }
+                detail: { text, location, venue }
               }));
             }}
           />
@@ -3938,6 +4004,10 @@ function FeedPageWrapper() {
         return;
       }
       setPages(prev => {
+        // When we already have cached feed and this result is from mock (API down), keep cache so edits persist after refresh
+        if (cursor === 0 && prev.length > 0 && page.fromMock) {
+          return prev;
+        }
         const existingIds = cursor === 0 ? new Set<string>() : new Set(prev.flat().map(p => p.id));
         const newChunk = page.items.filter(x => !existingIds.has(x.id));
         const seenInChunk = new Set<string>();
@@ -3947,7 +4017,7 @@ function FeedPageWrapper() {
           return true;
         });
         const next = cursor === 0 ? [dedupedChunk] : [...prev, dedupedChunk];
-        if (cursor === 0) {
+        if (cursor === 0 && !page.fromMock) {
           pagesLoadedForFilterRef.current = filterForRequest;
           saveFeed(userId, currentFilter, next).catch(() => {});
         }
@@ -4142,13 +4212,16 @@ function FeedPageWrapper() {
       // Add listeners for all posts in the feed
       pages.flat().forEach(post => {
         const handler = ((e: CustomEvent) => {
-          const { text, location } = e.detail;
+          const { text, location, venue } = e.detail;
           updateOne(post.id, p => ({
             ...p,
-            text: text || p.text,
-            text_content: text || p.text_content,
-            locationLabel: location || p.locationLabel
-          }));
+            text: text !== undefined ? text : p.text,
+            text_content: text !== undefined ? text : p.text_content,
+            locationLabel: location !== undefined ? location : p.locationLabel,
+            venue: venue !== undefined ? venue : p.venue
+          }), (newPages) => {
+            saveFeed(userId, currentFilter, newPages).catch(() => {});
+          });
         }) as EventListener;
 
         window.addEventListener(`updatePostInFeed-${post.id}`, handler);
@@ -4163,9 +4236,9 @@ function FeedPageWrapper() {
         window.removeEventListener(`updatePostInFeed-${postId}`, handler);
       });
     };
-  }, [pages]);
+  }, [pages, userId, currentFilter]);
 
-  function updateOne(id: string, updater: (p: Post) => Post) {
+  function updateOne(id: string, updater: (p: Post) => Post, onUpdated?: (newPages: Post[][]) => void) {
     setPages(cur => {
       const updated = cur.map(group => group.map(p => {
         if (p.id === id) {
@@ -4183,6 +4256,7 @@ function FeedPageWrapper() {
         return p;
       }));
 
+      if (onUpdated) onUpdated(updated);
       return updated;
     });
   }
@@ -4323,11 +4397,11 @@ function FeedPageWrapper() {
               className="relative px-3 py-1.5 text-sm font-medium text-white rounded-lg"
               onClick={() => setCustomLocation(null)}
             >
-              {/* Gradient border wrapper – match Clips/Discover red → yellow → red, with rotating reveal */}
+              {/* Gradient border wrapper – match Clips/Discover red → white → red, with rotating reveal */}
               <div
                 className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
                 style={{
-                  background: 'linear-gradient(90deg, red, yellow, red)',
+                  background: 'linear-gradient(90deg, red, white, red)',
                 }}
               >
                 {/* Overlay that covers border initially, then rotates to reveal it */}

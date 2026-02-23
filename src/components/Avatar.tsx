@@ -59,9 +59,9 @@ export default function Avatar({ src, name, size = 'md', className = '', hasStor
         onClick(e);
     } : undefined;
 
-    // Always show a border - red/yellow/red for unviewed stories, white for viewed/no stories
+    // Always show a border - red/white/red for unviewed stories, white for viewed/no stories
     const borderStyle = hasStory
-        ? { background: 'linear-gradient(135deg, red 0%, yellow 50%, red 100%)' }
+        ? { background: 'linear-gradient(135deg, red 0%, white 50%, red 100%)' }
         : { background: '#ffffff' };
 
     if (onClick) {

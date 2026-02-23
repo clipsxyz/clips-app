@@ -54,7 +54,9 @@ class PostController extends Controller
             }
             $offset = $cursor * $limit;
 
-            $cacheKey = 'feed:' . ($filter ?? 'all') . ':' . ($userId ?? 'guest') . ':' . $cursor . ':' . $limit;
+            // Include feed version so cache is invalidated when any post is updated (e.g. edit location/venue)
+            $feedVersion = Cache::get('feed_version', 0);
+            $cacheKey = 'feed:v' . $feedVersion . ':' . ($filter ?? 'all') . ':' . ($userId ?? 'guest') . ':' . $cursor . ':' . $limit;
             $ttlSeconds = 300; // 5 minutes
 
             $response = Cache::remember($cacheKey, $ttlSeconds, function () use ($request, $cursor, $limit, $filter, $userId, $offset) {
@@ -370,6 +372,9 @@ class PostController extends Controller
         }
 
         $post->save();
+
+        // Invalidate feed cache so next GET /posts returns fresh data (including this edit)
+        Cache::put('feed_version', (int) Cache::get('feed_version', 0) + 1);
 
         // Reload relationships
         $post->load(['user', 'taggedUsers']);

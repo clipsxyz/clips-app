@@ -523,7 +523,7 @@ export function getState(userId: string): UserState {
 
 const delay = (ms = 0) => new Promise(r => setTimeout(r, ms));
 
-export type Page = { items: Post[]; nextCursor: number | null };
+export type Page = { items: Post[]; nextCursor: number | null; fromMock?: boolean };
 
 /** Case-insensitive lookup so "Bob@Cork" and "bob@cork" are treated as the same user. */
 export function getFollowState(follows: Record<string, boolean>, handle: string | undefined): boolean {
@@ -950,7 +950,8 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
 
       return {
         items,
-        nextCursor: response?.nextCursor ?? null
+        nextCursor: response?.nextCursor ?? null,
+        fromMock: false
       };
     } catch (error: any) {
       // Only log if it's not a connection refused error (backend not running)
@@ -1198,7 +1199,7 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
 
     const next = start + slice.length < sortedWithMock.length ? start + slice.length : null;
 
-    return { items, nextCursor: next };
+    return { items, nextCursor: next, fromMock: true };
   } catch (error) {
     console.error('Error in fetchPostsPage:', error);
     throw error;

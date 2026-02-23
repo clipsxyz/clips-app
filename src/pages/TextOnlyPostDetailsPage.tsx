@@ -3,8 +3,11 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { FiChevronLeft, FiMapPin, FiUser } from 'react-icons/fi';
 import { useAuth } from '../context/Auth';
 import { createPost } from '../api/posts';
+import { saveDraft } from '../api/drafts';
 import { showToast } from '../utils/toast';
 import UserTaggingModal from '../components/UserTaggingModal';
+import Swal from 'sweetalert2';
+import { bottomSheet } from '../utils/swalBottomSheet';
 
 export default function TextOnlyPostDetailsPage() {
     const { user } = useAuth();
@@ -19,6 +22,17 @@ export default function TextOnlyPostDetailsPage() {
     const [taggedUsers, setTaggedUsers] = useState<string[]>([]);
     const [showUserTagging, setShowUserTagging] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isSavingDraft, setIsSavingDraft] = useState(false);
+
+    // Pre-fill from draft when opened from Profile
+    useEffect(() => {
+        const s = location.state as { fromDraft?: boolean; location?: string; venue?: string; taggedUsers?: string[] } | null;
+        if (s?.fromDraft) {
+            if (s.location) setLocationText(s.location);
+            if (s.venue) setVenueText(s.venue);
+            if (s.taggedUsers?.length) setTaggedUsers(s.taggedUsers);
+        }
+    }, [location.state]);
 
     // Scroll to top when component mounts - use useLayoutEffect to run before paint
     useLayoutEffect(() => {
@@ -149,6 +163,46 @@ export default function TextOnlyPostDetailsPage() {
 
     const canPost = text.trim().length > 0;
 
+    const handleSaveToDrafts = async () => {
+        if (!text.trim()) {
+            showToast('Add some text to save a draft.');
+            return;
+        }
+        if (isSavingDraft) return;
+        setIsSavingDraft(true);
+        showToast('Saving draft...');
+        try {
+            await saveDraft({
+                videoUrl: '',
+                videoDuration: 0,
+                isTextOnly: true,
+                textBody: text.trim(),
+                location: locationText.trim() || undefined,
+                venue: venueText.trim() || undefined,
+                taggedUsers: taggedUsers.length > 0 ? taggedUsers : undefined,
+            });
+            await new Promise<void>((r) => setTimeout(r, 50));
+            await Swal.fire(bottomSheet({
+                title: 'Saved to Drafts!',
+                message: 'You can find it in your profile. Tap a draft to continue and post.',
+                icon: 'success',
+                confirmButtonText: 'Done',
+            }));
+            navigate('/feed');
+        } catch (e) {
+            console.error(e);
+            showToast('Failed to save draft. Please try again.');
+            Swal.fire(bottomSheet({
+                title: 'Failed to Save',
+                message: 'Could not save draft. Please try again.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            }));
+        } finally {
+            setIsSavingDraft(false);
+        }
+    };
+
     return (
         <div ref={containerRef} className="min-h-screen bg-black flex flex-col" style={{ overflowY: 'auto' }}>
             {/* Header */}
@@ -171,16 +225,25 @@ export default function TextOnlyPostDetailsPage() {
                             </div>
                         </div>
                     </div>
-                    <button
-                        onClick={handleSubmit}
-                        disabled={!canPost || isSubmitting}
-                        className={`px-4 py-1.5 rounded-full text-sm font-semibold transition-colors ${canPost && !isSubmitting
-                            ? 'gz-animated-border bg-gray-900/30 text-white hover:bg-gray-800/50'
-                            : 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                            }`}
-                    >
-                        {isSubmitting ? 'Posting...' : 'Post'}
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={handleSaveToDrafts}
+                            disabled={!canPost || isSavingDraft}
+                            className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${canPost && !isSavingDraft ? 'text-white hover:bg-gray-800' : 'text-gray-500 cursor-not-allowed'}`}
+                        >
+                            {isSavingDraft ? 'Saving...' : 'Save to drafts'}
+                        </button>
+                        <button
+                            onClick={handleSubmit}
+                            disabled={!canPost || isSubmitting}
+                            className={`px-4 py-1.5 rounded-full text-sm font-semibold transition-colors ${canPost && !isSubmitting
+                                ? 'gz-animated-border bg-gray-900/30 text-white hover:bg-gray-800/50'
+                                : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                }`}
+                        >
+                            {isSubmitting ? 'Posting...' : 'Post'}
+                        </button>
+                    </div>
                 </div>
             </div>
 

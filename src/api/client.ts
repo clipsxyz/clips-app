@@ -168,6 +168,7 @@ export async function toggleLike(postId: string) {
 export async function updatePost(postId: string, postData: {
     text?: string;
     location?: string;
+    venue?: string;
 }) {
     return apiRequest(`/posts/${postId}`, {
         method: 'PUT',
