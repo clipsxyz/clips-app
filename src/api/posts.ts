@@ -837,8 +837,10 @@ function postMatchesLocationTab(p: Post, tab: string): boolean {
 
 export async function fetchPostsPage(tab: string, cursor: number | null, limit = 5, userId = 'me', _userLocal = '', _userRegional = '', _userNational = '', currentUserHandle = ''): Promise<Page> {
   const t = tab.toLowerCase();
-  // When API is off, use mock for all feeds (including Following) so Following loads fast and shows posts from in-memory follow state.
-  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+  // TEMP for your build: force mock feeds so everything (Ava/Sarah, your posts, recorded videos) stays in the mock world.
+  // When you're ready to switch to the real Laravel feed, change this back to:
+  //   const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+  const useLaravelAPI = false;
 
   if (useLaravelAPI) {
     try {
@@ -986,6 +988,11 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
     // - Location tabs (Dublin, Ireland, Finglas, etc.): show posts by AUTHOR LOCATION only (who posted from that place). No follow check.
     // - Following (Discover): show ONLY posts from people you follow (and your own reclips). Location does not matter.
     const filtered = posts.filter(p => {
+      // Always include the current user's own posts in any tab during dev/mock so new posts are visible immediately.
+      if (currentUserHandle && p.userHandle === currentUserHandle) {
+        return true;
+      }
+
       // Exclude reclipped posts from location-based feeds - they should only appear in Following feed
       if (p.isReclipped && t !== 'discover') {
         return false;
@@ -1207,23 +1214,7 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
 }
 
 export async function toggleLike(userId: string, id: string): Promise<Post> {
-  // Try Laravel API first, fallback to mock if it fails
-  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
-
-  if (useLaravelAPI) {
-    try {
-      const response = await apiClient.toggleLike(id);
-      return transformLaravelPost(response);
-    } catch (error: any) {
-      // Only log if it's not a connection refused error (backend not running)
-      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
-        console.warn('Laravel API call failed, falling back to mock data:', error);
-      }
-      // Fall through to mock implementation
-    }
-  }
-
-  // Mock implementation (fallback)
+  // PURE MOCK in your current build: update likes only in the local posts array/state.
   await delay(150);
   const s = getState(userId);
   const p = posts.find(x => x.id === id);
@@ -1580,6 +1571,10 @@ export async function fetchComments(postId: string): Promise<Comment[]> {
   return comments.filter(c => c.postId === postId && !c.parentId);
 }
 
+/**
+ * Fetch posts by user handle from the mock store only.
+ * Used as a safe fallback when the Laravel API is unavailable.
+ */
 export async function fetchPostsByUser(userHandle: string, limit = 30): Promise<Post[]> {
   await delay(150);
   const handle = userHandle.trim().toLowerCase();
@@ -1587,6 +1582,41 @@ export async function fetchPostsByUser(userHandle: string, limit = 30): Promise<
   // newest first (ids include timestamp; also fallback to original order)
   const sorted = filtered.slice().reverse();
   return sorted.slice(0, limit);
+}
+
+/**
+ * Fetch posts by user handle from the Laravel API, transforming them into frontend Post format.
+ * This is a small, focused API used by Boost so it can see real backend posts when the server is running.
+ * It falls back cleanly to the mock implementation when the API is off or unreachable.
+ */
+export async function fetchPostsByUserFromApi(userHandle: string, limit = 30): Promise<Post[]> {
+  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+
+  if (useLaravelAPI) {
+    try {
+      const encoded = encodeURIComponent(userHandle);
+      const params = new URLSearchParams({ limit: limit.toString() });
+      // Reuse existing user profile endpoint, which includes posts
+      const response = await apiClient.apiRequest(`/users/${encoded}?${params.toString()}`);
+      const rawPosts = Array.isArray(response?.posts) ? response.posts : [];
+      return rawPosts.map(transformLaravelPost);
+    } catch (error: any) {
+      // Only log when it's not a simple connection failure; for offline dev, silently fall back to mocks
+      const message = error?.message || '';
+      const isConnectionError =
+        error?.name === 'ConnectionRefused' ||
+        message.includes('CONNECTION_REFUSED') ||
+        message.includes('Failed to fetch') ||
+        message.includes('NetworkError');
+
+      if (!isConnectionError) {
+        console.warn('fetchPostsByUserFromApi failed, falling back to mock:', error);
+      }
+    }
+  }
+
+  // Fallback: use mock/local posts so Boost still works when backend is off
+  return fetchPostsByUser(userHandle, limit);
 }
 
 export async function addComment(postId: string, userHandle: string, text: string): Promise<Comment> {
@@ -1760,116 +1790,9 @@ export async function createPost(
   musicTrackId?: number, // Library music track ID
   venue?: string // Venue / place name for metadata carousel
 ): Promise<Post> {
-  // Use real Laravel API
-  const { createPost: createPostAPI } = await import('./client');
+  // PURE MOCK in your current build: create the post only in the local posts array + localStorage.
 
-  try {
-    const response = await createPostAPI({
-      text: text || undefined,
-      location: location || undefined,
-      venue: venue || undefined,
-      mediaUrl: imageUrl || undefined,
-      mediaType: mediaType || undefined,
-      caption: caption || undefined,
-      imageText: imageText || undefined,
-      bannerText: bannerText || undefined,
-      stickers: stickers || undefined,
-      templateId: templateId || undefined,
-      mediaItems: mediaItems || undefined,
-      textStyle: textStyle || undefined,
-      taggedUsers: taggedUsers || undefined,
-      videoCaptionsEnabled: videoCaptionsEnabled || undefined,
-      videoCaptionText: videoCaptionText || undefined,
-      subtitlesEnabled: subtitlesEnabled || undefined,
-      subtitleText: subtitleText || undefined,
-      editTimeline: editTimeline || undefined,
-      musicTrackId: musicTrackId || undefined,
-    });
-
-    // Transform Laravel response to frontend Post format
-    const finalVideoUrl = response.final_video_url || response.finalVideoUrl;
-    const originalMediaUrl = response.media_url || response.mediaUrl || imageUrl || '';
-
-    const transformedPost = {
-      id: response.id,
-      userHandle: response.user_handle || response.userHandle,
-      locationLabel: response.location_label || response.locationLabel || location || 'Unknown Location',
-      venue: response.venue || venue || undefined,
-      tags: response.tags || [],
-      // Use final_video_url if available (from completed render job), otherwise use original media_url
-      mediaUrl: finalVideoUrl || originalMediaUrl,
-      finalVideoUrl: finalVideoUrl || undefined, // Set as separate field for Media component
-      mediaType: response.media_type || response.mediaType || mediaType,
-      mediaItems: response.media_items || response.mediaItems || (imageUrl ? [{ url: imageUrl, type: mediaType || 'image' }] : undefined),
-      text: response.text_content || response.text || text || undefined,
-      imageText: response.image_text || response.imageText || imageText || undefined,
-      caption: response.caption || caption || undefined,
-      createdAt: new Date(response.created_at || response.createdAt).getTime(),
-      stats: {
-        likes: response.likes_count || response.stats?.likes || 0,
-        views: response.views_count || response.stats?.views || 0,
-        comments: response.comments_count || response.stats?.comments || 0,
-        shares: response.shares_count || response.stats?.shares || 0,
-        reclips: response.reclips_count || response.stats?.reclips || 0,
-      },
-      isBookmarked: response.is_bookmarked || false,
-      isFollowing: response.is_following || false,
-      authorFollowsYou: response.author_follows_you ?? response.authorFollowsYou ?? false,
-      userLiked: response.user_liked || false,
-      stickers: response.stickers || stickers || undefined,
-      templateId: response.template_id || response.templateId || templateId || undefined,
-      bannerText: response.banner_text || response.bannerText || bannerText || undefined,
-      textStyle: response.text_style || response.textStyle || textStyle || undefined,
-      taggedUsers: response.taggedUsers || taggedUsers || undefined,
-      videoCaptionsEnabled: response.video_captions_enabled || response.videoCaptionsEnabled || undefined,
-      videoCaptionText: response.video_caption_text || response.videoCaptionText || undefined,
-      subtitlesEnabled: response.subtitles_enabled || response.subtitlesEnabled || undefined,
-      subtitleText: response.subtitle_text || response.subtitleText || undefined,
-      userLocal: userLocal,
-      userRegional: userRegional,
-      userNational: userNational,
-      // Include renderJobId for PiP tracking
-      renderJobId: response.render_job_id || response.renderJobId,
-    } as Post & { renderJobId?: string };
-
-    return transformedPost;
-  } catch (error: any) {
-    console.error('Error creating post via API:', error);
-    console.error('Error details:', {
-      name: error?.name,
-      message: error?.message,
-      status: error?.status,
-      response: error?.response
-    });
-
-    // Check if it's a connection error - if so, use mock fallback
-    const isConnectionError =
-      error?.name === 'ConnectionRefused' ||
-      error?.message?.includes('CONNECTION_REFUSED') ||
-      error?.message?.includes('Failed to fetch') ||
-      error?.message?.includes('NetworkError') ||
-      (error?.name === 'TypeError' && error?.message?.includes('fetch'));
-
-    // Also fall back to mock when backend requires auth but user isn't logged in (e.g. no token)
-    const isAuthError =
-      error?.message?.includes('Authentication required') ||
-      error?.message?.includes('Unauthenticated') ||
-      error?.status === 401;
-
-    if (isConnectionError) {
-      console.log('⚠️ API connection failed, using mock fallback for post creation');
-      console.log('This is normal when backend is not running or not accessible from your device');
-      await delay(500);
-    } else if (isAuthError) {
-      console.log('⚠️ API requires authentication, using mock fallback for post creation');
-      await delay(500);
-    } else {
-      // For other errors (validation, etc), re-throw so user sees the error
-      console.error('❌ API error (not connection/auth):', error);
-      throw error;
-    }
-
-    // Helper function to convert blob URL to data URL for persistence
+  // Helper function to convert blob URL to data URL for persistence
     async function convertBlobToDataUrl(blobUrl: string): Promise<string> {
       if (!blobUrl.startsWith('blob:')) {
         return blobUrl; // Not a blob URL, return as-is
@@ -2004,8 +1927,7 @@ export async function createPost(
     // Save to localStorage for persistence
     savePostsToStorage(posts);
 
-    return decorateForUser(userId, newPost);
-  }
+  return decorateForUser(userId, newPost);
 }
 
 export type SearchResults = {

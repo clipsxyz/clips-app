@@ -128,23 +128,8 @@ export async function getActiveBoost(postId: string): Promise<BoostedPost | null
     const expired = boostedPosts.find((bp) => bp.postId === postId && bp.expiresAt <= now);
     if (expired) expired.isActive = false;
 
-    // Then try backend API (for real Stripe boosts)
-    try {
-        const status = await apiClient.getBoostStatusApi(postId);
-        if (status.isActive) {
-            return {
-                postId,
-                userId: '',
-                feedType: status.feedType as BoostFeedType,
-                price: 0,
-                activatedAt: status.activatedAt ? new Date(status.activatedAt).getTime() : 0,
-                expiresAt: status.expiresAt ? new Date(status.expiresAt).getTime() : 0,
-                isActive: true,
-            };
-        }
-    } catch {
-        // API failed – no backend boost
-    }
+    // TEMP for your build: never hit backend for boost status to avoid ERR_CONNECTION_REFUSED spam.
+    // When you're ready to use real Stripe boosts, restore the API call here.
     return null;
 }
 

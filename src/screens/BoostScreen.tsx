@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, ActivityIndi
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
-import { fetchPostsByUser, decorateForUser } from '../api/posts';
+import { fetchPostsByUserFromApi, decorateForUser } from '../api/posts';
 import type { Post } from '../types';
 
 const BoostScreen: React.FC = ({ navigation }: any) => {
@@ -25,7 +25,9 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
         setLoading(true);
         setError(null);
         try {
-            const userPosts = await fetchPostsByUser(user.handle, 50);
+            // Prefer real backend posts when Laravel API is available,
+            // but fall back to mock/local posts when offline so Boost stays fast while you build.
+            const userPosts = await fetchPostsByUserFromApi(user.handle, 50);
             const decorated = userPosts.map(p => decorateForUser(userId, p));
             setPosts(decorated);
         } catch (err) {
@@ -84,8 +86,12 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
                     renderItem={({ item }) => (
                         <View style={styles.postCard}>
                             <View style={styles.postHeader}>
-                                {item.mediaUrl && (
+                                {item.mediaUrl && !item.mediaUrl.startsWith('blob:') ? (
                                     <Image source={{ uri: item.mediaUrl }} style={styles.postThumbnail} />
+                                ) : (
+                                    <View style={[styles.postThumbnail, { alignItems: 'center', justifyContent: 'center' }]}>
+                                        <Icon name="videocam" size={24} color="#6B7280" />
+                                    </View>
                                 )}
                                 <View style={styles.postInfo}>
                                     <Text style={styles.postText} numberOfLines={2}>

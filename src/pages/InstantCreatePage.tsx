@@ -653,7 +653,7 @@ export default function InstantCreatePage() {
                         setTrimStart(0);
                         setTrimEnd(duration || 0);
                         
-                        // Auto-navigate to edit page after recording/selecting
+                        // Auto-navigate to new gallery-style preview flow after recording
                         setTimeout(() => {
                             const clipsToPass = updated.length > 0 ? updated : [newClip];
                             if (clipsToPass.length > 0) {
@@ -667,22 +667,26 @@ export default function InstantCreatePage() {
                                     videoRef.current.pause();
                                     videoRef.current.srcObject = null;
                                 }
-                                navigate('/create', {
+                                
+                                // Use the same preview flow as gallery file picker:
+                                // cache the recorded clip as a single gallery item,
+                                // then navigate to /create/gallery-preview.
+                                const galleryItems = [
+                                    {
+                                        blob,
+                                        mediaType: 'video' as const,
+                                        videoDuration: duration || 0,
+                                    },
+                                ];
+                                setGalleryPreviewMedia(galleryItems);
+
+                                navigate('/create/gallery-preview', {
                                     state: {
-                                        videoUrl: clipsToPass[0].url,
-                                        videoDuration: clipsToPass[0].duration,
-                                        filterInfo: {
-                                            active: selectedFilter,
-                                            brightness,
-                                            contrast,
-                                            saturation,
-                                            hue,
-                                            exportFailed: false
-                                        },
-                                        filtered: selectedFilter !== 'None' || brightness !== 1 || contrast !== 1 || saturation !== 1 || hue !== 0,
-                                        mediaType: 'video',
-                                        musicTrackId: selectedMusicTrackId
-                                    }
+                                        mediaUrl: undefined,
+                                        mediaType: 'video' as const,
+                                        videoDuration: duration || 0,
+                                        fromInstantRecording: true,
+                                    },
                                 });
                             }
                         }, 500); // Small delay to ensure state is set

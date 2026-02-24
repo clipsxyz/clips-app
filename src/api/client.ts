@@ -25,6 +25,12 @@ const API_BASE_URL = getApiBaseUrl();
 
 // Helper function to make API requests (with configurable timeout to avoid long hangs when backend is slow)
 export async function apiRequest(endpoint: string, options: RequestInit & { timeoutMs?: number } = {}) {
+    // DEV MOCK MODE: completely disable real backend calls.
+    // This prevents any /api/... requests (search, posts, boosts, etc.) while you build with mocks.
+    if (import.meta.env.VITE_DEV_MODE === 'true') {
+        console.info('[DEV MOCK] apiRequest skipped:', endpoint);
+        return {};
+    }
     const token = localStorage.getItem('authToken');
     const { timeoutMs = 8000, ...fetchOptions } = options;
 

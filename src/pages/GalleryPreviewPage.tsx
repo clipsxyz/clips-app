@@ -62,9 +62,11 @@ export default function GalleryPreviewPage() {
         draftVideoDuration?: number;
         draftId?: string;
         draftMediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>;
+        fromInstantRecording?: boolean;
     } | null) || {};
 
     const isFromDraft = !!(state.fromDraft && state.draftMediaUrl);
+    const fromInstantRecording = !!state.fromInstantRecording;
     const [resolvedMediaUrl, setResolvedMediaUrl] = useState(isFromDraft ? state.draftMediaUrl! : (state.mediaUrl ?? ''));
     const [resolvedMediaType, setResolvedMediaType] = useState<'image' | 'video'>(
         isFromDraft ? (state.draftMediaType ?? 'image') : (state.mediaType ?? 'video')
@@ -417,20 +419,45 @@ export default function GalleryPreviewPage() {
             showToast('Please log in to post.');
             return;
         }
+        if (!mediaUrl) {
+            showToast('No media selected to post.');
+            return;
+        }
         setIsUploading(true);
         try {
             let persistentMediaUrl = mediaUrl;
             const isVideo = mediaType === 'video';
+            const devMode = import.meta.env.VITE_DEV_MODE === 'true';
             if (mediaUrl.startsWith('blob:')) {
                 if (isVideo) {
-                    const res = await fetch(mediaUrl);
-                    if (!res.ok) throw new Error('Failed to fetch video');
-                    const blob = await res.blob();
-                    const file = new File([blob], `video-${Date.now()}.webm`, { type: blob.type || 'video/webm' });
-                    const { uploadFile } = await import('../api/client');
-                    const up = await uploadFile(file);
-                    if (up.success && up.fileUrl) persistentMediaUrl = up.fileUrl;
-                    else throw new Error(up.error || 'Upload failed');
+                    if (!devMode) {
+                        // Try to upload to backend in non-dev mode; in dev we keep the blob URL and let mocks handle it.
+                        try {
+                            const res = await fetch(mediaUrl);
+                            if (!res.ok) throw new Error('Failed to fetch video');
+                            const blob = await res.blob();
+                            const file = new File([blob], `video-${Date.now()}.webm`, { type: blob.type || 'video/webm' });
+                            const { uploadFile } = await import('../api/client');
+                            const up = await uploadFile(file);
+                            if (up.success && up.fileUrl) {
+                                persistentMediaUrl = up.fileUrl;
+                            } else {
+                                throw new Error(up.error || 'Upload failed');
+                            }
+                        } catch (uploadError: any) {
+                            const msg = uploadError?.message || '';
+                            const isConnectionError =
+                                msg.includes('CONNECTION_REFUSED') ||
+                                msg.includes('Failed to fetch') ||
+                                msg.includes('NetworkError');
+                            if (isConnectionError) {
+                                console.warn('Video upload failed (backend offline); using blob URL for mock post.', uploadError);
+                                // Keep persistentMediaUrl as original blob: URL so createPost can fall back to mock storage.
+                            } else {
+                                throw uploadError;
+                            }
+                        }
+                    }
                 } else {
                     const res = await fetch(mediaUrl);
                     const blob = await res.blob();
@@ -549,24 +576,28 @@ export default function GalleryPreviewPage() {
                     }}
                 >
                     {mediaType === 'video' ? (
-                        <video
-                            ref={videoRef}
-                            src={mediaUrl}
-                            playsInline
-                            muted
-                            loop
-                            autoPlay
-                            preload="auto"
-                            className="absolute inset-0 w-full h-full object-contain"
-                            style={filterStyle}
-                        />
+                        mediaUrl ? (
+                            <video
+                                ref={videoRef}
+                                src={mediaUrl}
+                                playsInline
+                                muted
+                                loop
+                                autoPlay
+                                preload="auto"
+                                className="absolute inset-0 w-full h-full object-contain"
+                                style={filterStyle}
+                            />
+                        ) : null
                     ) : (
-                        <img
-                            src={mediaUrl}
-                            alt="Preview"
-                            className="absolute inset-0 w-full h-full object-contain"
-                            style={filterStyle}
-                        />
+                        mediaUrl ? (
+                            <img
+                                src={mediaUrl}
+                                alt="Preview"
+                                className="absolute inset-0 w-full h-full object-contain"
+                                style={filterStyle}
+                            />
+                        ) : null
                     )}
                     {stickers.map((overlay) => (
                         <StickerOverlayComponent
@@ -585,7 +616,11 @@ export default function GalleryPreviewPage() {
 
             {/* Card overlay - black card, white icons */}
             <div
-                className="absolute bottom-0 left-0 right-0 z-20 flex flex-col max-h-[85dvh] rounded-t-[24px] overflow-hidden overflow-y-auto bg-black"
+                className={`absolute bottom-0 left-0 right-0 z-20 flex flex-col max-h-[85dvh] rounded-t-[24px] overflow-hidden overflow-y-auto ${
+                    fromInstantRecording
+                        ? 'bg-black/80 backdrop-blur-md border-t border-white/10'
+                        : 'bg-black'
+                }`}
                 style={{ paddingBottom: 'env(safe-area-inset-bottom, 0)' }}
             >
                 <div
