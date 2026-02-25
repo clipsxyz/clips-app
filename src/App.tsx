@@ -7,6 +7,7 @@ import CommentsModal from './components/CommentsModal';
 import ShareModal from './components/ShareModal';
 import ScenesModal from './components/ScenesModal';
 import CreateModal from './components/CreateModal';
+import AboutProfileModal from './components/AboutProfileModal';
 import TaggedUsersBottomSheet from './components/TaggedUsersBottomSheet';
 import TaggedAvatars from './components/TaggedAvatars';
 import Avatar from './components/Avatar';
@@ -48,7 +49,7 @@ const videoMutedMap = new Map<string, boolean>();
 
 type Tab = string; // Dynamic based on user location
 
-function BottomNav({ onCreateClick }: { onCreateClick: () => void }) {
+function BottomNav({ onCreateClick, onProfileClick }: { onCreateClick: () => void; onProfileClick?: () => void }) {
   const nav = useNavigate();
   const loc = useLocation();
   const { user } = useAuth();
@@ -165,7 +166,7 @@ function BottomNav({ onCreateClick }: { onCreateClick: () => void }) {
         {item('/boost', 'Boost', <FiZap size={16} />)}
         {item('/create', 'Create', <FiPlusSquare size={16} />, onCreateClick)}
         {item('/search', 'Search', <FiSearch size={16} />)}
-        {item('/profile', 'Passport', profileIcon, undefined, true)}
+        {item('/profile', 'Passport', profileIcon, onProfileClick, true)}
       </div>
     </nav>
   );
@@ -177,6 +178,15 @@ export default function App() {
   const [activeTab, setActiveTab] = React.useState<string>('Ireland');
   const [customLocation, setCustomLocation] = React.useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = React.useState(false);
+  const [showAboutProfileModal, setShowAboutProfileModal] = React.useState(false);
+
+  // After sign-up, show About your profile card when landing on feed
+  React.useEffect(() => {
+    if (loc.pathname === '/feed' && (loc.state as { fromSignup?: boolean })?.fromSignup) {
+      setShowAboutProfileModal(true);
+      navigate('/feed', { replace: true, state: {} });
+    }
+  }, [loc.pathname, loc.state, navigate]);
 
   // Determine current filter - custom location overrides tabs
   const currentFilter = customLocation || activeTab;
@@ -211,7 +221,10 @@ export default function App() {
           && loc.pathname !== '/create'
           && loc.pathname !== '/template-editor'
           && loc.pathname !== '/login' && (
-            <BottomNav onCreateClick={() => navigate('/create/instant')} />
+            <BottomNav
+            onCreateClick={() => navigate('/create/instant')}
+            onProfileClick={() => setShowAboutProfileModal(true)}
+          />
           )}
       </main>
 
@@ -220,6 +233,13 @@ export default function App() {
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
         onNavigate={(path) => navigate(path)}
+      />
+
+      {/* About your profile card (after sign-up or when tapping profile in footer) */}
+      <AboutProfileModal
+        isOpen={showAboutProfileModal}
+        onClose={() => setShowAboutProfileModal(false)}
+        onCreateProfile={() => navigate('/profile')}
       />
     </>
   );

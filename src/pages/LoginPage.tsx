@@ -1,8 +1,7 @@
 import React from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
-import { FiMapPin, FiUser, FiGlobe, FiCamera, FiX, FiEye, FiEyeOff } from 'react-icons/fi';
-import Avatar from '../components/Avatar';
+import { FiMapPin, FiUser, FiGlobe, FiX, FiEye, FiEyeOff } from 'react-icons/fi';
 import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMaps';
 import { loginUser } from '../api/client';
 
@@ -49,11 +48,11 @@ export default function LoginPage() {
   
   // Get step from URL parameter, default to 1 - use URL as source of truth
   const stepFromUrl = parseInt(searchParams.get('step') || '1', 10);
-  const step = (stepFromUrl >= 1 && stepFromUrl <= 3) ? stepFromUrl : 1;
+  const step = (stepFromUrl >= 1 && stepFromUrl <= 2) ? stepFromUrl : 1;
   
   // Helper function to update step (updates both state and URL)
   const updateStep = React.useCallback((newStep: number) => {
-    if (newStep >= 1 && newStep <= 3) {
+    if (newStep >= 1 && newStep <= 2) {
       setSignupError('');
       setSearchParams({ step: newStep.toString() });
     }
@@ -79,9 +78,6 @@ export default function LoginPage() {
   const [birthMonth, setBirthMonth] = React.useState('');
   const [birthDay, setBirthDay] = React.useState('');
   const [birthYear, setBirthYear] = React.useState('');
-
-  // Step 3: Profile picture
-  const [profilePicture, setProfilePicture] = React.useState<string | null>(null);
 
   // Password visibility toggle
   const [showPassword, setShowPassword] = React.useState(false);
@@ -251,11 +247,6 @@ export default function LoginPage() {
       alert('Please fill in all location fields');
       return;
     }
-    updateStep(3);
-  }
-
-  function handleProfilePictureSubmit(e: React.FormEvent) {
-    e.preventDefault();
     setSignupError('');
 
     const age = getAgeFromBirthday();
@@ -270,34 +261,18 @@ export default function LoginPage() {
       national: national,
       handle: `${name.trim().split(/\s+/)[0] || name.trim()}@${regional}`,
       countryFlag: countryFlag.trim(),
-      avatarUrl: profilePicture,
+      avatarUrl: undefined as string | undefined,
     };
 
     try {
-      // Save for local login later – omit large base64 to avoid localStorage quota
       const userDataForStorage = { ...userData, avatarUrl: undefined };
       saveLocalRegistration(email.trim(), password, userDataForStorage);
       login(userData);
-      nav('/profile', { replace: true });
+      nav('/feed', { replace: true, state: { fromSignup: true } });
     } catch (err: any) {
       console.error('Sign up error:', err);
-      setSignupError(err?.message || 'Something went wrong. Try again or use a smaller profile photo.');
+      setSignupError(err?.message || 'Something went wrong. Try again.');
     }
-  }
-
-  function handleProfilePictureSelect(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        setProfilePicture(e.target?.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  }
-
-  function removeProfilePicture() {
-    setProfilePicture(null);
   }
 
   async function handleLoginSubmit(e: React.FormEvent) {
@@ -517,10 +492,10 @@ export default function LoginPage() {
             </form>
           </div>
         ) : (
-        <div className="max-w-md mx-auto rounded-2xl p-0.5 bg-[linear-gradient(90deg,red,yellow,red)] shadow-lg flex-1">
+        <div className="max-w-md mx-auto rounded-2xl p-[1.5px] bg-[linear-gradient(90deg,#3b82f6,#a855f7)] shadow-lg flex-shrink-0">
         <form
-          onSubmit={step === 1 ? handleAccountSubmit : step === 2 ? handleLocationSubmit : handleProfilePictureSubmit}
-          className="rounded-2xl bg-black flex flex-col flex-1 min-h-0"
+          onSubmit={step === 1 ? handleAccountSubmit : handleLocationSubmit}
+          className="rounded-2xl bg-black flex flex-col min-h-0"
         >
           {/* Header */}
           <div className="flex-shrink-0 px-6 sm:px-10 pt-4 sm:pt-10 pb-4 sm:pb-6">
@@ -549,14 +524,13 @@ export default function LoginPage() {
                 </span>
               </h1>
               <p className="text-xs sm:text-sm text-gray-400 mb-4 sm:mb-6 font-normal">
-                {step === 1 ? 'Create your account' : step === 2 ? 'No algorithms just places' : 'Add a profile picture'}
+                {step === 1 ? 'Create your account' : 'No algorithms just places'}
               </p>
               
-              {/* Step Indicators - Instagram style */}
+              {/* Step Indicators - two steps only */}
               <div className="flex justify-center items-center space-x-2 mb-4 sm:mb-6">
                 <div className={`h-1 rounded-full transition-all ${step >= 1 ? 'bg-gradient-to-r from-[#3b82f6] to-[#a855f7]' : 'bg-gray-300'}`} style={{ width: step >= 1 ? '80px' : '40px' }}></div>
                 <div className={`h-1 rounded-full transition-all ${step >= 2 ? 'bg-gradient-to-r from-[#3b82f6] to-[#a855f7]' : 'bg-gray-300'}`} style={{ width: step >= 2 ? '80px' : '40px' }}></div>
-                <div className={`h-1 rounded-full transition-all ${step >= 3 ? 'bg-gradient-to-r from-[#3b82f6] to-[#a855f7]' : 'bg-gray-300'}`} style={{ width: step >= 3 ? '80px' : '40px' }}></div>
               </div>
             </div>
           </div>
@@ -792,59 +766,6 @@ export default function LoginPage() {
                   No local areas found for {regional}. Check browser console for details or add Google Maps API key.
                 </p>
               )}
-            </div>
-
-          </>
-        )}
-
-        {step === 3 && (
-          <>
-            {signupError && (
-              <p className="text-sm text-red-500 text-center py-2">{signupError}</p>
-            )}
-            {/* Step 3: Profile Picture - Instagram Style */}
-            <div className="text-center py-4">
-              {/* Current Avatar Preview */}
-              <div className="flex justify-center mb-6">
-                <Avatar
-                  src={profilePicture || undefined}
-                  name={name || 'User'}
-                  size="xl"
-                  className="border-2 border-gray-300 dark:border-gray-600"
-                />
-              </div>
-
-              {/* Upload Button */}
-              <div className="space-y-3">
-                <label className="block">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleProfilePictureSelect}
-                    className="hidden"
-                  />
-                  <div className="w-full px-4 py-2.5 bg-gradient-to-r from-[#3b82f6] to-[#a855f7] text-white rounded-sm hover:brightness-110 transition-colors cursor-pointer text-center text-sm font-semibold">
-                    <FiCamera className="inline w-4 h-4 mr-2" />
-                    Choose Photo
-                  </div>
-                </label>
-
-                {profilePicture && (
-                  <button
-                    type="button"
-                    onClick={removeProfilePicture}
-                    className="w-full px-4 py-2.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-sm hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors text-center text-sm font-semibold"
-                  >
-                    <FiX className="inline w-4 h-4 mr-2" />
-                    Remove Photo
-                  </button>
-                )}
-
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                  Your initials will be used if no photo is selected
-                </p>
-              </div>
-            </div>
           </>
         )}
 
@@ -854,10 +775,10 @@ export default function LoginPage() {
                 type="submit"
                 className="w-full px-4 py-2 bg-gradient-to-r from-[#3b82f6] to-[#a855f7] text-white rounded-sm hover:brightness-110 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {step === 1 ? 'Create account' : step === 2 ? 'Next' : 'Sign Up'}
+                {step === 1 ? 'Create account' : 'Next'}
               </button>
               
-              {(step === 2 || step === 3) && (
+              {step === 2 && (
                 <button
                   type="button"
                   onClick={() => updateStep(step - 1)}
@@ -876,20 +797,18 @@ export default function LoginPage() {
               <p className="text-xs text-center text-gray-500 mt-1">
                 {step === 1 
                   ? 'By signing up, you agree to the terms and conditions and community guidelines'
-                  : step === 2 
-                    ? (
-                      <>
-                        By signing up, you agree to our{' '}
-                        <Link to="/terms" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
-                          Terms and Conditions
-                        </Link>
-                        {' '}and{' '}
-                        <Link to="/terms#community-guidelines" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
-                          Community Guidelines
-                        </Link>
-                      </>
-                    )
-                    : 'Almost done! Add a profile picture to personalize your account'
+                  : (
+                    <>
+                      By signing up, you agree to our{' '}
+                      <Link to="/terms" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
+                        Terms and Conditions
+                      </Link>
+                      {' '}and{' '}
+                      <Link to="/terms#community-guidelines" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
+                        Community Guidelines
+                      </Link>
+                    </>
+                  )
                 }
               </p>
             </div>
