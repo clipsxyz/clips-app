@@ -653,7 +653,7 @@ export default function InstantCreatePage() {
                         setTrimStart(0);
                         setTrimEnd(duration || 0);
                         
-                        // Auto-navigate to edit page after recording/selecting
+                        // After recording: use same preview flow as gallery picker (GalleryPreviewPage)
                         setTimeout(() => {
                             const clipsToPass = updated.length > 0 ? updated : [newClip];
                             if (clipsToPass.length > 0) {
@@ -662,26 +662,19 @@ export default function InstantCreatePage() {
                                     streamRef.current.getTracks().forEach(t => t.stop());
                                     streamRef.current = null;
                                 }
-                                // Stop video playback
                                 if (videoRef.current) {
                                     videoRef.current.pause();
                                     videoRef.current.srcObject = null;
                                 }
-                                navigate('/create', {
+                                const duration = clipsToPass[0].duration || 0;
+                                const galleryItems = [{ blob, mediaType: 'video' as const, videoDuration: duration }];
+                                setGalleryPreviewMedia(galleryItems);
+                                navigate('/create/gallery-preview', {
                                     state: {
-                                        videoUrl: clipsToPass[0].url,
-                                        videoDuration: clipsToPass[0].duration,
-                                        filterInfo: {
-                                            active: selectedFilter,
-                                            brightness,
-                                            contrast,
-                                            saturation,
-                                            hue,
-                                            exportFailed: false
-                                        },
-                                        filtered: selectedFilter !== 'None' || brightness !== 1 || contrast !== 1 || saturation !== 1 || hue !== 0,
-                                        mediaType: 'video',
-                                        musicTrackId: selectedMusicTrackId
+                                        mediaUrl: undefined,
+                                        mediaType: 'video' as const,
+                                        videoDuration: duration,
+                                        fromInstantRecording: true
                                     }
                                 });
                             }
@@ -1250,9 +1243,16 @@ export default function InstantCreatePage() {
 
         return (
         <div className="fixed inset-0 bg-black z-50 flex flex-col">
-            {/* Regular Icons - Top Bar (always visible) */}
-            {!previewUrl && (
-                <div className="absolute top-0 left-0 right-0 z-50 bg-gradient-to-b from-black/80 to-transparent flex items-center justify-between px-6 py-4">
+            {/* Top bar: Back + camera controls (6 icons spaced from left to right) */}
+            <div className="absolute top-0 left-0 right-0 z-50 bg-gradient-to-b from-black/80 to-transparent px-4 py-3">
+                <div className="flex items-center justify-between gap-3 w-full">
+                    <button
+                        onClick={() => navigate('/feed')}
+                        className="p-1.5 bg-black/60 backdrop-blur-sm text-white rounded-full hover:bg-black/80 active:scale-95 transition-colors"
+                        aria-label="Back to feed"
+                    >
+                        <FiArrowLeft className="w-4 h-4" />
+                    </button>
                     <button 
                         title="Flip camera" 
                         className="p-2 rounded-lg bg-black/60 text-white hover:bg-black/80 active:scale-95 transition-all duration-200" 
@@ -1309,47 +1309,37 @@ export default function InstantCreatePage() {
                     >
                         <span className="text-xs font-semibold">G</span>
                     </button>
-                    {/* 60 Second Timer - Circular Progress Bar when recording */}
-                    <div className="relative">
-                        {recording && (
-                            <div className="absolute top-12 left-1/2 -translate-x-1/2 w-12 h-12 z-50">
-                                <svg className="w-12 h-12 transform -rotate-90" viewBox="0 0 48 48">
-                                    <circle cx="24" cy="24" r="20" stroke="rgba(255, 255, 255, 0.2)" strokeWidth="4" fill="none" />
-                                    <circle
-                                        cx="24" cy="24" r="20"
-                                        stroke="rgba(255, 255, 255, 0.9)" strokeWidth="4" fill="none"
-                                        strokeDasharray={`${2 * Math.PI * 20}`}
-                                        strokeDashoffset={`${2 * Math.PI * 20 * (1 - (60 - recordingTime) / 60)}`}
-                                        strokeLinecap="round"
-                                    />
-                                </svg>
-                                <div className="absolute inset-0 flex items-center justify-center">
-                                    <span className="text-white text-xs font-bold">{recordingTime}</span>
-                                </div>
-                            </div>
-                        )}
-                    </div>
                 </div>
-            )}
 
-            {/* Back / Next - Below Icons */}
-            <div className="absolute top-16 left-0 right-0 z-50 p-4 flex items-center justify-between">
-                <button
-                    onClick={() => navigate('/feed')}
-                    className="p-2 bg-black/50 backdrop-blur-sm text-white rounded-full hover:bg-black/70 transition-colors"
-                >
-                    <FiArrowLeft className="w-6 h-6" />
-                </button>
-                {previewUrl ? (
-                    <button
-                        onClick={handleNext}
-                        className="px-4 py-2 rounded-full bg-white text-black text-sm font-semibold hover:bg-gray-100 transition-colors"
-                    >
-                        Next: post to feed
-                    </button>
-                ) : (
-                    <div className="w-10" />
-                )}
+                {/* Right: Next (when preview) + timer */}
+                <div className="flex items-center gap-3">
+                    {previewUrl && (
+                        <button
+                            onClick={handleNext}
+                            className="px-3 py-1.5 rounded-full bg-white text-black text-xs font-semibold hover:bg-gray-100 transition-colors"
+                        >
+                            Next
+                        </button>
+                    )}
+                    {/* 60 Second Timer - Circular Progress Bar when recording */}
+                    {recording && (
+                        <div className="relative w-8 h-8">
+                            <svg className="w-8 h-8 transform -rotate-90" viewBox="0 0 48 48">
+                                <circle cx="24" cy="24" r="20" stroke="rgba(255, 255, 255, 0.2)" strokeWidth="4" fill="none" />
+                                <circle
+                                    cx="24" cy="24" r="20"
+                                    stroke="rgba(255, 255, 255, 0.9)" strokeWidth="4" fill="none"
+                                    strokeDasharray={`${2 * Math.PI * 20}`}
+                                    strokeDashoffset={`${2 * Math.PI * 20 * (1 - (60 - recordingTime) / 60)}`}
+                                    strokeLinecap="round"
+                                />
+                            </svg>
+                            <div className="absolute inset-0 flex items-center justify-center">
+                                <span className="text-white text-[10px] font-bold">{recordingTime}</span>
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
 
             {/* Video Preview - Full Screen */}
@@ -1381,27 +1371,53 @@ export default function InstantCreatePage() {
 
                         {/* Footer: Gallery, Stories, Text - small dashed icons */}
                         <div className="absolute bottom-0 left-0 right-0 z-30 flex items-center justify-between px-4 py-2.5 bg-gradient-to-t from-black/60 to-transparent border-t border-white/5 gap-2">
-                            <button
-                                onClick={() => cameraRollInputRef.current?.click()}
-                                className="flex flex-row items-center justify-center gap-1.5 px-3 py-1.5 rounded-full border border-transparent bg-white text-black font-medium text-[11px] backdrop-blur-sm hover:bg-gray-100 active:scale-95 transition-all flex-1"
-                            >
-                                <FiUpload className="w-4 h-4" />
-                                <span>Gallery +10</span>
-                            </button>
-                            <button
-                                onClick={() => navigate('/clip')}
-                                className="flex flex-row items-center justify-center gap-1.5 px-3 py-1.5 rounded-full border border-white/30 bg-black/30 backdrop-blur-sm text-white/90 hover:bg-white/10 active:scale-95 transition-all flex-1"
-                            >
-                                <FiCamera className="w-4 h-4" />
-                                <span className="text-[11px] font-medium">Story</span>
-                            </button>
-                            <button
-                                onClick={() => navigate('/create/text-only')}
-                                className="flex flex-row items-center justify-center gap-1.5 px-3 py-1.5 rounded-full border border-white/30 bg-black/30 backdrop-blur-sm text-white/90 hover:bg-white/10 active:scale-95 transition-all flex-1"
-                            >
-                                <FiType className="w-4 h-4" />
-                                <span className="text-[11px] font-medium">Text post</span>
-                            </button>
+                            {/* Gallery with blue→purple rounded gradient ring */}
+                            <div className="flex-1">
+                                <div
+                                    className="rounded-full p-[1.5px]"
+                                    style={{ background: 'linear-gradient(135deg,#3b82f6,#a855f7)' }}
+                                >
+                                    <button
+                                        onClick={() => cameraRollInputRef.current?.click()}
+                                        className="w-full flex flex-row items-center justify-center gap-1.5 px-3 py-1.5 rounded-full bg-black/30 backdrop-blur-sm text-white/90 hover:bg-white/10 active:scale-95 transition-all"
+                                    >
+                                        <FiUpload className="w-4 h-4" />
+                                        <span className="text-[11px] font-medium">Gallery</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Story with blue→purple rounded gradient ring */}
+                            <div className="flex-1">
+                                <div
+                                    className="rounded-full p-[1.5px]"
+                                    style={{ background: 'linear-gradient(135deg,#3b82f6,#a855f7)' }}
+                                >
+                                    <button
+                                        onClick={() => navigate('/clip')}
+                                        className="w-full flex flex-row items-center justify-center gap-1.5 px-3 py-1.5 rounded-full bg-black/30 backdrop-blur-sm text-white/90 hover:bg-white/10 active:scale-95 transition-all"
+                                    >
+                                        <FiCamera className="w-4 h-4" />
+                                        <span className="text-[11px] font-medium">Story</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Text post with blue→purple rounded gradient ring */}
+                            <div className="flex-1">
+                                <div
+                                    className="rounded-full p-[1.5px]"
+                                    style={{ background: 'linear-gradient(135deg,#3b82f6,#a855f7)' }}
+                                >
+                                    <button
+                                        onClick={() => navigate('/create/text-only')}
+                                        className="w-full flex flex-row items-center justify-center gap-1.5 px-3 py-1.5 rounded-full bg-black/30 backdrop-blur-sm text-white/90 hover:bg-white/10 active:scale-95 transition-all"
+                                    >
+                                        <FiType className="w-4 h-4" />
+                                        <span className="text-[11px] font-medium">Text post</span>
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </>
                 ) : (
@@ -1565,7 +1581,7 @@ export default function InstantCreatePage() {
                                 const t2 = setTimeout(() => setCountdown(1), 2000);
                                 const t3 = setTimeout(() => { setCountdown(null); startRecording(); }, 3000);
                             }}
-                            className="w-20 h-20 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 border-4 border-white shadow-2xl flex items-center justify-center hover:scale-105 transition-all duration-300 active:scale-95"
+                            className="w-20 h-20 rounded-full bg-gradient-to-br from-[#3b82f6] to-[#a855f7] border-4 border-white shadow-2xl flex items-center justify-center hover:scale-105 transition-all duration-300 active:scale-95"
                             aria-label="Record video"
                         >
                             <FiCircle className="w-10 h-10 text-white" fill="white" />
@@ -1589,110 +1605,6 @@ export default function InstantCreatePage() {
                             )}
                         </button>
                     )}
-                </div>
-            )}
-
-            {/* Platform Icons - Left Side Vertical */}
-            {!previewUrl && (
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 z-50 flex flex-col gap-3">
-                    {/* TikTok Icon */}
-                    <button
-                        onClick={async () => {
-                            try {
-                                const tiktokTemplate = await getTemplate(TEMPLATE_IDS.TIKTOK);
-                                if (tiktokTemplate) {
-                                    navigate('/template-editor', {
-                                        state: { template: tiktokTemplate }
-                                    });
-                                } else {
-                                    Swal.fire(bottomSheet({
-                                        title: 'Error',
-                                        message: 'Could not load TikTok template',
-                                        icon: 'alert',
-                                    }));
-                                }
-                            } catch (error) {
-                                console.error('Error loading TikTok template:', error);
-                                Swal.fire(bottomSheet({
-                                    title: 'Error',
-                                    message: 'Failed to load TikTok template',
-                                    icon: 'alert',
-                                }));
-                            }
-                        }}
-                        className="w-10 h-10 rounded-lg bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/20 hover:bg-black/80 active:scale-95 transition-all cursor-pointer"
-                        aria-label="Open TikTok template"
-                    >
-                        <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 text-white">
-                            <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.65 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z"/>
-                        </svg>
-                    </button>
-                    
-                    {/* Instagram Icon */}
-                    <button
-                        onClick={async () => {
-                            try {
-                                const instagramTemplate = await getTemplate(TEMPLATE_IDS.INSTAGRAM);
-                                if (instagramTemplate) {
-                                    navigate('/template-editor', {
-                                        state: { template: instagramTemplate }
-                                    });
-                                } else {
-                                    Swal.fire(bottomSheet({
-                                        title: 'Error',
-                                        message: 'Could not load Instagram template',
-                                        icon: 'alert',
-                                    }));
-                                }
-                            } catch (error) {
-                                console.error('Error loading Instagram template:', error);
-                                Swal.fire(bottomSheet({
-                                    title: 'Error',
-                                    message: 'Failed to load Instagram template',
-                                    icon: 'alert',
-                                }));
-                            }
-                        }}
-                        className="w-10 h-10 rounded-lg bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/20 hover:bg-black/80 active:scale-95 transition-all cursor-pointer"
-                        aria-label="Open Instagram template"
-                    >
-                        <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 text-white">
-                            <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
-                        </svg>
-                    </button>
-                    
-                    {/* YouTube Shorts Icon */}
-                    <button
-                        onClick={async () => {
-                            try {
-                                const youtubeShortsTemplate = await getTemplate(TEMPLATE_IDS.YOUTUBE_SHORTS);
-                                if (youtubeShortsTemplate) {
-                                    navigate('/template-editor', {
-                                        state: { template: youtubeShortsTemplate }
-                                    });
-                                } else {
-                                    Swal.fire(bottomSheet({
-                                        title: 'Error',
-                                        message: 'Could not load YouTube Shorts template',
-                                        icon: 'alert',
-                                    }));
-                                }
-                            } catch (error) {
-                                console.error('Error loading YouTube Shorts template:', error);
-                                Swal.fire(bottomSheet({
-                                    title: 'Error',
-                                    message: 'Failed to load YouTube Shorts template',
-                                    icon: 'alert',
-                                }));
-                            }
-                        }}
-                        className="w-10 h-10 rounded-lg bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/20 hover:bg-black/80 active:scale-95 transition-all cursor-pointer"
-                        aria-label="Open YouTube Shorts template"
-                    >
-                        <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 text-white">
-                            <path d="M17.77 10.32c-.77-.32-1.2-.5-1.2-.5L18 9.06c1.84-.96 2.53-3.23 1.56-5.06s-3.24-2.53-5.07-1.56L6 6.94c-1.29.68-2.07 2.04-2 3.49.07 1.42.93 2.67 2.22 3.25.03.01 1.2.5 1.2.5L6 14.94c-1.84.96-2.53 3.23-1.56 5.06.97 1.83 3.24 2.53 5.07 1.56l8.5-4.5c1.29-.68 2.06-2.04 1.99-3.49-.06-1.42-.92-2.67-2.21-3.25zM10 14.65v-5.3L15 12l-5 2.65z"/>
-                        </svg>
-                    </button>
                 </div>
             )}
 

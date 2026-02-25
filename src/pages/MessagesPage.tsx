@@ -3517,7 +3517,7 @@ export default function MessagesPage() {
                     }}
                     onLike={async () => {
                         try {
-                            const updated = await toggleLike(user.id!, selectedPostForScenes.id);
+                            const updated = await toggleLike(user.id!, selectedPostForScenes.id, selectedPostForScenes);
                             setSelectedPostForScenes(updated);
                             setSharedPosts(prev => ({ ...prev, [updated.id]: updated }));
                         } catch (_) { /* ignore */ }

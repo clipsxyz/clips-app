@@ -947,7 +947,7 @@ function FeedScreen({ navigation }: { navigation?: any }) {
         <FeedCard
             post={post}
             onLike={async () => {
-                const updated = await toggleLike(userId, post.id);
+                const updated = await toggleLike(userId, post.id, post);
                 // Update local state - find and update the post
                 setPages(prev => prev.map(page =>
                     page.map(p => p.id === post.id ? updated : p)

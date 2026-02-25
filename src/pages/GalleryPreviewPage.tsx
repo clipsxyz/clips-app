@@ -6,7 +6,7 @@ import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react'
 import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
-import { FiFilter, FiSmile, FiMapPin, FiBookmark, FiSend, FiArrowLeft, FiUser, FiLayers, FiPlus, FiX, FiType } from 'react-icons/fi';
+import { FiFilter, FiSmile, FiMapPin, FiBookmark, FiSend, FiArrowLeft, FiUser, FiLayers, FiPlus, FiX, FiType, FiVolume2, FiVolumeX } from 'react-icons/fi';
 import { createPost } from '../api/posts';
 import { saveDraft } from '../api/drafts';
 import Swal from 'sweetalert2';
@@ -17,6 +17,7 @@ import StickerOverlayComponent from '../components/StickerOverlay';
 import UserTaggingModal from '../components/UserTaggingModal';
 import { getStickers, STICKER_CATEGORIES } from '../api/stickers';
 import { getGalleryPreviewMedia, clearGalleryPreviewMedia } from '../utils/galleryPreviewCache';
+import { motion } from 'framer-motion';
 
 const FILTER_NAMES = ['None', 'B&W', 'Sepia', 'Vivid', 'Cool', 'Vignette', 'Beauty'];
 const CAROUSEL_MAX = 10;
@@ -181,6 +182,7 @@ export default function GalleryPreviewPage() {
     const dragStartYRef = useRef<number>(0);
     const dragTriggeredRef = useRef<boolean>(false);
     const dragThreshold = 24;
+    const [isMuted, setIsMuted] = useState(true);
 
     useEffect(() => {
         if (mediaType !== 'video' || !mediaUrl) {
@@ -224,6 +226,13 @@ export default function GalleryPreviewPage() {
             return () => ro.disconnect();
         }
     }, [mediaUrl]);
+
+    // Keep muted state in sync with video element
+    useEffect(() => {
+        const el = videoRef.current;
+        if (!el) return;
+        el.muted = isMuted;
+    }, [isMuted, mediaUrl, mediaType]);
 
     // On mobile, video often won't autoplay until we call play() (e.g. after loadedmetadata)
     useEffect(() => {
@@ -423,14 +432,35 @@ export default function GalleryPreviewPage() {
             const isVideo = mediaType === 'video';
             if (mediaUrl.startsWith('blob:')) {
                 if (isVideo) {
-                    const res = await fetch(mediaUrl);
-                    if (!res.ok) throw new Error('Failed to fetch video');
-                    const blob = await res.blob();
-                    const file = new File([blob], `video-${Date.now()}.webm`, { type: blob.type || 'video/webm' });
-                    const { uploadFile } = await import('../api/client');
-                    const up = await uploadFile(file);
-                    if (up.success && up.fileUrl) persistentMediaUrl = up.fileUrl;
-                    else throw new Error(up.error || 'Upload failed');
+                    // When not using Laravel API or in dev mode, skip upload and keep blob URL so mock post works without backend.
+                    const useBackend = import.meta.env.VITE_USE_LARAVEL_API !== 'false' && import.meta.env.VITE_DEV_MODE !== 'true';
+                    if (useBackend) {
+                        try {
+                            const res = await fetch(mediaUrl);
+                            if (!res.ok) throw new Error('Failed to fetch video');
+                            const blob = await res.blob();
+                            const file = new File([blob], `video-${Date.now()}.webm`, { type: blob.type || 'video/webm' });
+                            const { uploadFile } = await import('../api/client');
+                            const up = await uploadFile(file);
+                            if (up.success && up.fileUrl) {
+                                persistentMediaUrl = up.fileUrl;
+                            } else {
+                                throw new Error(up.error || 'Upload failed');
+                            }
+                        } catch (uploadError: any) {
+                            const msg = uploadError?.message || '';
+                            const isConnectionError =
+                                msg.includes('CONNECTION_REFUSED') ||
+                                msg.includes('Failed to fetch') ||
+                                msg.includes('Network error');
+                            if (isConnectionError) {
+                                console.warn('Video upload failed (backend offline); using blob URL.', uploadError);
+                            } else {
+                                throw uploadError;
+                            }
+                        }
+                    }
+                    // else: persistentMediaUrl stays as blob URL for mock
                 } else {
                     const res = await fetch(mediaUrl);
                     const blob = await res.blob();
@@ -530,44 +560,75 @@ export default function GalleryPreviewPage() {
                             </button>
                         </div>
                     )}
-                    <button
-                        onClick={handlePost}
-                        disabled={isUploading}
-                        className="p-2.5 bg-white text-gray-900 rounded-full hover:bg-gray-200 disabled:opacity-50 transition-colors shadow-lg flex-shrink-0"
-                        title="Post to newsfeed"
-                        aria-label="Post to newsfeed"
-                    >
-                        <FiSend className="w-6 h-6" />
-                    </button>
+                    {/* Post button with rounded blue/purple border */}
+                    <div className="rounded-full p-[1.5px]" style={{ background: 'linear-gradient(135deg,#3b82f6,#a855f7)' }}>
+                        <button
+                            onClick={handlePost}
+                            disabled={isUploading}
+                            className="p-2.5 rounded-full bg-black text-white disabled:opacity-50 transition-colors shadow-lg flex-shrink-0 hover:bg-black"
+                            title="Post to newsfeed"
+                            aria-label="Post to newsfeed"
+                        >
+                            <FiSend className="w-6 h-6" />
+                        </button>
+                    </div>
                 </div>
-                <div
+                <motion.div
                     ref={containerRef}
-                    className="absolute inset-0 flex items-center justify-center bg-black overflow-hidden"
+                    layout
+                    transition={{ duration: 0.35, ease: 'easeInOut' }}
+                    className="absolute left-0 right-0 flex items-center justify-center bg-black overflow-hidden"
+                    style={{
+                        top: 0,
+                        height: cardBodyExpanded ? '50vh' : '100vh',
+                    }}
                     onClick={(e) => {
                         if (e.target === e.currentTarget || (e.target as HTMLElement).tagName === 'VIDEO' || (e.target as HTMLElement).tagName === 'IMG')
                             setSelectedStickerId(null);
                     }}
                 >
-                    {mediaType === 'video' ? (
-                        <video
-                            ref={videoRef}
-                            src={mediaUrl}
-                            playsInline
-                            muted
-                            loop
-                            autoPlay
-                            preload="auto"
-                            className="absolute inset-0 w-full h-full object-contain"
-                            style={filterStyle}
-                        />
-                    ) : (
-                        <img
-                            src={mediaUrl}
-                            alt="Preview"
-                            className="absolute inset-0 w-full h-full object-contain"
-                            style={filterStyle}
-                        />
-                    )}
+                    {mediaType === 'video'
+                        ? (mediaUrl && mediaUrl.trim()) ? (
+                            <>
+                                {/* Mute toggle button */}
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        const next = !isMuted;
+                                        setIsMuted(next);
+                                        if (videoRef.current) videoRef.current.muted = next;
+                                    }}
+                                    className="absolute bottom-24 left-1/2 -translate-x-1/2 z-10 p-2 rounded-full bg-black/60 text-white hover:bg-black/80"
+                                    aria-label={isMuted ? 'Unmute video' : 'Mute video'}
+                                >
+                                    {isMuted ? <FiVolumeX className="w-5 h-5" /> : <FiVolume2 className="w-5 h-5" />}
+                                </button>
+
+                                <motion.video
+                                    layoutId="gallery-media"
+                                    ref={videoRef}
+                                    src={mediaUrl}
+                                    playsInline
+                                    loop
+                                    autoPlay
+                                    preload="auto"
+                                    muted={isMuted}
+                                    className="absolute inset-0 w-full h-full object-contain"
+                                    style={filterStyle}
+                                />
+                            </>
+                        ) : null
+                        : (mediaUrl && mediaUrl.trim()) ? (
+                            <motion.img
+                                layoutId="gallery-media"
+                                src={mediaUrl}
+                                alt="Preview"
+                                className="absolute inset-0 w-full h-full object-contain"
+                                style={filterStyle}
+                            />
+                        ) : null
+                    }
                     {stickers.map((overlay) => (
                         <StickerOverlayComponent
                             key={overlay.id}
@@ -580,13 +641,18 @@ export default function GalleryPreviewPage() {
                             containerHeight={containerSize.height || 400}
                         />
                     ))}
-                </div>
+                </motion.div>
             </section>
 
-            {/* Card overlay - black card, white icons */}
+            {/* Card overlay - black card, white icons, with blue→purple gradient border */}
             <div
                 className="absolute bottom-0 left-0 right-0 z-20 flex flex-col max-h-[85dvh] rounded-t-[24px] overflow-hidden overflow-y-auto bg-black"
-                style={{ paddingBottom: 'env(safe-area-inset-bottom, 0)' }}
+                style={{
+                    paddingBottom: 'env(safe-area-inset-bottom, 0)',
+                    borderWidth: '1.5px 0 0 0',
+                    borderStyle: 'solid',
+                    borderImage: 'linear-gradient(90deg, #3b82f6, #a855f7) 1',
+                }}
             >
                 <div
                     role="button"
@@ -693,14 +759,22 @@ export default function GalleryPreviewPage() {
                             <label className="block text-xs font-medium text-white/70">
                                 Caption
                             </label>
-                            <textarea
-                                value={caption}
-                                onChange={(e) => setCaption(e.target.value)}
-                                placeholder="Write a caption..."
-                                rows={3}
-                                maxLength={500}
-                                className="w-full rounded-xl bg-white/5 border border-white/15 px-3 py-2 text-sm text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-white/60 focus:border-transparent resize-none"
-                            />
+                            {/* Rounded gradient border ring (inner background solid dark) */}
+                            <div
+                                className="rounded-2xl p-[1.5px]"
+                                style={{ background: 'linear-gradient(135deg,#3b82f6,#a855f7)' }}
+                            >
+                                <div className="rounded-[1rem] bg-[#020617]">
+                                    <textarea
+                                        value={caption}
+                                        onChange={(e) => setCaption(e.target.value)}
+                                        placeholder="Write a caption..."
+                                        rows={3}
+                                        maxLength={500}
+                                        className="w-full rounded-[1rem] bg-transparent border-none px-3 py-2 text-sm text-white placeholder-white/40 focus:outline-none focus:ring-0 resize-none"
+                                    />
+                                </div>
+                            </div>
                             <div className="flex justify-end">
                                 <span className="text-[11px] text-white/40">
                                     {caption.length}/500
@@ -783,38 +857,58 @@ export default function GalleryPreviewPage() {
                     )}
                     {cardTab === 'location' && (
                         <div className="space-y-3">
-                            <div className="rounded-xl bg-gray-800/80 border border-gray-700/50 overflow-hidden">
-                                <label className="block px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wide">Story location</label>
-                                <input
-                                    type="text"
-                                    value={storyLocation}
-                                    onChange={(e) => setStoryLocation(e.target.value)}
-                                    placeholder="Add story location"
-                                    className="w-full px-4 pb-3 bg-transparent text-white placeholder-gray-500 focus:outline-none focus:ring-0 text-sm"
-                                />
+                            {/* Story location with rounded gradient ring (inner background solid dark) */}
+                            <div
+                                className="rounded-2xl p-[1.5px]"
+                                style={{ background: 'linear-gradient(135deg,#3b82f6,#a855f7)' }}
+                            >
+                                <div className="rounded-[1rem] bg-[#020617] overflow-hidden">
+                                    <label className="block px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wide">Story location</label>
+                                    <input
+                                        type="text"
+                                        value={storyLocation}
+                                        onChange={(e) => setStoryLocation(e.target.value)}
+                                        placeholder="Add story location"
+                                        className="w-full px-4 pb-3 bg-transparent text-white placeholder-gray-500 focus:outline-none focus:ring-0 text-sm"
+                                    />
+                                </div>
                             </div>
-                            <div className="rounded-xl bg-white/10 border border-white/20 overflow-hidden">
-                                <label className="block px-4 py-3 text-xs font-medium text-white/70 uppercase tracking-wide">Venue</label>
-                                <input
-                                    type="text"
-                                    value={venue}
-                                    onChange={(e) => setVenue(e.target.value)}
-                                    placeholder="Add venue"
-                                    className="w-full px-4 pb-3 bg-transparent text-white placeholder-gray-500 focus:outline-none focus:ring-0 text-sm"
-                                />
+
+                            {/* Venue with rounded gradient ring */}
+                            <div
+                                className="rounded-2xl p-[1.5px]"
+                                style={{ background: 'linear-gradient(135deg,#3b82f6,#a855f7)' }}
+                            >
+                                <div className="rounded-[1rem] bg-[#020617] overflow-hidden">
+                                    <label className="block px-4 py-3 text-xs font-medium text-white/70 uppercase tracking-wide">Venue</label>
+                                    <input
+                                        type="text"
+                                        value={venue}
+                                        onChange={(e) => setVenue(e.target.value)}
+                                        placeholder="Add venue"
+                                        className="w-full px-4 pb-3 bg-transparent text-white placeholder-gray-500 focus:outline-none focus:ring-0 text-sm"
+                                    />
+                                </div>
                             </div>
-                            <div className="rounded-xl bg-white/10 border border-white/20 overflow-hidden">
-                                <label className="block px-4 py-3 text-xs font-medium text-white/70 uppercase tracking-wide">Tag user</label>
-                                <button
-                                    type="button"
-                                    onClick={() => setShowTagUserModal(true)}
-                                    className="w-full px-4 pb-3 flex items-center gap-2 text-left text-sm text-white/90 hover:text-white focus:outline-none"
-                                >
-                                    <FiUser className="w-4 h-4 text-white/60 flex-shrink-0" />
-                                    <span className={taggedUsers.length > 0 ? 'text-white' : 'text-white/50'}>
-                                        {taggedUsers.length > 0 ? taggedUsers.map((h) => `@${h}`).join(', ') : 'Tag user'}
-                                    </span>
-                                </button>
+
+                            {/* Tag user with rounded gradient ring */}
+                            <div
+                                className="rounded-2xl p-[1.5px]"
+                                style={{ background: 'linear-gradient(135deg,#3b82f6,#a855f7)' }}
+                            >
+                                <div className="rounded-[1rem] bg-[#020617] overflow-hidden">
+                                    <label className="block px-4 py-3 text-xs font-medium text-white/70 uppercase tracking-wide">Tag user</label>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowTagUserModal(true)}
+                                        className="w-full px-4 pb-3 flex items-center gap-2 text-left text-sm text-white/90 hover:text-white focus:outline-none"
+                                    >
+                                        <FiUser className="w-4 h-4 text-white/60 flex-shrink-0" />
+                                        <span className={taggedUsers.length > 0 ? 'text-white' : 'text-white/50'}>
+                                            {taggedUsers.length > 0 ? taggedUsers.map((h) => `@${h}`).join(', ') : 'Tag user'}
+                                        </span>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     )}
@@ -865,9 +959,9 @@ export default function GalleryPreviewPage() {
                                         style={currentCarouselIndex === idx ? { borderColor: 'white' } : undefined}
                                     >
                                         {item.type === 'video' ? (
-                                            <video src={item.url} className="w-full h-full object-cover" muted playsInline />
+                                            item.url ? <video src={item.url} className="w-full h-full object-cover" muted playsInline /> : <div className="w-full h-full bg-white/10" />
                                         ) : (
-                                            <img src={item.url} alt="" className="w-full h-full object-cover" />
+                                            item.url ? <img src={item.url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full bg-white/10" />
                                         )}
                                         <span className="absolute bottom-0 left-0 right-0 bg-black/70 text-[10px] text-white text-center py-0.5">{idx + 1}</span>
                                         <button

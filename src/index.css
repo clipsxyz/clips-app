@@ -260,6 +260,28 @@ video {
   }
 }
 
+/* Splash logo coming-from-background effect */
+@keyframes splash-logo-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.7) translateY(20px);
+  }
+
+  60% {
+    opacity: 1;
+    transform: scale(1.05) translateY(0);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.splash-logo-animate {
+  animation: splash-logo-pop 700ms ease-out forwards;
+}
+
 @keyframes border-rotate {
   to {
     --border-angle: 360deg;

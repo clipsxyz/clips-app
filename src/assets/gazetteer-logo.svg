@@ -1,0 +1,22 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- Simple map pin (white only, no square) -->
+  <path
+    d="M256 144
+       C224 144 200 168 200 200
+       C200 226 214 252 234 280
+       L256 312
+       L278 280
+       C298 252 312 226 312 200
+       C312 168 288 144 256 144Z
+       M256 176
+       C272 176 284 188 284 204
+       C284 220 272 232 256 232
+       C240 232 228 220 228 204
+       C228 188 240 176 256 176Z"
+    fill="none"
+    stroke="#ffffff"
+    stroke-width="16"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

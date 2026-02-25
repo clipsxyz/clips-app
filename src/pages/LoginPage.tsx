@@ -376,7 +376,7 @@ export default function LoginPage() {
       }}
     >
       {/* Forgot password modal */}
-      {showForgotPassword && (
+            {showForgotPassword && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
           <div className="w-full max-w-sm rounded-lg border border-gray-700 bg-gray-900 p-6">
             <h3 className="text-lg font-medium text-white mb-2">Reset password</h3>
@@ -385,11 +385,11 @@ export default function LoginPage() {
                 <p className="text-sm text-gray-300 mb-4">
                   If an account exists for that email, we&apos;ve sent a reset link. Check your inbox.
                 </p>
-                <button
-                  type="button"
-                  onClick={() => { setShowForgotPassword(false); setForgotSent(false); setForgotEmail(''); }}
-                  className="w-full py-2 bg-blue-500 text-white rounded-sm hover:bg-blue-600 text-sm font-medium"
-                >
+                  <button
+                    type="button"
+                    onClick={() => { setShowForgotPassword(false); setForgotSent(false); setForgotEmail(''); }}
+                    className="w-full py-2 bg-gradient-to-r from-[#3b82f6] to-[#a855f7] text-white rounded-sm hover:brightness-110 text-sm font-medium"
+                  >
                   Back to login
                 </button>
               </>
@@ -420,7 +420,7 @@ export default function LoginPage() {
                         // TODO: Call API when backend supports it - apiRequest('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email: forgotEmail }) });
                       }
                     }}
-                    className="flex-1 py-2 bg-blue-500 text-white rounded-sm hover:bg-blue-600 text-sm font-medium"
+                    className="flex-1 py-2 bg-gradient-to-r from-[#3b82f6] to-[#a855f7] text-white rounded-sm hover:brightness-110 text-sm font-medium"
                   >
                     Send link
                   </button>
@@ -451,7 +451,7 @@ export default function LoginPage() {
         </div>
 
         {mode === 'login' ? (
-          <div className="max-w-md mx-auto rounded-2xl p-0.5 bg-[linear-gradient(90deg,red,yellow,red)] shadow-lg">
+          <div className="max-w-md mx-auto rounded-2xl p-0.5 bg-[linear-gradient(90deg,#3b82f6,#a855f7)] shadow-lg">
             <form
               onSubmit={handleLoginSubmit}
               className="rounded-2xl bg-black px-8 py-8 flex flex-col"
@@ -503,7 +503,7 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={loginLoading}
-                className="w-full px-4 py-2 bg-blue-500 text-white rounded-sm hover:bg-blue-600 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full px-4 py-2 bg-gradient-to-r from-[#3b82f6] to-[#a855f7] text-white rounded-sm hover:brightness-110 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loginLoading ? 'Logging in…' : 'Log in'}
               </button>
@@ -554,9 +554,9 @@ export default function LoginPage() {
               
               {/* Step Indicators - Instagram style */}
               <div className="flex justify-center items-center space-x-2 mb-4 sm:mb-6">
-                <div className={`h-1 rounded-full transition-all ${step >= 1 ? 'bg-blue-500' : 'bg-gray-300'}`} style={{ width: step >= 1 ? '80px' : '40px' }}></div>
-                <div className={`h-1 rounded-full transition-all ${step >= 2 ? 'bg-blue-500' : 'bg-gray-300'}`} style={{ width: step >= 2 ? '80px' : '40px' }}></div>
-                <div className={`h-1 rounded-full transition-all ${step >= 3 ? 'bg-blue-500' : 'bg-gray-300'}`} style={{ width: step >= 3 ? '80px' : '40px' }}></div>
+                <div className={`h-1 rounded-full transition-all ${step >= 1 ? 'bg-gradient-to-r from-[#3b82f6] to-[#a855f7]' : 'bg-gray-300'}`} style={{ width: step >= 1 ? '80px' : '40px' }}></div>
+                <div className={`h-1 rounded-full transition-all ${step >= 2 ? 'bg-gradient-to-r from-[#3b82f6] to-[#a855f7]' : 'bg-gray-300'}`} style={{ width: step >= 2 ? '80px' : '40px' }}></div>
+                <div className={`h-1 rounded-full transition-all ${step >= 3 ? 'bg-gradient-to-r from-[#3b82f6] to-[#a855f7]' : 'bg-gray-300'}`} style={{ width: step >= 3 ? '80px' : '40px' }}></div>
               </div>
             </div>
           </div>
@@ -794,16 +794,6 @@ export default function LoginPage() {
               )}
             </div>
 
-            {/* Country Flag (Emoji) */}
-            <div>
-              <input
-                value={countryFlag}
-                onChange={e => setCountryFlag(e.target.value)}
-                maxLength={8}
-                placeholder="Country Flag (emoji)"
-                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
-              />
-            </div>
           </>
         )}
 
@@ -833,7 +823,7 @@ export default function LoginPage() {
                     onChange={handleProfilePictureSelect}
                     className="hidden"
                   />
-                  <div className="w-full px-4 py-2.5 bg-blue-500 text-white rounded-sm hover:bg-blue-600 transition-colors cursor-pointer text-center text-sm font-semibold">
+                  <div className="w-full px-4 py-2.5 bg-gradient-to-r from-[#3b82f6] to-[#a855f7] text-white rounded-sm hover:brightness-110 transition-colors cursor-pointer text-center text-sm font-semibold">
                     <FiCamera className="inline w-4 h-4 mr-2" />
                     Choose Photo
                   </div>
@@ -862,7 +852,7 @@ export default function LoginPage() {
             <div className="pt-6 mt-4 border-t border-gray-700 space-y-3">
               <button
                 type="submit"
-                className="w-full px-4 py-2 bg-blue-500 text-white rounded-sm hover:bg-blue-600 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full px-4 py-2 bg-gradient-to-r from-[#3b82f6] to-[#a855f7] text-white rounded-sm hover:brightness-110 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {step === 1 ? 'Create account' : step === 2 ? 'Next' : 'Sign Up'}
               </button>

@@ -1206,9 +1206,11 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
   }
 }
 
-export async function toggleLike(userId: string, id: string): Promise<Post> {
-  // Try Laravel API first, fallback to mock if it fails
-  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+export async function toggleLike(userId: string, id: string, currentPost?: Post): Promise<Post> {
+  // In dev/mock mode, skip backend entirely and update the in-memory posts only.
+  const useLaravelAPI =
+    import.meta.env.VITE_USE_LARAVEL_API !== 'false' &&
+    import.meta.env.VITE_DEV_MODE !== 'true';
 
   if (useLaravelAPI) {
     try {
@@ -1223,12 +1225,22 @@ export async function toggleLike(userId: string, id: string): Promise<Post> {
     }
   }
 
-  // Mock implementation (fallback)
+  // Pure mock implementation
   await delay(150);
   const s = getState(userId);
-  const p = posts.find(x => x.id === id);
+  let p = posts.find(x => x.id === id);
+  if (!p && currentPost) {
+    // Post not in global store (e.g. mock Ava/Sarah injected only in feed) – update user like state and return updated currentPost
+    const was = !!s.likes[id];
+    s.likes[id] = !was;
+    const nextLikes = Math.max(0, currentPost.stats.likes + (was ? -1 : 1));
+    return decorateForUser(userId, {
+      ...currentPost,
+      userLiked: !was,
+      stats: { ...currentPost.stats, likes: nextLikes },
+    });
+  }
   if (!p) {
-    // Post not in mock (e.g. feed from API); caller should do optimistic update
     throw new Error('Post not found');
   }
   const was = !!s.likes[id];

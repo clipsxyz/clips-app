@@ -129,7 +129,7 @@ export default function CollectionFeedPage() {
                                         await enqueue({ type: 'like', postId: p.id, userId });
                                         return;
                                     }
-                                    const updated = await toggleLike(userId, p.id);
+                                    const updated = await toggleLike(userId, p.id, p);
                                     updateOne(p.id, _post => ({ ...updated }));
                                     window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
                                         detail: { liked: updated.userLiked, likes: updated.stats.likes }
@@ -233,7 +233,7 @@ export default function CollectionFeedPage() {
                             await enqueue({ type: 'like', postId: selectedPostForScenes.id, userId });
                             return;
                         }
-                        const updated = await toggleLike(userId, selectedPostForScenes.id);
+                        const updated = await toggleLike(userId, selectedPostForScenes.id, selectedPostForScenes);
                         updateOne(selectedPostForScenes.id, _post => ({ ...updated }));
                         setSelectedPostForScenes(updated);
                         window.dispatchEvent(new CustomEvent(`likeToggled-${selectedPostForScenes.id}`, {

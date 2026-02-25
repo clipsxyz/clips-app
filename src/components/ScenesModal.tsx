@@ -1258,11 +1258,13 @@ export default function ScenesModal({
                 >
                     {effectivePosts.length > 0 ? (
                         <div
-                            className={isCaptionExpanded ? 'fixed left-0 right-0 top-0 overflow-hidden touch-none' : 'absolute inset-0 overflow-hidden touch-none'}
+                            className="fixed left-0 right-0 top-0 overflow-hidden touch-none"
                             style={{
                                 touchAction: 'none',
-                                // When comments sheet is open, pin video to top half so it stays visible (keyboard can't push it off)
-                                ...(isCaptionExpanded ? { height: '50vh', zIndex: 105 } : {})
+                                // Smoothly animate between full-screen and top-half when comments sheet opens/closes
+                                height: isCaptionExpanded ? '50vh' : '100vh',
+                                zIndex: isCaptionExpanded ? 105 : undefined,
+                                transition: 'height 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
                             }}
                             onTouchStart={handleCarouselTouchStart}
                             onTouchMove={handleCarouselTouchMove}

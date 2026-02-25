@@ -386,7 +386,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
               style={{
                 background:
-                  'linear-gradient(90deg, red, white, red)',
+                  'linear-gradient(90deg, #3b82f6, #a855f7)', // blue → purple
               }}
             >
               <div className="w-full h-full rounded-lg bg-black relative z-10" />
@@ -468,7 +468,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
               style={{
                 background:
-                  'linear-gradient(90deg, red, white, red)',
+                  'linear-gradient(90deg, #3b82f6, #a855f7)', // blue → purple
               }}
             >
               <div className="w-full h-full rounded-lg bg-black relative z-10" />
@@ -2326,11 +2326,11 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                         setIsViewInScenesExpanded(false);
                       }, 2000);
                     }}
-                    className={`${isViewInScenesExpanded ? 'px-2' : 'px-1.5'} py-1 bg-black/70 rounded text-white text-[10px] font-semibold hover:bg-black/90 active:bg-black transition-all duration-300 shadow-lg pointer-events-auto flex items-center gap-1`}
+                    className={`${isViewInScenesExpanded ? 'px-2' : 'px-1.5'} py-1 bg-white rounded-full text-black text-[10px] font-semibold hover:bg-gray-100 active:bg-gray-200 transition-all duration-300 shadow-lg pointer-events-auto flex items-center gap-1`}
                     aria-label="View in Scenes"
                     title="View in Scenes"
                   >
-                    <FiEye className="w-3 h-3 flex-shrink-0" />
+                    <FiMaximize className="w-3 h-3 flex-shrink-0" />
                     {isViewInScenesExpanded && (
                       <span className="whitespace-nowrap">View in Scenes</span>
                     )}
@@ -4497,8 +4497,9 @@ function FeedPageWrapper() {
               window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
                 detail: { liked: nextLiked, likes: nextLikes }
               }));
+
               try {
-                const updated = await toggleLike(userId, p.id);
+                const updated = await toggleLike(userId, p.id, p);
                 updateOne(p.id, _post => ({ ...updated }));
                 window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
                   detail: { liked: updated.userLiked, likes: updated.stats.likes }
@@ -4554,7 +4555,10 @@ function FeedPageWrapper() {
               }
 
               // Mock-only: keep follow state local, refresh Following feed, no API call (avoids delay and state overwrite)
-              const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+              const useLaravelApi =
+                typeof import.meta !== 'undefined' &&
+                import.meta.env?.VITE_USE_LARAVEL_API !== 'false' &&
+                import.meta.env?.VITE_DEV_MODE !== 'true';
               if (!useLaravelApi) {
                 const newFollowing = !wasFollowing;
                 setFollowState(userId, p.userHandle, newFollowing);
@@ -5176,7 +5180,7 @@ function FeedPageWrapper() {
                 detail: { liked: nextLiked, likes: nextLikes }
               }));
               try {
-                const updated = await toggleLike(userId, p.id);
+                const updated = await toggleLike(userId, p.id, p);
                 updateOne(p.id, _post => ({ ...updated }));
                 if (selectedPostForScenes?.id === p.id) setSelectedPostForScenes(updated);
                 window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
@@ -5559,7 +5563,7 @@ function BoostPageWrapper() {
                 detail: { liked: nextLiked, likes: nextLikes }
               }));
               try {
-                const updated = await toggleLike(userId, p.id);
+                const updated = await toggleLike(userId, p.id, p);
                 updateOne(p.id, _post => ({ ...updated }));
                 window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
                   detail: { liked: updated.userLiked, likes: updated.stats.likes }
@@ -5679,7 +5683,7 @@ function BoostPageWrapper() {
               detail: { liked: nextLiked, likes: nextLikes }
             }));
             try {
-              const updated = await toggleLike(userId, selectedPostForScenes.id);
+              const updated = await toggleLike(userId, selectedPostForScenes.id, selectedPostForScenes);
               updateOne(selectedPostForScenes.id, _post => ({ ...updated }));
               setSelectedPostForScenes(updated);
               window.dispatchEvent(new CustomEvent(`likeToggled-${selectedPostForScenes.id}`, {

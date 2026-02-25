@@ -45,7 +45,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
     const handleLike = async () => {
         if (!post) return;
         try {
-            const updated = await toggleLike(userId, post.id);
+            const updated = await toggleLike(userId, post.id, post);
             setPost(updated);
         } catch (err) {
             console.error('Error liking post:', err);
