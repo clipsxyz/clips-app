@@ -31,6 +31,7 @@ class Story extends Model
         'text_color',
         'text_size',
         'location',
+        'venue',
         'views_count',
         'expires_at',
         'shared_from_post_id',

@@ -779,9 +779,8 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
     return out;
   }, [post.locationLabel, post.venue, post.createdAt]);
   const [metadataIndex, setMetadataIndex] = React.useState(0);
-  // Transition style for carousel: 'none' | 'fade' | 'slide-up' | 'slide-left'
-  const metadataTransition: 'none' | 'fade' | 'slide-up' | 'slide-left' = 'slide-left';
-  const metadataTransitionClass = metadataTransition === 'fade' ? 'metadata-carousel-fade' : metadataTransition === 'slide-up' ? 'metadata-carousel-slide-up' : metadataTransition === 'slide-left' ? 'metadata-carousel-slide-left' : '';
+  // Transition style for carousel (currently fixed to slide-left)
+  const metadataTransitionClass = 'metadata-carousel-slide-left';
   React.useEffect(() => {
     if (metadataItems.length <= 1) return;
     const t = setInterval(() => {
@@ -1015,16 +1014,19 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
           {/* Story location on top: location → venue → timestamp */}
           {metadataItems.length > 0 && (() => {
             const current = metadataItems[metadataIndex];
-            const iconClass = `w-3 h-3 flex-shrink-0 text-white/90`;
+            const iconClass = `w-3 h-3 flex-shrink-0 text-gray-900`;
             const Icon = current.type === 'location' ? FiMapPin : current.type === 'venue' ? FiHome : FiClock;
             return (
               <div
                 className="flex items-center gap-1 min-w-0 max-w-[160px] justify-end min-h-[1.25rem] overflow-hidden"
                 title={metadataItems.map((m) => m.label).join(' · ')}
               >
-                <div key={metadataIndex} className={`flex items-center gap-1 justify-end min-w-0 max-w-[160px] ${metadataTransitionClass}`}>
+                <div
+                  key={metadataIndex}
+                  className={`flex items-center gap-1 justify-end min-w-0 max-w-[160px] rounded-full bg-white/95 px-2 py-0.5 shadow-sm ${metadataTransitionClass}`}
+                >
                   <Icon className={iconClass} />
-                  <span className="text-xs font-medium whitespace-nowrap truncate text-white">
+                  <span className="text-xs font-medium whitespace-nowrap truncate text-gray-900">
                     {current.label}
                   </span>
                 </div>
@@ -1074,7 +1076,7 @@ function TagRow({ tags }: { tags: string[] }) {
   );
 }
 
-function TextCard({ text, onDoubleLike, textStyle, stickers }: { text: string; onDoubleLike: () => Promise<void>; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string }; stickers?: StickerOverlay[]; userHandle?: string; locationLabel?: string; createdAt?: string }) {
+function TextCard({ text, onDoubleLike, textStyle, stickers }: { text: string; onDoubleLike: () => Promise<void>; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string; fontFamily?: string }; stickers?: StickerOverlay[]; userHandle?: string; locationLabel?: string; createdAt?: string }) {
   const [burst, setBurst] = React.useState(false);
   const [tapPosition, setTapPosition] = React.useState<{ x: number; y: number } | null>(null);
   const [isExpanded, setIsExpanded] = React.useState(false);
@@ -1120,13 +1122,23 @@ function TextCard({ text, onDoubleLike, textStyle, stickers }: { text: string; o
     return backgrounds[backgroundIndex];
   })();
 
-  // Get text size class - use normal readable size for feed display
+  // Get text size class - use textStyle size when provided
   const getTextSizeClass = () => {
-    return 'text-base'; // Normal readable text size like in the reference image
+    const size = textStyle?.size || 'medium';
+    switch (size) {
+      case 'small':
+        return 'text-sm';
+      case 'large':
+        return 'text-xl';
+      case 'medium':
+      default:
+        return 'text-base';
+    }
   };
 
-  // Get text color from textStyle or default to white
+  // Get text color and font from textStyle or default to white/system font
   const textColor = textStyle?.color || 'white';
+  const textFontFamily = textStyle?.fontFamily || 'system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif';
 
   function getTapPosition(e: React.MouseEvent | React.TouchEvent): { x: number; y: number } | null {
     if (!containerRef.current) return null;
@@ -2789,10 +2801,9 @@ function EngagementBar({
     setLikes(post.stats.likes);
     setViews(post.stats.views);
     setComments(post.stats.comments);
-    setShares(post.stats.shares);
     setReclips(post.stats.reclips);
     setUserReclipped(post.userReclipped || false);
-  }, [post.userLiked, post.stats.likes, post.stats.views, post.stats.comments, post.stats.shares, post.stats.reclips, post.userReclipped]);
+  }, [post.userLiked, post.stats.likes, post.stats.views, post.stats.comments, post.stats.reclips, post.userReclipped]);
 
   // Listen for engagement updates
   React.useEffect(() => {
@@ -2905,6 +2916,7 @@ function EngagementBar({
           isOpen={showShareToStoriesModal}
           onClose={() => setShowShareToStoriesModal(false)}
           post={post}
+          onShareSuccess={() => setShares(prev => prev + 1)}
         />
       </div>
     );
@@ -3013,6 +3025,7 @@ function EngagementBar({
         isOpen={showShareToStoriesModal}
         onClose={() => setShowShareToStoriesModal(false)}
         post={post}
+        onShareSuccess={() => setShares(prev => prev + 1)}
       />
     </div>
   );

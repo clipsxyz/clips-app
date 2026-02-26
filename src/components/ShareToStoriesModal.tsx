@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import { createStory } from '../api/stories';
+import { incrementShares } from '../api/posts';
 import { showToast } from '../utils/toast';
 import type { Post } from '../types';
 
@@ -9,9 +10,11 @@ interface ShareToStoriesModalProps {
   isOpen: boolean;
   onClose: () => void;
   post: Post;
+  /** Called when share succeeds so the feed can update the post's share count immediately */
+  onShareSuccess?: (postId: string) => void;
 }
 
-const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClose, post }) => {
+const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClose, post, onShareSuccess }) => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [isSharing, setIsSharing] = useState(false);
@@ -106,7 +109,7 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
         mediaType = 'image';
       }
 
-      // Create the story
+      // Create the story (include venue so metadata carousel shows location + venue + time)
       await createStory(
         user.id,
         user.handle || '',
@@ -117,8 +120,24 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
         undefined, // textColor
         undefined, // textSize
         post.id, // sharedFromPost
-        post.userHandle // sharedFromUser
+        post.userHandle, // sharedFromUser
+        undefined, // textStyle
+        undefined, // stickers
+        undefined, // taggedUsers
+        undefined, // poll
+        undefined, // taggedUsersPositions
+        undefined, // question
+        post.venue // venue for story metadata carousel
       );
+
+      // Update share count on the post and notify feed card
+      try {
+        await incrementShares(user.id, post.id);
+      } catch (_) {
+        // Ignore if backend fails; local event still updates UI
+      }
+      window.dispatchEvent(new CustomEvent(`shareAdded-${post.id}`));
+      onShareSuccess?.(post.id);
 
       // Close the modal
       onClose();
@@ -126,12 +145,14 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
       // Show success toast
       showToast?.('You shared this to Clips 24!');
 
-      // Navigate to Clips 24 page (StoriesPage)
-      navigate('/stories', {
-        state: {
-          openUserHandle: user.handle // Open current user's clips
-        }
-      });
+      // Delay navigation so the feed's share-count update commits before we unmount
+      setTimeout(() => {
+        navigate('/stories', {
+          state: {
+            openUserHandle: user.handle // Open current user's clips
+          }
+        });
+      }, 150);
     } catch (e) {
       console.error('Failed to share to clips:', e);
       alert('Failed to share to Clips 24. Please try again.');

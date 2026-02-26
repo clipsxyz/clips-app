@@ -122,6 +122,7 @@ class StoryController extends Controller
             'text_color' => 'nullable|string|max:50',
             'text_size' => 'nullable|in:small,medium,large',
             'location' => 'nullable|string|max:200',
+            'venue' => 'nullable|string|max:200',
             'shared_from_post_id' => 'nullable|uuid|exists:posts,id',
             'textStyle' => 'nullable|array',
             'textStyle.color' => 'nullable|string|max:50',
@@ -153,6 +154,7 @@ class StoryController extends Controller
                 'text_color' => $request->text_color,
                 'text_size' => $request->text_size,
                 'location' => $request->location,
+                'venue' => $request->venue,
                 'shared_from_post_id' => $request->shared_from_post_id,
                 'shared_from_user_handle' => $request->shared_from_post_id 
                     ? Post::find($request->shared_from_post_id)?->user_handle 

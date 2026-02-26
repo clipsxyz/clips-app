@@ -649,7 +649,7 @@ export async function createStory(
     textSize?: 'small' | 'medium' | 'large',
     sharedFromPost?: string,
     sharedFromUser?: string,
-    textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string }, // Text style for text-only stories
+    textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string; fontFamily?: string }, // Text style for text-only stories
     stickers?: StickerOverlay[], // Stickers/GIFs for stories
     taggedUsers?: string[], // Tagged users (handles only)
     poll?: { question: string; option1: string; option2: string; option3?: string }, // Poll data
@@ -699,6 +699,7 @@ export async function createStory(
             createdAt: new Date(response.created_at).getTime() || now,
             expiresAt: new Date(response.expires_at).getTime() || (now + 24 * 60 * 60 * 1000),
             location: response.location || undefined,
+            venue: response.venue || undefined,
             views: response.views_count || 0,
             hasViewed: response.has_viewed || false,
             reactions: response.reactions || [],
@@ -749,6 +750,7 @@ export async function createStory(
             createdAt: now,
             expiresAt,
             location,
+            venue: venue || undefined,
             views: 0,
             hasViewed: false,
             reactions: [],

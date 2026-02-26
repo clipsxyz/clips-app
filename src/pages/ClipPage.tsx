@@ -12,6 +12,7 @@ import StickerPicker from '../components/StickerPicker';
 import UserTaggingModal from '../components/UserTaggingModal';
 import StickerOverlayComponent from '../components/StickerOverlay';
 import type { Post, StickerOverlay, Sticker } from '../types';
+import { TEXT_STORY_TEMPLATES, TextStoryTemplate } from '../textStoryTemplates';
 
 // Tagged User Overlay Component (draggable)
 interface TaggedUserOverlayProps {
@@ -23,7 +24,7 @@ interface TaggedUserOverlayProps {
     containerWidth: number;
     containerHeight: number;
     isModalOpen?: boolean; // Whether any modal is open
-    containerRef?: React.RefObject<HTMLDivElement>; // Container ref for accurate positioning
+    containerRef?: React.RefObject<HTMLDivElement | null>; // Container ref for accurate positioning
 }
 
 function TaggedUserOverlay({
@@ -320,7 +321,18 @@ export default function ClipPage() {
   const [textColor, setTextColor] = React.useState('#FFFFFF');
   const [textSize, setTextSize] = React.useState<'small' | 'medium' | 'large'>('small');
   const [background, setBackground] = React.useState<string>('linear-gradient(to bottom right, #ec4899, #a855f7, #9333ea)');
+  const [textFontFamily, setTextFontFamily] = React.useState<string>('system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif');
   const [showBackgroundPicker, setShowBackgroundPicker] = React.useState(false);
+  const [textTemplateId, setTextTemplateId] = React.useState<string>(TEXT_STORY_TEMPLATES[2]?.id || TEXT_STORY_TEMPLATES[0]?.id);
+  const applyTextTemplate = React.useCallback((templateId: string) => {
+    const tpl: TextStoryTemplate | undefined = TEXT_STORY_TEMPLATES.find((t) => t.id === templateId);
+    if (!tpl) return;
+    setTextTemplateId(tpl.id);
+    setBackground(tpl.background);
+    setTextColor(tpl.textColor);
+    setTextSize(tpl.textSize);
+    setTextFontFamily(tpl.fontFamily);
+  }, []);
   const [showTextColorPicker, setShowTextColorPicker] = React.useState(false);
   const [showGifPicker, setShowGifPicker] = React.useState(false);
   const [showStickerPicker, setShowStickerPicker] = React.useState(false);
@@ -349,6 +361,8 @@ export default function ClipPage() {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
   const [sharedPostInfo, setSharedPostInfo] = React.useState<{ postId?: string; userId?: string } | null>(null);
+  const [keyboardOffset, setKeyboardOffset] = React.useState(0);
+  const [showStoryLocationSheet, setShowStoryLocationSheet] = React.useState(false);
   const [filteredFromFlow, setFilteredFromFlow] = React.useState(false);
   const [videoSegments, setVideoSegments] = React.useState<string[]>([]);
   const [currentSegmentIndex, setCurrentSegmentIndex] = React.useState(0);
@@ -628,7 +642,7 @@ export default function ClipPage() {
         sharedPostInfo?.postId,
         sharedPostInfo?.userId,
         // Only pass textStyle if no media (for text-only stories)
-        selectedMedia ? undefined : (text.trim() ? { color: textColor, size: textSize, background: background } : undefined),
+        selectedMedia ? undefined : (text.trim() ? ({ color: textColor, size: textSize, background: background, fontFamily: textFontFamily } as any) : undefined),
         allStickers.length > 0 ? allStickers : undefined, // stickers (including text and location)
         taggedUsers.length > 0 ? taggedUsers.map(tu => tu.handle) : undefined, // taggedUsers (send handles for API compatibility)
         undefined, // poll
@@ -797,6 +811,29 @@ export default function ClipPage() {
     }
   }, [textOnlyMode, selectedMedia]);
 
+  // Move bottom controls up when keyboard opens in text-only mode (mobile web)
+  React.useEffect(() => {
+    if (!textOnlyMode || selectedMedia) return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const updateOffset = () => {
+      const visible = vv.height;
+      const full = window.innerHeight || visible;
+      const keyboardOpen = visible < full * 0.9;
+      const offset = keyboardOpen ? Math.max(0, full - visible) : 0;
+      setKeyboardOffset(offset);
+    };
+
+    updateOffset();
+    vv.addEventListener('resize', updateOffset);
+    vv.addEventListener('scroll', updateOffset);
+    return () => {
+      vv.removeEventListener('resize', updateOffset);
+      vv.removeEventListener('scroll', updateOffset);
+    };
+  }, [textOnlyMode, selectedMedia]);
+
   // Handle adding GIF as overlay
   const handleAddGif = (gifUrl: string) => {
     const gifOverlay: StickerOverlay = {
@@ -898,13 +935,13 @@ export default function ClipPage() {
   const getTextSizeClass = () => {
     switch (textSize) {
       case 'small':
-        return 'text-2xl';
+        return 'text-xl';
       case 'medium':
-        return 'text-4xl';
+        return 'text-3xl';
       case 'large':
-        return 'text-6xl';
+        return 'text-5xl';
       default:
-        return 'text-4xl';
+        return 'text-3xl';
     }
   };
 
@@ -1297,26 +1334,14 @@ export default function ClipPage() {
             >
               <FiX className="w-6 h-6" />
             </button>
-            <button
-              onClick={() => setShowStickerPicker(true)}
-              className="p-2 text-white hover:bg-white/10 rounded-full transition-colors"
-              aria-label="Stickers"
-            >
-              <FiSmile className="w-5 h-5" />
-            </button>
-            <button
-              onClick={() => setShowBackgroundPicker(!showBackgroundPicker)}
-              className="px-3 py-1.5 text-white hover:bg-white/10 rounded-full transition-colors text-sm font-medium"
-              aria-label="Background Settings"
-            >
-              Background
-            </button>
+            <div className="w-10" />
+            <div className="w-10" />
           </div>
 
           {/* Main Content Area */}
           <div 
             ref={containerRef}
-            className="flex-1 flex items-center justify-center relative overflow-hidden"
+            className={`flex-1 flex items-center ${keyboardOffset > 0 ? 'justify-start pt-6' : 'justify-center'} relative overflow-hidden`}
             style={{
               background: background.includes('gradient') 
                 ? undefined 
@@ -1355,7 +1380,7 @@ export default function ClipPage() {
           >
             {/* Text Display Area */}
             <div 
-              className="w-full h-full flex flex-col items-center justify-center px-4 pointer-events-none max-w-full overflow-hidden"
+              className={`w-full h-full flex flex-col items-center ${keyboardOffset > 0 ? 'justify-start pt-4' : 'justify-center'} px-4 pointer-events-none max-w-full overflow-hidden`}
               onTouchStart={(e) => {
                 // Focus textarea when tapping on text area (but not on stickers/tagged users)
                 const target = e.target as HTMLElement;
@@ -1380,7 +1405,7 @@ export default function ClipPage() {
               ) : (
                 <div
                   className={`text-center w-full max-w-full overflow-hidden ${getTextSizeClass()}`}
-                  style={{ color: textColor }}
+                  style={{ color: textColor, fontFamily: textFontFamily }}
                 >
                   <div className="leading-relaxed whitespace-pre-wrap font-bold drop-shadow-lg break-words" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', maxWidth: '100%' }}>
                     {text}
@@ -1505,41 +1530,6 @@ export default function ClipPage() {
                   </div>
                 </div>
               )}
-
-              {/* Background Picker */}
-              {showBackgroundPicker && (
-                <div className="flex flex-col gap-2 bg-white/90 backdrop-blur-sm rounded-2xl p-2 shadow-lg max-h-[400px] overflow-y-auto">
-                  <div className="text-xs font-semibold text-gray-700 mb-1">Background</div>
-                  {/* Gradient Options */}
-                  <div className="grid grid-cols-2 gap-1 mb-2">
-                    {[
-                      'linear-gradient(to bottom right, #ec4899, #a855f7, #9333ea)',
-                      'linear-gradient(to bottom right, #ef4444, #f97316, #fbbf24)',
-                      'linear-gradient(to bottom right, #3b82f6, #8b5cf6, #ec4899)',
-                      'linear-gradient(to bottom right, rgb(255, 140, 0), rgb(255, 0, 160), rgb(140, 40, 255))',
-                      'linear-gradient(to bottom right, #f59e0b, #ef4444, #ec4899)',
-                    ].map((gradient) => (
-                      <button
-                        key={gradient}
-                        onClick={() => setBackground(gradient)}
-                        className={`h-12 rounded-lg ${background === gradient ? 'ring-2 ring-black' : ''}`}
-                        style={{ background: gradient }}
-                      />
-                    ))}
-                  </div>
-                  {/* Solid Color Options */}
-                  <div className="grid grid-cols-4 gap-1">
-                    {['#000000', '#FFFFFF', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF'].map((color) => (
-                      <button
-                        key={color}
-                        onClick={() => setBackground(color)}
-                        className={`w-8 h-8 rounded-full ${background === color ? 'ring-2 ring-black' : ''}`}
-                        style={{ backgroundColor: color }}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* Character Counter */}
@@ -1557,65 +1547,94 @@ export default function ClipPage() {
               </div>
             )}
 
-            {/* Bottom Bar */}
-            <div className="absolute bottom-0 left-0 right-0 flex items-center justify-center gap-6 p-4 bg-black/20 backdrop-blur-sm z-10">
-              {/* Text Color Button */}
-              <button
-                onClick={() => {
-                  setShowTextColorPicker(!showTextColorPicker);
-                  setShowBackgroundPicker(false);
-                }}
-                className="p-3 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors"
-                aria-label="Text Color"
-              >
-                <span className="text-xl font-bold">Aa</span>
-              </button>
+              {/* Bottom area: templates row + controls bar */}
+            <div
+              className="absolute left-0 right-0 bg-black/20 backdrop-blur-sm z-10"
+              style={{
+                bottom: keyboardOffset > 0 ? keyboardOffset : 0,
+                transition: 'bottom 0.18s ease-out',
+              }}
+            >
+              {/* Templates carousel (TikTok-style) */}
+              <div className="flex gap-2 overflow-x-auto px-4 pt-2 pb-2">
+                {TEXT_STORY_TEMPLATES.map((tpl) => (
+                  <button
+                    key={tpl.id}
+                    onClick={() => applyTextTemplate(tpl.id)}
+                    className={`flex flex-col items-center gap-1 flex-shrink-0 ${
+                      textTemplateId === tpl.id ? 'opacity-100' : 'opacity-80 hover:opacity-100'
+                    }`}
+                  >
+                    <div
+                      className={`w-14 h-20 rounded-xl shadow-sm flex items-center justify-center text-[10px] font-semibold ${
+                        textTemplateId === tpl.id ? 'ring-2 ring-white' : ''
+                      }`}
+                      style={{ background: tpl.background, color: tpl.textColor }}
+                    >
+                      Aa
+                    </div>
+                    <span className="text-[9px] text-white/90">{tpl.name}</span>
+                  </button>
+                ))}
+              </div>
 
-              {/* Tag Users Button */}
-              <button
-                onClick={() => setShowUserTagging(true)}
-                className="p-3 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors relative"
-                aria-label="Tag Users"
-              >
-                <FiUser className="w-5 h-5" />
-                {taggedUsers.length > 0 && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-xs flex items-center justify-center text-white">
-                    {taggedUsers.length}
-                  </span>
-                )}
-              </button>
+              {/* Controls row */}
+              <div className="flex items-center justify-center gap-6 px-4 pb-4 pt-1">
+                {/* Story Location / Venue Button */}
+                <button
+                  onClick={() => setShowStoryLocationSheet(true)}
+                  className="p-3 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors"
+                  aria-label="Add story location and venue"
+                >
+                  <FiMapPin className="w-5 h-5" />
+                </button>
 
-              {/* GIF Button */}
-              <button
-                onClick={() => setShowGifPicker(true)}
-                className="p-3 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors"
-                aria-label="Add GIF"
-              >
-                <span className="text-xl font-bold">GIF</span>
-              </button>
+                {/* Sticker Button (moved from header) */}
+                <button
+                  onClick={() => setShowStickerPicker(true)}
+                  className="p-3 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors"
+                  aria-label="Add stickers"
+                >
+                  <FiSmile className="w-5 h-5" />
+                </button>
 
-              {/* Add Link Button */}
-              <button
-                onClick={() => setShowLinkModal(true)}
-                className="p-3 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors relative"
-                aria-label="Add Link"
-              >
-                <FiLink className="w-5 h-5" />
-                {linkOverlays.length > 0 && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-blue-500 rounded-full text-xs flex items-center justify-center text-white">
-                    {linkOverlays.length}
-                  </span>
-                )}
-              </button>
+                {/* Tag Users Button */}
+                <button
+                  onClick={() => setShowUserTagging(true)}
+                  className="p-3 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors relative"
+                  aria-label="Tag Users"
+                >
+                  <FiUser className="w-5 h-5" />
+                  {taggedUsers.length > 0 && (
+                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-xs flex items-center justify-center text-white">
+                      {taggedUsers.length}
+                    </span>
+                  )}
+                </button>
 
-              {/* Submit Button */}
-              <button
-                onClick={handleSubmit}
-                disabled={isUploading || (!text.trim() && gifOverlays.length === 0)}
-                className="px-6 py-3 bg-white text-black rounded-full font-semibold hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isUploading ? 'Posting...' : 'Post'}
-              </button>
+                {/* Add Link Button */}
+                <button
+                  onClick={() => setShowLinkModal(true)}
+                  className="p-3 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors relative"
+                  aria-label="Add Link"
+                >
+                  <FiLink className="w-5 h-5" />
+                  {linkOverlays.length > 0 && (
+                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-blue-500 rounded-full text-xs flex items-center justify-center text-white">
+                      {linkOverlays.length}
+                    </span>
+                  )}
+                </button>
+
+                {/* Submit Button */}
+                <button
+                  onClick={handleSubmit}
+                  disabled={isUploading || (!text.trim() && gifOverlays.length === 0)}
+                  className="px-6 py-3 bg-white text-black rounded-full font-semibold hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isUploading ? 'Posting...' : 'Post'}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1725,6 +1744,75 @@ export default function ClipPage() {
                     </button>
                   </div>
                 </form>
+              </div>
+            </div>
+          )}
+
+          {/* Story Location / Venue Sheet (text-only mode) */}
+          {showStoryLocationSheet && (
+            <div
+              className="fixed inset-0 z-[220] flex items-end bg-black/70 backdrop-blur-sm"
+              onClick={() => setShowStoryLocationSheet(false)}
+            >
+              <div
+                className="w-full max-h-[75vh] bg-[#050816] rounded-t-2xl border-t border-white/10 p-4 pt-3"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-3" />
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <FiMapPin className="w-4 h-4 text-white/80" />
+                    <h2 className="text-white text-base font-semibold">Story location</h2>
+                  </div>
+                  <button
+                    onClick={() => setShowStoryLocationSheet(false)}
+                    className="p-1.5 rounded-full text-white/70 hover:bg-white/10 transition-colors"
+                    aria-label="Close"
+                  >
+                    <FiX className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-400 mb-2">
+                      Location (shown at top of story and in feed carousel)
+                    </label>
+                    <input
+                      type="text"
+                      value={storyLocation}
+                      onChange={(e) => setStoryLocation(e.target.value)}
+                      placeholder="e.g. Dublin, Ireland"
+                      className="w-full px-4 py-2.5 rounded-xl bg-gray-900 text-white placeholder-gray-500 border border-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      maxLength={60}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-400 mb-2">
+                      Venue (café, stadium, park, etc.)
+                    </label>
+                    <input
+                      type="text"
+                      value={venue}
+                      onChange={(e) => setVenue(e.target.value)}
+                      placeholder="e.g. Phoenix Park, Local café"
+                      className="w-full px-4 py-2.5 rounded-xl bg-gray-900 text-white placeholder-gray-500 border border-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      maxLength={60}
+                    />
+                  </div>
+
+                  <div className="rounded-2xl bg-gray-900/60 border border-white/10 p-3 text-xs text-gray-400">
+                    Your location and venue help other users discover where this story is from.
+                  </div>
+
+                  <button
+                    onClick={() => setShowStoryLocationSheet(false)}
+                    className="w-full py-3 rounded-full bg-white text-black font-semibold text-sm hover:bg-gray-100 transition-colors"
+                  >
+                    Done
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -2930,6 +3018,77 @@ export default function ClipPage() {
                     ? `Share ${videoSegments.length} Clips to Story`
                     : 'Share to Story'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Story Location / Venue Sheet for text-only stories */}
+      {showStoryLocationSheet && (
+        <div
+          className="fixed inset-0 z-[220] flex items-end bg-black/70 backdrop-blur-sm"
+          onClick={() => setShowStoryLocationSheet(false)}
+        >
+          <div
+            className="w-full max-h-[75vh] bg-[#050816] rounded-t-2xl border-t border-white/10 p-4 pt-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-3" />
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <FiMapPin className="w-4 h-4 text-white/80" />
+                <h2 className="text-white text-base font-semibold">Story location</h2>
+              </div>
+              <button
+                onClick={() => setShowStoryLocationSheet(false)}
+                className="p-1.5 rounded-full text-white/70 hover:bg-white/10 transition-colors"
+                aria-label="Close"
+              >
+                <FiX className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* Location input */}
+              <div>
+                <label className="block text-xs font-medium text-gray-400 mb-2">
+                  Location (shown at top of story and in feed carousel)
+                </label>
+                <input
+                  type="text"
+                  value={storyLocation}
+                  onChange={(e) => setStoryLocation(e.target.value)}
+                  placeholder="e.g. Dublin, Ireland"
+                  className="w-full px-4 py-2.5 rounded-xl bg-gray-900 text-white placeholder-gray-500 border border-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  maxLength={60}
+                />
+              </div>
+
+              {/* Venue input */}
+              <div>
+                <label className="block text-xs font-medium text-gray-400 mb-2">
+                  Venue (café, stadium, park, etc.)
+                </label>
+                <input
+                  type="text"
+                  value={venue}
+                  onChange={(e) => setVenue(e.target.value)}
+                  placeholder="e.g. Phoenix Park, Local café"
+                  className="w-full px-4 py-2.5 rounded-xl bg-gray-900 text-white placeholder-gray-500 border border-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  maxLength={60}
+                />
+              </div>
+
+              <div className="rounded-2xl bg-gray-900/60 border border-white/10 p-3 text-xs text-gray-400">
+                Your location and venue help other users discover where this story is from.
+              </div>
+
+              <button
+                onClick={() => setShowStoryLocationSheet(false)}
+                className="w-full py-3 rounded-full bg-white text-black font-semibold text-sm hover:bg-gray-100 transition-colors"
+              >
+                Done
+              </button>
+            </div>
           </div>
         </div>
       )}

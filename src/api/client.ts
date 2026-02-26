@@ -144,7 +144,7 @@ export async function createPost(postData: {
     stickers?: any[];
     templateId?: string;
     mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; text?: string; textStyle?: any }>;
-    textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string };
+    textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string; fontFamily?: string };
     taggedUsers?: string[];
     videoCaptionsEnabled?: boolean;
     videoCaptionText?: string;

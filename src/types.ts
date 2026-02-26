@@ -40,7 +40,7 @@ export type Post = {
   mediaUrl?: string; // Optional for text-only posts (deprecated, use mediaItems for carousel)
   finalVideoUrl?: string; // Final rendered video URL from backend (after processing)
   mediaType?: 'image' | 'video'; // New field to distinguish media types (deprecated, use mediaItems for carousel)
-  mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<{ type: string; intensity?: number; duration?: number; startTime?: number;[key: string]: any }>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; // Multiple media items for carousel with effects/templates, including text-only clips
+  mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<{ type: string; intensity?: number; duration?: number; startTime?: number;[key: string]: any }>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string; fontFamily?: string } }>; // Multiple media items for carousel with effects/templates, including text-only clips
   text?: string; // Text content of the post (maps to text_content in DB)
   text_content?: string; // Backend field
   imageText?: string; // Text overlay on images
@@ -86,6 +86,7 @@ export type Post = {
     color?: string; // Text color
     size?: 'small' | 'medium' | 'large'; // Text size
     background?: string; // Background gradient or color
+    fontFamily?: string; // Optional font family for text-only posts
   };
   // Tagged users
   taggedUsers?: string[]; // Array of user handles tagged in the post
@@ -153,6 +154,7 @@ export type Story = {
   createdAt: number;
   expiresAt: number; // Timestamp when story expires (24 hours from creation)
   location?: string;
+  venue?: string; // Venue / place name (metadata carousel on story view)
   views: number;
   hasViewed: boolean;
   reactions: StoryReaction[];

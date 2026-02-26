@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiHeart, FiVolume2, FiVolumeX, FiMaximize2, FiMapPin, FiSend, FiLink, FiCopy, FiPlus } from 'react-icons/fi';
+import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiHeart, FiVolume2, FiVolumeX, FiMaximize2, FiMapPin, FiSend, FiLink, FiCopy, FiPlus, FiHome, FiClock } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
@@ -124,6 +124,33 @@ export default function StoriesPage() {
     const [isFollowingStoryUser, setIsFollowingStoryUser] = React.useState<boolean>(false);
     const [isFollowLoading, setIsFollowLoading] = React.useState<boolean>(false);
     const [optimisticVote, setOptimisticVote] = React.useState<'option1' | 'option2' | 'option3' | null>(null);
+
+    // Metadata carousel for story viewer: location → venue → timestamp (same as newsfeed cards)
+    // For shared posts, use originalPost's location/venue so carousel matches the newsfeed card
+    const currentStoryForMeta = storyGroups[currentGroupIndex]?.stories?.[currentStoryIndex];
+    const storyMetadataItems = React.useMemo(() => {
+        const s = currentStoryForMeta;
+        if (!s) return [];
+        const isSharedPost = s.sharedFromPost && originalPost?.id === s.sharedFromPost;
+        const locationLabel = isSharedPost && originalPost?.locationLabel ? originalPost.locationLabel.trim() : (s.location && s.location.trim()) || '';
+        const venueLabel = isSharedPost && originalPost?.venue ? originalPost.venue.trim() : (s.venue && s.venue.trim()) || '';
+        const out: Array<{ label: string; type: 'location' | 'venue' | 'timestamp' }> = [];
+        if (locationLabel) out.push({ label: locationLabel, type: 'location' });
+        if (venueLabel) out.push({ label: venueLabel, type: 'venue' });
+        if (typeof s.createdAt === 'number' && !Number.isNaN(s.createdAt)) out.push({ label: getTimeAgo(s.createdAt), type: 'timestamp' });
+        return out;
+    }, [currentStoryForMeta, originalPost?.id, originalPost?.locationLabel, originalPost?.venue, currentStoryForMeta?.location, currentStoryForMeta?.venue, currentStoryForMeta?.createdAt]);
+    const [storyMetadataIndex, setStoryMetadataIndex] = React.useState(0);
+    React.useEffect(() => {
+        setStoryMetadataIndex(0);
+    }, [currentGroupIndex, currentStoryIndex]);
+    React.useEffect(() => {
+        if (storyMetadataItems.length <= 1) return;
+        const t = setInterval(() => {
+            setStoryMetadataIndex((i) => (i + 1) % storyMetadataItems.length);
+        }, 3000);
+        return () => clearInterval(t);
+    }, [storyMetadataItems.length]);
     const [showQuestionAnswerModal, setShowQuestionAnswerModal] = React.useState(false);
     const [questionAnswer, setQuestionAnswer] = React.useState('');
     const [selectedResponse, setSelectedResponse] = React.useState<{ id: string; userHandle: string; text: string; createdAt: number } | null>(null);
@@ -1102,8 +1129,8 @@ export default function StoriesPage() {
         });
     }, [storyGroups]);
 
-    // Helper function to get time ago text
-    const getTimeAgo = (timestamp: number) => {
+    // Helper function to get time ago text (hoisted so it can be used above)
+    function getTimeAgo(timestamp: number) {
         const seconds = Math.floor((Date.now() - timestamp) / 1000);
 
         if (seconds < 60) return 'Active now';
@@ -1111,7 +1138,7 @@ export default function StoriesPage() {
         if (seconds < 86400) return `Active ${Math.floor(seconds / 3600)}h ago`;
         if (seconds < 604800) return `Active ${Math.floor(seconds / 86400)}d ago`;
         return `Active ${Math.floor(seconds / 604800)}w ago`;
-    };
+    }
 
     // Build a shareable URL for the current story
     const getCurrentStoryShareUrl = () => {
@@ -1596,6 +1623,14 @@ export default function StoriesPage() {
                                         // Get tagged users positions from story (not from textStyle)
                                         const taggedUsersPositions = currentStory?.taggedUsersPositions as Array<{ handle: string; x: number; y: number }> | undefined;
                                         
+                                        // Map textStyle.size to a readable font size so preview matches creation screen better
+                                        const sizeClass =
+                                            currentStory?.textStyle?.size === 'small'
+                                                ? 'text-sm'
+                                                : currentStory?.textStyle?.size === 'large'
+                                                    ? 'text-xl'
+                                                    : 'text-base';
+
                                         return (
                                             <div
                                                 className="w-full h-full flex items-center justify-center p-4 relative"
@@ -1605,7 +1640,7 @@ export default function StoriesPage() {
                                             >
                                                 <div className="w-full max-w-md relative">
                                                     <div
-                                                        className="text-base leading-relaxed whitespace-pre-wrap font-normal px-6 py-8"
+                                                        className={`${sizeClass} leading-relaxed whitespace-pre-wrap font-normal px-6 py-8`}
                                                         style={{
                                                             color: currentStory?.textStyle?.color || '#ffffff'
                                                         }}
@@ -2751,11 +2786,31 @@ export default function StoriesPage() {
                                         name={currentGroup?.name || 'User'}
                                         size="sm"
                                     />
-                                    <div>
+                                    <div className="flex flex-col gap-0.5 min-w-0">
                                         <p className="text-white font-semibold text-sm">{currentGroup?.userHandle}</p>
-                                        {currentStory?.createdAt && (
+                                        {/* Metadata carousel: location → venue → timestamp (white pill, black text - same as newsfeed cards) */}
+                                        {storyMetadataItems.length > 0 ? (() => {
+                                            const current = storyMetadataItems[storyMetadataIndex];
+                                            const Icon = current.type === 'location' ? FiMapPin : current.type === 'venue' ? FiHome : FiClock;
+                                            return (
+                                                <div
+                                                    className="flex items-center gap-1 min-w-0 max-w-[160px] min-h-[1.25rem] overflow-hidden"
+                                                    title={storyMetadataItems.map((m) => m.label).join(' · ')}
+                                                >
+                                                    <div
+                                                        key={storyMetadataIndex}
+                                                        className="flex items-center gap-1 min-w-0 max-w-[160px] rounded-full bg-white/95 px-2 py-0.5 shadow-sm text-gray-900 metadata-carousel-slide-left"
+                                                    >
+                                                        <Icon className="w-3 h-3 flex-shrink-0 text-gray-900" />
+                                                        <span className="text-xs font-medium whitespace-nowrap truncate text-gray-900">
+                                                            {current.label}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })() : currentStory?.createdAt ? (
                                             <p className="text-white/70 text-xs">{getTimeAgo(currentStory.createdAt)}</p>
-                                        )}
+                                        ) : null}
                                     </div>
                                 </div>
                                 
@@ -2940,7 +2995,7 @@ export default function StoriesPage() {
                                     {(() => {
                                         // Parse mentions (@handle) and make them clickable
                                         const text = currentStory.text || '';
-                                        const parts: (string | JSX.Element)[] = [];
+                                        const parts: (string | React.ReactNode)[] = [];
                                         // Match @handle (including @ in handle like @Sarah@Artane)
                                         // Updated regex to match @ followed by word characters, @, and more word characters
                                         const mentionRegex = /@([\w@]+)/g;
