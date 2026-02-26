@@ -766,6 +766,7 @@ export default function LoginPage() {
                   No local areas found for {regional}. Check browser console for details or add Google Maps API key.
                 </p>
               )}
+            </div>
           </>
         )}
 
