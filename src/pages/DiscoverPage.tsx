@@ -57,7 +57,8 @@ export default function DiscoverPage() {
         navigate(`/feed?location=${encodeURIComponent(name)}`);
     }
 
-    const firstName = (user?.name || 'Friend').split('@')[0];
+    const rawName = user?.name || 'Friend';
+    const firstName = rawName.split('@')[0].trim().split(/\s+/)[0];
 
     return (
         <div className="p-4 space-y-8 min-h-[70vh] flex flex-col items-center justify-center pb-32">

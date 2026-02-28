@@ -6,19 +6,6 @@ import { useAuth } from '../context/Auth';
 import { getAvatarForHandle } from '../api/users';
 import { getNotifications, type Notification, type NotificationType, markNotificationRead, markAllNotificationsRead, getUnreadNotificationCount, deleteNotification } from '../api/notifications';
 import { getStoryInsightsForUser, type StoryInsight } from '../api/stories';
-// Import questions API - using type-only import to avoid runtime issues
-type Question = {
-    id: string;
-    storyId: string;
-    questionPrompt: string;
-    creatorHandle: string;
-    responderUserId: string;
-    responderHandle: string;
-    answer: string;
-    createdAt: number;
-    repliedTo: boolean;
-    replyStoryId?: string;
-};
 import { listConversations, seedMockDMs, type ConversationSummary, pinConversation, unpinConversation, acceptMessageRequest } from '../api/messages';
 import { timeAgo } from '../utils/timeAgo';
 import Swal from 'sweetalert2';
@@ -181,24 +168,16 @@ export default function InboxPage() {
     const [insights, setInsights] = React.useState<StoryInsight[]>([]);
     const [items, setItems] = React.useState<ConversationSummary[]>([]);
     const [loading, setLoading] = React.useState(true);
-    const [activeTab, setActiveTab] = React.useState<'insights' | 'notifications' | 'questions' | 'messages'>('notifications');
+    const [activeTab, setActiveTab] = React.useState<'insights' | 'notifications' | 'messages'>('notifications');
     const [selectedQuestionInsight, setSelectedQuestionInsight] = React.useState<StoryInsight | null>(null);
-    const [questions, setQuestions] = React.useState<Question[]>([]);
-    const [questionAvatars, setQuestionAvatars] = React.useState<Record<string, string>>({});
 
     const loadData = React.useCallback(async () => {
         if (!user?.handle) return;
         try {
-            // Dynamically import to avoid circular dependency issues
-            const { getQuestionsForUser } = await import('../api/questions');
-            const [notifs, storyInsights, conversations, userQuestions, followedUsers] = await Promise.all([
+            const [notifs, storyInsights, conversations, followedUsers] = await Promise.all([
                 getNotifications(user.handle),
                 getStoryInsightsForUser(user.handle),
                 listConversations(user.handle),
-                getQuestionsForUser(user.handle).catch(err => {
-                    console.error('Error loading questions:', err);
-                    return [];
-                }),
                 user?.id ? getFollowedUsers(user.id).catch(() => [] as string[]) : Promise.resolve([] as string[])
             ]);
             
@@ -242,43 +221,12 @@ export default function InboxPage() {
             setNotifications(allNotifications);
             setInsights(storyInsights);
             setItems(conversationsWithFollowStatus);
-            setQuestions(userQuestions || []);
-            
-            // Fetch avatar URLs for question responders
-            if (userQuestions && userQuestions.length > 0) {
-                const avatarMap: Record<string, string> = {};
-                await Promise.all(userQuestions.map(async (q) => {
-                    // Try to get avatar from getAvatarForHandle first (for mock data)
-                    let avatarUrl = getAvatarForHandle(q.responderHandle);
-                    
-                    // If not found in mock data, try fetching from backend API
-                    if (!avatarUrl && user?.id) {
-                        try {
-                            const { fetchUserProfile } = await import('../api/client');
-                            const profile = await fetchUserProfile(q.responderHandle, user.id);
-                            if (profile && (profile.avatar_url || profile.avatarUrl)) {
-                                avatarUrl = profile.avatar_url || profile.avatarUrl;
-                            }
-                        } catch (error) {
-                            console.warn(`Failed to fetch avatar for ${q.responderHandle}:`, error);
-                        }
-                    }
-                    
-                    if (avatarUrl) {
-                        avatarMap[q.responderHandle] = avatarUrl;
-                    }
-                }));
-                setQuestionAvatars(avatarMap);
-            }
-            
             setLoading(false);
         } catch (error) {
             console.error('Error loading inbox data:', error);
             setNotifications([]);
             setInsights([]);
             setItems([]);
-            setQuestions([]);
-            setQuestionAvatars({});
             setLoading(false);
         }
     }, [user?.handle, user?.id]);
@@ -673,20 +621,6 @@ export default function InboxPage() {
                     )}
                 </button>
                 <button
-                    onClick={() => setActiveTab('questions')}
-                    className={`flex-1 py-1.5 text-xs font-medium transition-colors relative whitespace-nowrap flex items-center justify-center gap-1 ${activeTab === 'questions'
-                            ? 'text-red-500 border-b-2 border-red-500'
-                            : 'text-gray-500 hover:text-gray-300'
-                        }`}
-                >
-                    <span>Questions</span>
-                    {questions && questions.length > 0 && (
-                        <span className="px-1 py-0.5 bg-red-500 text-white text-[9px] rounded-full min-w-[16px] text-center leading-none">
-                            {questions.length > 9 ? '9+' : questions.length}
-                        </span>
-                    )}
-                </button>
-                <button
                     onClick={() => setActiveTab('messages')}
                     className={`flex-1 py-1.5 text-xs font-medium transition-colors relative whitespace-nowrap flex items-center justify-center gap-1 ${activeTab === 'messages'
                             ? 'text-blue-500 border-b-2 border-blue-500'
@@ -847,60 +781,6 @@ export default function InboxPage() {
                                         </button>
                                     </div>
                                 )}
-                            </div>
-                        ))}
-                    </div>
-                )
-            ) : activeTab === 'questions' ? (
-                !questions || !Array.isArray(questions) || questions.length === 0 ? (
-                    <div className="text-gray-500">No questions yet.</div>
-                ) : (
-                    <div className="space-y-3">
-                        {questions.map(question => (
-                            <div
-                                key={question.id}
-                                className="w-full text-left bg-gray-50 dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700"
-                            >
-                                <div className="flex items-start gap-3 mb-3">
-                                    <Avatar
-                                        name={question.responderHandle}
-                                        src={questionAvatars[question.responderHandle] || getAvatarForHandle(question.responderHandle)}
-                                        size="sm"
-                                    />
-                                    <div className="flex-1">
-                                        <p className="font-semibold text-sm text-gray-900 dark:text-gray-100">
-                                            {question.responderHandle}
-                                        </p>
-                                        <p className="text-xs text-gray-500">
-                                            {timeAgo(question.createdAt)}
-                                        </p>
-                                    </div>
-                                </div>
-                                <div className="mb-3">
-                                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-semibold uppercase tracking-wide">Question:</p>
-                                    <p className="text-sm text-gray-900 dark:text-gray-100 font-semibold">{question.questionPrompt}</p>
-                                </div>
-                                <div className="mb-4">
-                                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-semibold uppercase tracking-wide">Reply:</p>
-                                    <p className="text-sm text-gray-900 dark:text-gray-100">{question.answer}</p>
-                                </div>
-                                <button
-                                    onClick={() => {
-                                        navigate('/reply-question', {
-                                            state: {
-                                                replyToQuestion: {
-                                                    question: question.questionPrompt,
-                                                    response: question.answer,
-                                                    responderHandle: question.responderHandle,
-                                                    questionId: question.id
-                                                }
-                                            }
-                                        });
-                                    }}
-                                    className="w-full py-2 px-4 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold hover:opacity-90 transition-opacity"
-                                >
-                                    Reply in Story
-                                </button>
                             </div>
                         ))}
                     </div>

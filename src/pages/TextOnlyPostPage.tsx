@@ -8,7 +8,8 @@ import { showToast } from '../utils/toast';
 import Avatar from '../components/Avatar';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
-import { FiMapPin, FiX, FiSearch } from 'react-icons/fi';
+import { FiMapPin, FiX, FiSearch, FiLayers } from 'react-icons/fi';
+import { TEXT_STORY_TEMPLATES, TextStoryTemplate } from '../textStoryTemplates';
 
 export default function TextOnlyPostPage() {
     const { user } = useAuth();
@@ -26,6 +27,12 @@ export default function TextOnlyPostPage() {
     const [tagSearchQuery, setTagSearchQuery] = useState('');
     const [tagSearchUsers, setTagSearchUsers] = useState<Array<{ handle: string; display_name?: string; avatar_url?: string }>>([]);
     const [tagSearchLoading, setTagSearchLoading] = useState(false);
+    const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(locationState?.templateId || null);
+    const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+
+    const activeTemplate: TextStoryTemplate | undefined = selectedTemplateId
+        ? TEXT_STORY_TEMPLATES.find((t) => t.id === selectedTemplateId)
+        : undefined;
 
     const isClip = locationState?.isClip === true;
 
@@ -141,6 +148,17 @@ export default function TextOnlyPostPage() {
 
         setIsSubmitting(true);
         try {
+            const selectedTemplate: TextStoryTemplate | undefined =
+                selectedTemplateId ? TEXT_STORY_TEMPLATES.find((t) => t.id === selectedTemplateId) : undefined;
+
+            const textStyle: { color: string; size: 'small' | 'medium' | 'large'; background: string } = selectedTemplate
+                ? {
+                    color: selectedTemplate.textColor,
+                    size: selectedTemplate.textSize,
+                    background: selectedTemplate.background,
+                }
+                : { color: '#ffffff', size: 'medium', background: '#000000' };
+
             await createPost(
                 user.id,
                 user.handle,
@@ -154,10 +172,10 @@ export default function TextOnlyPostPage() {
                 user.regional,
                 user.national,
                 undefined, // stickers
-                undefined, // templateId
+                selectedTemplate ? selectedTemplate.id : undefined, // templateId
                 undefined, // mediaItems
                 undefined, // bannerText
-                { color: '#ffffff', size: 'medium', background: '#000000' }, // textStyle
+                textStyle, // textStyle
                 taggedUsers.length > 0 ? taggedUsers : undefined, // taggedUsers
                 undefined, // videoCaptionsEnabled
                 undefined, // videoCaptionText
@@ -183,16 +201,25 @@ export default function TextOnlyPostPage() {
 
     return (
         <div className="min-h-screen bg-black flex flex-col" style={{ pointerEvents: 'auto' }}>
-            {/* Header: Cancel (left) | Location + Drafts + Post (right) */}
+            {/* Header: Cancel + Template picker (left) | Location + Drafts + Post (right) */}
             <div className="sticky top-0 z-10 bg-black flex-shrink-0">
                 <div className="flex items-center justify-between px-4 h-14">
-                    <button
-                        onClick={handleCancel}
-                        className="text-white font-medium text-base hover:opacity-80 transition-opacity"
-                        aria-label="Cancel"
-                    >
-                        Cancel
-                    </button>
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={handleCancel}
+                            className="text-white font-medium text-base hover:opacity-80 transition-opacity"
+                            aria-label="Cancel"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={() => setShowTemplatePicker(true)}
+                            className={`p-1.5 rounded-full text-white transition-colors border border-white/40 ${selectedTemplateId ? 'bg-white/10' : 'hover:bg-white/10'}`}
+                            aria-label="Choose template"
+                        >
+                            <FiLayers className="w-5 h-5" />
+                        </button>
+                    </div>
                     <div className="flex items-center gap-3">
                         <button
                             onClick={handleOpenLocationSheet}
@@ -219,7 +246,7 @@ export default function TextOnlyPostPage() {
                 </div>
             </div>
 
-            {/* Profile picture + text input (Bluesky-style) */}
+            {/* Profile picture + text input with template preview (postcard style) */}
             <div className="flex-1 px-4 pt-4 pb-6 overflow-y-auto">
                 <div className="flex gap-3 flex-start">
                     <div className="flex-shrink-0 pt-1">
@@ -230,17 +257,29 @@ export default function TextOnlyPostPage() {
                         />
                     </div>
                     <div className="flex-1 min-w-0">
-                        <textarea
-                            ref={textInputRef}
-                            value={text}
-                            onChange={(e) => setText(e.target.value)}
-                            placeholder="What's up?"
-                            maxLength={500}
-                            className="w-full bg-transparent text-white text-[17px] leading-snug resize-none border-none outline-none min-h-[120px] py-2 placeholder:text-gray-500 focus:outline-none focus:ring-0"
-                            rows={5}
-                            autoFocus={!isClip}
-                            style={{ pointerEvents: 'auto', width: '100%' }}
-                        />
+                        <div
+                            className="rounded-2xl border border-white/10 bg-[#020617] px-3 py-2"
+                            style={{
+                                background: activeTemplate ? activeTemplate.background : '#020617',
+                            }}
+                        >
+                            <textarea
+                                ref={textInputRef}
+                                value={text}
+                                onChange={(e) => setText(e.target.value)}
+                                placeholder="What's up?"
+                                maxLength={500}
+                                className="w-full bg-transparent text-[17px] leading-snug resize-none border-none outline-none min-h-[120px] py-2 placeholder:text-gray-400 focus:outline-none focus:ring-0"
+                                rows={5}
+                                autoFocus={!isClip}
+                                style={{
+                                    pointerEvents: 'auto',
+                                    width: '100%',
+                                    color: activeTemplate ? activeTemplate.textColor : '#ffffff',
+                                    fontFamily: activeTemplate?.fontFamily || 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                                }}
+                            />
+                        </div>
                         <div className="flex justify-end mt-1">
                             <span className={`text-xs ${text.length > 450 ? (text.length >= 500 ? 'text-red-400' : 'text-amber-400') : 'text-gray-500'}`}>
                                 {text.length}/500
@@ -354,6 +393,53 @@ export default function TextOnlyPostPage() {
                             >
                                 Done
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Template picker bottom sheet (reuses story text templates for feed postcards) */}
+            {showTemplatePicker && (
+                <div className="fixed inset-0 z-40 flex items-end bg-black/60" onClick={() => setShowTemplatePicker(false)}>
+                    <div
+                        className="w-full max-h-[75vh] overflow-y-auto bg-[#020617] rounded-t-2xl border-t border-white/10"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="sticky top-0 bg-[#020617] border-b border-white/10 px-4 py-3 flex items-center justify-between">
+                            <h2 className="text-lg font-semibold text-white">Choose a template</h2>
+                            <button
+                                onClick={() => setShowTemplatePicker(false)}
+                                className="p-2 rounded-full text-white hover:bg-white/10"
+                                aria-label="Close template picker"
+                            >
+                                <FiX className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="p-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
+                            {TEXT_STORY_TEMPLATES.map((tpl) => {
+                                const isSelected = selectedTemplateId === tpl.id;
+                                return (
+                                    <button
+                                        key={tpl.id}
+                                        type="button"
+                                        onClick={() => {
+                                            setSelectedTemplateId(tpl.id);
+                                            setShowTemplatePicker(false);
+                                        }}
+                                        className={`flex flex-col items-center gap-1 rounded-xl border px-2 pt-2 pb-2.5 transition-colors ${
+                                            isSelected ? 'border-white bg-white/10' : 'border-white/10 hover:border-white/60 hover:bg-white/5'
+                                        }`}
+                                    >
+                                        <div
+                                            className="w-full h-24 rounded-lg flex items-center justify-center text-xs font-semibold text-center px-2"
+                                            style={{ background: tpl.background, color: tpl.textColor, fontFamily: tpl.fontFamily }}
+                                        >
+                                            Aa
+                                        </div>
+                                        <span className="text-xs text-white/90">{tpl.name}</span>
+                                    </button>
+                                );
+                            })}
                         </div>
                     </div>
                 </div>

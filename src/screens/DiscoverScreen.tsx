@@ -66,7 +66,8 @@ export default function DiscoverScreen({ navigation }: any) {
         }
     };
 
-    const firstName = (user?.name || 'Friend').split('@')[0];
+    const rawName = user?.name || 'Friend';
+    const firstName = rawName.split('@')[0].trim().split(/\s+/)[0];
     const displayList = suggestions.length > 0 
         ? suggestions.slice(0, 8) 
         : results.slice(0, 6).map(r => ({ name: r, type: 'city' as const }));

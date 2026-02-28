@@ -102,8 +102,30 @@ export default function InstantCreatePage() {
     ]);
     const presetIdxRef = React.useRef(0);
     const MAX_VIDEO_SECONDS = 60;
-    const [recordingTime, setRecordingTime] = React.useState(60); // Countdown from 60 to 0
+
+    // Recording mode selector (TikTok-style): 60s, 30s, 15s, Photo
+    type RecordingMode = '60' | '30' | '15' | 'photo';
+    const [recordingMode, setRecordingMode] = React.useState<RecordingMode>('60');
+    const [currentRecordingLimit, setCurrentRecordingLimit] = React.useState<number>(MAX_VIDEO_SECONDS);
+    const [recordingTime, setRecordingTime] = React.useState(MAX_VIDEO_SECONDS); // Countdown from selected limit to 0
     const recordingTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+
+    const getSecondsForMode = (mode: RecordingMode): number => {
+        switch (mode) {
+            case '30':
+                return 30;
+            case '15':
+                return 15;
+            case 'photo':
+                return 0;
+            case '60':
+            default:
+                return MAX_VIDEO_SECONDS;
+        }
+    };
+
+    const recordingLimitForDisplay = currentRecordingLimit || getSecondsForMode(recordingMode) || MAX_VIDEO_SECONDS;
+    const TIMER_CIRCUMFERENCE = 2 * Math.PI * 20;
 
     // Load draft when navigated from profile drafts
     React.useEffect(() => {
@@ -540,7 +562,65 @@ export default function InstantCreatePage() {
         };
     }, [facingMode, micOn, cameraOn, previewUrl]);
 
+    async function capturePhoto() {
+        try {
+            // Prefer composited green-screen canvas when enabled
+            let canvas: HTMLCanvasElement | null = null;
+            if (greenEnabled && greenCanvasRef.current) {
+                canvas = greenCanvasRef.current;
+            } else if (videoRef.current) {
+                const video = videoRef.current;
+                const width = video.videoWidth || video.clientWidth || 720;
+                const height = video.videoHeight || video.clientHeight || 1280;
+                const offscreen = document.createElement('canvas');
+                offscreen.width = width;
+                offscreen.height = height;
+                const ctx = offscreen.getContext('2d');
+                if (!ctx) return;
+                ctx.drawImage(video, 0, 0, offscreen.width, offscreen.height);
+                canvas = offscreen;
+            }
+
+            if (!canvas) return;
+
+            const blob: Blob = await new Promise((resolve) => {
+                canvas!.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.9);
+            });
+
+            if (!blob || blob.size === 0) return;
+
+            // Stop camera stream before navigating
+            if (streamRef.current) {
+                streamRef.current.getTracks().forEach(t => t.stop());
+                streamRef.current = null;
+            }
+            if (videoRef.current) {
+                videoRef.current.pause();
+                videoRef.current.srcObject = null;
+            }
+
+            const galleryItems = [{ blob, mediaType: 'image' as const, videoDuration: 0 }];
+            setGalleryPreviewMedia(galleryItems);
+            navigate('/create/gallery-preview', {
+                state: {
+                    mediaUrl: undefined,
+                    mediaType: 'image' as const,
+                    videoDuration: 0,
+                    fromInstantRecording: true
+                }
+            });
+        } catch (error) {
+            console.error('Error capturing photo frame:', error);
+        }
+    }
+
     function startRecording() {
+        // Photo mode: capture single frame instead of recording video
+        if (recordingMode === 'photo') {
+            capturePhoto();
+            return;
+        }
+
         const cameraStream = videoRef.current?.srcObject as MediaStream | null;
         if (!cameraStream) return;
         recordedChunksRef.current = [];
@@ -777,9 +857,12 @@ export default function InstantCreatePage() {
             }
         };
         mr.start(100); // Request data every 100ms
+
+        const limit = getSecondsForMode(recordingMode) || MAX_VIDEO_SECONDS;
         setRecording(true);
-        setRecordingTime(60); // Reset to 60 seconds
-        
+        setCurrentRecordingLimit(limit);
+        setRecordingTime(limit); // Reset to selected limit
+
         // Start countdown timer
         recordingTimerRef.current = setInterval(() => {
             setRecordingTime(prev => {
@@ -803,7 +886,9 @@ export default function InstantCreatePage() {
             clearInterval(recordingTimerRef.current);
             recordingTimerRef.current = null;
         }
-        setRecordingTime(60); // Reset timer
+        // Reset timer to current mode's limit
+        const resetLimit = getSecondsForMode(recordingMode) || MAX_VIDEO_SECONDS;
+        setRecordingTime(resetLimit);
         
         if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
             mediaRecorderRef.current.stop();
@@ -1329,8 +1414,8 @@ export default function InstantCreatePage() {
                                 <circle
                                     cx="24" cy="24" r="20"
                                     stroke="rgba(255, 255, 255, 0.9)" strokeWidth="4" fill="none"
-                                    strokeDasharray={`${2 * Math.PI * 20}`}
-                                    strokeDashoffset={`${2 * Math.PI * 20 * (1 - (60 - recordingTime) / 60)}`}
+                                    strokeDasharray={`${TIMER_CIRCUMFERENCE}`}
+                                    strokeDashoffset={`${TIMER_CIRCUMFERENCE * (1 - ((recordingLimitForDisplay - recordingTime) / recordingLimitForDisplay))}`}
                                     strokeLinecap="round"
                                 />
                             </svg>
@@ -1369,54 +1454,60 @@ export default function InstantCreatePage() {
                             />
                         )}
 
-                        {/* Footer: Gallery, Stories, Text - small dashed icons */}
+                        {/* Footer: Gallery, Stories, Text - gradient ring only around icons */}
                         <div className="absolute bottom-0 left-0 right-0 z-30 flex items-center justify-between px-4 py-2.5 bg-gradient-to-t from-black/60 to-transparent border-t border-white/5 gap-2">
-                            {/* Gallery with blue→purple rounded gradient ring */}
+                            {/* Gallery with blue→purple gradient icon border */}
                             <div className="flex-1">
-                                <div
-                                    className="rounded-full p-[1.5px]"
-                                    style={{ background: 'linear-gradient(135deg,#3b82f6,#a855f7)' }}
+                                <button
+                                    onClick={() => cameraRollInputRef.current?.click()}
+                                    className="w-full flex flex-row items-center justify-center gap-2 px-3 py-1.5 rounded-full bg-black/30 backdrop-blur-sm text-white/90 hover:bg-white/10 active:scale-95 transition-all"
                                 >
-                                    <button
-                                        onClick={() => cameraRollInputRef.current?.click()}
-                                        className="w-full flex flex-row items-center justify-center gap-1.5 px-3 py-1.5 rounded-full bg-black/30 backdrop-blur-sm text-white/90 hover:bg-white/10 active:scale-95 transition-all"
+                                    <div
+                                        className="rounded-full p-[1.5px]"
+                                        style={{ background: 'linear-gradient(135deg,#3b82f6,#a855f7)' }}
                                     >
-                                        <FiUpload className="w-4 h-4" />
-                                        <span className="text-[11px] font-medium">Gallery</span>
-                                    </button>
-                                </div>
+                                        <div className="rounded-full bg-black px-1.5 py-1.5 flex items-center justify-center">
+                                            <FiUpload className="w-4 h-4" />
+                                        </div>
+                                    </div>
+                                    <span className="text-[11px] font-medium">Gallery</span>
+                                </button>
                             </div>
 
-                            {/* Story with blue→purple rounded gradient ring */}
+                            {/* Story with blue→purple gradient icon border */}
                             <div className="flex-1">
-                                <div
-                                    className="rounded-full p-[1.5px]"
-                                    style={{ background: 'linear-gradient(135deg,#3b82f6,#a855f7)' }}
+                                <button
+                                    onClick={() => navigate('/clip')}
+                                    className="w-full flex flex-row items-center justify-center gap-2 px-3 py-1.5 rounded-full bg-black/30 backdrop-blur-sm text-white/90 hover:bg-white/10 active:scale-95 transition-all"
                                 >
-                                    <button
-                                        onClick={() => navigate('/clip')}
-                                        className="w-full flex flex-row items-center justify-center gap-1.5 px-3 py-1.5 rounded-full bg-black/30 backdrop-blur-sm text-white/90 hover:bg-white/10 active:scale-95 transition-all"
+                                    <div
+                                        className="rounded-full p-[1.5px]"
+                                        style={{ background: 'linear-gradient(135deg,#3b82f6,#a855f7)' }}
                                     >
-                                        <FiCamera className="w-4 h-4" />
-                                        <span className="text-[11px] font-medium">Story</span>
-                                    </button>
-                                </div>
+                                        <div className="rounded-full bg-black px-1.5 py-1.5 flex items-center justify-center">
+                                            <FiCamera className="w-4 h-4" />
+                                        </div>
+                                    </div>
+                                    <span className="text-[11px] font-medium">Story</span>
+                                </button>
                             </div>
 
-                            {/* Text post with blue→purple rounded gradient ring */}
+                            {/* Text with blue→purple gradient icon border */}
                             <div className="flex-1">
-                                <div
-                                    className="rounded-full p-[1.5px]"
-                                    style={{ background: 'linear-gradient(135deg,#3b82f6,#a855f7)' }}
+                                <button
+                                    onClick={() => navigate('/create/text-only')}
+                                    className="w-full flex flex-row items-center justify-center gap-2 px-3 py-1.5 rounded-full bg-black/30 backdrop-blur-sm text-white/90 hover:bg-white/10 active:scale-95 transition-all"
                                 >
-                                    <button
-                                        onClick={() => navigate('/create/text-only')}
-                                        className="w-full flex flex-row items-center justify-center gap-1.5 px-3 py-1.5 rounded-full bg-black/30 backdrop-blur-sm text-white/90 hover:bg-white/10 active:scale-95 transition-all"
+                                    <div
+                                        className="rounded-full p-[1.5px]"
+                                        style={{ background: 'linear-gradient(135deg,#3b82f6,#a855f7)' }}
                                     >
-                                        <FiType className="w-4 h-4" />
-                                        <span className="text-[11px] font-medium">Text post</span>
-                                    </button>
-                                </div>
+                                        <div className="rounded-full bg-black px-1.5 py-1.5 flex items-center justify-center">
+                                            <FiType className="w-4 h-4" />
+                                        </div>
+                                    </div>
+                                    <span className="text-[11px] font-medium">Text</span>
+                                </button>
                             </div>
                         </div>
                     </>
@@ -1569,20 +1660,51 @@ export default function InstantCreatePage() {
                 )}
             </div>
 
-            {/* Record Button */}
+            {/* Record Button + duration mode selector */}
             {!previewUrl && (
-                <div className="absolute bottom-24 left-0 right-0 z-50 flex flex-col items-center justify-center gap-4">
+                <div className="absolute bottom-24 left-0 right-0 z-50 flex flex-col items-center justify-center gap-3">
+                    {/* Duration / Photo selector (60s · 30s · 15s · Photo) */}
+                    <div className="flex items-center gap-4 text-xs font-semibold text-white">
+                        {[
+                            { id: '60' as RecordingMode, label: '60s' },
+                            { id: '30' as RecordingMode, label: '30s' },
+                            { id: '15' as RecordingMode, label: '15s' },
+                            { id: 'photo' as RecordingMode, label: 'Photo' },
+                        ].map((mode) => (
+                            <button
+                                key={mode.id}
+                                type="button"
+                                disabled={recording}
+                                onClick={() => {
+                                    if (recording) return;
+                                    setRecordingMode(mode.id);
+                                    const limit = getSecondsForMode(mode.id) || MAX_VIDEO_SECONDS;
+                                    setRecordingTime(limit || MAX_VIDEO_SECONDS);
+                                    setCurrentRecordingLimit(limit || MAX_VIDEO_SECONDS);
+                                }}
+                                className={`px-2 py-0.5 rounded-full transition-colors ${
+                                    recordingMode === mode.id
+                                        ? 'bg-white/20 text-white'
+                                        : 'text-white/70 hover:text-white'
+                                } ${recording ? 'opacity-60 cursor-default' : ''}`}
+                            >
+                                {mode.label}
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* Main record button */}
                     {!recording && countdown === null ? (
                         <button
                             onClick={() => {
-                                // Optional 3s countdown before recording
+                                // Optional 3s countdown before recording/capture
                                 setCountdown(3);
                                 const t1 = setTimeout(() => setCountdown(2), 1000);
                                 const t2 = setTimeout(() => setCountdown(1), 2000);
                                 const t3 = setTimeout(() => { setCountdown(null); startRecording(); }, 3000);
                             }}
                             className="w-20 h-20 rounded-full bg-gradient-to-br from-[#3b82f6] to-[#a855f7] border-4 border-white shadow-2xl flex items-center justify-center hover:scale-105 transition-all duration-300 active:scale-95"
-                            aria-label="Record video"
+                            aria-label={recordingMode === 'photo' ? 'Take photo' : 'Record video'}
                         >
                             <FiCircle className="w-10 h-10 text-white" fill="white" />
                         </button>
@@ -1590,8 +1712,8 @@ export default function InstantCreatePage() {
                         <button
                             onClick={stopRecording}
                             className={`w-20 h-20 rounded-full border-4 border-white shadow-2xl flex items-center justify-center hover:scale-105 transition-all duration-500 active:scale-95 ${
-                                countdown !== null 
-                                    ? 'bg-red-500 animate-pulse' 
+                                countdown !== null
+                                    ? 'bg-red-500 animate-pulse'
                                     : 'bg-red-500'
                             }`}
                             aria-label={recording ? "Stop recording" : "Recording starting..."}

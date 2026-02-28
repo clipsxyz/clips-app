@@ -102,11 +102,23 @@ export default function UserTaggingModal({ isOpen, onClose, onSelectUser, tagged
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center animate-in fade-in duration-200">
-            <div className="w-full max-w-md max-h-[80vh] bg-gray-900 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+        <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center animate-in fade-in duration-200 p-4">
+            <svg width="0" height="0" aria-hidden="true" style={{ position: 'absolute' }}>
+                <defs>
+                    <linearGradient id="userTaggingModalIconGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#3b82f6" />
+                        <stop offset="100%" stopColor="#a855f7" />
+                    </linearGradient>
+                </defs>
+            </svg>
+            <div className="w-full max-w-md max-h-[80vh] rounded-2xl p-[2px] flex flex-col overflow-hidden mx-4" style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}>
+                <div className="bg-gray-900 rounded-[14px] flex flex-col overflow-hidden flex-1 min-h-0">
                 {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
-                    <h2 className="text-xl font-bold text-white">Tag People</h2>
+                    <div className="flex items-center gap-2">
+                        <FiUser className="w-6 h-6 shrink-0" style={{ stroke: 'url(#userTaggingModalIconGrad)', fill: 'none', strokeWidth: 2 }} />
+                        <h2 className="text-xl font-bold text-white">Tag People</h2>
+                    </div>
                     <button
                         onClick={onClose}
                         className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-full transition-colors"
@@ -189,6 +201,7 @@ export default function UserTaggingModal({ isOpen, onClose, onSelectUser, tagged
                             })}
                         </div>
                     )}
+                </div>
                 </div>
             </div>
         </div>

@@ -93,6 +93,10 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
 
     setIsSharing(true);
 
+    // Optimistic: update share count on the card immediately so the number goes up right away
+    window.dispatchEvent(new CustomEvent(`shareAdded-${post.id}`));
+    onShareSuccess?.(post.id);
+
     try {
       // Truncate text to 200 characters for stories
       const maxLength = 200;
@@ -109,7 +113,7 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
         mediaType = 'image';
       }
 
-      // Create the story (include venue so metadata carousel shows location + venue + time)
+      // Create the story (include venue and textStyle/template so shared text-only posts keep template on stories)
       await createStory(
         user.id,
         user.handle || '',
@@ -121,7 +125,7 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
         undefined, // textSize
         post.id, // sharedFromPost
         post.userHandle, // sharedFromUser
-        undefined, // textStyle
+        post.textStyle ?? undefined, // textStyle so stories page can render shared text post with same style
         undefined, // stickers
         undefined, // taggedUsers
         undefined, // poll
@@ -130,14 +134,12 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
         post.venue // venue for story metadata carousel
       );
 
-      // Update share count on the post and notify feed card
+      // Persist share count (mock storage / API) so it stays correct when user returns to feed
       try {
         await incrementShares(user.id, post.id);
       } catch (_) {
-        // Ignore if backend fails; local event still updates UI
+        // Ignore; UI already updated optimistically
       }
-      window.dispatchEvent(new CustomEvent(`shareAdded-${post.id}`));
-      onShareSuccess?.(post.id);
 
       // Close the modal
       onClose();

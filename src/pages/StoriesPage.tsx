@@ -4,7 +4,7 @@ import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiHeart, FiVolume2
 import { AiFillHeart } from 'react-icons/ai';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
-import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle, voteOnPoll, addQuestionAnswer } from '../api/stories';
+import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle, voteOnPoll } from '../api/stories';
 import { appendMessage } from '../api/messages';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
@@ -16,6 +16,7 @@ import { reclipPost } from '../api/posts';
 import { getFlagForHandle, getAvatarForHandle } from '../api/users';
 import Flag from '../components/Flag';
 import { timeAgo } from '../utils/timeAgo';
+import { TEXT_STORY_TEMPLATES } from '../textStoryTemplates';
 import { toggleFollow } from '../api/client';
 import { FiUserPlus, FiUserCheck } from 'react-icons/fi';
 import type { Story, StoryGroup, Post } from '../types';
@@ -1421,7 +1422,11 @@ export default function StoriesPage() {
                                                 </div>
                                             );
                                         } else if (originalPost.text) {
-                                            // Display shared text-only post as a nested story card
+                                            // Display shared text-only post as a nested story card (use post template/textStyle)
+                                            const template = originalPost.templateId ? TEXT_STORY_TEMPLATES.find(t => t.id === originalPost.templateId) : undefined;
+                                            const bg = originalPost.textStyle?.background ?? template?.background ?? '#000000';
+                                            const textColor = originalPost.textStyle?.color ?? template?.textColor ?? '#ffffff';
+                                            const fontFamily = originalPost.textStyle?.fontFamily ?? template?.fontFamily ?? undefined;
                                             return (
                                                 <div
                                                     className="w-full h-full flex flex-col items-center justify-center relative p-6"
@@ -1480,7 +1485,7 @@ export default function StoriesPage() {
                                                             </div>
                                                         </div>
 
-                                                        {/* Text Content */}
+                                                        {/* Text Content - use post template/background and text color */}
                                                         <div 
                                                             className="p-4 w-full overflow-hidden" 
                                                             style={{ 
@@ -1490,21 +1495,22 @@ export default function StoriesPage() {
                                                             }}
                                                         >
                                                             <div 
-                                                                className="p-4 rounded-2xl bg-black overflow-hidden w-full" 
+                                                                className="p-4 rounded-2xl overflow-hidden w-full" 
                                                                 style={{ 
                                                                     maxWidth: '100%', 
                                                                     boxSizing: 'border-box', 
-                                                                    backgroundColor: '#000000' 
+                                                                    background: bg 
                                                                 }}
                                                             >
                                                                 <div 
-                                                                    className="text-base leading-relaxed whitespace-pre-wrap font-normal text-white break-words w-full" 
+                                                                    className="text-base leading-relaxed whitespace-pre-wrap font-normal break-words w-full" 
                                                                     style={{ 
                                                                         wordBreak: 'break-word', 
                                                                         overflowWrap: 'anywhere', 
                                                                         maxWidth: '100%', 
                                                                         boxSizing: 'border-box', 
-                                                                        color: '#ffffff' 
+                                                                        color: textColor,
+                                                                        fontFamily: fontFamily || undefined
                                                                     }}
                                                                 >
                                                                     {originalPost.text || 'Shared post'}
@@ -2717,49 +2723,7 @@ export default function StoriesPage() {
                                     }
                                 })()}
 
-                                {/* Question Overlay - Only show for viewers, never show responses publicly */}
-                                {currentStory?.question && (
-                                        <div 
-                                            className="absolute top-[60%] left-0 right-0 px-4 z-[80] pointer-events-auto transform -translate-y-1/2"
-                                            style={{ maxWidth: '100%' }}
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                e.preventDefault();
-                                            }}
-                                            onTouchStart={(e) => {
-                                                e.stopPropagation();
-                                            }}
-                                        >
-                                            <div 
-                                                className="rounded-xl p-[1.5px] max-w-[14rem] mx-auto"
-                                                style={{
-                                                    background: 'linear-gradient(to right, rgba(255, 78, 203, 0.8), rgba(143, 91, 255, 0.8))'
-                                                }}
-                                            >
-                                                <div className="backdrop-blur-md bg-white/95 rounded-xl p-3 shadow-xl">
-                                                    {/* Question Prompt */}
-                                                    <div className="bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg p-3 mb-3 text-center">
-                                                        <p className="text-white font-semibold text-sm">{currentStory.question.prompt || 'Ask me anything'}</p>
-                                                    </div>
-                                                    
-                                                    {/* Answer Button */}
-                                                    <button
-                                                        onClick={() => {
-                                                            setShowQuestionAnswerModal(true);
-                                                            setPaused(true);
-                                                            pausedRef.current = true;
-                                                        }}
-                                                        className="w-full px-3 py-2 rounded-lg font-semibold text-xs transition-all border-2 bg-gray-100 text-gray-900 hover:bg-gray-200 cursor-pointer"
-                                                        style={{
-                                                            borderColor: 'black'
-                                                        }}
-                                                    >
-                                                        Tap to answer
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                )}
+                                {/* Question overlay removed */}
                             </div>
                         </div>
                     </div>
@@ -2794,15 +2758,15 @@ export default function StoriesPage() {
                                             const Icon = current.type === 'location' ? FiMapPin : current.type === 'venue' ? FiHome : FiClock;
                                             return (
                                                 <div
-                                                    className="flex items-center gap-1 min-w-0 max-w-[160px] min-h-[1.25rem] overflow-hidden"
+                                                    className="flex items-center gap-0.5 min-w-0 max-w-[110px] min-h-[1rem] overflow-hidden"
                                                     title={storyMetadataItems.map((m) => m.label).join(' · ')}
                                                 >
                                                     <div
                                                         key={storyMetadataIndex}
-                                                        className="flex items-center gap-1 min-w-0 max-w-[160px] rounded-full bg-white/95 px-2 py-0.5 shadow-sm text-gray-900 metadata-carousel-slide-left"
+                                                        className="flex items-center gap-0.5 min-w-0 max-w-[110px] rounded-full bg-white/95 px-1.5 py-0.5 shadow-sm text-gray-900 metadata-carousel-slide-left"
                                                     >
-                                                        <Icon className="w-3 h-3 flex-shrink-0 text-gray-900" />
-                                                        <span className="text-xs font-medium whitespace-nowrap truncate text-gray-900">
+                                                        <Icon className="w-2.5 h-2.5 flex-shrink-0 text-gray-900" />
+                                                        <span className="text-[10px] font-medium whitespace-nowrap truncate text-gray-900">
                                                             {current.label}
                                                         </span>
                                                     </div>
@@ -3377,65 +3341,7 @@ export default function StoriesPage() {
                     </div>
                 )}
 
-                {/* Question Answer Modal */}
-                {showQuestionAnswerModal && currentStory && currentStory.question && (
-                    <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-end" onClick={() => {
-                        setShowQuestionAnswerModal(false);
-                        setQuestionAnswer('');
-                        setPaused(false);
-                        pausedRef.current = false;
-                    }}>
-                        <div className="w-full bg-white dark:bg-gray-900 rounded-t-3xl p-6 animate-in slide-in-from-bottom duration-300" onClick={(e) => e.stopPropagation()}>
-                            <div className="flex items-center justify-between mb-4">
-                                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                                    {currentStory.question.prompt || 'Ask me anything'}
-                                </h3>
-                                <button
-                                    onClick={() => {
-                                        setShowQuestionAnswerModal(false);
-                                        setQuestionAnswer('');
-                                        setPaused(false);
-                                        pausedRef.current = false;
-                                    }}
-                                    className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                                >
-                                    <FiX className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-                                </button>
-                            </div>
-                            <textarea
-                                value={questionAnswer}
-                                onChange={(e) => setQuestionAnswer(e.target.value)}
-                                placeholder="Type your answer..."
-                                className="w-full h-24 p-3 rounded-xl border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 resize-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                                autoFocus
-                                maxLength={200}
-                            />
-                            <div className="mt-4 flex items-center gap-3">
-                                <button
-                                    onClick={async () => {
-                                        if (!questionAnswer.trim() || !user?.id || !user?.handle || !currentStory) return;
-                                        
-                                        try {
-                                            await addQuestionAnswer(currentStory.id, user.id, user.handle, questionAnswer.trim());
-                                            setShowQuestionAnswerModal(false);
-                                            setQuestionAnswer('');
-                                            setPaused(false);
-                                            pausedRef.current = false;
-                                            showToast('Answer sent!');
-                                        } catch (error) {
-                                            console.error('Error submitting answer:', error);
-                                            showToast('Failed to send answer. Please try again.');
-                                        }
-                                    }}
-                                    disabled={!questionAnswer.trim()}
-                                    className="flex-1 py-3 rounded-xl bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
-                                >
-                                    Send Answer
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
+                {/* Question Answer Modal removed */}
 
                 {/* Story Share Sheet - for WhatsApp, Copy Link, etc. */}
                 {showStoryShareModal && currentStory && (

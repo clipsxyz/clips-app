@@ -42,6 +42,7 @@ import ZoomableMedia from './components/ZoomableMedia';
 import { getInstagramImageDimensions, getImageSize } from './utils/imageDimensions';
 import Swal from 'sweetalert2';
 import { bottomSheet } from './utils/swalBottomSheet';
+import { TEXT_STORY_TEMPLATES } from './textStoryTemplates';
 
 // Global map to store video playback times per post ID for seamless transitions
 const videoTimesMap = new Map<string, number>();
@@ -192,11 +193,13 @@ export default function App() {
   const currentFilter = customLocation || activeTab;
 
   const isLoginPage = loc.pathname === '/login';
+  const isClipPage = loc.pathname === '/clip';
+  const isFullViewportPage = isLoginPage || isClipPage; // No scroll, no bottom nav
   return (
     <>
       <main
         id="main"
-        className={`mx-auto max-w-md md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800 ${isLoginPage ? 'h-screen min-h-[100dvh] overflow-hidden flex flex-col' : 'min-h-screen pb-[calc(64px+theme(spacing.safe))]'}`}
+        className={`mx-auto max-w-md md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800 ${isFullViewportPage ? 'h-screen min-h-[100dvh] overflow-hidden flex flex-col' : 'min-h-screen pb-[calc(64px+theme(spacing.safe))]'}`}
         style={{ backgroundColor: '#030712' }}
       >
         {loc.pathname !== '/login'
@@ -207,7 +210,7 @@ export default function App() {
           && !loc.pathname.startsWith('/user/')
           && !loc.pathname.startsWith('/create/text-only')
           && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
-        <div className={isLoginPage ? 'flex-1 min-h-0 overflow-hidden flex flex-col' : undefined}>
+        <div className={isFullViewportPage ? 'flex-1 min-h-0 overflow-hidden flex flex-col' : undefined}>
           <Outlet context={{ activeTab, setActiveTab, customLocation, setCustomLocation }} />
         </div>
         {loc.pathname !== '/discover'
@@ -438,9 +441,9 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                 <defs>
                   <linearGradient id="gazetteerWaveGradient" x1="0%" y1="50%" x2="100%" y2="50%">
                     <stop offset="0%" stopColor="transparent" stopOpacity="0" />
-                    <stop offset="20%" stopColor="red" stopOpacity="0.7" />
-                    <stop offset="50%" stopColor="yellow" stopOpacity="0.9" />
-                    <stop offset="80%" stopColor="red" stopOpacity="0.7" />
+                    <stop offset="20%" stopColor="#3b82f6" stopOpacity="0.8" />
+                    <stop offset="50%" stopColor="#a855f7" stopOpacity="0.95" />
+                    <stop offset="80%" stopColor="#3b82f6" stopOpacity="0.8" />
                     <stop offset="100%" stopColor="transparent" stopOpacity="0" />
                   </linearGradient>
                 </defs>
@@ -748,7 +751,8 @@ function BoostButton({ postId, onBoost, stretch, knownBoosted }: { postId: strin
       disabled={busy}
       aria-label="Boost post"
       title="Boost this post"
-      className={`px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-60 transition-all duration-200 active:scale-[.98] bg-brand-600 text-white hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 flex items-center gap-2 ${stretchCls}`}
+      style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}
+      className={`px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-60 transition-all duration-200 active:scale-[.98] text-white hover:opacity-95 flex items-center gap-2 ${stretchCls}`}
     >
       <FiZap className="w-4 h-4 flex-shrink-0" />
       <span>Boost</span>
@@ -1014,19 +1018,19 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
           {/* Story location on top: location → venue → timestamp */}
           {metadataItems.length > 0 && (() => {
             const current = metadataItems[metadataIndex];
-            const iconClass = `w-3 h-3 flex-shrink-0 text-gray-900`;
+            const iconClass = `w-2.5 h-2.5 flex-shrink-0 text-gray-900`;
             const Icon = current.type === 'location' ? FiMapPin : current.type === 'venue' ? FiHome : FiClock;
             return (
               <div
-                className="flex items-center gap-1 min-w-0 max-w-[160px] justify-end min-h-[1.25rem] overflow-hidden"
+                className="flex items-center gap-0.5 min-w-0 max-w-[110px] justify-end min-h-[1rem] overflow-hidden"
                 title={metadataItems.map((m) => m.label).join(' · ')}
               >
                 <div
                   key={metadataIndex}
-                  className={`flex items-center gap-1 justify-end min-w-0 max-w-[160px] rounded-full bg-white/95 px-2 py-0.5 shadow-sm ${metadataTransitionClass}`}
+                  className={`flex items-center gap-0.5 justify-end min-w-0 max-w-[110px] rounded-full bg-white/95 px-1.5 py-0.5 shadow-sm ${metadataTransitionClass}`}
                 >
                   <Icon className={iconClass} />
-                  <span className="text-xs font-medium whitespace-nowrap truncate text-gray-900">
+                  <span className="text-[10px] font-medium whitespace-nowrap truncate text-gray-900">
                     {current.label}
                   </span>
                 </div>
@@ -1222,16 +1226,17 @@ function TextCard({ text, onDoubleLike, textStyle, stickers }: { text: string; o
         }}
         onClick={handleClick}
         onTouchEnd={handleTouchEnd}
-        className="relative w-full rounded-lg bg-white shadow-lg z-10"
+        className="relative w-full rounded-lg shadow-lg z-10"
         style={{
           maxWidth: '100%',
           boxSizing: 'border-box',
           padding: '16px',
-          marginBottom: '12px'
+          marginBottom: '12px',
+          background: selectedBackground
         }}
       >
         {/* Speech bubble content */}
-        <div className="text-base leading-relaxed whitespace-pre-wrap font-normal text-gray-800 break-words w-full" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', maxWidth: '100%', boxSizing: 'border-box' }}>
+        <div className={`leading-relaxed whitespace-pre-wrap font-normal break-words w-full ${getTextSizeClass()}`} style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', maxWidth: '100%', boxSizing: 'border-box', color: textColor, fontFamily: textFontFamily }}>
           {displayText}
         </div>
         {shouldTruncate && (
@@ -1255,7 +1260,7 @@ function TextCard({ text, onDoubleLike, textStyle, stickers }: { text: string; o
             height: 0,
             borderLeft: '8px solid transparent',
             borderRight: '8px solid transparent',
-            borderTop: '12px solid white'
+            borderTop: '12px solid ' + (selectedBackground.includes('gradient') ? '#1e293b' : selectedBackground)
           }}
         />
 
@@ -2729,7 +2734,8 @@ function EngagementBar({
   isMetricsOpen,
   likeButtonRef,
   variant = 'default',
-  knownBoosted
+  knownBoosted,
+  onShareSuccess
 }: {
   post: Post;
   onLike: () => Promise<void>;
@@ -2749,6 +2755,8 @@ function EngagementBar({
   variant?: 'default' | 'boost';
   /** When true, boost button shows Boosted immediately */
   knownBoosted?: boolean;
+  /** Called when share to stories succeeds so feed can update share count */
+  onShareSuccess?: (postId: string) => void;
 }) {
   const [isSaved, setIsSaved] = React.useState(false);
   const [showShareToStoriesModal, setShowShareToStoriesModal] = React.useState(false);
@@ -2795,15 +2803,16 @@ function EngagementBar({
   const [busy, setBusy] = React.useState(false);
   const likeCooldownRef = React.useRef(0);
 
-  // Sync with post data changes
+  // Sync with post data changes (including shares so counter updates when post is refreshed)
   React.useEffect(() => {
     setLiked(post.userLiked);
     setLikes(post.stats.likes);
     setViews(post.stats.views);
     setComments(post.stats.comments);
+    setShares(post.stats.shares);
     setReclips(post.stats.reclips);
     setUserReclipped(post.userReclipped || false);
-  }, [post.userLiked, post.stats.likes, post.stats.views, post.stats.comments, post.stats.reclips, post.userReclipped]);
+  }, [post.userLiked, post.stats.likes, post.stats.views, post.stats.comments, post.stats.shares, post.stats.reclips, post.userReclipped]);
 
   // Listen for engagement updates
   React.useEffect(() => {
@@ -2916,7 +2925,10 @@ function EngagementBar({
           isOpen={showShareToStoriesModal}
           onClose={() => setShowShareToStoriesModal(false)}
           post={post}
-          onShareSuccess={() => setShares(prev => prev + 1)}
+          onShareSuccess={(postId) => {
+            setShares(prev => prev + 1);
+            onShareSuccess?.(postId);
+          }}
         />
       </div>
     );
@@ -3025,7 +3037,10 @@ function EngagementBar({
         isOpen={showShareToStoriesModal}
         onClose={() => setShowShareToStoriesModal(false)}
         post={post}
-        onShareSuccess={() => setShares(prev => prev + 1)}
+        onShareSuccess={(postId) => {
+          setShares(prev => prev + 1);
+          onShareSuccess?.(postId);
+        }}
       />
     </div>
   );
@@ -3079,7 +3094,8 @@ function BoostMetrics({ post, isOpen }: { post: Post; isOpen: boolean }) {
   if (!isBoosted) return null;
 
   return (
-    <div className={`mx-4 mb-4 p-4 bg-white dark:bg-gray-900 rounded-xl border-2 border-brand-200 dark:border-brand-800 transition-all duration-300 overflow-hidden shadow-sm ${isOpen ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0 p-0 mb-0'}`}>
+    <div className={`mx-4 mb-4 rounded-xl p-[2px] transition-all duration-300 overflow-hidden shadow-sm ${isOpen ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0 p-0 mb-0'}`} style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}>
+      <div className="p-4 bg-white dark:bg-gray-900 rounded-[10px] h-full">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <FiTrendingUp className="w-5 h-5 text-brand-600 dark:text-brand-400" />
@@ -3146,13 +3162,15 @@ function BoostMetrics({ post, isOpen }: { post: Post; isOpen: boolean }) {
           </span>
         </div>
       </div>
+      </div>
     </div>
   );
 }
 
 function PostAnalyticsCard({ post, isOpen }: { post: Post; isOpen: boolean }) {
   return (
-    <div className={`mx-4 mb-4 p-4 bg-white dark:bg-gray-900 rounded-xl border-2 border-brand-200 dark:border-brand-800 transition-all duration-300 overflow-hidden shadow-sm ${isOpen ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0 p-0 mb-0'}`}>
+    <div className={`mx-4 mb-4 rounded-xl p-[2px] transition-all duration-300 overflow-hidden shadow-sm ${isOpen ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0 p-0 mb-0'}`} style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}>
+      <div className="p-4 bg-white dark:bg-gray-900 rounded-[10px] h-full">
       <div className="flex items-center gap-2 mb-3">
         <FiBarChart2 className="w-5 h-5 text-brand-600 dark:text-brand-400" />
         <h3 className="font-semibold text-gray-900 dark:text-gray-100">Post Analytics</h3>
@@ -3194,11 +3212,12 @@ function PostAnalyticsCard({ post, isOpen }: { post: Post; isOpen: boolean }) {
           <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">{post.stats.reclips.toLocaleString()}</span>
         </div>
       </div>
+      </div>
     </div>
   );
 }
 
-export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare, onOpenComments, onView, onReclip, onOpenScenes, showBoostIcon, onBoost, onDelete, onOpenDM, priority = false, engagementVariant = 'default', knownBoosted }: {
+export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, onShare, onOpenComments, onView, onReclip, onOpenScenes, showBoostIcon, onBoost, onDelete, onOpenDM, onShareSuccess, priority = false, engagementVariant = 'default', knownBoosted }: {
   post: Post;
   onLike: () => Promise<void>;
   onFollow?: () => Promise<void>;
@@ -3212,6 +3231,8 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   onDelete?: () => Promise<void>;
   /** Open in-feed DM compose sheet (mutual follow only). */
   onOpenDM?: (handle: string) => void;
+  /** Called when post is shared to stories so feed can update share count */
+  onShareSuccess?: (postId: string) => void;
   priority?: boolean;
   /** 'boost' = boost page layout: long boost button + analytics tab only */
   engagementVariant?: 'default' | 'boost';
@@ -3323,6 +3344,24 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   const hasMedia = !!(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0));
   const isTextOnly = post.text && !post.mediaUrl && (!post.mediaItems || post.mediaItems.length === 0);
 
+  // If this is a text-only post with a templateId, derive style from TEXT_STORY_TEMPLATES
+  const templateForText = post.templateId
+    ? TEXT_STORY_TEMPLATES.find((t) => t.id === post.templateId)
+    : undefined;
+
+  let effectiveTextStyle: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string; fontFamily?: string } | undefined =
+    post.textStyle;
+
+  if (templateForText) {
+    effectiveTextStyle = {
+      background: templateForText.background,
+      color: templateForText.textColor,
+      size: templateForText.textSize,
+      fontFamily: templateForText.fontFamily,
+      ...(post.textStyle || {}),
+    };
+  }
+
   return (
     <article ref={articleRef} aria-labelledby={titleId} className="mx-0 mb-6 overflow-hidden border-0 border-b border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out]" style={{ backgroundColor: '#030712' }}>
       {/* Show PostHeader normally for text-only posts */}
@@ -3352,7 +3391,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             <TextCard
               text={post.text || ''}
               onDoubleLike={onLike}
-              textStyle={post.textStyle}
+              textStyle={effectiveTextStyle}
               stickers={post.stickers}
               userHandle={post.userHandle}
               locationLabel={post.locationLabel}
@@ -3457,6 +3496,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         likeButtonRef={likeButtonRef}
         variant={engagementVariant === 'boost' ? 'boost' : 'default'}
         knownBoosted={knownBoosted}
+        onShareSuccess={onShareSuccess}
       />
       {/* Debug: show media URL under card in dev so you can copy it on phone */}
       {import.meta.env.DEV && post.mediaUrl && (
@@ -3941,7 +3981,9 @@ function FeedPageWrapper() {
     let cancelled = false;
     (async () => {
       try {
-        const cached = await loadFeed(userId, currentFilter);
+        // In mock mode, skip cache and always fetch fresh so new posts appear immediately
+        const useMock = (import.meta as any).env?.VITE_USE_LARAVEL_API === 'false';
+        const cached = useMock ? null : await loadFeed(userId, currentFilter);
         if (cancelled) return;
         const hasCache = cached && cached.length > 0;
         if (hasCache) {
@@ -4037,10 +4079,7 @@ function FeedPageWrapper() {
         return;
       }
       setPages(prev => {
-        // When we already have cached feed and this result is from mock (API down), keep cache so edits persist after refresh
-        if (cursor === 0 && prev.length > 0 && page.fromMock) {
-          return prev;
-        }
+        // In mock mode, always use fresh fetch result so new posts appear. (Previously we kept stale cache, which hid new posts.)
         const existingIds = cursor === 0 ? new Set<string>() : new Set(prev.flat().map(p => p.id));
         const newChunk = page.items.filter(x => !existingIds.has(x.id));
         const seenInChunk = new Set<string>();
@@ -4050,9 +4089,9 @@ function FeedPageWrapper() {
           return true;
         });
         const next = cursor === 0 ? [dedupedChunk] : [...prev, dedupedChunk];
-        if (cursor === 0 && !page.fromMock) {
+        if (cursor === 0) {
           pagesLoadedForFilterRef.current = filterForRequest;
-          saveFeed(userId, currentFilter, next).catch(() => {});
+          if (!page.fromMock) saveFeed(userId, currentFilter, next).catch(() => {});
         }
         return next;
       });
@@ -4272,9 +4311,10 @@ function FeedPageWrapper() {
   }, [pages, userId, currentFilter]);
 
   function updateOne(id: string, updater: (p: Post) => Post, onUpdated?: (newPages: Post[][]) => void) {
+    const idStr = String(id);
     setPages(cur => {
       const updated = cur.map(group => group.map(p => {
-        if (p.id === id) {
+        if (String(p.id) === idStr) {
           const next = updater({ ...p });
           // Never lose id (incrementViews etc can return minimal objects without id)
           const preserved = {
@@ -4430,11 +4470,11 @@ function FeedPageWrapper() {
               className="relative px-3 py-1.5 text-sm font-medium text-white rounded-lg"
               onClick={() => setCustomLocation(null)}
             >
-              {/* Gradient border wrapper – match Clips/Discover red → white → red, with rotating reveal */}
+              {/* Gradient border wrapper – blue → purple, with rotating reveal */}
               <div
                 className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
                 style={{
-                  background: 'linear-gradient(90deg, red, white, red)',
+                  background: 'linear-gradient(90deg, #3b82f6 0%, #a855f7 50%, #3b82f6 100%)',
                 }}
               >
                 {/* Overlay that covers border initially, then rotates to reveal it */}
@@ -4918,6 +4958,7 @@ function FeedPageWrapper() {
               setDmSheetOpen(true);
               setTimeout(() => dmSheetInputRef.current?.focus(), 100);
             } : undefined}
+            onShareSuccess={(postId) => updateOne(postId, p => ({ ...p, stats: { ...p.stats, shares: p.stats.shares + 1 } }))}
           />
         );
       })}
@@ -5039,7 +5080,7 @@ function FeedPageWrapper() {
                     className={`inline-flex items-center justify-center px-4 py-2.5 rounded-full text-sm font-semibold transition-all ${
                       isNotifyOnForCurrentLocation
                         ? 'bg-green-600 text-white hover:bg-green-500'
-                        : 'bg-gradient-to-r from-red-500 via-yellow-400 to-red-500 text-black hover:brightness-110'
+                        : 'bg-gradient-to-r from-sky-500 via-indigo-500 to-purple-500 text-white hover:brightness-110'
                     }`}
                   >
                     {isNotifyOnForCurrentLocation ? 'You’ll be notified' : `Notify me when ${customLocation} wakes up`}
@@ -5404,7 +5445,7 @@ function BoostPageWrapper() {
   const [unreadCount, setUnreadCount] = React.useState(0);
   const [hasInbox, setHasInbox] = React.useState(false);
 
-  // Load user's posts + Bob's mock posts (so you can try boost without creating a post)
+  // Load only the current user's posts (no mock users)
   React.useEffect(() => {
     async function loadUserPosts() {
       if (!user?.handle) return;
@@ -5412,14 +5453,11 @@ function BoostPageWrapper() {
       setLoading(true);
       setError(null);
       try {
-        const [userPosts, bobPosts] = await Promise.all([
-          fetchPostsByUser(user.handle, 50),
-          fetchPostsByUser('Bob@Ireland', 10),
-        ]);
+        const userPosts = await fetchPostsByUser(user.handle, 50);
         const createdOnly = userPosts.filter(p => !p.originalUserHandle);
         const decorated = createdOnly.map(p => decorateForUser(userId, p));
-        const bobDecorated = bobPosts.map(p => decorateForUser(userId, p));
-        setPosts([...decorated, ...bobDecorated]);
+        decorated.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+        setPosts(decorated);
       } catch (err) {
         console.error('Error loading user posts:', err);
         setError('Failed to load your posts');
@@ -5438,15 +5476,11 @@ function BoostPageWrapper() {
 
     const handleBoostSuccess = () => {
       if (!user?.handle) return;
-      Promise.all([
-        fetchPostsByUser(user.handle, 50),
-        fetchPostsByUser('Bob@Ireland', 10),
-      ])
-        .then(([userPosts, bobPosts]) => {
+      fetchPostsByUser(user.handle, 50)
+        .then(userPosts => {
           const createdOnly = userPosts.filter(p => !p.originalUserHandle);
-          const decorated = createdOnly.map(p => decorateForUser(userId, p));
-          const bobDecorated = bobPosts.map(p => decorateForUser(userId, p));
-          let result = [...decorated, ...bobDecorated];
+          let result = createdOnly.map(p => decorateForUser(userId, p));
+          result.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
           // Mark the boosted post so Sponsored label and disabled Boost button show
           if (locationState?.postId && locationState?.feedType) {
             result = result.map(p =>
@@ -5549,7 +5583,7 @@ function BoostPageWrapper() {
       {/* Header */}
       <div className="px-3 py-2">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Your Posts</h2>
-        <p className="text-sm text-gray-600 dark:text-gray-400">Boost your posts to reach more people. Demo: you can also boost Bob&apos;s mock posts below.</p>
+        <p className="text-sm text-gray-600 dark:text-gray-400">Boost your posts to reach more people.</p>
       </div>
 
       <div className="h-4" />
@@ -5669,6 +5703,7 @@ function BoostPageWrapper() {
                 }));
               }
             }}
+            onShareSuccess={(postId) => updateOne(postId, p => ({ ...p, stats: { ...p.stats, shares: p.stats.shares + 1 } }))}
           />
         ))
       )}

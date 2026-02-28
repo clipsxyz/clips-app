@@ -654,6 +654,15 @@ export default function GalleryPreviewPage() {
                     borderImage: 'linear-gradient(90deg, #3b82f6, #a855f7) 1',
                 }}
             >
+                {/* Gradient for card option icons (purple → blue) */}
+                <svg width="0" height="0" aria-hidden="true" style={{ position: 'absolute' }}>
+                    <defs>
+                        <linearGradient id="cardOptionIconGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stopColor="#a855f7" />
+                            <stop offset="100%" stopColor="#3b82f6" />
+                        </linearGradient>
+                    </defs>
+                </svg>
                 <div
                     role="button"
                     tabIndex={0}
@@ -686,7 +695,7 @@ export default function GalleryPreviewPage() {
                     <div className="w-16 h-1.5 bg-white/50 rounded-full pointer-events-none" />
                     <span className="text-[10px] text-white/60 pointer-events-none">{cardBodyExpanded ? 'Drag down to collapse' : 'Tap to expand'}</span>
                 </div>
-                {/* Card header: Caption, Location, Carousel, Filters, then Save far right - all white icons */}
+                {/* Card header: Caption, Location, Carousel, Filters, then Save far right - option icons use purple→blue gradient */}
                 <div className="flex items-center gap-2 px-4 pb-2 mt-3 border-b border-white/10 overflow-x-auto scrollbar-hide">
                     <button
                         onClick={() => setCardTab('caption')}
@@ -696,7 +705,7 @@ export default function GalleryPreviewPage() {
                             cardTab === 'caption' ? 'bg-white/20' : 'hover:bg-white/10'
                         }`}
                     >
-                        <FiType className="w-5 h-5" />
+                        <FiType className="w-5 h-5" style={{ stroke: 'url(#cardOptionIconGradient)', fill: 'none' }} />
                     </button>
                     <button
                         onClick={() => setCardTab('location')}
@@ -706,7 +715,7 @@ export default function GalleryPreviewPage() {
                             cardTab === 'location' ? 'bg-white/20' : 'hover:bg-white/10'
                         }`}
                     >
-                        <FiMapPin className="w-5 h-5" />
+                        <FiMapPin className="w-5 h-5" style={{ stroke: 'url(#cardOptionIconGradient)', fill: 'none' }} />
                     </button>
                     <button
                         onClick={() => setCardTab('carousel')}
@@ -716,7 +725,7 @@ export default function GalleryPreviewPage() {
                             cardTab === 'carousel' ? 'bg-white/20' : 'hover:bg-white/10'
                         }`}
                     >
-                        <FiLayers className="w-5 h-5" />
+                        <FiLayers className="w-5 h-5" style={{ stroke: 'url(#cardOptionIconGradient)', fill: 'none' }} />
                         {carouselItems.length > 1 && (
                             <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-3.5 px-1 rounded-full bg-white/90 text-black text-[10px] font-bold flex items-center justify-center">
                                 {carouselItems.length}
@@ -731,7 +740,7 @@ export default function GalleryPreviewPage() {
                             cardTab === 'filters' ? 'bg-white/20' : 'hover:bg-white/10'
                         }`}
                     >
-                        <FiFilter className="w-5 h-5" />
+                        <FiFilter className="w-5 h-5" style={{ stroke: 'url(#cardOptionIconGradient)', fill: 'none' }} />
                     </button>
                     <button
                         onClick={handleSaveToDrafts}
@@ -903,7 +912,7 @@ export default function GalleryPreviewPage() {
                                         onClick={() => setShowTagUserModal(true)}
                                         className="w-full px-4 pb-3 flex items-center gap-2 text-left text-sm text-white/90 hover:text-white focus:outline-none"
                                     >
-                                        <FiUser className="w-4 h-4 text-white/60 flex-shrink-0" />
+                                        <FiUser className="w-4 h-4 flex-shrink-0" style={{ stroke: 'url(#cardOptionIconGradient)', fill: 'none' }} />
                                         <span className={taggedUsers.length > 0 ? 'text-white' : 'text-white/50'}>
                                             {taggedUsers.length > 0 ? taggedUsers.map((h) => `@${h}`).join(', ') : 'Tag user'}
                                         </span>

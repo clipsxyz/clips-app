@@ -1338,10 +1338,10 @@ export default function ClipPage() {
             <div className="w-10" />
           </div>
 
-          {/* Main Content Area */}
+          {/* Main Content Area - bounded scroll region (TikTok-style: text canvas between header and footer) */}
           <div 
             ref={containerRef}
-            className={`flex-1 flex items-center ${keyboardOffset > 0 ? 'justify-start pt-6' : 'justify-center'} relative overflow-hidden`}
+            className={`flex-1 min-h-0 flex items-center ${keyboardOffset > 0 ? 'justify-start pt-6' : 'justify-center'} relative overflow-y-auto`}
             style={{
               background: background.includes('gradient') 
                 ? undefined 
@@ -1380,7 +1380,7 @@ export default function ClipPage() {
           >
             {/* Text Display Area */}
             <div 
-              className={`w-full h-full flex flex-col items-center ${keyboardOffset > 0 ? 'justify-start pt-4' : 'justify-center'} px-4 pointer-events-none max-w-full overflow-hidden`}
+              className={`w-full min-h-full flex flex-col items-center ${keyboardOffset > 0 ? 'justify-start pt-4' : 'justify-center'} px-4 pb-4 pointer-events-none max-w-full overflow-hidden`}
               onTouchStart={(e) => {
                 // Focus textarea when tapping on text area (but not on stickers/tagged users)
                 const target = e.target as HTMLElement;
@@ -1547,14 +1547,16 @@ export default function ClipPage() {
               </div>
             )}
 
-              {/* Bottom area: templates row + controls bar */}
-            <div
-              className="absolute left-0 right-0 bg-black/20 backdrop-blur-sm z-10"
-              style={{
-                bottom: keyboardOffset > 0 ? keyboardOffset : 0,
-                transition: 'bottom 0.18s ease-out',
-              }}
-            >
+          </div>
+
+          {/* Fixed footer: templates row + controls bar (outside scroll area so it never covers text) */}
+          <div
+            className="flex-shrink-0 left-0 right-0 bg-black/20 backdrop-blur-sm z-10"
+            style={{
+              marginBottom: keyboardOffset > 0 ? keyboardOffset : 0,
+              transition: 'margin-bottom 0.18s ease-out',
+            }}
+          >
               {/* Templates carousel (TikTok-style) */}
               <div className="flex gap-2 overflow-x-auto px-4 pt-2 pb-2">
                 {TEXT_STORY_TEMPLATES.map((tpl) => (
@@ -1636,7 +1638,6 @@ export default function ClipPage() {
                 </button>
               </div>
             </div>
-          </div>
 
           {/* Modals */}
           {showGifPicker && (
@@ -1738,7 +1739,7 @@ export default function ClipPage() {
                     </button>
                     <button
                       type="submit"
-                      className="flex-1 px-4 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
+                      className="flex-1 px-4 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
                     >
                       Add Link
                     </button>
@@ -1820,11 +1821,11 @@ export default function ClipPage() {
       );
     }
 
-    // Original upload UI
+    // Original upload UI - fixed viewport, no scrolling (fixed so parent scroll cannot affect it)
     return (
-      <div className="min-h-screen bg-black relative overflow-hidden">
+      <div className="fixed inset-0 w-full h-full overflow-hidden flex flex-col bg-black">
         {/* Header */}
-        <div className="absolute top-0 left-0 right-0 z-50 bg-gradient-to-b from-black/80 to-transparent p-4">
+        <div className="flex-shrink-0 z-10 bg-gradient-to-b from-black/90 to-black/70 backdrop-blur-sm p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <button
@@ -1867,19 +1868,19 @@ export default function ClipPage() {
           </div>
         </div>
 
-        {/* Main Upload Area */}
-        <div className="flex items-center justify-center h-screen px-6">
+        {/* Main Upload Area - fills remaining space, no scroll */}
+        <div className="flex-1 flex items-center justify-center min-h-0 overflow-hidden px-6">
           <div className="text-center max-w-md">
-            {/* Camera Icon with Gradient Border */}
+            {/* Camera Icon with Gradient Border (blue–purple) */}
             <button
               onClick={handleCameraClick}
               className="relative mx-auto mb-6 w-32 h-32 cursor-pointer hover:scale-105 transition-transform"
             >
-              {/* Outer glowing border - static */}
+              {/* Outer border: linear gradient blue → purple */}
               <div
-                className="w-32 h-32 rounded-full p-0.5 absolute top-0 left-0"
+                className="w-32 h-32 rounded-full p-[3px] absolute top-0 left-0"
                 style={{
-                  background: 'conic-gradient(from 0deg, rgb(255, 140, 0), rgb(248, 0, 50), rgb(255, 0, 160), rgb(140, 40, 255), rgb(0, 35, 255), rgb(25, 160, 255), rgb(255, 140, 0))',
+                  background: 'linear-gradient(135deg, #3b82f6, #a855f7)',
                 }}
               >
                 {/* Inner container */}
@@ -1917,12 +1918,11 @@ export default function ClipPage() {
             </p>
 
             {/* Upload Button - Sticker Style */}
-            <div className="block mb-4">
+            <div className="block mb-4 flex justify-center">
               <label className="cursor-pointer inline-block">
                 <div className="relative group transition-transform hover:scale-105 active:scale-95"
                   style={{ 
-                    filter: 'drop-shadow(0 3px 8px rgba(0, 0, 0, 0.25))',
-                    transform: 'rotate(30deg)'
+                    filter: 'drop-shadow(0 3px 8px rgba(0, 0, 0, 0.25))'
                   }}
                 >
                   <div 
@@ -1971,131 +1971,7 @@ export default function ClipPage() {
               className="hidden"
             />
 
-            {/* Text Only and Poll Options - Sticker Style */}
-            <div className="flex flex-col items-center gap-6 w-full px-6 mt-4">
-              <div className="flex justify-between items-start w-full gap-6">
-                {/* Left Column */}
-                <div className="flex flex-col gap-6 flex-1 items-center">
-                  {/* Text Story Sticker */}
-              <button
-                onClick={() => setTextOnlyMode(true)}
-                    className="relative group transition-transform hover:scale-105 active:scale-95"
-                    style={{ 
-                      filter: 'drop-shadow(0 3px 8px rgba(0, 0, 0, 0.25))',
-                      transform: 'rotate(-30deg)',
-                      marginTop: '10px'
-                    }}
-                  >
-                    <div 
-                      className="px-5 py-3.5 rounded-2xl relative overflow-visible"
-                      style={{
-                        background: 'linear-gradient(135deg, #FF6B9D 0%, #C44569 50%, #FF6B9D 100%)',
-                        border: '2.5px solid rgba(255, 255, 255, 0.9)',
-                        boxShadow: '0 6px 16px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.3)'
-                      }}
-                    >
-                      {/* Decorative elements */}
-                      <div className="absolute top-1 left-2 text-lg opacity-80">✍️</div>
-                      <div className="absolute top-0.5 right-2.5 text-base opacity-60">📝</div>
-                      <div className="absolute bottom-1 left-2.5 text-sm opacity-50">✨</div>
-                      
-                      {/* Text */}
-                      <div className="relative z-10">
-                        <div className="text-white font-bold text-sm tracking-tight" style={{ textShadow: '0 1px 3px rgba(0, 0, 0, 0.3)' }}>
-                Create Text Story
-                        </div>
-                      </div>
-                      
-                      {/* Plus icon on border */}
-                      <div className="absolute -top-1 -right-1 w-4 h-4 bg-blue-500 border-2 border-white rounded-full flex items-center justify-center shadow-lg z-20">
-                        <span className="text-white text-[8px] font-bold">+</span>
-                      </div>
-                    </div>
-              </button>
-
-                  {/* Question Sticker */}
-                  <button
-                    onClick={() => {
-                      setQuestionMode(true);
-                    }}
-                    className="relative group transition-transform hover:scale-105 active:scale-95"
-                    style={{ 
-                      filter: 'drop-shadow(0 3px 8px rgba(0, 0, 0, 0.25))',
-                      transform: 'rotate(30deg)',
-                      marginTop: '20px'
-                    }}
-                  >
-                    <div 
-                      className="px-5 py-3.5 rounded-2xl relative overflow-visible"
-                      style={{
-                        background: 'linear-gradient(135deg, #F7B731 0%, #E17055 50%, #F7B731 100%)',
-                        border: '2.5px solid rgba(255, 255, 255, 0.9)',
-                        boxShadow: '0 6px 16px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.3)'
-                      }}
-                    >
-                      {/* Decorative elements */}
-                      <div className="absolute top-1 left-2 text-lg opacity-80">❓</div>
-                      <div className="absolute top-0.5 right-2.5 text-base opacity-60">💬</div>
-                      <div className="absolute bottom-1 left-2.5 text-sm opacity-50">💭</div>
-                      
-                      {/* Text */}
-                      <div className="relative z-10">
-                        <div className="text-white font-bold text-sm tracking-tight" style={{ textShadow: '0 1px 3px rgba(0, 0, 0, 0.3)' }}>
-                          Ask a Question
-                        </div>
-                      </div>
-                      
-                      {/* Plus icon on border */}
-                      <div className="absolute -top-1 -right-1 w-4 h-4 bg-blue-500 border-2 border-white rounded-full flex items-center justify-center shadow-lg z-20">
-                        <span className="text-white text-[8px] font-bold">+</span>
-                      </div>
-                    </div>
-                  </button>
-                </div>
-
-                {/* Right Column */}
-                <div className="flex flex-col gap-6 flex-1 items-center">
-                  {/* Poll Sticker - moved down to avoid overlap */}
-              <button
-                onClick={() => {
-                  setPollMode(true);
-                }}
-                    className="relative group transition-transform hover:scale-105 active:scale-95"
-                    style={{ 
-                      filter: 'drop-shadow(0 3px 8px rgba(0, 0, 0, 0.25))',
-                      transform: 'rotate(30deg)',
-                      marginTop: '60px'
-                    }}
-                  >
-                    <div 
-                      className="px-5 py-3.5 rounded-2xl relative overflow-visible"
-                      style={{
-                        background: 'linear-gradient(135deg, #4ECDC4 0%, #44A08D 50%, #4ECDC4 100%)',
-                        border: '2.5px solid rgba(255, 255, 255, 0.9)',
-                        boxShadow: '0 6px 16px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.3)'
-                      }}
-                    >
-                      {/* Decorative elements */}
-                      <div className="absolute top-1 left-2 text-lg opacity-80">📊</div>
-                      <div className="absolute top-0.5 right-2.5 text-base opacity-60">✓</div>
-                      <div className="absolute bottom-1 left-2.5 text-sm opacity-50">🗳️</div>
-                      
-                      {/* Text */}
-                      <div className="relative z-10">
-                        <div className="text-white font-bold text-sm tracking-tight" style={{ textShadow: '0 1px 3px rgba(0, 0, 0, 0.3)' }}>
-                Create a Poll
-                        </div>
-                      </div>
-                      
-                      {/* Plus icon on border */}
-                      <div className="absolute -top-1 -right-1 w-4 h-4 bg-blue-500 border-2 border-white rounded-full flex items-center justify-center shadow-lg z-20">
-                        <span className="text-white text-[8px] font-bold">+</span>
-                      </div>
-                    </div>
-              </button>
-                </div>
-              </div>
-            </div>
+            {/* Text-only, Ask a Question, and Poll stickers have been removed to keep stories focused on photo and video only */}
           </div>
         </div>
 
@@ -2330,90 +2206,118 @@ export default function ClipPage() {
         </div>
 
         {/* Footer with Icon Buttons */}
+        <svg width="0" height="0" className="absolute" aria-hidden>
+          <defs>
+            <linearGradient id="clipPageIconGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#3b82f6" />
+              <stop offset="100%" stopColor="#a855f7" />
+            </linearGradient>
+          </defs>
+        </svg>
         <div className="absolute bottom-0 left-0 right-0 flex items-center justify-center gap-4 p-4 bg-black/20 backdrop-blur-sm z-10">
-          {/* Add Text Button */}
-          <button
-            onClick={() => {
-              setShowTextCard(true);
-              setShowLocationCard(false);
-              setShowLinkCard(false);
-              setShowTagUserCard(false);
-            }}
-            className="p-3 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors relative"
-            aria-label="Add Text"
-          >
-            <FiType className="w-5 h-5" />
+          {/* Add Text Button - gradient border */}
+          <div className="rounded-full p-[2px] flex-shrink-0" style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}>
+            <button
+              onClick={() => {
+                setShowTextCard(true);
+                setShowLocationCard(false);
+                setShowLinkCard(false);
+                setShowTagUserCard(false);
+              }}
+              className="p-3 bg-black/80 hover:bg-black/90 rounded-full text-white transition-colors relative"
+              aria-label="Add Text"
+            >
+              <FiType className="w-5 h-5 shrink-0" style={{ stroke: 'url(#clipPageIconGrad)', fill: 'none' }} />
             {textStickers.length > 0 && (
               <span className="absolute -top-1 -right-1 w-5 h-5 bg-blue-500 rounded-full text-xs flex items-center justify-center text-white">
                 {textStickers.length}
               </span>
             )}
-          </button>
+            </button>
+          </div>
 
-          {/* Add Location Button */}
-          <button
-            onClick={() => {
-              setShowLocationCard(true);
-              setShowTextCard(false);
-              setShowLinkCard(false);
-              setShowTagUserCard(false);
-            }}
-            className="p-3 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors relative"
-            aria-label="Add Location"
-          >
-            <FiMapPin className="w-5 h-5" />
-            {locationStickers.length > 0 && (
-              <span className="absolute -top-1 -right-1 w-5 h-5 bg-blue-500 rounded-full text-xs flex items-center justify-center text-white">
-                {locationStickers.length}
-              </span>
-            )}
-          </button>
+          {/* Add Location Button - gradient border */}
+          <div className="rounded-full p-[2px] flex-shrink-0" style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}>
+            <button
+              onClick={() => {
+                setShowLocationCard(true);
+                setShowTextCard(false);
+                setShowLinkCard(false);
+                setShowTagUserCard(false);
+              }}
+              className="p-3 bg-black/80 hover:bg-black/90 rounded-full text-white transition-colors relative"
+              aria-label="Add Location"
+            >
+              <FiMapPin className="w-5 h-5 shrink-0" style={{ stroke: 'url(#clipPageIconGrad)', fill: 'none' }} />
+              {locationStickers.length > 0 && (
+                <span className="absolute -top-1 -right-1 w-5 h-5 bg-blue-500 rounded-full text-xs flex items-center justify-center text-white">
+                  {locationStickers.length}
+                </span>
+              )}
+            </button>
+          </div>
 
-          {/* Add Link Button */}
-          <button
-            onClick={() => {
-              setShowLinkCard(true);
-              setShowTextCard(false);
-              setShowLocationCard(false);
-              setShowTagUserCard(false);
-            }}
-            className="p-3 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors relative"
-            aria-label="Add Link"
-          >
-            <FiLink className="w-5 h-5" />
-            {linkOverlays.length > 0 && (
-              <span className="absolute -top-1 -right-1 w-5 h-5 bg-blue-500 rounded-full text-xs flex items-center justify-center text-white">
-                {linkOverlays.length}
-              </span>
-            )}
-          </button>
+          {/* Add Link Button - gradient border */}
+          <div className="rounded-full p-[2px] flex-shrink-0" style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}>
+            <button
+              onClick={() => {
+                setShowLinkCard(true);
+                setShowTextCard(false);
+                setShowLocationCard(false);
+                setShowTagUserCard(false);
+              }}
+              className="p-3 bg-black/80 hover:bg-black/90 rounded-full text-white transition-colors relative"
+              aria-label="Add Link"
+            >
+              <FiLink className="w-5 h-5 shrink-0" style={{ stroke: 'url(#clipPageIconGrad)', fill: 'none' }} />
+              {linkOverlays.length > 0 && (
+                <span className="absolute -top-1 -right-1 w-5 h-5 bg-blue-500 rounded-full text-xs flex items-center justify-center text-white">
+                  {linkOverlays.length}
+                </span>
+              )}
+            </button>
+          </div>
 
-          {/* Tag User Button */}
-          <button
-            onClick={() => {
-              setShowTagUserCard(true);
-              setShowTextCard(false);
-              setShowLocationCard(false);
-              setShowLinkCard(false);
-            }}
-            className="p-3 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors relative"
-            aria-label="Tag User"
-          >
-            <FiUser className="w-5 h-5" />
-            {taggedUsers.length > 0 && (
-              <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-xs flex items-center justify-center text-white">
-                {taggedUsers.length}
-              </span>
-            )}
-          </button>
+          {/* Tag User Button - gradient border */}
+          <div className="rounded-full p-[2px] flex-shrink-0" style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}>
+            <button
+              onClick={() => {
+                setShowTagUserCard(true);
+                setShowTextCard(false);
+                setShowLocationCard(false);
+                setShowLinkCard(false);
+              }}
+              className="p-3 bg-black/80 hover:bg-black/90 rounded-full text-white transition-colors relative"
+              aria-label="Tag User"
+            >
+              <FiUser className="w-5 h-5 shrink-0" style={{ stroke: 'url(#clipPageIconGrad)', fill: 'none' }} />
+              {taggedUsers.length > 0 && (
+                <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-xs flex items-center justify-center text-white">
+                  {taggedUsers.length}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* Text Card Modal */}
         {showTextCard && (
           <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm">
-            <div className="bg-gray-900 rounded-2xl p-6 max-w-md w-full mx-4 border border-gray-700">
+            <div className="rounded-2xl p-[2px] max-w-md w-full mx-4" style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}>
+              <svg width="0" height="0" aria-hidden="true" style={{ position: 'absolute' }}>
+                <defs>
+                  <linearGradient id="clipPageTextCardIconGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#3b82f6" />
+                    <stop offset="100%" stopColor="#a855f7" />
+                  </linearGradient>
+                </defs>
+              </svg>
+              <div className="bg-gray-900 rounded-[14px] p-6 w-full">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-white">Add Text</h2>
+                <div className="flex items-center gap-2">
+                  <FiType className="w-6 h-6 shrink-0" style={{ stroke: 'url(#clipPageTextCardIconGrad)', fill: 'none', strokeWidth: 2 }} />
+                  <h2 className="text-xl font-bold text-white">Add Text</h2>
+                </div>
                 <button
                   onClick={() => setShowTextCard(false)}
                   className="p-2 hover:bg-gray-800 rounded-full transition-colors"
@@ -2520,12 +2424,13 @@ export default function ClipPage() {
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 px-4 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
+                    className="flex-1 px-4 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
                   >
                     Add Text
                   </button>
                 </div>
               </form>
+              </div>
             </div>
           </div>
         )}
@@ -2533,9 +2438,21 @@ export default function ClipPage() {
         {/* Location Card Modal */}
         {showLocationCard && (
           <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm">
-            <div className="bg-gray-900 rounded-2xl p-6 max-w-md w-full mx-4 border border-gray-700">
+            <div className="rounded-2xl p-[2px] max-w-md w-full mx-4" style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}>
+              <svg width="0" height="0" aria-hidden="true" style={{ position: 'absolute' }}>
+                <defs>
+                  <linearGradient id="clipPageLocationCardIconGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#3b82f6" />
+                    <stop offset="100%" stopColor="#a855f7" />
+                  </linearGradient>
+                </defs>
+              </svg>
+              <div className="bg-gray-900 rounded-[14px] p-6 w-full">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-white">Add Location</h2>
+                <div className="flex items-center gap-2">
+                  <FiMapPin className="w-6 h-6 shrink-0" style={{ stroke: 'url(#clipPageLocationCardIconGrad)', fill: 'none', strokeWidth: 2 }} />
+                  <h2 className="text-xl font-bold text-white">Add Location</h2>
+                </div>
                 <button
                   onClick={() => setShowLocationCard(false)}
                   className="p-2 hover:bg-gray-800 rounded-full transition-colors"
@@ -2599,12 +2516,13 @@ export default function ClipPage() {
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 px-4 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
+                    className="flex-1 px-4 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
                   >
                     Add Location
                   </button>
                 </div>
               </form>
+              </div>
             </div>
           </div>
         )}
@@ -2612,9 +2530,21 @@ export default function ClipPage() {
         {/* Link Card Modal */}
         {showLinkCard && (
           <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm">
-            <div className="bg-gray-900 rounded-2xl p-6 max-w-md w-full mx-4 border border-gray-700">
+            <div className="rounded-2xl p-[2px] max-w-md w-full mx-4" style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}>
+              <svg width="0" height="0" aria-hidden="true" style={{ position: 'absolute' }}>
+                <defs>
+                  <linearGradient id="clipPageLinkCardIconGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#3b82f6" />
+                    <stop offset="100%" stopColor="#a855f7" />
+                  </linearGradient>
+                </defs>
+              </svg>
+              <div className="bg-gray-900 rounded-[14px] p-6 w-full">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-white">Add Link</h2>
+                <div className="flex items-center gap-2">
+                  <FiLink className="w-6 h-6 shrink-0" style={{ stroke: 'url(#clipPageLinkCardIconGrad)', fill: 'none', strokeWidth: 2 }} />
+                  <h2 className="text-xl font-bold text-white">Add Link</h2>
+                </div>
                 <button
                   onClick={() => setShowLinkCard(false)}
                   className="p-2 hover:bg-gray-800 rounded-full transition-colors"
@@ -2669,12 +2599,13 @@ export default function ClipPage() {
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 px-4 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
+                    className="flex-1 px-4 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
                   >
                     Add Link
                   </button>
                 </div>
               </form>
+              </div>
             </div>
           </div>
         )}
@@ -3182,7 +3113,7 @@ export default function ClipPage() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
+                  className="flex-1 px-4 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
                 >
                   Add Link
                 </button>

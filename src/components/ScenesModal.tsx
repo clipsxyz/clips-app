@@ -26,6 +26,7 @@ import { timeAgo } from '../utils/timeAgo';
 import type { Post } from '../types';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from '../constants';
 import StreetSign from './StreetSign';
+import { TEXT_STORY_TEMPLATES } from '../textStoryTemplates';
 
 /** Radiating red/pink lines burst for YouTube Shorts-style double-tap like (used in Scenes). */
 function ShortsLikeBurstLines() {
@@ -266,6 +267,7 @@ export default function ScenesModal({
     const [currentIndex, setCurrentIndex] = React.useState(0);
     const hasMultipleItems = items.length > 1;
     const currentItem = items[currentIndex];
+    const isTextOnlyPost = !post.mediaUrl && !(post.mediaItems && post.mediaItems.length > 0) && !!post.text;
 
     // Update container size for stickers
     React.useEffect(() => {
@@ -728,8 +730,14 @@ export default function ScenesModal({
         }
     }
 
-    // Handle double tap to like
+    // Handle double tap to like (disabled for pure text-only fullscreen posts)
     const handleMediaTap = React.useCallback(async (e?: React.MouseEvent | React.TouchEvent) => {
+        // For pure text-only fullscreen posts, ignore double-tap like entirely
+        if (isTextOnlyPost) {
+            lastTapRef.current = Date.now();
+            return;
+        }
+
         // Prevent processing if already handling a double tap
         if (isProcessingDoubleTap.current) {
             return;
@@ -861,7 +869,7 @@ export default function ScenesModal({
             (lastTapRef as any).singleTapTimer = singleTapTimer;
         }
         lastTapRef.current = now;
-    }, [currentItem?.type, onLike, reclipBusy, liked]);
+    }, [currentItem?.type, onLike, reclipBusy, liked, isTextOnlyPost]);
 
     const handleMediaClick = React.useCallback((e: React.MouseEvent) => {
         if (touchHandledRef.current) {
@@ -1290,82 +1298,73 @@ export default function ScenesModal({
                                     </div>
                                 )}
                                 <div className="w-full relative" style={{ height: vh }}>
-                                    {/* Current post - full content */}
+                                    {/* Text-only posts: minimal UI – only X to close */}
+                                    {(() => {
+                                        const isTextOnlyPost = !post.mediaUrl && !post.mediaItems?.length && !!post.text;
+                                        return isTextOnlyPost ? (
+                                            <div className="absolute top-0 left-0 right-0 z-30 flex justify-end p-4">
+                                                <button
+                                                    onClick={() => onClose()}
+                                                    aria-label="Close"
+                                                    className="p-2.5 rounded-full bg-black/50 hover:bg-black/70 text-white transition-colors"
+                                                >
+                                                    <FiX size={24} />
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <>
                                     {/* Top Left - Street sign with location (top) and time (bottom) */}
                                     <div className="absolute top-5 left-3 z-10">
                                         <StreetSign
-                            topLabel={post.locationLabel || ''}
-                            bottomLabel={post.createdAt ? timeAgo(post.createdAt) : ''}
-                        />
-                    </div>
+                                            topLabel={post.locationLabel || ''}
+                                            bottomLabel={post.createdAt ? timeAgo(post.createdAt) : ''}
+                                        />
+                                    </div>
 
-                    {/* Top Bar - Feed label (centre), Counter, Close Button */}
-                    <div className="absolute top-4 left-0 right-0 z-30 flex items-center justify-between px-4">
-                        {/* Left side - Counter (only for multi-item posts) */}
-                        <div className="flex-1 flex justify-start">
-                            {hasMultipleItems && (
-                                <div className="px-2 py-1 bg-black/50 text-white text-xs rounded-full">
-                                    {currentIndex + 1} / {items.length}
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Center - Feed label when in carousel mode */}
-                        <div className="absolute left-0 right-0 top-0 bottom-0 flex items-center justify-center pointer-events-none">
-                            {feedLabel && (
-                                <div className="inline-flex items-center gap-1.5 rounded-full border border-white/80 bg-black/60 px-3 py-1.5 text-white">
-                                    <FiMapPin className="w-4 h-4 flex-shrink-0" />
-                                    <span className="text-xs font-semibold uppercase tracking-wider">
-                                        {feedLabel}
-                                    </span>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Right side - Close button with circular progress ring around it */}
-                        <div className="flex-1 flex justify-end">
-                            <div className="relative w-10 h-10 flex items-center justify-center">
-                                {/* Progress ring behind the X */}
-                                <svg className="absolute inset-0 w-10 h-10 transform -rotate-90" viewBox="0 0 48 48">
-                                    {/* Background circle */}
-                                    <circle
-                                        cx="24"
-                                        cy="24"
-                                        r="18"
-                                        stroke="rgba(255,255,255,0.25)"
-                                        strokeWidth="3"
-                                        fill="none"
-                                    />
-                                    {/* Progress circle */}
-                                    <circle
-                                        cx="24"
-                                        cy="24"
-                                        r="18"
-                                        stroke="rgba(255,255,255,0.95)"
-                                        strokeWidth="3"
-                                        fill="none"
-                                        strokeDasharray={`${2 * Math.PI * 18}`}
-                                        strokeDashoffset={`${2 * Math.PI * 18 * (1 - Math.max(0, Math.min(1, videoProgress)))}`}
-                                        strokeLinecap="round"
-                                    />
-                                </svg>
-                                <button
-                                    onClick={() => {
-                                        // Save current video time before closing
-                                        let savedTime: number | undefined;
-                                        if (videoRef.current && currentItem?.type === 'video') {
-                                            savedTime = videoRef.current.currentTime;
-                                        }
-                                        onClose(savedTime);
-                                    }}
-                                    aria-label="Close scenes"
-                                    className="relative z-10 p-1.5 rounded-full bg-black/40 hover:bg-black/60 text-white transition-colors"
-                                >
-                                    <FiX size={16} />
-                                </button>
-                            </div>
-                        </div>
-                    </div>
+                                    {/* Top Bar - Feed label (centre), Counter, Close Button */}
+                                    <div className="absolute top-4 left-0 right-0 z-30 flex items-center justify-between px-4">
+                                        <div className="flex-1 flex justify-start">
+                                            {hasMultipleItems && (
+                                                <div className="px-2 py-1 bg-black/50 text-white text-xs rounded-full">
+                                                    {currentIndex + 1} / {items.length}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="absolute left-0 right-0 top-0 bottom-0 flex items-center justify-center pointer-events-none">
+                                            {feedLabel && (
+                                                <div className="inline-flex items-center gap-1.5 rounded-full border border-white/80 bg-black/60 px-3 py-1.5 text-white">
+                                                    <FiMapPin className="w-4 h-4 flex-shrink-0" />
+                                                    <span className="text-xs font-semibold uppercase tracking-wider">
+                                                        {feedLabel}
+                                                    </span>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="flex-1 flex justify-end">
+                                            <div className="relative w-10 h-10 flex items-center justify-center">
+                                                <svg className="absolute inset-0 w-10 h-10 transform -rotate-90" viewBox="0 0 48 48">
+                                                    <circle cx="24" cy="24" r="18" stroke="rgba(255,255,255,0.25)" strokeWidth="3" fill="none" />
+                                                    <circle cx="24" cy="24" r="18" stroke="rgba(255,255,255,0.95)" strokeWidth="3" fill="none" strokeDasharray={`${2 * Math.PI * 18}`} strokeDashoffset={`${2 * Math.PI * 18 * (1 - Math.max(0, Math.min(1, videoProgress)))}`} strokeLinecap="round" />
+                                                </svg>
+                                                <button
+                                                    onClick={() => {
+                                                        let savedTime: number | undefined;
+                                                        if (videoRef.current && currentItem?.type === 'video') {
+                                                            savedTime = videoRef.current.currentTime;
+                                                        }
+                                                        onClose(savedTime);
+                                                    }}
+                                                    aria-label="Close scenes"
+                                                    className="relative z-10 p-1.5 rounded-full bg-black/40 hover:bg-black/60 text-white transition-colors"
+                                                >
+                                                    <FiX size={16} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                            </>
+                                        );
+                                    })()}
 
                     {/* Main Media Content */}
                     <div
@@ -1504,61 +1503,41 @@ export default function ScenesModal({
 
                             return mediaElement;
                         })() : (
-                            // Text-only post display
-                            // Check if this is a shared text-only post (no media, has text) - show as post card screenshot
+                            // Text-only post display (shared from feed or direct) - fullscreen with template styling, scrollable
                             !post.mediaUrl && !post.mediaItems?.length && post.text ? (
-                                // Display as screenshot of original post card (like StoriesPage)
-                                <div
-                                    className="w-full h-full flex items-center justify-center p-4"
-                                    style={{
-                                        background: '#000000' // Black background
-                                    }}
-                                >
-                                    <div className="w-full max-w-md rounded-2xl overflow-hidden bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-2xl" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
-                                        {/* Post Header */}
-                                        <div className="flex items-start justify-between px-4 pt-4 pb-3 border-b border-gray-200 dark:border-gray-700">
-                                            <div className="flex items-center gap-3 flex-1">
-                                                <Avatar
-                                                    src={getAvatarForHandle(post.userHandle)}
-                                                    name={post.userHandle.split('@')[0]}
-                                                    size="sm"
-                                                />
-                                                <div className="flex-1">
-                                                    <h3 className="font-semibold flex items-center gap-1.5 text-gray-900 dark:text-gray-100 text-sm">
-                                                        <span>{post.userHandle}</span>
-                                                        <Flag
-                                                            value={getFlagForHandle(post.userHandle) || ''}
-                                                            size={14}
-                                                        />
-                                                    </h3>
-                                                    <div className="text-xs text-gray-600 dark:text-gray-300 flex items-center gap-2 mt-0.5">
-                                                        {post.locationLabel && (
-                                                            <>
-                                                                <span className="flex items-center gap-1">
-                                                                    <FiMapPin className="w-3 h-3" />
-                                                                    {post.locationLabel}
-                                                                </span>
-                                                                {post.createdAt && <span className="text-gray-400">·</span>}
-                                                            </>
-                                                        )}
-                                                        {post.createdAt && (
-                                                            <span>{timeAgo(post.createdAt)}</span>
-                                                        )}
+                                (() => {
+                                    const template = post.templateId ? TEXT_STORY_TEMPLATES.find(t => t.id === post.templateId) : undefined;
+                                    const bg = post.textStyle?.background ?? template?.background ?? '#000000';
+                                    const textColor = post.textStyle?.color ?? template?.textColor ?? '#ffffff';
+                                    const fontFamily = post.textStyle?.fontFamily ?? template?.fontFamily ?? undefined;
+                                    const sizeClass = (post.textStyle?.size ?? template?.textSize ?? 'medium') === 'small' ? 'text-base' : (post.textStyle?.size ?? template?.textSize) === 'large' ? 'text-2xl' : 'text-xl';
+                                    return (
+                                        <div
+                                            className="w-full h-full flex flex-col overflow-hidden"
+                                            style={{
+                                                background: bg?.includes?.('gradient') ? undefined : bg,
+                                                backgroundImage: bg?.includes?.('gradient') ? bg : undefined
+                                            }}
+                                        >
+                                            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain">
+                                                <div className="text-center w-full max-w-full px-6 py-8">
+                                                    <div
+                                                        className={`leading-relaxed whitespace-pre-wrap font-bold drop-shadow-lg break-words ${sizeClass}`}
+                                                        style={{
+                                                            color: textColor,
+                                                            wordBreak: 'break-word',
+                                                            overflowWrap: 'anywhere',
+                                                            maxWidth: '100%',
+                                                            fontFamily: fontFamily || undefined
+                                                        }}
+                                                    >
+                                                        {post.text}
                                                     </div>
                                                 </div>
                                             </div>
                                         </div>
-
-                                        {/* Text Content - styled like feed */}
-                                        <div className="p-4 w-full overflow-hidden" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
-                                            <div className="p-4 rounded-lg bg-black overflow-hidden w-full" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
-                                                <div className="text-base leading-relaxed whitespace-pre-wrap font-normal text-white break-words w-full" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', maxWidth: '100%', boxSizing: 'border-box' }}>
-                                                    {post.text}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
+                                    );
+                                })()
                             ) : (
                                 // Text-only story display (directly created, not shared) - keep original style with gradient/textStyle
                                 <div
@@ -1821,8 +1800,8 @@ export default function ScenesModal({
                         )}
                     </div>
 
-                    {/* Bottom Section with Profile, Caption, and Bottom Action Bar (Bluesky-style) */}
-                    {!isCaptionExpanded && (
+                    {/* Bottom Section with Profile, Caption, and Bottom Action Bar (Bluesky-style) - hidden for text-only fullscreen */}
+                    {!isCaptionExpanded && (post.mediaUrl || (post.mediaItems && post.mediaItems.length) || !post.text) && (
                         <div className="absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black/90 via-black/70 to-transparent">
                             <div className="max-w-md mx-auto px-4 pb-safe">
                                 {/* Profile & Caption Section */}

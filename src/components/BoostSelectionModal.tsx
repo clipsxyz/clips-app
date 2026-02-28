@@ -179,8 +179,9 @@ export default function BoostSelectionModal({
                     <button
                         onClick={handleSubmit}
                         disabled={!selectedOption}
+                        style={selectedOption ? { background: 'linear-gradient(135deg, #3b82f6, #a855f7)' } : undefined}
                         className={`w-full py-3 px-6 rounded-xl font-semibold text-white transition-all duration-200 ${selectedOption
-                                ? 'bg-brand-600 hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 shadow-lg hover:shadow-xl active:scale-[0.98]'
+                                ? 'hover:opacity-95 shadow-lg hover:shadow-xl active:scale-[0.98]'
                                 : 'bg-gray-300 dark:bg-gray-700 cursor-not-allowed'
                             }`}
                     >

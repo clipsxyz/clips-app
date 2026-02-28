@@ -1,0 +1,12 @@
+---
+description: Keep agents focused; avoid over-exploration and runaway behavior
+alwaysApply: true
+---
+
+# Agent behavior
+
+- **Scope narrow**: Work on the user's specific request. Do not broad-explore the repo unless the task clearly requires it.
+- **Targeted reads**: Prefer `Grep` or `Read` with offset/limit for large files (e.g. `src/App.tsx` is 5800+ lines). Do not read entire huge files to answer a small question.
+- **One thing at a time**: Finish the current change or answer before starting unrelated exploration or refactors.
+- **No speculative sweeps**: Do not run project-wide searches, full-codebase refactors, or "fix everything" passes unless the user explicitly asks.
+- **Respect mock mode**: When `VITE_USE_LARAVEL_API=false`, the app uses mock data; do not assume backend is required for local dev.

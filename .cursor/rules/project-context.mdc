@@ -1,0 +1,10 @@
+---
+description: Project structure and context limits
+alwaysApply: true
+---
+
+# Project context
+
+- **Web app**: Main app is Vite + React in `src/`. Entry: `src/App.tsx`. Backend: `laravel-backend/`.
+- **Don't load root docs by default**: Root has many `*.md` (LARAVEL_*, STRIPE_*, etc.). Only open a doc when the task clearly needs it (e.g. setup, Stripe, Laravel).
+- **Large file**: `src/App.tsx` is very large; use `Read` with offset/limit or `Grep` for specific symbols instead of reading the whole file.

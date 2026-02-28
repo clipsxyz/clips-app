@@ -25,6 +25,10 @@ export async function unifiedSearch(params: {
     locationsLimit?: number;
     postsLimit?: number;
 }) {
+    const useLaravelAPI =
+        typeof import.meta !== 'undefined' &&
+        (import.meta as any).env?.VITE_USE_LARAVEL_API !== 'false';
+
     const searchParams = new URLSearchParams();
     searchParams.set('q', params.q);
     if (params.types) searchParams.set('types', params.types);
@@ -36,6 +40,12 @@ export async function unifiedSearch(params: {
     if (params.postsLimit != null) searchParams.set('postsLimit', String(params.postsLimit));
 
     try {
+        // When backend API is disabled (mock mode), skip the network call entirely
+        // so dev server doesn't spam ECONNREFUSED proxy errors.
+        if (!useLaravelAPI) {
+            throw new Error('Laravel API disabled via VITE_USE_LARAVEL_API=false');
+        }
+
         const resp = await fetch(`/api/search?${searchParams.toString()}`);
         
         // Check if response is JSON

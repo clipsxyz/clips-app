@@ -495,11 +495,31 @@ function saveFollowsToStorage(userId: string, follows: Record<string, boolean>):
   } catch (_) {}
 }
 
+/** Fresh follows from localStorage (no in-memory cache). Merge from all possible keys so phone/tablet never miss follows due to userId mismatch. */
+function getFollowsForDiscover(userId: string): Record<string, boolean> {
+  const uid = typeof userId === 'string' ? userId : String(userId);
+  const fromUid = loadFollowsFromStorage(uid);
+  const fromTestUser = loadFollowsFromStorage('test-user');
+  const fromAnon = loadFollowsFromStorage('anon');
+  let fromStoredUser: Record<string, boolean> = {};
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('user') : null;
+    if (raw) {
+      const u = JSON.parse(raw);
+      const storedId = u?.id != null ? String(u.id) : null;
+      if (storedId && storedId !== uid && storedId !== 'test-user' && storedId !== 'anon') {
+        fromStoredUser = loadFollowsFromStorage(storedId);
+      }
+    }
+  } catch (_) {}
+  return { ...fromAnon, ...fromTestUser, ...fromStoredUser, ...fromUid };
+}
+
 export function getState(userId: string): UserState {
   const uid = typeof userId === 'string' ? userId : String(userId);
   if (!userState[uid]) {
     let follows = loadFollowsFromStorage(uid);
-    // If this is a real user (not anon), merge in any follows stored under 'anon' so we don't lose them, then clear anon
+    // Merge follows from alternate keys so we don't lose them when userId changes (e.g. test-user → signed-up user)
     if (uid !== 'anon') {
       const anonFollows = loadFollowsFromStorage('anon');
       if (Object.keys(anonFollows).length > 0) {
@@ -508,6 +528,17 @@ export function getState(userId: string): UserState {
         try {
           if (typeof localStorage !== 'undefined') localStorage.removeItem(FOLLOWS_STORAGE_KEY('anon'));
         } catch (_) {}
+      }
+      // Merge from 'test-user' so follows made before signup don't vanish (test-user is the default pre-login user)
+      if (uid !== 'test-user') {
+        const testUserFollows = loadFollowsFromStorage('test-user');
+        if (Object.keys(testUserFollows).length > 0) {
+          follows = { ...testUserFollows, ...follows };
+          saveFollowsToStorage(uid, follows);
+          try {
+            if (typeof localStorage !== 'undefined') localStorage.removeItem(FOLLOWS_STORAGE_KEY('test-user'));
+          } catch (_) {}
+        }
       }
     }
     userState[uid] = {
@@ -835,10 +866,10 @@ function postMatchesLocationTab(p: Post, tab: string): boolean {
   return local === query;
 }
 
-export async function fetchPostsPage(tab: string, cursor: number | null, limit = 5, userId = 'me', _userLocal = '', _userRegional = '', _userNational = '', currentUserHandle = ''): Promise<Page> {
+export async function fetchPostsPage(tab: string, cursor: number | null, limit = 5, userId = 'me', _userLocal = '', _userRegional = '', _userNational = '', _currentUserHandle = ''): Promise<Page> {
   const t = tab.toLowerCase();
-  // When API is off, use mock for all feeds (including Following) so Following loads fast and shows posts from in-memory follow state.
-  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+  // When API is off, use mock for all feeds. For Discover (Following), always use mock so local follows from localStorage are used (fixes phone/tablet where API might return empty).
+  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false' && t !== 'discover';
 
   if (useLaravelAPI) {
     try {
@@ -980,111 +1011,56 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
     }
 
     await delay(0);
-    const t = tab.toLowerCase();
 
-    // Feed rules (by design):
-    // - Location tabs (Dublin, Ireland, Finglas, etc.): show posts by AUTHOR LOCATION only (who posted from that place). No follow check.
-    // - Following (Discover): show ONLY posts from people you follow (and your own reclips). Location does not matter.
+    // Filter by tab: Discover = following only (+ your own); location tabs = BY AUTHOR LOCATION ONLY
+    // Location feeds (China, Dublin, Finglas, etc.): show ONLY posts whose author's location matches. No cross-location leaking.
+    const norm = (h?: string) => (h || '').trim().toLowerCase();
     const filtered = posts.filter(p => {
-      // Exclude reclipped posts from location-based feeds - they should only appear in Following feed
-      if (p.isReclipped && t !== 'discover') {
-        return false;
+      if (p.isReclipped && t !== 'discover') return false;
+
+      const isOwn = !!_currentUserHandle && norm(p.userHandle) === norm(_currentUserHandle) && !p.isReclipped;
+      if (isOwn) {
+        if (t === 'discover') return true; // Following feed: always show your posts
+        return postMatchesLocationTab(p, t); // Location feeds: only show your posts if they match this location
       }
 
       if (t === 'discover') {
-        const userState = getState(userId);
-        const follows = userState.follows || {};
+        const follows = getFollowsForDiscover(userId);
         const anyFollowing = Object.values(follows).some(v => v === true);
         const isFollowing = getFollowState(follows, p.userHandle);
-        // "My reclip" only when local state says I reclipped it
-        const isMyReclip =
-          !!currentUserHandle &&
-          p.userHandle === currentUserHandle &&
-          p.userReclipped === true;
-
-        // If user follows nobody yet: show ONLY their own reclips (if any), otherwise nothing.
-        if (!anyFollowing) {
-          return p.isReclipped && isMyReclip;
-        }
-
-        // Reclipped posts: show if you follow the reclipper OR you are the reclipper
-        if (p.isReclipped) {
-          return isFollowing || isMyReclip;
-        }
-
-        // Non‑reclipped posts: only show if you follow the author
+        const isMyReclip = !!_currentUserHandle && norm(p.userHandle) === norm(_currentUserHandle) && p.userReclipped === true;
+        if (!anyFollowing) return p.isReclipped && isMyReclip;
+        if (p.isReclipped) return isFollowing || isMyReclip;
         return isFollowing;
       }
 
       if (t.toLowerCase() === 'clips') {
-        // Clips tab: Show stories (posts that were originally stories) from people you follow
-        const userState = getState(userId);
-        const isFollowing = getFollowState(userState.follows, p.userHandle);
+        const isFollowing = getFollowState(getState(userId).follows || {}, p.userHandle);
         if (!isFollowing) return false;
-        // Check if this post's media was from a story
-        if (p.mediaUrl && wasEverAStory(p.mediaUrl)) {
-          return true;
-        }
-        return false;
+        return !!(p.mediaUrl && wasEverAStory(p.mediaUrl));
       }
 
-      // Check if this is a custom location search (not one of the predefined tabs)
       const predefinedTabs = ['finglas', 'dublin', 'ireland', 'discover'];
       if (!predefinedTabs.includes(t)) {
-        // Custom location search – worldwide: show only posts from authors in this place (same rule as predefined tabs)
         const query = t.trim().toLowerCase();
-        console.log('=== CUSTOM LOCATION FILTER FOR:', query, '===');
-
         const normalize = (v?: string) => (v || '').trim().toLowerCase();
         const local = normalize(p.userLocal);
         const regional = normalize(p.userRegional);
         const national = normalize(p.userNational);
-
-        let match = false;
-        if (LOCATION_COUNTRIES.has(query)) {
-          match = national === query || (query === 'uk' && (national === 'united kingdom' || national === 'uk')) || (query === 'usa' && (national === 'usa' || national === 'united states'));
-        } else if (LOCATION_CITIES.has(query)) {
-          match = regional === query;
-        } else {
-          match = local === query;
-        }
-
-        if (match) {
-          console.log('Post MATCHING for custom filter', query, ':', {
-            userHandle: p.userHandle,
-            userLocal: p.userLocal,
-            userRegional: p.userRegional,
-            userNational: p.userNational
-          });
-        }
-
-        return match;
+        if (LOCATION_COUNTRIES.has(query))
+          return national === query || (query === 'uk' && (national === 'united kingdom' || national === 'uk')) || (query === 'usa' && (national === 'usa' || national === 'united states'));
+        if (LOCATION_CITIES.has(query)) return regional === query;
+        return local === query;
       }
 
-      // Predefined tab filtering - show only posts from users in that location
-      // Check if tab matches user's local, regional, or national (case-insensitive)
       const tabLower = t.toLowerCase();
       const userLocalLower = (p.userLocal || '').toLowerCase();
       const userRegionalLower = (p.userRegional || '').toLowerCase();
       const userNationalLower = (p.userNational || '').toLowerCase();
-
-      // Match against local, regional, or national
-      if (tabLower === userLocalLower || tabLower === userRegionalLower || tabLower === userNationalLower) {
-        return true;
-      }
-
-      // Legacy hardcoded checks for backward compatibility
-      if (t === 'finglas' && p.userLocal === 'Finglas') {
-        return true;
-      }
-      if (t === 'dublin' && p.userRegional === 'Dublin') {
-        return true;
-      }
-      if (t === 'ireland' && p.userNational === 'Ireland') {
-        return true;
-      }
-
-      // Fallback - do not include any other posts for unknown tabs
+      if (tabLower === userLocalLower || tabLower === userRegionalLower || tabLower === userNationalLower) return true;
+      if (t === 'finglas' && p.userLocal === 'Finglas') return true;
+      if (t === 'dublin' && p.userRegional === 'Dublin') return true;
+      if (t === 'ireland' && p.userNational === 'Ireland') return true;
       return false;
     });
 
@@ -1107,8 +1083,7 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
 
     // Following (discover) mock path: if user follows Ava but she's not in the list (e.g. not in global posts), prepend her
     if (t === 'discover' && (cursor === null || cursor === 0)) {
-      const userState = getState(userId);
-      const followsAva = getFollowState(userState.follows || {}, 'Ava@galway');
+      const followsAva = getFollowState(getFollowsForDiscover(userId), 'Ava@galway');
       const hasAva = sorted.some(p => p.id === 'ava-normal-ireland-demo' || (p.userHandle && p.userHandle.toLowerCase() === 'ava@galway'));
       if (followsAva && !hasAva) {
         const avaNormal = getAvaNormalPost();
@@ -1428,12 +1403,26 @@ export async function incrementShares(userId: string, id: string): Promise<Post>
 
   // Mock implementation (fallback)
   await delay(100);
-  const p = posts.find(x => x.id === id);
+  const idStr = String(id);
+  const p = posts.find(x => String(x.id) === idStr);
   if (!p) {
+    // Try storage (user-created posts may exist only there if feed just reloaded)
+    const fromStorage = getPostsFromStorage();
+    const inStorage = fromStorage.find(x => String(x.id) === idStr);
+    if (inStorage) {
+      inStorage.stats = inStorage.stats || { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 };
+      inStorage.stats.shares += 1;
+      const updated = fromStorage.map(x => (String(x.id) === idStr ? inStorage : x));
+      savePostsToStorage(updated);
+      return decorateForUser(userId, inStorage);
+    }
     console.error('Post not found for incrementShares:', id);
     throw new Error(`Post with id ${id} not found`);
   }
   p.stats.shares += 1;
+  if (!isMockPostId(p.id)) {
+    savePostsToStorage(posts.filter(px => !isMockPostId(px.id)));
+  }
   return decorateForUser(userId, p);
 }
 
@@ -1844,6 +1833,15 @@ export async function createPost(
       renderJobId: response.render_job_id || response.renderJobId,
     } as Post & { renderJobId?: string };
 
+    // Also store newly created posts in the local in-memory array + localStorage
+    // so Boost page and mock-mode feeds can see them immediately.
+    try {
+      posts.unshift(transformedPost);
+      savePostsToStorage(posts);
+    } catch (e) {
+      console.warn('Failed to cache created post locally:', e);
+    }
+
     return transformedPost;
   } catch (error: any) {
     console.error('Error creating post via API:', error);
@@ -1876,9 +1874,9 @@ export async function createPost(
       console.log('⚠️ API requires authentication, using mock fallback for post creation');
       await delay(500);
     } else {
-      // For other errors (validation, etc), re-throw so user sees the error
-      console.error('❌ API error (not connection/auth):', error);
-      throw error;
+      // For other errors (validation, etc), still fall back to mock so local dev always works
+      console.error('❌ API error (not connection/auth), falling back to mock createPost:', error);
+      await delay(500);
     }
 
     // Helper function to convert blob URL to data URL for persistence
