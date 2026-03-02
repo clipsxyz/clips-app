@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
-import { FiMapPin, FiUser, FiGlobe, FiX, FiEye, FiEyeOff } from 'react-icons/fi';
+import { FiMapPin, FiUser, FiGlobe, FiX, FiEye, FiEyeOff, FiFileText, FiShield } from 'react-icons/fi';
 import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMaps';
 import { loginUser } from '../api/client';
 
@@ -250,6 +250,7 @@ export default function LoginPage() {
     setSignupError('');
 
     const age = getAgeFromBirthday();
+    const consentTimestamp = new Date().toISOString();
 
     const userData = {
       name: name.trim(),
@@ -262,6 +263,8 @@ export default function LoginPage() {
       handle: `${name.trim().split(/\s+/)[0] || name.trim()}@${regional}`,
       countryFlag: countryFlag.trim(),
       avatarUrl: undefined as string | undefined,
+      termsAcceptedAt: consentTimestamp,
+      guidelinesAcceptedAt: consentTimestamp,
     };
 
     try {
@@ -795,23 +798,31 @@ export default function LoginPage() {
                   Log in
                 </button>
               </p>
-              <p className="text-xs text-center text-gray-500 mt-1">
-                {step === 1 
-                  ? 'By signing up, you agree to the terms and conditions and community guidelines'
-                  : (
-                    <>
-                      By signing up, you agree to our{' '}
-                      <Link to="/terms" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
-                        Terms and Conditions
-                      </Link>
-                      {' '}and{' '}
-                      <Link to="/terms#community-guidelines" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
-                        Community Guidelines
-                      </Link>
-                    </>
-                  )
-                }
-              </p>
+              <div className="mt-1 space-y-1.5">
+                <p className="text-[11px] text-center text-gray-500">
+                  By signing up, you confirm that you are at least 13 years old and agree to our Terms and Conditions and Community Guidelines.
+                </p>
+                <div className="flex items-center justify-center gap-4 text-[11px] text-gray-400">
+                  <Link
+                    to="/terms"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 hover:text-blue-400"
+                  >
+                    <FiFileText className="w-3.5 h-3.5" />
+                    <span>Terms</span>
+                  </Link>
+                  <Link
+                    to="/terms#community-guidelines"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 hover:text-blue-400"
+                  >
+                    <FiShield className="w-3.5 h-3.5" />
+                    <span>Community Guidelines</span>
+                  </Link>
+                </div>
+              </div>
             </div>
         </div>
       </form>

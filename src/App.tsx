@@ -3528,12 +3528,6 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         knownBoosted={knownBoosted}
         onShareSuccess={onShareSuccess}
       />
-      {/* Debug: show media URL under card in dev so you can copy it on phone */}
-      {import.meta.env.DEV && post.mediaUrl && (
-        <div className="px-4 pb-2 text-[10px] text-gray-400 break-all">
-          mediaUrl: {post.mediaUrl}
-        </div>
-      )}
       {/* Heart animation from tap to like button - rendered after EngagementBar so ref is set */}
       {heartAnimation && (() => {
         const el = likeButtonRef.current;

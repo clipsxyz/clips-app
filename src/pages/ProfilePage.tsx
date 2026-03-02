@@ -545,15 +545,15 @@ export default function ProfilePage() {
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-[#030712] flex items-center justify-center">
         <div className="text-center">
-          <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
+          <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
             </svg>
           </div>
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Not Signed In</h2>
-          <p className="text-gray-600 mb-4">Please sign in to view your profile</p>
+          <h2 className="text-xl font-semibold text-white mb-2">Not Signed In</h2>
+          <p className="text-gray-400 mb-4">Please sign in to view your profile</p>
           <button
             onClick={() => nav('/login')}
             className="px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 text-white font-semibold rounded-xl shadow-lg hover:from-brand-600 hover:to-brand-700 transition-all duration-200"
@@ -566,9 +566,9 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header - Sticky (light mode only) */}
-      <div className="sticky top-0 z-[100] bg-white/95 backdrop-blur-md border-b border-gray-200 shadow-sm">
+    <div className="min-h-screen bg-[#030712] text-gray-100">
+      {/* Header - Sticky (dark experiment) */}
+      <div className="sticky top-0 z-[100] bg-[#020617]/95 backdrop-blur-md border-b border-gray-800 shadow-sm">
         <div className="max-w-2xl mx-auto px-4 py-3">
           <div className="flex items-center justify-between">
             {/* Left: Profile Picture with + to show you can change it */}
@@ -593,7 +593,7 @@ export default function ProfilePage() {
 
             {/* Center: User name */}
             <div className="flex-1 flex justify-center min-w-0 px-2">
-              <h1 className="text-xl font-bold text-gray-900 truncate" title={user?.name}>
+              <h1 className="text-xl font-bold text-white truncate" title={user?.name}>
                 {user?.name || 'Passport'}
               </h1>
             </div>
@@ -603,21 +603,21 @@ export default function ProfilePage() {
               <button
                 onClick={handleTogglePrivacy}
                 disabled={isTogglingPrivacy}
-                className="p-2 rounded-full hover:bg-gray-100 transition-colors"
+                className="p-2 rounded-full hover:bg-gray-800 transition-colors"
                 title={isPrivate ? 'Profile is private - Click to make public' : 'Profile is public - Click to make private'}
                 aria-label={isPrivate ? 'Make profile public' : 'Make profile private'}
               >
                 {isPrivate ? (
-                  <FiLock className="w-5 h-5 text-gray-700" />
+                  <FiLock className="w-5 h-5 text-gray-200" />
                 ) : (
-                  <FiUnlock className="w-5 h-5 text-gray-700" />
+                  <FiUnlock className="w-5 h-5 text-gray-200" />
                 )}
               </button>
             </div>
           </div>
 
           {/* Tabs: Messages, Drafts, Collections, Settings */}
-          <div className="flex items-center justify-around border-t border-gray-200 mt-3 pt-3">
+          <div className="flex items-center justify-around border-t border-gray-800 mt-3 pt-3">
             <button
               type="button"
               onClick={(e) => {
@@ -625,10 +625,10 @@ export default function ProfilePage() {
                 e.stopPropagation();
                 nav('/inbox');
               }}
-              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors relative pointer-events-auto"
+              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors relative pointer-events-auto"
             >
-              <FiMessageCircle className="w-5 h-5 text-gray-700" />
-              <span className="text-xs font-medium text-gray-700">Messages</span>
+              <FiMessageCircle className="w-5 h-5 text-gray-200" />
+              <span className="text-xs font-medium text-gray-200">Messages</span>
               {unreadCount > 0 && (
                 <span className="absolute top-0 right-0 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
                   {unreadCount > 9 ? '9+' : unreadCount}
@@ -649,10 +649,10 @@ export default function ProfilePage() {
                 // Then open drafts
                 setDraftsOpen(true);
               }}
-              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors relative pointer-events-auto"
+              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors relative pointer-events-auto"
             >
-              <FiFileText className="w-5 h-5 text-gray-700" />
-              <span className="text-xs font-medium text-gray-700">Drafts</span>
+              <FiFileText className="w-5 h-5 text-gray-200" />
+              <span className="text-xs font-medium text-gray-200">Drafts</span>
               {drafts.length > 0 && (
                 <span className="absolute top-0 right-0 w-5 h-5 bg-blue-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
                   {drafts.length > 9 ? '9+' : drafts.length}
@@ -672,10 +672,10 @@ export default function ProfilePage() {
                 loadCollections(); // Refresh collections before opening
                 setCollectionsOpen(true);
               }}
-              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors relative pointer-events-auto"
+              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors relative pointer-events-auto"
             >
-              <FiBookmark className="w-5 h-5 text-gray-700" />
-              <span className="text-xs font-medium text-gray-700">Collections</span>
+              <FiBookmark className="w-5 h-5 text-gray-200" />
+              <span className="text-xs font-medium text-gray-200">Collections</span>
               {collections.length > 0 && (
                 <span className="absolute top-0 right-0 w-5 h-5 bg-purple-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
                   {collections.length > 9 ? '9+' : collections.length}
@@ -694,10 +694,10 @@ export default function ProfilePage() {
                 // Then open settings
                 setSettingsOpen(true);
               }}
-              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors pointer-events-auto"
+              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors pointer-events-auto"
             >
-              <FiSettings className="w-5 h-5 text-gray-700" />
-              <span className="text-xs font-medium text-gray-700">Settings</span>
+              <FiSettings className="w-5 h-5 text-gray-200" />
+              <span className="text-xs font-medium text-gray-200">Settings</span>
             </button>
           </div>
         </div>
@@ -718,7 +718,7 @@ export default function ProfilePage() {
               >
                 {/* Enlarged Profile Picture */}
                 <div className="relative">
-                  <div className="w-48 h-48 rounded-full overflow-hidden border-4 border-white shadow-2xl">
+                  <div className="w-48 h-48 rounded-full overflow-hidden border-4 border-gray-700 shadow-2xl">
                     {user.avatarUrl ? (
                       <img
                         src={user.avatarUrl}
@@ -726,8 +726,8 @@ export default function ProfilePage() {
                         className="w-full h-full object-cover"
                       />
                     ) : (
-                      <div className="w-full h-full bg-gray-300 flex items-center justify-center">
-                        <span className="text-6xl font-bold text-white">
+                      <div className="w-full h-full bg-gray-800 flex items-center justify-center">
+                        <span className="text-6xl font-bold text-gray-100">
                           {user.name?.charAt(0).toUpperCase() || 'U'}
                         </span>
                       </div>
@@ -737,9 +737,9 @@ export default function ProfilePage() {
                 
                 {/* Change Button */}
                 <label className="cursor-pointer">
-                  <div className="flex flex-col items-center gap-2 px-6 py-3 bg-white rounded-full shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105">
-                    <FiCamera className="w-6 h-6 text-gray-700" />
-                    <span className="text-sm font-medium text-gray-700">Change</span>
+                  <div className="flex flex-col items-center gap-2 px-6 py-3 bg-gray-900 rounded-full shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105">
+                    <FiCamera className="w-6 h-6 text-gray-200" />
+                    <span className="text-sm font-medium text-gray-100">Change</span>
                   </div>
                   <input
                     type="file"
@@ -782,46 +782,64 @@ export default function ProfilePage() {
             {/* Followers Card - top left */}
             <button
               onClick={() => setSelectedCard('followers')}
-              className="flex flex-col items-center gap-3 p-5 rounded-2xl cursor-pointer bg-white border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 text-left w-full"
+              className="relative rounded-2xl cursor-pointer text-left w-full group"
             >
-              <ProfileCardImage
-                imagePath={PROFILE_CARD_IMAGES.followers}
-                icon={<FiUsers className="w-6 h-6 text-gray-600" />}
+              <div
+                className="absolute -inset-3 rounded-2xl bg-[conic-gradient(from_180deg_at_50%_0%,#3b82f6,#a855f7,#3b82f6)] opacity-70 blur-xl group-hover:opacity-100 group-hover:blur-[26px] transition-all duration-300"
+                aria-hidden="true"
               />
-              <div className="text-center w-full">
-                <div className="font-semibold text-sm text-gray-900">Followers</div>
-                <div className="text-lg font-bold text-gray-900 mt-0.5">{followersCount}</div>
+              <div className="relative flex flex-col items-center gap-3 p-5 rounded-[1rem] bg-[#020617] border border-gray-800 shadow-sm">
+                <ProfileCardImage
+                  imagePath={PROFILE_CARD_IMAGES.followers}
+                  icon={<FiUsers className="w-6 h-6 text-gray-600" />}
+                />
+                <div className="text-center w-full">
+                  <div className="font-semibold text-sm text-gray-100">Followers</div>
+                  <div className="text-lg font-bold text-white mt-0.5">{followersCount}</div>
+                </div>
               </div>
             </button>
 
             {/* Following Card - top right */}
             <button
               onClick={() => setSelectedCard('following')}
-              className="flex flex-col items-center gap-3 p-5 rounded-2xl cursor-pointer bg-white border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 text-left w-full"
+              className="relative rounded-2xl cursor-pointer text-left w-full group"
             >
-              <ProfileCardImage
-                imagePath={PROFILE_CARD_IMAGES.following}
-                icon={<FiUserCheck className="w-6 h-6 text-gray-600" />}
+              <div
+                className="absolute -inset-3 rounded-2xl bg-[conic-gradient(from_180deg_at_50%_0%,#3b82f6,#a855f7,#3b82f6)] opacity-70 blur-xl group-hover:opacity-100 group-hover:blur-[26px] transition-all duration-300"
+                aria-hidden="true"
               />
-              <div className="text-center w-full">
-                <div className="font-semibold text-sm text-gray-900">Following</div>
-                <div className="text-lg font-bold text-gray-900 mt-0.5">{followingCount}</div>
+              <div className="relative flex flex-col items-center gap-3 p-5 rounded-[1rem] bg-[#020617] border border-gray-800 shadow-sm">
+                <ProfileCardImage
+                  imagePath={PROFILE_CARD_IMAGES.following}
+                  icon={<FiUserCheck className="w-6 h-6 text-gray-600" />}
+                />
+                <div className="text-center w-full">
+                  <div className="font-semibold text-sm text-gray-100">Following</div>
+                  <div className="text-lg font-bold text-white mt-0.5">{followingCount}</div>
+                </div>
               </div>
             </button>
 
             {/* Bio Card */}
             <button
               onClick={() => setSelectedCard('bio')}
-              className="flex flex-col items-center gap-3 p-5 rounded-2xl cursor-pointer bg-white border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 text-left w-full"
+              className="relative rounded-2xl cursor-pointer text-left w-full group"
             >
-              <ProfileCardImage
-                imagePath={PROFILE_CARD_IMAGES.bio}
-                icon={<FiEdit3 className="w-6 h-6 text-gray-600" />}
+              <div
+                className="absolute -inset-3 rounded-2xl bg-[conic-gradient(from_180deg_at_50%_0%,#3b82f6,#a855f7,#3b82f6)] opacity-70 blur-xl group-hover:opacity-100 group-hover:blur-[26px] transition-all duration-300"
+                aria-hidden="true"
               />
-              <div className="text-center w-full">
-                <div className="font-semibold text-sm text-gray-900">Bio</div>
-                <div className="text-xs text-gray-500 mt-0.5">
-                  {bio ? 'Edit bio' : 'Add bio'}
+              <div className="relative flex flex-col items-center gap-3 p-5 rounded-[1rem] bg-[#020617] border border-gray-800 shadow-sm">
+                <ProfileCardImage
+                  imagePath={PROFILE_CARD_IMAGES.bio}
+                  icon={<FiEdit3 className="w-6 h-6 text-gray-600" />}
+                />
+                <div className="text-center w-full">
+                  <div className="font-semibold text-sm text-gray-100">Bio</div>
+                  <div className="text-xs text-gray-400 mt-0.5">
+                    {bio ? 'Edit bio' : 'Add bio'}
+                  </div>
                 </div>
               </div>
             </button>
@@ -829,75 +847,105 @@ export default function ProfilePage() {
             {/* Social Links Card */}
             <button
               onClick={() => setSelectedCard('social')}
-              className="flex flex-col items-center gap-3 p-5 rounded-2xl cursor-pointer bg-white border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 text-left w-full"
+              className="relative rounded-2xl cursor-pointer text-left w-full group"
             >
-              <ProfileCardImage
-                imagePath={PROFILE_CARD_IMAGES.social}
-                icon={<FiLink2 className="w-6 h-6 text-gray-600" />}
+              <div
+                className="absolute -inset-3 rounded-2xl bg-[conic-gradient(from_180deg_at_50%_0%,#3b82f6,#a855f7,#3b82f6)] opacity-70 blur-xl group-hover:opacity-100 group-hover:blur-[26px] transition-all duration-300"
+                aria-hidden="true"
               />
-              <div className="text-center w-full">
-                <div className="font-semibold text-sm text-gray-900">Social Links</div>
-                <div className="text-xs text-gray-500 mt-0.5">Add links</div>
+              <div className="relative flex flex-col items-center gap-3 p-5 rounded-[1rem] bg-[#020617] border border-gray-800 shadow-sm">
+                <ProfileCardImage
+                  imagePath={PROFILE_CARD_IMAGES.social}
+                  icon={<FiLink2 className="w-6 h-6 text-gray-600" />}
+                />
+                <div className="text-center w-full">
+                  <div className="font-semibold text-sm text-gray-100">Social Links</div>
+                  <div className="text-xs text-gray-400 mt-0.5">Add links</div>
+                </div>
               </div>
             </button>
 
             {/* Travel Info Card */}
             <button
               onClick={() => setSelectedCard('personal')}
-              className="flex flex-col items-center gap-3 p-5 rounded-2xl cursor-pointer bg-white border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 text-left w-full"
+              className="relative rounded-2xl cursor-pointer text-left w-full group"
             >
-              <ProfileCardImage
-                imagePath={PROFILE_CARD_IMAGES.personal}
-                icon={<FiUser className="w-6 h-6 text-gray-600" />}
+              <div
+                className="absolute -inset-3 rounded-2xl bg-[conic-gradient(from_180deg_at_50%_0%,#3b82f6,#a855f7,#3b82f6)] opacity-70 blur-xl group-hover:opacity-100 group-hover:blur-[26px] transition-all duration-300"
+                aria-hidden="true"
               />
-              <div className="text-center w-full">
-                <div className="font-semibold text-sm text-gray-900">Travel Info</div>
-                <div className="text-xs text-gray-500 mt-0.5">Edit details</div>
+              <div className="relative flex flex-col items-center gap-3 p-5 rounded-[1rem] bg-[#020617] border border-gray-800 shadow-sm">
+                <ProfileCardImage
+                  imagePath={PROFILE_CARD_IMAGES.personal}
+                  icon={<FiUser className="w-6 h-6 text-gray-600" />}
+                />
+                <div className="text-center w-full">
+                  <div className="font-semibold text-sm text-gray-100">Travel Info</div>
+                  <div className="text-xs text-gray-400 mt-0.5">Edit details</div>
+                </div>
               </div>
             </button>
 
             {/* Location Card */}
             <button
               onClick={() => setSelectedCard('location')}
-              className="flex flex-col items-center gap-3 p-5 rounded-2xl cursor-pointer bg-white border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 text-left w-full"
+              className="relative rounded-2xl cursor-pointer text-left w-full group"
             >
-              <ProfileCardImage
-                imagePath={PROFILE_CARD_IMAGES.location}
-                icon={<FiMapPin className="w-6 h-6 text-gray-600" />}
+              <div
+                className="absolute -inset-3 rounded-2xl bg-[conic-gradient(from_180deg_at_50%_0%,#3b82f6,#a855f7,#3b82f6)] opacity-70 blur-xl group-hover:opacity-100 group-hover:blur-[26px] transition-all duration-300"
+                aria-hidden="true"
               />
-              <div className="text-center w-full">
-                <div className="font-semibold text-sm text-gray-900">Location</div>
-                <div className="text-xs text-gray-500 mt-0.5">Set location</div>
+              <div className="relative flex flex-col items-center gap-3 p-5 rounded-[1rem] bg-[#020617] border border-gray-800 shadow-sm">
+                <ProfileCardImage
+                  imagePath={PROFILE_CARD_IMAGES.location}
+                  icon={<FiMapPin className="w-6 h-6 text-gray-600" />}
+                />
+                <div className="text-center w-full">
+                  <div className="font-semibold text-sm text-gray-100">Location</div>
+                  <div className="text-xs text-gray-400 mt-0.5">Set location</div>
+                </div>
               </div>
             </button>
 
             {/* Interests Card */}
             <button
               onClick={() => setSelectedCard('interests')}
-              className="flex flex-col items-center gap-3 p-5 rounded-2xl cursor-pointer bg-white border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 text-left w-full"
+              className="relative rounded-2xl cursor-pointer text-left w-full group"
             >
-              <ProfileCardImage
-                imagePath={PROFILE_CARD_IMAGES.interests}
-                icon={<FiHeart className="w-6 h-6 text-gray-600" />}
+              <div
+                className="absolute -inset-3 rounded-2xl bg-[conic-gradient(from_180deg_at_50%_0%,#3b82f6,#a855f7,#3b82f6)] opacity-70 blur-xl group-hover:opacity-100 group-hover:blur-[26px] transition-all duration-300"
+                aria-hidden="true"
               />
-              <div className="text-center w-full">
-                <div className="font-semibold text-sm text-gray-900">Interests</div>
-                <div className="text-xs text-gray-500 mt-0.5">Add interests</div>
+              <div className="relative flex flex-col items-center gap-3 p-5 rounded-[1rem] bg-[#020617] border border-gray-800 shadow-sm">
+                <ProfileCardImage
+                  imagePath={PROFILE_CARD_IMAGES.interests}
+                  icon={<FiHeart className="w-6 h-6 text-gray-600" />}
+                />
+                <div className="text-center w-full">
+                  <div className="font-semibold text-sm text-gray-100">Interests</div>
+                  <div className="text-xs text-gray-400 mt-0.5">Add interests</div>
+                </div>
               </div>
             </button>
 
             {/* Country Flag Card */}
             <button
               onClick={() => setSelectedCard('flag')}
-              className="flex flex-col items-center gap-3 p-5 rounded-2xl cursor-pointer bg-white border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 text-left w-full"
+              className="relative rounded-2xl cursor-pointer text-left w-full group"
             >
-              <ProfileCardImage
-                imagePath={PROFILE_CARD_IMAGES.flag}
-                icon={<FiGlobe className="w-6 h-6 text-gray-600" />}
+              <div
+                className="absolute -inset-3 rounded-2xl bg-[conic-gradient(from_180deg_at_50%_0%,#3b82f6,#a855f7,#3b82f6)] opacity-70 blur-xl group-hover:opacity-100 group-hover:blur-[26px] transition-all duration-300"
+                aria-hidden="true"
               />
-              <div className="text-center w-full">
-                <div className="font-semibold text-sm text-gray-900">Country Flag</div>
-                <div className="text-xs text-gray-500 mt-0.5">Select flag</div>
+              <div className="relative flex flex-col items-center gap-3 p-5 rounded-[1rem] bg-[#020617] border border-gray-800 shadow-sm">
+                <ProfileCardImage
+                  imagePath={PROFILE_CARD_IMAGES.flag}
+                  icon={<FiGlobe className="w-6 h-6 text-gray-600" />}
+                />
+                <div className="text-center w-full">
+                  <div className="font-semibold text-sm text-gray-100">Country Flag</div>
+                  <div className="text-xs text-gray-400 mt-0.5">Select flag</div>
+                </div>
               </div>
             </button>
           </div>

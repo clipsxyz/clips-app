@@ -156,7 +156,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       bio: userData.bio || undefined,
       socialLinks: userData.socialLinks || undefined,
       placesTraveled: userData.placesTraveled || undefined,
-      is_private: userData.is_private || false
+      is_private: userData.is_private || false,
+      termsAcceptedAt: userData.termsAcceptedAt,
+      guidelinesAcceptedAt: userData.guidelinesAcceptedAt,
     };
     setUser(u);
     // Persist large base64 avatar in IndexedDB (survives refresh); strip from localStorage to avoid quota exceeded

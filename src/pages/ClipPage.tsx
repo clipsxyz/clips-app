@@ -2215,7 +2215,7 @@ export default function ClipPage() {
           </defs>
         </svg>
         <div className="absolute bottom-0 left-0 right-0 flex items-center justify-center gap-4 p-4 bg-black/20 backdrop-blur-sm z-10">
-          {/* Add Text Button - gradient border */}
+          {/* Add Text Button - gradient border, white icon */}
           <div className="rounded-full p-[2px] flex-shrink-0" style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}>
             <button
               onClick={() => {
@@ -2227,7 +2227,7 @@ export default function ClipPage() {
               className="p-3 bg-black/80 hover:bg-black/90 rounded-full text-white transition-colors relative"
               aria-label="Add Text"
             >
-              <FiType className="w-5 h-5 shrink-0" style={{ stroke: 'url(#clipPageIconGrad)', fill: 'none' }} />
+              <FiType className="w-5 h-5 shrink-0 text-white" />
             {textStickers.length > 0 && (
               <span className="absolute -top-1 -right-1 w-5 h-5 bg-blue-500 rounded-full text-xs flex items-center justify-center text-white">
                 {textStickers.length}
@@ -2236,7 +2236,7 @@ export default function ClipPage() {
             </button>
           </div>
 
-          {/* Add Location Button - gradient border */}
+          {/* Add Location Button - gradient border, white icon */}
           <div className="rounded-full p-[2px] flex-shrink-0" style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}>
             <button
               onClick={() => {
@@ -2248,7 +2248,7 @@ export default function ClipPage() {
               className="p-3 bg-black/80 hover:bg-black/90 rounded-full text-white transition-colors relative"
               aria-label="Add Location"
             >
-              <FiMapPin className="w-5 h-5 shrink-0" style={{ stroke: 'url(#clipPageIconGrad)', fill: 'none' }} />
+              <FiMapPin className="w-5 h-5 shrink-0 text-white" />
               {locationStickers.length > 0 && (
                 <span className="absolute -top-1 -right-1 w-5 h-5 bg-blue-500 rounded-full text-xs flex items-center justify-center text-white">
                   {locationStickers.length}
@@ -2257,7 +2257,7 @@ export default function ClipPage() {
             </button>
           </div>
 
-          {/* Add Link Button - gradient border */}
+          {/* Add Link Button - gradient border, white icon */}
           <div className="rounded-full p-[2px] flex-shrink-0" style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}>
             <button
               onClick={() => {
@@ -2269,7 +2269,7 @@ export default function ClipPage() {
               className="p-3 bg-black/80 hover:bg-black/90 rounded-full text-white transition-colors relative"
               aria-label="Add Link"
             >
-              <FiLink className="w-5 h-5 shrink-0" style={{ stroke: 'url(#clipPageIconGrad)', fill: 'none' }} />
+              <FiLink className="w-5 h-5 shrink-0 text-white" />
               {linkOverlays.length > 0 && (
                 <span className="absolute -top-1 -right-1 w-5 h-5 bg-blue-500 rounded-full text-xs flex items-center justify-center text-white">
                   {linkOverlays.length}
@@ -2278,7 +2278,7 @@ export default function ClipPage() {
             </button>
           </div>
 
-          {/* Tag User Button - gradient border */}
+          {/* Tag User Button - gradient border, white icon */}
           <div className="rounded-full p-[2px] flex-shrink-0" style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}>
             <button
               onClick={() => {
@@ -2290,7 +2290,7 @@ export default function ClipPage() {
               className="p-3 bg-black/80 hover:bg-black/90 rounded-full text-white transition-colors relative"
               aria-label="Tag User"
             >
-              <FiUser className="w-5 h-5 shrink-0" style={{ stroke: 'url(#clipPageIconGrad)', fill: 'none' }} />
+              <FiUser className="w-5 h-5 shrink-0 text-white" />
               {taggedUsers.length > 0 && (
                 <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-xs flex items-center justify-center text-white">
                   {taggedUsers.length}
