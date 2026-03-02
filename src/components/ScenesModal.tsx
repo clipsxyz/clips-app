@@ -1,7 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { FiX, FiHeart, FiShare2, FiRepeat, FiMapPin, FiVolume2, FiVolumeX, FiMessageSquare, FiMessageCircle, FiChevronUp, FiChevronDown, FiBookmark, FiMoreHorizontal, FiSend, FiSmile } from 'react-icons/fi';
+import { FiX, FiHeart, FiShare2, FiRepeat, FiMapPin, FiHome, FiClock, FiVolume2, FiVolumeX, FiMessageSquare, FiMessageCircle, FiChevronUp, FiChevronDown, FiBookmark, FiMoreHorizontal, FiSend, FiSmile } from 'react-icons/fi';
 import { AiFillHeart } from 'react-icons/ai';
 import SavePostModal from './SavePostModal';
 import PostMenuModal from './PostMenuModal';
@@ -25,7 +25,6 @@ import { getAvatarForHandle, getFlagForHandle } from '../api/users';
 import { timeAgo } from '../utils/timeAgo';
 import type { Post } from '../types';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from '../constants';
-import StreetSign from './StreetSign';
 import { TEXT_STORY_TEMPLATES } from '../textStoryTemplates';
 
 /** Radiating red/pink lines burst for YouTube Shorts-style double-tap like (used in Scenes). */
@@ -268,6 +267,22 @@ export default function ScenesModal({
     const hasMultipleItems = items.length > 1;
     const currentItem = items[currentIndex];
     const isTextOnlyPost = !post.mediaUrl && !(post.mediaItems && post.mediaItems.length > 0) && !!post.text;
+
+    // Metadata carousel (location → venue → timestamp), same as newsfeed cards
+    const scenesMetadataItems = React.useMemo(() => {
+        const out: Array<{ label: string; type: 'location' | 'venue' | 'timestamp' }> = [];
+        if (post.locationLabel && post.locationLabel !== 'Unknown Location') out.push({ label: post.locationLabel, type: 'location' });
+        if (post.venue) out.push({ label: post.venue, type: 'venue' });
+        const ts = post.createdAt != null ? (typeof post.createdAt === 'string' ? parseInt(post.createdAt, 10) : post.createdAt) : null;
+        if (typeof ts === 'number' && !Number.isNaN(ts)) out.push({ label: timeAgo(ts), type: 'timestamp' });
+        return out;
+    }, [post.locationLabel, post.venue, post.createdAt]);
+    const [scenesMetadataIndex, setScenesMetadataIndex] = React.useState(0);
+    React.useEffect(() => {
+        if (scenesMetadataItems.length <= 1) return;
+        const t = setInterval(() => setScenesMetadataIndex((i) => (i + 1) % scenesMetadataItems.length), 3000);
+        return () => clearInterval(t);
+    }, [scenesMetadataItems.length]);
 
     // Update container size for stickers
     React.useEffect(() => {
@@ -1313,13 +1328,42 @@ export default function ScenesModal({
                                             </div>
                                         ) : (
                                             <>
-                                    {/* Top Left - Street sign with location (top) and time (bottom) */}
-                                    <div className="absolute top-5 left-3 z-10">
-                                        <StreetSign
-                                            topLabel={post.locationLabel || ''}
-                                            bottomLabel={post.createdAt ? timeAgo(post.createdAt) : ''}
-                                        />
-                                    </div>
+                                    {/* Top Left - Metadata carousel (same as newsfeed cards): gradient border + shimmer text */}
+                                    {scenesMetadataItems.length > 0 && (
+                                        <div className="absolute top-4 left-3 z-10 flex items-center min-h-[1.5rem] overflow-visible">
+                                            <div
+                                                key={scenesMetadataIndex}
+                                                className="flex items-center gap-0.5 justify-start min-w-0 max-w-[140px] rounded-lg p-[1px] bg-gradient-to-r from-blue-500 to-purple-600 animate-chyron-emerge origin-left"
+                                                title={scenesMetadataItems.map((m) => m.label).join(' · ')}
+                                            >
+                                                <div className="flex items-center gap-0.5 justify-start min-w-0 max-w-[138px] rounded-[7px] bg-black/75 px-2 py-1">
+                                                    {(() => {
+                                                        const current = scenesMetadataItems[scenesMetadataIndex];
+                                                        const Icon = current.type === 'location' ? FiMapPin : current.type === 'venue' ? FiHome : FiClock;
+                                                        return (
+                                                            <>
+                                                                <Icon className="w-2.5 h-2.5 flex-shrink-0 text-white/95" />
+                                                                <span
+                                                                    className="text-[10px] font-medium whitespace-nowrap truncate min-w-0 tracking-tight inline-block"
+                                                                    style={{
+                                                                        background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
+                                                                        backgroundSize: '200% 100%',
+                                                                        WebkitBackgroundClip: 'text',
+                                                                        backgroundClip: 'text',
+                                                                        WebkitTextFillColor: 'transparent',
+                                                                        color: 'transparent',
+                                                                        animation: 'shimmer 3s linear infinite',
+                                                                    }}
+                                                                >
+                                                                    {current.label}
+                                                                </span>
+                                                            </>
+                                                        );
+                                                    })()}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
 
                                     {/* Top Bar - Feed label (centre), Counter, Close Button */}
                                     <div className="absolute top-4 left-0 right-0 z-30 flex items-center justify-between px-4">

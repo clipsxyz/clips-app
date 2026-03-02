@@ -39,3 +39,26 @@
     animation: none !important;
   }
 }
+
+/* Chyron emerge: small from background → full size (runs on mount and on carousel change) */
+@keyframes chyronEmerge {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-chyron-emerge {
+  transform-origin: right center;
+  animation: chyronEmerge 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-chyron-emerge {
+    animation-duration: 0.08s;
+  }
+}

@@ -75,7 +75,7 @@ function BottomNav({ onCreateClick, onProfileClick }: { onCreateClick: () => voi
   // Helper to create square icon container (Uber Eats style)
   const createSquareIcon = (icon: React.ReactNode, isActive: boolean) => {
     return (
-      <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-200 ${
+      <div className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200 ${
         isActive 
           ? 'bg-gray-900 dark:bg-gray-100' 
           : 'bg-transparent border border-white'
@@ -95,18 +95,18 @@ function BottomNav({ onCreateClick, onProfileClick }: { onCreateClick: () => voi
       return (
         <button
           onClick={onClick || (() => nav(path))}
-          className="flex flex-col items-center justify-center flex-1 py-2 px-1 transition-all duration-200 active:scale-95"
+          className="flex flex-col items-center justify-center flex-1 py-1.5 px-1 transition-all duration-200 active:scale-95"
           aria-current={active ? 'page' : undefined}
           title={label}
         >
-          <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-200 ${
+          <div className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200 ${
             active 
               ? 'bg-gray-900 dark:bg-gray-100' 
               : 'bg-transparent border border-white'
           }`}>
             {icon}
           </div>
-          <span className={`text-[10px] mt-1.5 font-medium transition-colors ${
+          <span className={`text-[10px] mt-1 font-medium transition-colors ${
             active 
               ? 'text-gray-900 dark:text-white' 
               : 'text-white'
@@ -120,12 +120,12 @@ function BottomNav({ onCreateClick, onProfileClick }: { onCreateClick: () => voi
     return (
       <button
         onClick={onClick || (() => nav(path))}
-        className="flex flex-col items-center justify-center flex-1 py-2 px-1 transition-all duration-200 active:scale-95"
+        className="flex flex-col items-center justify-center flex-1 py-1.5 px-1 transition-all duration-200 active:scale-95"
         aria-current={active ? 'page' : undefined}
         title={label}
       >
         {createSquareIcon(icon, active)}
-        <span className={`text-[10px] mt-1.5 font-medium transition-colors ${
+        <span className={`text-[10px] mt-1 font-medium transition-colors ${
           active 
             ? 'text-gray-900 dark:text-white' 
             : 'text-white'
@@ -162,7 +162,7 @@ function BottomNav({ onCreateClick, onProfileClick }: { onCreateClick: () => voi
 
   return (
     <nav aria-label="Primary navigation" className="fixed bottom-0 inset-x-0 bg-gradient-to-t from-black/60 via-black/40 to-transparent z-40 pb-safe backdrop-blur-sm">
-      <div className="mx-auto max-w-md flex items-center justify-around px-2 py-1">
+      <div className="mx-auto max-w-md flex items-center justify-around px-2 py-0.5">
         {item('/feed', 'Home', <FiHome size={16} />, handleHomeClick)}
         {item('/boost', 'Boost', <FiZap size={16} />)}
         {item('/create', 'Create', <FiPlusSquare size={16} />, onCreateClick)}
@@ -199,7 +199,7 @@ export default function App() {
     <>
       <main
         id="main"
-        className={`mx-auto max-w-md md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800 ${isFullViewportPage ? 'h-screen min-h-[100dvh] overflow-hidden flex flex-col' : 'min-h-screen pb-[calc(64px+theme(spacing.safe))]'}`}
+        className={`mx-auto max-w-md md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800 ${isFullViewportPage ? 'h-screen min-h-[100dvh] overflow-hidden flex flex-col' : 'min-h-screen pb-[calc(56px+theme(spacing.safe))]'}`}
         style={{ backgroundColor: '#030712' }}
       >
         {loc.pathname !== '/login'
@@ -207,6 +207,7 @@ export default function App() {
           && loc.pathname !== '/profile'
           && loc.pathname !== '/clip'
           && loc.pathname !== '/stories'
+          && loc.pathname !== '/boost'
           && !loc.pathname.startsWith('/user/')
           && !loc.pathname.startsWith('/create/text-only')
           && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
@@ -581,7 +582,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                         backgroundClip: 'text',
                         WebkitTextFillColor: 'transparent',
                         color: 'transparent',
-                        animation: 'shimmer 3s linear infinite',
+                        animation: 'shimmer 6s linear infinite',
                         display: 'inline-block'
                       }}
                     >
@@ -737,7 +738,7 @@ function BoostButton({ postId, onBoost, stretch, knownBoosted }: { postId: strin
         disabled
         aria-label="Post is boosted"
         title={`Boosted - ${formatTimeRemaining(timeRemaining)} remaining`}
-        className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200 bg-red-600 text-white dark:bg-red-500 flex items-center gap-2 cursor-not-allowed opacity-90 ${stretchCls}`}
+        className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-200 bg-red-600 text-white dark:bg-red-500 flex items-center gap-2 cursor-not-allowed opacity-90 shadow-lg ${stretchCls}`}
       >
         <FiZap className="w-4 h-4 flex-shrink-0" />
         <span>Boosted</span>
@@ -751,11 +752,25 @@ function BoostButton({ postId, onBoost, stretch, knownBoosted }: { postId: strin
       disabled={busy}
       aria-label="Boost post"
       title="Boost this post"
-      style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}
-      className={`px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-60 transition-all duration-200 active:scale-[.98] text-white hover:opacity-95 flex items-center gap-2 ${stretchCls}`}
+      className={`rounded-xl p-[1px] bg-gradient-to-r from-blue-500 to-purple-600 disabled:opacity-60 transition-all duration-200 active:scale-[0.98] shadow-lg hover:shadow-xl ${stretchCls}`}
     >
-      <FiZap className="w-4 h-4 flex-shrink-0" />
-      <span>Boost</span>
+      <div className="flex items-center justify-center gap-2 rounded-[11px] bg-black/75 px-4 py-2 min-h-[2.25rem]">
+        <FiZap className="w-4 h-4 flex-shrink-0 text-white/95" />
+        <span
+          className="text-sm font-semibold truncate inline-block"
+          style={{
+            background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
+            backgroundSize: '200% 100%',
+            WebkitBackgroundClip: 'text',
+            backgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            color: 'transparent',
+            animation: 'shimmer 3s linear infinite',
+          }}
+        >
+          Boost
+        </span>
+      </div>
     </button>
   );
 }
@@ -1015,24 +1030,39 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
           </div>
         </div>
         <div className="relative z-10 flex flex-col items-end gap-0.5 flex-shrink-0">
-          {/* Story location on top: location → venue → timestamp */}
+          {/* Story location on top: location → venue → timestamp (news-style entrance) */}
           {metadataItems.length > 0 && (() => {
             const current = metadataItems[metadataIndex];
-            const iconClass = `w-2.5 h-2.5 flex-shrink-0 text-gray-900`;
             const Icon = current.type === 'location' ? FiMapPin : current.type === 'venue' ? FiHome : FiClock;
             return (
               <div
-                className="flex items-center gap-0.5 min-w-0 max-w-[110px] justify-end min-h-[1rem] overflow-hidden"
+                className="flex items-center gap-0.5 min-w-0 max-w-[85px] justify-end min-h-[0.875rem] overflow-visible"
                 title={metadataItems.map((m) => m.label).join(' · ')}
               >
                 <div
                   key={metadataIndex}
-                  className={`flex items-center gap-0.5 justify-end min-w-0 max-w-[110px] rounded-full bg-white/95 px-1.5 py-0.5 shadow-sm ${metadataTransitionClass}`}
+                  className={`flex items-center gap-0.5 justify-end min-w-0 max-w-[85px] rounded-md border border-white animate-chyron-emerge ${metadataTransitionClass}`}
+                  style={{
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.4), 0 1px 0 rgba(255,255,255,0.25) inset, 0 -1px 0 rgba(0,0,0,0.2) inset',
+                  }}
                 >
-                  <Icon className={iconClass} />
-                  <span className="text-[10px] font-medium whitespace-nowrap truncate text-gray-900">
-                    {current.label}
-                  </span>
+                  <div className="flex items-center gap-0.5 justify-end min-w-0 max-w-[83px] rounded-[5px] bg-black/75 px-1.5 py-0.5" style={{ boxShadow: '0 1px 0 rgba(255,255,255,0.08) inset' }}>
+                    <Icon className="w-2 h-2 flex-shrink-0 text-white/95" />
+                    <span
+                      className="text-[9px] font-medium whitespace-nowrap truncate min-w-0 tracking-tight inline-block"
+                      style={{
+                        background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
+                        backgroundSize: '200% 100%',
+                        WebkitBackgroundClip: 'text',
+                        backgroundClip: 'text',
+                        WebkitTextFillColor: 'transparent',
+                        color: 'transparent',
+                        animation: 'shimmer 6s linear infinite',
+                      }}
+                    >
+                      {current.label}
+                    </span>
+                  </div>
                 </div>
               </div>
             );
@@ -1243,7 +1273,7 @@ function TextCard({ text, onDoubleLike, textStyle, stickers }: { text: string; o
           <div className="mt-3 flex justify-start">
             <button
               onClick={handleMoreClick}
-              className="text-blue-500 hover:text-blue-600 text-sm font-medium transition-colors focus:outline-none focus:ring-0"
+              className="text-white hover:text-white/90 text-sm font-medium transition-colors focus:outline-none focus:ring-0"
               style={{ outline: 'none', border: 'none', background: 'none' }}
               aria-label={isExpanded ? 'Show less' : 'Show more'}
             >
@@ -5577,17 +5607,14 @@ function BoostPageWrapper() {
   }
 
   return (
-    <div className="pb-2">
-      <div className="h-4" />
-
-      {/* Header */}
-      <div className="px-3 py-2">
+    <div className="flex flex-col min-h-0 flex-1 pb-2">
+      {/* Pinned header – posts scroll underneath (z-30 above card overlays) */}
+      <div className="sticky top-0 z-30 isolate shrink-0 px-3 py-3 bg-[#030712] border-b border-gray-800/50 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.3)]">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Your Posts</h2>
         <p className="text-sm text-gray-600 dark:text-gray-400">Boost your posts to reach more people.</p>
       </div>
 
-      <div className="h-4" />
-
+      <div className="relative z-0">
       {posts.length === 0 ? (
         <div className="p-6 text-center">
           <p className="text-gray-600 dark:text-gray-400">You haven&apos;t created any posts yet.</p>
@@ -5707,6 +5734,7 @@ function BoostPageWrapper() {
           />
         ))
       )}
+      </div>
 
       {/* Modals */}
       {commentsModalOpen && selectedPostId && (
