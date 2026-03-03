@@ -521,6 +521,7 @@ export default function GalleryPreviewPage() {
                 venue.trim() || undefined
             );
             showToast('Post created successfully!');
+            window.dispatchEvent(new CustomEvent('postCreated'));
             if (overlay) {
                 overlay.success('Your post is now live on the feed.');
             }

@@ -10,6 +10,7 @@ import Swal from 'sweetalert2';
 import { bottomSheet, saveDraftConfirmSheet } from '../utils/swalBottomSheet';
 import { FiMapPin, FiX, FiSearch, FiLayers } from 'react-icons/fi';
 import { TEXT_STORY_TEMPLATES, TextStoryTemplate } from '../textStoryTemplates';
+import { showUploadOverlay } from '../utils/uploadOverlay';
 
 export default function TextOnlyPostPage() {
     const { user } = useAuth();
@@ -180,6 +181,15 @@ export default function TextOnlyPostPage() {
             return;
         }
 
+        // Show TikTok-style mini overlay and immediately return to feed.
+        // For text-only posts we reflect the chosen template background in the mini thumbnail.
+        const overlay = showUploadOverlay({
+            initialMessage: 'Posting to Gazetteer…',
+            background: activeTemplate ? activeTemplate.background : '#000000',
+            label: activeTemplate ? activeTemplate.name?.charAt(0).toUpperCase() || 'Aa' : 'Aa',
+        });
+        navigate('/feed');
+
         setIsSubmitting(true);
         try {
             const selectedTemplate: TextStoryTemplate | undefined =
@@ -222,10 +232,11 @@ export default function TextOnlyPostPage() {
 
             window.dispatchEvent(new CustomEvent('postCreated'));
             showToast('Post created successfully!');
-            navigate('/feed');
+            overlay.success('Your post is now live on the feed.');
         } catch (error) {
             console.error('Error creating post:', error);
             showToast('Failed to create post. Please try again.');
+            overlay.error('Could not post. Please try again.');
         } finally {
             setIsSubmitting(false);
         }

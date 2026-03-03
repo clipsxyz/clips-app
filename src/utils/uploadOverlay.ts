@@ -6,8 +6,10 @@ export interface UploadOverlayController {
 }
 
 type Options = {
-  thumbUrl: string;
+  thumbUrl?: string;
   initialMessage?: string;
+  background?: string;
+  label?: string;
 };
 
 function createContainer(): HTMLDivElement {
@@ -30,7 +32,7 @@ export function showUploadOverlay(opts: Options): UploadOverlayController {
     };
   }
 
-  const { thumbUrl, initialMessage = 'Posting to Gazetteer…' } = opts;
+  const { thumbUrl, initialMessage = 'Posting to Gazetteer…', background, label } = opts;
   const container = createContainer();
 
   const card = document.createElement('div');
@@ -54,13 +56,33 @@ export function showUploadOverlay(opts: Options): UploadOverlayController {
   thumb.style.border = '1px solid rgba(148,163,184,0.5)';
   thumb.style.backgroundColor = '#020617';
 
-  const img = document.createElement('img');
-  img.src = thumbUrl;
-  img.alt = 'Uploading preview';
-  img.style.width = '100%';
-  img.style.height = '100%';
-  img.style.objectFit = 'cover';
-  thumb.appendChild(img);
+  if (thumbUrl) {
+    const img = document.createElement('img');
+    img.src = thumbUrl;
+    img.alt = 'Uploading preview';
+    img.style.width = '100%';
+    img.style.height = '100%';
+    img.style.objectFit = 'cover';
+    thumb.appendChild(img);
+  } else {
+    // Text-only / template fallback: block that can match template background
+    const placeholder = document.createElement('div');
+    placeholder.style.width = '100%';
+    placeholder.style.height = '100%';
+    placeholder.style.display = 'flex';
+    placeholder.style.alignItems = 'center';
+    placeholder.style.justifyContent = 'center';
+    if (background) {
+      placeholder.style.background = background;
+    } else {
+      placeholder.style.backgroundImage = 'linear-gradient(135deg,#3b82f6,#a855f7)';
+    }
+    placeholder.style.color = '#f9fafb';
+    placeholder.style.fontSize = '14px';
+    placeholder.style.fontWeight = '600';
+    placeholder.textContent = label || 'Aa';
+    thumb.appendChild(placeholder);
+  }
 
   const textWrap = document.createElement('div');
   textWrap.style.display = 'flex';

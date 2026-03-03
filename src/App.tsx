@@ -2987,12 +2987,6 @@ function EngagementBar({
             <span className="text-xs text-white tabular-nums">{likes}</span>
           </button>
 
-          {/* Views */}
-          <div className={`flex items-center ${iconGap} flex-shrink-0`}>
-            <FiEye className={`${iconSize} text-white`} />
-            <span className="text-xs text-white tabular-nums">{views}</span>
-          </div>
-
           {/* Comments */}
           <button
             className={`flex items-center ${iconGap} transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0`}
@@ -3024,13 +3018,26 @@ function EngagementBar({
 
           {/* Reclip */}
           <button
-            className={`flex items-center ${iconGap} transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0 ${post.userHandle === currentUserHandle ? 'opacity-30 cursor-not-allowed' : ''}`}
+            className={`flex items-center ${iconGap} transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0 ${
+              post.userHandle === currentUserHandle ? 'opacity-30 cursor-not-allowed' : ''
+            }`}
             onClick={reclipClick}
             disabled={post.userHandle === currentUserHandle}
-            aria-label={post.userHandle === currentUserHandle ? "Cannot reclip your own post" : "Reclip post"}
-            title={post.userHandle === currentUserHandle ? "Cannot reclip your own post" : "Reclip post"}
+            aria-label={post.userHandle === currentUserHandle ? 'Cannot reclip your own post' : 'Reclip post'}
+            title={post.userHandle === currentUserHandle ? 'Cannot reclip your own post' : 'Reclip post'}
           >
-            <FiRepeat className={`${iconSize} ${userReclipped ? 'text-green-500' : 'text-gray-600 dark:text-gray-400'}`} />
+            {userReclipped ? (
+              <div
+                className="p-[1.5px] rounded-full"
+                style={{ background: 'linear-gradient(135deg,#3b82f6,#a855f7)' }}
+              >
+                <div className="w-6 h-6 rounded-full bg-black flex items-center justify-center">
+                  <FiRepeat className="w-3.5 h-3.5 text-white" />
+                </div>
+              </div>
+            ) : (
+              <FiRepeat className={`${iconSize} text-gray-600 dark:text-gray-400`} />
+            )}
             <span className="text-xs text-gray-700 dark:text-gray-300 tabular-nums">{reclips}</span>
           </button>
         </div>
