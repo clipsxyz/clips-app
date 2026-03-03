@@ -1787,62 +1787,30 @@ export async function createPost(
       musicTrackId: musicTrackId || undefined,
     });
 
-    // Transform Laravel response to frontend Post format
-    const finalVideoUrl = response.final_video_url || response.finalVideoUrl;
-    const originalMediaUrl = response.media_url || response.mediaUrl || imageUrl || '';
+    // Transform Laravel response using the same helper we use for feeds
+    // so media URLs are rewritten correctly for phone (localhost → device IP, etc.)
+    let transformed = transformLaravelPost(response);
 
-    const transformedPost = {
-      id: response.id,
-      userHandle: response.user_handle || response.userHandle,
-      locationLabel: response.location_label || response.locationLabel || location || 'Unknown Location',
-      venue: response.venue || venue || undefined,
-      tags: response.tags || [],
-      // Use final_video_url if available (from completed render job), otherwise use original media_url
-      mediaUrl: finalVideoUrl || originalMediaUrl,
-      finalVideoUrl: finalVideoUrl || undefined, // Set as separate field for Media component
-      mediaType: response.media_type || response.mediaType || mediaType,
-      mediaItems: response.media_items || response.mediaItems || (imageUrl ? [{ url: imageUrl, type: mediaType || 'image' }] : undefined),
-      text: response.text_content || response.text || text || undefined,
-      imageText: response.image_text || response.imageText || imageText || undefined,
-      caption: response.caption || caption || undefined,
-      createdAt: new Date(response.created_at || response.createdAt).getTime(),
-      stats: {
-        likes: response.likes_count || response.stats?.likes || 0,
-        views: response.views_count || response.stats?.views || 0,
-        comments: response.comments_count || response.stats?.comments || 0,
-        shares: response.shares_count || response.stats?.shares || 0,
-        reclips: response.reclips_count || response.stats?.reclips || 0,
-      },
-      isBookmarked: response.is_bookmarked || false,
-      isFollowing: response.is_following || false,
-      authorFollowsYou: response.author_follows_you ?? response.authorFollowsYou ?? false,
-      userLiked: response.user_liked || false,
-      stickers: response.stickers || stickers || undefined,
-      templateId: response.template_id || response.templateId || templateId || undefined,
-      bannerText: response.banner_text || response.bannerText || bannerText || undefined,
-      textStyle: response.text_style || response.textStyle || textStyle || undefined,
-      taggedUsers: response.taggedUsers || taggedUsers || undefined,
-      videoCaptionsEnabled: response.video_captions_enabled || response.videoCaptionsEnabled || undefined,
-      videoCaptionText: response.video_caption_text || response.videoCaptionText || undefined,
-      subtitlesEnabled: response.subtitles_enabled || response.subtitlesEnabled || undefined,
-      subtitleText: response.subtitle_text || response.subtitleText || undefined,
-      userLocal: userLocal,
-      userRegional: userRegional,
-      userNational: userNational,
-      // Include renderJobId for PiP tracking
-      renderJobId: response.render_job_id || response.renderJobId,
-    } as Post & { renderJobId?: string };
+    // Ensure we preserve/override location from the current user when available
+    if (userLocal || userRegional || userNational) {
+      transformed = {
+        ...transformed,
+        userLocal: userLocal ?? transformed.userLocal,
+        userRegional: userRegional ?? transformed.userRegional,
+        userNational: userNational ?? transformed.userNational,
+      };
+    }
 
     // Also store newly created posts in the local in-memory array + localStorage
     // so Boost page and mock-mode feeds can see them immediately.
     try {
-      posts.unshift(transformedPost);
+      posts.unshift(transformed);
       savePostsToStorage(posts);
     } catch (e) {
       console.warn('Failed to cache created post locally:', e);
     }
 
-    return transformedPost;
+    return transformed;
   } catch (error: any) {
     console.error('Error creating post via API:', error);
     console.error('Error details:', {

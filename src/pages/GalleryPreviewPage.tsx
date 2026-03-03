@@ -18,6 +18,7 @@ import UserTaggingModal from '../components/UserTaggingModal';
 import { getStickers, STICKER_CATEGORIES } from '../api/stickers';
 import { getGalleryPreviewMedia, clearGalleryPreviewMedia } from '../utils/galleryPreviewCache';
 import { motion } from 'framer-motion';
+import { showUploadOverlay } from '../utils/uploadOverlay';
 
 const FILTER_NAMES = ['None', 'B&W', 'Sepia', 'Vivid', 'Cool', 'Vignette', 'Beauty'];
 const CAROUSEL_MAX = 10;
@@ -426,6 +427,24 @@ export default function GalleryPreviewPage() {
             showToast('Please log in to post.');
             return;
         }
+        const useBackend = import.meta.env.VITE_USE_LARAVEL_API !== 'false' && import.meta.env.VITE_DEV_MODE !== 'true';
+        if (mediaType === 'video' && !useBackend) {
+            await Swal.fire(bottomSheet({
+                title: 'Cannot post video in mock mode',
+                message: 'To post videos from your gallery, the Gazetteer backend needs to be running. In mock mode you can post photos and text, but videos will not upload.',
+                icon: 'alert',
+                confirmButtonText: 'OK',
+            }));
+            return;
+        }
+        const thumbForOverlay = mediaType === 'image'
+            ? (mediaUrl || (carouselItems[0]?.url ?? ''))
+            : (videoFrameDataUrl || mediaUrl || (carouselItems[0]?.url ?? ''));
+        const overlay = thumbForOverlay
+            ? showUploadOverlay({ thumbUrl: thumbForOverlay, initialMessage: 'Posting to Gazetteer…' })
+            : null;
+        // Immediately return user to main feed while upload runs in background
+        navigate('/feed');
         setIsUploading(true);
         try {
             let persistentMediaUrl = mediaUrl;
@@ -502,14 +521,19 @@ export default function GalleryPreviewPage() {
                 venue.trim() || undefined
             );
             showToast('Post created successfully!');
-            navigate('/feed');
+            if (overlay) {
+                overlay.success('Your post is now live on the feed.');
+            }
         } catch (err: any) {
             console.error(err);
             showToast(err?.message || 'Failed to create post. Please try again.');
+            if (overlay) {
+                overlay.error('Could not post. Please try again.');
+            }
         } finally {
             setIsUploading(false);
         }
-    }, [user, mediaUrl, mediaType, carouselItems, stickers, storyLocation, venue, taggedUsers, navigate]);
+    }, [user, mediaUrl, mediaType, carouselItems, stickers, storyLocation, venue, taggedUsers, navigate, videoFrameDataUrl]);
 
     if (hasCheckedCache && !mediaUrl) return null;
 
@@ -701,31 +725,52 @@ export default function GalleryPreviewPage() {
                         onClick={() => setCardTab('caption')}
                         title="Caption"
                         aria-label="Caption"
-                        className={`flex-shrink-0 flex items-center justify-center p-2.5 rounded-xl transition-colors text-white ${
-                            cardTab === 'caption' ? 'bg-white/20' : 'hover:bg-white/10'
+                        className={`flex-shrink-0 flex items-center justify-center p-2.5 rounded-xl transition-colors ${
+                            cardTab === 'caption' ? 'bg-white/10' : 'hover:bg-white/5'
                         }`}
                     >
-                        <FiType className="w-5 h-5" style={{ stroke: 'url(#cardOptionIconGradient)', fill: 'none' }} />
+                        <div
+                            className="p-[1.5px] rounded-full"
+                            style={{ background: 'linear-gradient(135deg,#a855f7,#3b82f6)' }}
+                        >
+                            <div className="w-8 h-8 rounded-full bg-black flex items-center justify-center">
+                                <FiType className="w-4 h-4 text-white" />
+                            </div>
+                        </div>
                     </button>
                     <button
                         onClick={() => setCardTab('location')}
                         title="Location, venue, tag user"
                         aria-label="Location"
-                        className={`flex-shrink-0 flex items-center justify-center p-2.5 rounded-xl transition-colors text-white ${
-                            cardTab === 'location' ? 'bg-white/20' : 'hover:bg-white/10'
+                        className={`flex-shrink-0 flex items-center justify-center p-2.5 rounded-xl transition-colors ${
+                            cardTab === 'location' ? 'bg-white/10' : 'hover:bg-white/5'
                         }`}
                     >
-                        <FiMapPin className="w-5 h-5" style={{ stroke: 'url(#cardOptionIconGradient)', fill: 'none' }} />
+                        <div
+                            className="p-[1.5px] rounded-full"
+                            style={{ background: 'linear-gradient(135deg,#a855f7,#3b82f6)' }}
+                        >
+                            <div className="w-8 h-8 rounded-full bg-black flex items-center justify-center">
+                                <FiMapPin className="w-4 h-4 text-white" />
+                            </div>
+                        </div>
                     </button>
                     <button
                         onClick={() => setCardTab('carousel')}
                         title="Add photos/videos (carousel, max 10)"
                         aria-label="Carousel"
-                        className={`flex-shrink-0 flex items-center justify-center p-2.5 rounded-xl transition-colors relative text-white ${
-                            cardTab === 'carousel' ? 'bg-white/20' : 'hover:bg-white/10'
+                        className={`flex-shrink-0 flex items-center justify-center p-2.5 rounded-xl transition-colors relative ${
+                            cardTab === 'carousel' ? 'bg-white/10' : 'hover:bg-white/5'
                         }`}
                     >
-                        <FiLayers className="w-5 h-5" style={{ stroke: 'url(#cardOptionIconGradient)', fill: 'none' }} />
+                        <div
+                            className="p-[1.5px] rounded-full"
+                            style={{ background: 'linear-gradient(135deg,#a855f7,#3b82f6)' }}
+                        >
+                            <div className="w-8 h-8 rounded-full bg-black flex items-center justify-center">
+                                <FiLayers className="w-4 h-4 text-white" />
+                            </div>
+                        </div>
                         {carouselItems.length > 1 && (
                             <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-3.5 px-1 rounded-full bg-white/90 text-black text-[10px] font-bold flex items-center justify-center">
                                 {carouselItems.length}
@@ -736,11 +781,18 @@ export default function GalleryPreviewPage() {
                         onClick={() => setCardTab('filters')}
                         title="Filters"
                         aria-label="Filters"
-                        className={`flex-shrink-0 flex items-center justify-center p-2.5 rounded-xl transition-colors text-white ${
-                            cardTab === 'filters' ? 'bg-white/20' : 'hover:bg-white/10'
+                        className={`flex-shrink-0 flex items-center justify-center p-2.5 rounded-xl transition-colors ${
+                            cardTab === 'filters' ? 'bg-white/10' : 'hover:bg-white/5'
                         }`}
                     >
-                        <FiFilter className="w-5 h-5" style={{ stroke: 'url(#cardOptionIconGradient)', fill: 'none' }} />
+                        <div
+                            className="p-[1.5px] rounded-full"
+                            style={{ background: 'linear-gradient(135deg,#a855f7,#3b82f6)' }}
+                        >
+                            <div className="w-8 h-8 rounded-full bg-black flex items-center justify-center">
+                                <FiFilter className="w-4 h-4 text-white" />
+                            </div>
+                        </div>
                     </button>
                     <button
                         onClick={handleSaveToDrafts}
@@ -912,7 +964,14 @@ export default function GalleryPreviewPage() {
                                         onClick={() => setShowTagUserModal(true)}
                                         className="w-full px-4 pb-3 flex items-center gap-2 text-left text-sm text-white/90 hover:text-white focus:outline-none"
                                     >
-                                        <FiUser className="w-4 h-4 flex-shrink-0" style={{ stroke: 'url(#cardOptionIconGradient)', fill: 'none' }} />
+                                        <div
+                                            className="p-[1px] rounded-full flex-shrink-0"
+                                            style={{ background: 'linear-gradient(135deg,#a855f7,#3b82f6)' }}
+                                        >
+                                            <div className="w-6 h-6 rounded-full bg-black flex items-center justify-center">
+                                                <FiUser className="w-3.5 h-3.5 text-white" />
+                                            </div>
+                                        </div>
                                         <span className={taggedUsers.length > 0 ? 'text-white' : 'text-white/50'}>
                                             {taggedUsers.length > 0 ? taggedUsers.map((h) => `@${h}`).join(', ') : 'Tag user'}
                                         </span>

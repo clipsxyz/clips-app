@@ -2,7 +2,7 @@
  * SweetAlert2 options for "bottom sheet" style modals (lower half of screen, dark theme, rounded).
  * All app Swals use this style: Gazetteer says shimmer, dark bg, rounded top, white text.
  */
-import type { SweetAlertOptions } from 'sweetalert2';
+import Swal, { type SweetAlertOptions } from 'sweetalert2';
 
 /** Icon: user with plus (follow request) - white on dark */
 const FOLLOW_REQUEST_ICON_SVG = `<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="20" y1="8" x2="20" y2="14"></line><line x1="23" y1="11" x2="17" y2="11"></line></svg>`;
@@ -73,6 +73,62 @@ export function bottomSheet(opts: BottomSheetOptions): SweetAlertOptions {
     cancelButtonText,
     title: undefined,
     html: content,
+  };
+}
+
+export type DraftConfirmAction = 'save' | 'discard' | 'keep';
+
+/** Three-option bottom sheet specifically for "Save draft / Discard / Keep editing" flows. */
+export function saveDraftConfirmSheet(
+  onAction: (action: DraftConfirmAction) => void,
+  title = 'Save draft?',
+  message = 'Would you like to save this as a draft to edit later?'
+): SweetAlertOptions {
+  const iconSvg = ICON_ALERT_SVG;
+  const gazetteerBlock = '<p class=\"swal-bottom-sheet-gazetteer gazetteer-shimmer\">Gazetteer says</p>';
+  const iconBlock = `<div class=\"swal-bottom-sheet-icon\">${iconSvg}</div>`;
+  const messageBlock = `<p class=\"swal-bottom-sheet-message\">${escapeHtml(message)}</p>`;
+  const content = `
+    <div class=\"swal-bottom-sheet-content\">
+      ${gazetteerBlock}
+      ${iconBlock}
+      <h3 class=\"swal-bottom-sheet-title-text\">${escapeHtml(title)}</h3>
+      ${messageBlock}
+      <div class=\"mt-4 px-4 pb-4 space-y-2\">
+        <button class=\"w-full py-3 rounded-full bg-[#3b82f6] text-white text-sm font-semibold hover:bg-[#2563eb] transition\" data-action=\"save\">
+          Save draft
+        </button>
+        <button class=\"w-full py-3 rounded-full bg-[#b91c1c] text-white text-sm font-semibold hover:bg-[#dc2626] transition\" data-action=\"discard\">
+          Discard
+        </button>
+        <button class=\"w-full py-3 rounded-full bg-[#16a34a] text-white text-sm font-semibold hover:bg-[#22c55e] transition\" data-action=\"keep\">
+          Keep editing
+        </button>
+      </div>
+    </div>
+  `;
+
+  return {
+    ...BOTTOM_SHEET_BASE,
+    showConfirmButton: false,
+    showCancelButton: false,
+    title: undefined,
+    html: content,
+    didOpen: (popup) => {
+      const root = popup as HTMLElement;
+      const attach = (action: DraftConfirmAction) => {
+        const btn = root.querySelector<HTMLButtonElement>(`button[data-action="${action}"]`);
+        if (btn) {
+          btn.onclick = () => {
+            onAction(action);
+            Swal.close();
+          };
+        }
+      };
+      attach('save');
+      attach('discard');
+      attach('keep');
+    },
   };
 }
 

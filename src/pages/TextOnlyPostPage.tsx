@@ -7,7 +7,7 @@ import { unifiedSearch } from '../api/search';
 import { showToast } from '../utils/toast';
 import Avatar from '../components/Avatar';
 import Swal from 'sweetalert2';
-import { bottomSheet } from '../utils/swalBottomSheet';
+import { bottomSheet, saveDraftConfirmSheet } from '../utils/swalBottomSheet';
 import { FiMapPin, FiX, FiSearch, FiLayers } from 'react-icons/fi';
 import { TEXT_STORY_TEMPLATES, TextStoryTemplate } from '../textStoryTemplates';
 
@@ -35,6 +35,15 @@ export default function TextOnlyPostPage() {
         : undefined;
 
     const isClip = locationState?.isClip === true;
+
+    // Auto-expand textarea height as the user types, similar to Bluesky's composer
+    useEffect(() => {
+        const el = textInputRef.current;
+        if (!el) return;
+        el.style.height = '0px';
+        const nextHeight = Math.min(el.scrollHeight, 400); // cap height so page layout stays usable
+        el.style.height = `${nextHeight}px`;
+    }, [text]);
 
     useEffect(() => {
         if (!tagSearchQuery.trim()) {
@@ -65,12 +74,36 @@ export default function TextOnlyPostPage() {
     const clipId = locationState?.clipId;
     const templateId = locationState?.templateId;
 
-    const handleCancel = () => {
-        if (isClip) {
-            navigate('/template-editor', { state: { template: { id: templateId } } });
-        } else {
-            navigate('/feed');
+    const handleCancel = async () => {
+        // If there's no text at all, just leave without prompting
+        if (!text.trim()) {
+            if (isClip) {
+                navigate('/template-editor', { state: { template: { id: templateId } } });
+            } else {
+                navigate('/feed');
+            }
+            return;
         }
+
+        await Swal.fire(
+            saveDraftConfirmSheet(async (action) => {
+                if (action === 'save') {
+                    await handleSaveToDrafts();
+                    return;
+                }
+
+                if (action === 'discard') {
+                    setText('');
+                    setLocationText('');
+                    setVenueText('');
+                    setTaggedUsers([]);
+                    setSelectedTemplateId(null);
+                    return;
+                }
+
+                // keep editing: do nothing
+            })
+        );
     };
 
     const handleSaveToDrafts = async () => {
@@ -90,6 +123,7 @@ export default function TextOnlyPostPage() {
                 location: locationText.trim() || undefined,
                 venue: venueText.trim() || undefined,
                 taggedUsers: taggedUsers.length > 0 ? taggedUsers : undefined,
+                textTemplateId: selectedTemplateId || undefined,
             });
             await new Promise<void>((r) => setTimeout(r, 50));
             await Swal.fire(bottomSheet({
@@ -200,9 +234,9 @@ export default function TextOnlyPostPage() {
     const canPost = text.trim().length > 0;
 
     return (
-        <div className="min-h-screen bg-black flex flex-col" style={{ pointerEvents: 'auto' }}>
+        <div className="min-h-screen bg-black flex flex-col pt-14" style={{ pointerEvents: 'auto' }}>
             {/* Header: Cancel + Template picker (left) | Location + Drafts + Post (right) */}
-            <div className="sticky top-0 z-10 bg-black flex-shrink-0">
+            <div className="fixed top-0 left-0 right-0 z-30 bg-black/95 backdrop-blur border-b border-white/10">
                 <div className="flex items-center justify-between px-4 h-14">
                     <div className="flex items-center gap-3">
                         <button
@@ -258,9 +292,9 @@ export default function TextOnlyPostPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                         <div
-                            className="rounded-2xl border border-white/10 bg-[#020617] px-3 py-2"
+                            className="px-3 py-2"
                             style={{
-                                background: activeTemplate ? activeTemplate.background : '#020617',
+                                background: activeTemplate ? activeTemplate.background : '#000000',
                             }}
                         >
                             <textarea
@@ -269,14 +303,18 @@ export default function TextOnlyPostPage() {
                                 onChange={(e) => setText(e.target.value)}
                                 placeholder="What's up?"
                                 maxLength={500}
-                                className="w-full bg-transparent text-[17px] leading-snug resize-none border-none outline-none min-h-[120px] py-2 placeholder:text-gray-400 focus:outline-none focus:ring-0"
-                                rows={5}
+                                className="w-full bg-transparent text-[17px] leading-snug resize-none border-none outline-none min-h-[96px] py-2 placeholder:text-gray-400 focus:outline-none focus:ring-0"
+                                rows={1}
                                 autoFocus={!isClip}
                                 style={{
                                     pointerEvents: 'auto',
                                     width: '100%',
+                                    overflow: 'hidden',
                                     color: activeTemplate ? activeTemplate.textColor : '#ffffff',
-                                    fontFamily: activeTemplate?.fontFamily || 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                                    fontFamily: activeTemplate?.fontFamily || 'system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif',
+                                    border: 'none',
+                                    outline: 'none',
+                                    boxShadow: 'none',
                                 }}
                             />
                         </div>

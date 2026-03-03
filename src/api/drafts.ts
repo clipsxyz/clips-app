@@ -25,6 +25,8 @@ export interface Draft {
   venue?: string;
   /** Tagged user handles for text-only (and other) drafts. */
   taggedUsers?: string[];
+  /** Selected text template ID for text-only drafts. */
+  textTemplateId?: string;
 }
 
 const DRAFTS_KEY = 'user_drafts';

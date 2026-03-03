@@ -429,6 +429,7 @@ export default function ProfilePage() {
           location: draft.location ?? '',
           venue: draft.venue ?? '',
           taggedUsers: draft.taggedUsers ?? [],
+          templateId: draft.textTemplateId ?? null,
         },
       });
       return;
