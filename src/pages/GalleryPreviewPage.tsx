@@ -6,7 +6,8 @@ import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react'
 import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
-import { FiFilter, FiSmile, FiMapPin, FiBookmark, FiSend, FiArrowLeft, FiUser, FiLayers, FiPlus, FiX, FiType, FiVolume2, FiVolumeX } from 'react-icons/fi';
+import { FiFilter, FiSmile, FiBookmark, FiSend, FiArrowLeft, FiUser, FiLayers, FiPlus, FiX, FiType, FiVolume2, FiVolumeX } from 'react-icons/fi';
+import { MdOutlineShareLocation } from 'react-icons/md';
 import { createPost } from '../api/posts';
 import { saveDraft } from '../api/drafts';
 import Swal from 'sweetalert2';
@@ -748,12 +749,12 @@ export default function GalleryPreviewPage() {
                         }`}
                     >
                         <div
-                            className="p-[1.5px] rounded-full"
+                                className="p-[2px] rounded-full"
                             style={{ background: 'linear-gradient(135deg,#a855f7,#3b82f6)' }}
                         >
-                            <div className="w-8 h-8 rounded-full bg-black flex items-center justify-center">
-                                <FiMapPin className="w-4 h-4 text-white" />
-                            </div>
+                                <div className="w-9 h-9 rounded-full bg-black flex items-center justify-center">
+                                    <MdOutlineShareLocation className="w-5 h-5 text-white" />
+                                </div>
                         </div>
                     </button>
                     <button

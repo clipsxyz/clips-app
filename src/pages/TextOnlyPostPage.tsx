@@ -8,7 +8,8 @@ import { showToast } from '../utils/toast';
 import Avatar from '../components/Avatar';
 import Swal from 'sweetalert2';
 import { bottomSheet, saveDraftConfirmSheet } from '../utils/swalBottomSheet';
-import { FiMapPin, FiX, FiSearch, FiLayers } from 'react-icons/fi';
+import { FiX, FiSearch, FiLayers } from 'react-icons/fi';
+import { MdOutlineShareLocation } from 'react-icons/md';
 import { TEXT_STORY_TEMPLATES, TextStoryTemplate } from '../textStoryTemplates';
 import { showUploadOverlay } from '../utils/uploadOverlay';
 
@@ -268,10 +269,10 @@ export default function TextOnlyPostPage() {
                     <div className="flex items-center gap-3">
                         <button
                             onClick={handleOpenLocationSheet}
-                            className="p-1.5 rounded-full text-white hover:bg-white/10 transition-colors"
+                            className="p-2 rounded-full text-white hover:bg-white/10 transition-colors"
                             aria-label="Add location and venue"
                         >
-                            <FiMapPin className="w-5 h-5" />
+                            <MdOutlineShareLocation className="w-6 h-6 text-white" />
                         </button>
                         <button
                             onClick={handleSaveToDrafts}

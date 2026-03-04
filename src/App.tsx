@@ -1,6 +1,8 @@
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiSend, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX, FiClock } from 'react-icons/fi';
+import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX, FiClock } from 'react-icons/fi';
+import { VscLiveShare } from 'react-icons/vsc';
+import { SiFigshare } from 'react-icons/si';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from './constants';
 import TopBar from './components/TopBar';
 import CommentsModal from './components/CommentsModal';
@@ -415,7 +417,9 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
             >
               <div className="w-full h-full rounded-lg bg-black relative z-10" />
             </div>
-            <span className="relative z-10">Clips24</span>
+            <span className="relative z-10 text-[11px] sm:text-sm font-extrabold tracking-[0.14em] uppercase">
+              Clips24
+            </span>
           </button>
         </div>
 
@@ -497,7 +501,9 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
             >
               <div className="w-full h-full rounded-lg bg-black relative z-10" />
             </div>
-            <span className="relative z-10">Discover</span>
+            <span className="relative z-10 text-[11px] sm:text-sm font-extrabold tracking-[0.14em] uppercase">
+              Discover
+            </span>
           </button>
         </div>
       </div>
@@ -994,7 +1000,7 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
                 }}
                 aria-label="Message user"
               >
-                <FiSend className="w-3 h-3 text-red-500" strokeWidth={2.5} />
+                <VscLiveShare className="w-3 h-3 text-red-500" />
               </button>
             )}
             {/* Green tick when we follow them but they don't follow us */}
@@ -1030,39 +1036,23 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
           </div>
         </div>
         <div className="relative z-10 flex flex-col items-end gap-0.5 flex-shrink-0">
-          {/* Story location on top: location → venue → timestamp (news-style entrance) */}
+          {/* Metadata pill on top: location → venue → timestamp (Instagram-style: clean, minimal, no shimmer) */}
           {metadataItems.length > 0 && (() => {
             const current = metadataItems[metadataIndex];
             const Icon = current.type === 'location' ? FiMapPin : current.type === 'venue' ? FiHome : FiClock;
             return (
               <div
-                className="flex items-center gap-0.5 min-w-0 max-w-[85px] justify-end min-h-[0.875rem] overflow-visible"
+                className="flex items-center gap-0.5 min-w-0 max-w-[140px] justify-end min-h-[0.9rem] overflow-visible"
                 title={metadataItems.map((m) => m.label).join(' · ')}
               >
                 <div
                   key={metadataIndex}
-                  className={`flex items-center gap-0.5 justify-end min-w-0 max-w-[85px] rounded-md border border-white animate-chyron-emerge ${metadataTransitionClass}`}
-                  style={{
-                    boxShadow: '0 2px 4px rgba(0,0,0,0.4), 0 1px 0 rgba(255,255,255,0.25) inset, 0 -1px 0 rgba(0,0,0,0.2) inset',
-                  }}
+                  className={`flex items-center gap-1 justify-end min-w-0 max-w-[140px] ${metadataTransitionClass}`}
                 >
-                  <div className="flex items-center gap-0.5 justify-end min-w-0 max-w-[83px] rounded-[5px] bg-black/75 px-1.5 py-0.5" style={{ boxShadow: '0 1px 0 rgba(255,255,255,0.08) inset' }}>
-                    <Icon className="w-2 h-2 flex-shrink-0 text-white/95" />
-                    <span
-                      className="text-[9px] font-medium whitespace-nowrap truncate min-w-0 tracking-tight inline-block"
-                      style={{
-                        background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
-                        backgroundSize: '200% 100%',
-                        WebkitBackgroundClip: 'text',
-                        backgroundClip: 'text',
-                        WebkitTextFillColor: 'transparent',
-                        color: 'transparent',
-                        animation: 'shimmer 6s linear infinite',
-                      }}
-                    >
-                      {current.label}
-                    </span>
-                  </div>
+                  <Icon className="w-3 h-3 flex-shrink-0 text-white/80" />
+                  <span className="text-[10px] font-medium whitespace-nowrap truncate min-w-0 tracking-tight text-white/90">
+                    {current.label}
+                  </span>
                 </div>
               </div>
             );
@@ -2998,21 +2988,14 @@ function EngagementBar({
             <span className="text-xs text-white tabular-nums">{comments}</span>
           </button>
 
-          {/* Share to Stories */}
+          {/* Share to Stories – Gazetteer stories icon (SiFigshare) */}
           <button
             className={`flex items-center ${iconGap} transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0`}
             onClick={shareClick}
             aria-label="Share post to stories"
             title="Share post to stories"
           >
-            <div className={`relative ${iconSize}`}>
-              <div className="absolute inset-0 rounded-full bg-white/90" />
-              <svg className="absolute inset-0 w-full h-full" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="10" cy="10" r="9" stroke="#030712" strokeWidth="1.5" strokeDasharray="2 2" fill="none" />
-                <line x1="10" y1="6" x2="10" y2="14" stroke="#030712" strokeWidth="2" strokeLinecap="round" />
-                <line x1="6" y1="10" x2="14" y2="10" stroke="#030712" strokeWidth="2" strokeLinecap="round" />
-              </svg>
-            </div>
+            <SiFigshare className={`${iconSize} text-white`} />
             <span className="text-xs text-white tabular-nums">{shares}</span>
           </button>
 
@@ -3044,14 +3027,14 @@ function EngagementBar({
 
         {/* Right group: Share/DM (paper plane), Metrics – kept inset from edge (Instagram: bookmark on right) */}
         <div className={`flex items-center flex-shrink-0 ${rowGap}`}>
-          {/* Share (paper airplane) – DM / share sheet */}
+          {/* Share – VS Code Live Share style icon (VscLiveShare) */}
           <button
             className={`flex items-center justify-center ${iconSize} transition-opacity hover:opacity-70 active:opacity-50`}
             onClick={() => _onShare?.()}
             aria-label="Share post"
             title="Share post"
           >
-            <FiSend className={`${iconSize} text-white`} />
+            <VscLiveShare className={`${iconSize} text-white`} />
           </button>
 
           {showBoostButton && onBoost && (
@@ -5066,7 +5049,7 @@ function FeedPageWrapper() {
                 className="flex-shrink-0 w-11 h-11 rounded-full bg-[#0095f6] hover:bg-[#0084d4] disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center text-white transition-colors"
                 aria-label="Send message"
               >
-                <FiSend className="w-5 h-5" />
+                <VscLiveShare className="w-5 h-5" />
               </button>
             </div>
           </div>

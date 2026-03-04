@@ -844,9 +844,11 @@ function postMatchesLocationTab(p: Post, tab: string): boolean {
   const t = tab.toLowerCase();
   const predefinedTabs = ['finglas', 'dublin', 'ireland', 'discover'];
   if (predefinedTabs.includes(t)) {
-    const userLocalLower = (p.userLocal || '').toLowerCase();
-    const userRegionalLower = (p.userRegional || '').toLowerCase();
-    const userNationalLower = (p.userNational || '').toLowerCase();
+    // Normalize stored author locations: trim + lowercase so "Ireland " matches "ireland"
+    const normalize = (v?: string) => (v || '').trim().toLowerCase();
+    const userLocalLower = normalize(p.userLocal);
+    const userRegionalLower = normalize(p.userRegional);
+    const userNationalLower = normalize(p.userNational);
     if (t === 'finglas') return userLocalLower === 'finglas';
     if (t === 'dublin') return userRegionalLower === 'dublin';
     if (t === 'ireland') return userNationalLower === 'ireland';
@@ -1021,17 +1023,33 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       const isOwn = !!_currentUserHandle && norm(p.userHandle) === norm(_currentUserHandle) && !p.isReclipped;
       if (isOwn) {
         if (t === 'discover') return true; // Following feed: always show your posts
-        return postMatchesLocationTab(p, t); // Location feeds: only show your posts if they match this location
+
+        // For your own posts in the three core location tabs (local / regional / national),
+        // always show them – users expect to see their own posts in all of their tiers.
+        if (['finglas', 'dublin', 'ireland'].includes(t)) {
+          return true;
+        }
+
+        // For any other custom location feeds, fall back to the normal matching logic
+        // using your CURRENT profile location instead of the snapshot on the post.
+        const ownLocationPost: Post = {
+          ...p,
+          userLocal: _userLocal || p.userLocal,
+          userRegional: _userRegional || p.userRegional,
+          userNational: _userNational || p.userNational,
+        };
+        return postMatchesLocationTab(ownLocationPost, t);
       }
 
       if (t === 'discover') {
+        // Mock Following feed:
+        // - show posts from any handle the user follows
+        // - always show your own posts (authored or reclipped)
         const follows = getFollowsForDiscover(userId);
-        const anyFollowing = Object.values(follows).some(v => v === true);
         const isFollowing = getFollowState(follows, p.userHandle);
-        const isMyReclip = !!_currentUserHandle && norm(p.userHandle) === norm(_currentUserHandle) && p.userReclipped === true;
-        if (!anyFollowing) return p.isReclipped && isMyReclip;
-        if (p.isReclipped) return isFollowing || isMyReclip;
-        return isFollowing;
+        const isOwnAuthor = !!_currentUserHandle && norm(p.userHandle) === norm(_currentUserHandle);
+        const isMyReclip = isOwnAuthor && p.isReclipped === true;
+        return isFollowing || isOwnAuthor || isMyReclip;
       }
 
       if (t.toLowerCase() === 'clips') {
@@ -1054,13 +1072,20 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       }
 
       const tabLower = t.toLowerCase();
-      const userLocalLower = (p.userLocal || '').toLowerCase();
-      const userRegionalLower = (p.userRegional || '').toLowerCase();
-      const userNationalLower = (p.userNational || '').toLowerCase();
+      const normalize = (v?: string) => (v || '').trim().toLowerCase();
+      const userLocalLower = normalize(p.userLocal);
+      const userRegionalLower = normalize(p.userRegional);
+      const userNationalLower = normalize(p.userNational);
+
+      // For Ireland tab in mock mode, treat Dublin regional/local as Ireland when national is missing.
+      if (t === 'ireland') {
+        if (userNationalLower === 'ireland') return true;
+        if (userNationalLower === '' && (userRegionalLower === 'dublin' || userLocalLower === 'dublin')) return true;
+      }
+
       if (tabLower === userLocalLower || tabLower === userRegionalLower || tabLower === userNationalLower) return true;
       if (t === 'finglas' && p.userLocal === 'Finglas') return true;
       if (t === 'dublin' && p.userRegional === 'Dublin') return true;
-      if (t === 'ireland' && p.userNational === 'Ireland') return true;
       return false;
     });
 
@@ -1079,16 +1104,52 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
         const avaNormal = getAvaNormalPost();
         sorted = [avaNormal, ...sorted];
       }
+
+      // Also guarantee ALL of the current user's posts appear in their own Ireland feed,
+      // regardless of how location was snapshotted on the post (mock/dev convenience).
+      if (_currentUserHandle) {
+        const ownHandleLower = _currentUserHandle.trim().toLowerCase();
+        const ownPosts = posts.filter(p => (p.userHandle || '').trim().toLowerCase() === ownHandleLower);
+        if (ownPosts.length > 0) {
+          const seenIds = new Set<string>();
+          const merged = [...ownPosts, ...sorted].filter(p => {
+            const id = String(p.id);
+            if (seenIds.has(id)) return false;
+            seenIds.add(id);
+            return true;
+          });
+          sorted = merged;
+        }
+      }
     }
 
-    // Following (discover) mock path: if user follows Ava but she's not in the list (e.g. not in global posts), prepend her
+    // Following (discover) mock path: ensure key mock users you've followed (Ava, Bob) appear
     if (t === 'discover' && (cursor === null || cursor === 0)) {
-      const followsAva = getFollowState(getFollowsForDiscover(userId), 'Ava@galway');
-      const hasAva = sorted.some(p => p.id === 'ava-normal-ireland-demo' || (p.userHandle && p.userHandle.toLowerCase() === 'ava@galway'));
+      const follows = getFollowsForDiscover(userId);
+
+      // Ava
+      const followsAva = getFollowState(follows, 'Ava@galway');
+      const hasAva = sorted.some(
+        p => p.id === 'ava-normal-ireland-demo' || (p.userHandle && p.userHandle.toLowerCase() === 'ava@galway')
+      );
       if (followsAva && !hasAva) {
         const avaNormal = getAvaNormalPost();
         sorted = [avaNormal, ...sorted];
         if (!posts.find((p) => p.id === avaNormal.id)) posts.push(avaNormal);
+      }
+
+      // Bob
+      const followsBob = getFollowState(follows, 'Bob@Ireland');
+      const hasBob = sorted.some(
+        p => p.userHandle && p.userHandle.toLowerCase() === 'bob@ireland'
+      );
+      if (followsBob && !hasBob) {
+        const bobPost = posts.find(
+          p => p.userHandle && p.userHandle.toLowerCase() === 'bob@ireland'
+        );
+        if (bobPost) {
+          sorted = [decorateForUser(userId, bobPost), ...sorted];
+        }
       }
     }
 

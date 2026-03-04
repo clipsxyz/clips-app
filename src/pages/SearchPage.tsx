@@ -61,21 +61,29 @@ export default function SearchPage() {
 
             {/* Search Bar */}
             <div className="relative">
-                <FiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    onFocus={() => { setShowSearchMode(true); setIsFocused(true); }}
-                    onBlur={() => setIsFocused(false)}
-                    placeholder=""
-                    className="w-full pl-10 pr-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                />
+                {/* Outer gradient ring on focus, similar to Discover bottom search */}
+                <div
+                    className={isFocused ? 'rounded-lg p-[1.5px] bg-gradient-to-r from-blue-500 to-purple-600' : ''}
+                >
+                    <div className="relative rounded-lg bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600">
+                        <FiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                        <input
+                            type="text"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            onFocus={() => { setShowSearchMode(true); setIsFocused(true); }}
+                            onBlur={() => setIsFocused(false)}
+                            placeholder=""
+                            className="w-full pl-10 pr-4 py-3 rounded-lg bg-transparent text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-0 focus:border-transparent"
+                        />
+                    </div>
+                </div>
                 {(!searchQuery) && (
                     <div className="pointer-events-none absolute left-10 right-4 top-1/2 -translate-y-1/2 select-none z-10">
                         <span
                             style={{
-                                background: 'linear-gradient(90deg, #87ceeb, #ffb6c1, #87cefa, #c084fc, #34d399, #f59e0b, #ef4444, #dc2626, #fca5a5, #60a5fa, #fb7185, #87ceeb)',
+                                // Match Discover's feel but with Gazetteer purple→blue gradient and shimmer
+                                background: 'linear-gradient(90deg, #3b82f6, #a855f7, #3b82f6)',
                                 backgroundSize: '200% 100%',
                                 WebkitBackgroundClip: 'text',
                                 backgroundClip: 'text',
