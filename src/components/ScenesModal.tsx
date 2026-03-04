@@ -1,8 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { FiX, FiHeart, FiShare2, FiRepeat, FiMapPin, FiHome, FiClock, FiVolume2, FiVolumeX, FiMessageSquare, FiMessageCircle, FiChevronUp, FiChevronDown, FiBookmark, FiMoreHorizontal, FiSend, FiSmile } from 'react-icons/fi';
-import { AiFillHeart } from 'react-icons/ai';
+import { FiX, FiThumbsUp, FiShare2, FiRepeat, FiMapPin, FiHome, FiClock, FiVolume2, FiVolumeX, FiMessageSquare, FiMessageCircle, FiChevronUp, FiChevronDown, FiBookmark, FiMoreHorizontal, FiSend, FiSmile } from 'react-icons/fi';
 import SavePostModal from './SavePostModal';
 import PostMenuModal from './PostMenuModal';
 import Avatar from './Avatar';
@@ -2273,14 +2272,10 @@ export default function ScenesModal({
                                                                     type="button"
                                                                     onClick={() => handleLikeComment(comment.id)}
                                                                     disabled={likingCommentId === comment.id}
-                                                                    className="p-0.5 hover:text-red-500 disabled:opacity-50 disabled:pointer-events-none"
+                                                                    className="p-0.5 hover:text-blue-500 disabled:opacity-50 disabled:pointer-events-none"
                                                                     aria-label={comment.userLiked ? 'Unlike' : 'Like'}
                                                                 >
-                                                                    {comment.userLiked ? (
-                                                                        <AiFillHeart className="w-4 h-4 text-red-500" />
-                                                                    ) : (
-                                                                        <FiHeart className="w-4 h-4" />
-                                                                    )}
+                                                                    <FiThumbsUp className={`w-4 h-4 ${comment.userLiked ? 'text-blue-500' : ''}`} />
                                                                 </button>
                                                                 <span className="text-xs">{comment.likes || 0}</span>
                                                             </div>
@@ -2349,15 +2344,11 @@ export default function ScenesModal({
                                                                                         type="button"
                                                                                         onClick={() => handleLikeReply(comment.id, reply.id)}
                                                                                         disabled={likingReplyKey === `${comment.id}-${reply.id}`}
-                                                                                        className="flex items-center gap-1 text-xs text-gray-500 hover:text-red-500 disabled:opacity-50 disabled:pointer-events-none"
+                                                                                        className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-500 disabled:opacity-50 disabled:pointer-events-none"
                                                                                         aria-label={reply.userLiked ? 'Unlike reply' : 'Like reply'}
                                                                                         title={(reply.likes ?? 0) === 0 ? 'Like this reply' : `${reply.likes ?? 0} likes`}
                                                                                     >
-                                                                                        {reply.userLiked ? (
-                                                                                            <AiFillHeart className="w-3.5 h-3.5 text-red-500" />
-                                                                                        ) : (
-                                                                                            <FiHeart className="w-3.5 h-3.5" />
-                                                                                        )}
+                                                                                        <FiThumbsUp className={`w-3.5 h-3.5 ${reply.userLiked ? 'text-blue-500' : ''}`} />
                                                                                         <span className="text-xs" title="Likes on this reply">{reply.likes ?? 0}</span>
                                                                                     </button>
                                                                                 </div>

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiHeart, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX, FiClock } from 'react-icons/fi';
+import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX, FiClock } from 'react-icons/fi';
 import { VscLiveShare } from 'react-icons/vsc';
 import { SiFigshare } from 'react-icons/si';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from './constants';
@@ -210,6 +210,7 @@ export default function App() {
           && loc.pathname !== '/clip'
           && loc.pathname !== '/stories'
           && loc.pathname !== '/boost'
+          && loc.pathname !== '/search'
           && !loc.pathname.startsWith('/user/')
           && !loc.pathname.startsWith('/create/text-only')
           && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
@@ -2778,6 +2779,7 @@ function EngagementBar({
   /** Called when share to stories succeeds so feed can update share count */
   onShareSuccess?: (postId: string) => void;
 }) {
+  const { user } = useAuth();
   const [isSaved, setIsSaved] = React.useState(false);
   const [showShareToStoriesModal, setShowShareToStoriesModal] = React.useState(false);
 
@@ -2822,6 +2824,182 @@ function EngagementBar({
   const [userReclipped, setUserReclipped] = React.useState(post.userReclipped || false);
   const [busy, setBusy] = React.useState(false);
   const likeCooldownRef = React.useRef(0);
+
+  // Likes sheet (Instagram-style: "Likes and plays" bottom card)
+  const [showLikesSheet, setShowLikesSheet] = React.useState(false);
+  const [likers, setLikers] = React.useState<string[]>([]);
+  const [likersFollowing, setLikersFollowing] = React.useState<Set<string>>(new Set());
+
+  const handleToggleFollowFromLikes = React.useCallback(
+    (handle: string) => {
+      if (!user) return;
+      const uid = user.id;
+      const isFollowing = likersFollowing.has(handle);
+      const next = !isFollowing;
+
+      setFollowState(uid, handle, next);
+      setLikersFollowing((prev) => {
+        const nextSet = new Set(prev);
+        if (next) nextSet.add(handle);
+        else nextSet.delete(handle);
+        return nextSet;
+      });
+    },
+    [likersFollowing, user]
+  );
+
+  const openLikesSheet = React.useCallback(() => {
+    if (!user || likes <= 0) return;
+
+    const maxToShow = Math.min(100, likes);
+    const baseHandles = [
+      'Ava@galway',
+      'Bob@Ireland',
+      'Clara@London',
+      'Diego@Madrid',
+      'Eimear@Dublin',
+      'Farah@Dubai',
+      'Gabe@NYC',
+      'Hana@Tokyo',
+      'Imran@Karachi',
+      'Jules@Paris',
+    ];
+
+    const generated: string[] = [];
+    for (let i = 0; i < maxToShow; i++) {
+      const base = baseHandles[i % baseHandles.length];
+      const suffixIndex = Math.floor(i / baseHandles.length);
+      const handle = suffixIndex === 0 ? base : `${base}_${suffixIndex + 1}`;
+      generated.push(handle);
+    }
+
+    const state = getState(user.id);
+    const followingSet = new Set<string>();
+    generated.forEach((handle) => {
+      if (getFollowState(state.follows, handle)) {
+        followingSet.add(handle);
+      }
+    });
+
+    setLikers(generated);
+    setLikersFollowing(followingSet);
+
+    const listHtml =
+      generated.length === 0
+        ? '<div class="py-8 text-center text-xs text-gray-500">No likes yet.</div>'
+        : generated
+            .map((handle) => {
+              const isFollowing = followingSet.has(handle);
+              const followClasses = isFollowing
+                ? 'px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-white/5 text-gray-200 border border-white/20'
+                : 'px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-blue-500 text-white border border-blue-400';
+              const followLabel = isFollowing ? 'Following' : 'Follow';
+              const followingFlag = isFollowing ? '1' : '0';
+              const avatarUrl = getAvatarForHandle(handle);
+              const initial = handle.charAt(0).toUpperCase();
+              return `
+                <div class="flex items-center justify-between gap-3 py-2">
+                  <div class="flex items-center gap-3 min-w-0">
+                    <div class="w-8 h-8 rounded-full bg-gray-700 flex-shrink-0 overflow-hidden">
+                      <img src="${avatarUrl}" alt="${handle}" class="w-full h-full object-cover" data-initial="${initial}" />
+                    </div>
+                    <div class="min-w-0">
+                      <div class="text-sm font-medium text-gray-100 truncate">
+                        ${handle}
+                      </div>
+                    </div>
+                  </div>
+                  ${
+                    user && user.handle !== handle
+                      ? `<button
+                          type="button"
+                          class="${followClasses}"
+                          data-handle="${handle}"
+                          data-following="${followingFlag}"
+                        >
+                          ${followLabel}
+                        </button>`
+                      : ''
+                  }
+                </div>
+              `;
+            })
+            .join('');
+
+    const config = bottomSheet({
+      title: 'Likes and views',
+      html: `
+        <div class="mt-2 px-4 pb-3 space-y-4">
+          <div class="flex items-center justify-between text-sm text-gray-200">
+            <div class="flex items-center gap-2">
+              <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-black text-white">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M2 9H5V21H2C1.45 21 1 20.55 1 20V10C1 9.45 1.45 9 2 9Z"></path>
+                  <path d="M7.29 7.71L13.69 1.31C13.87 1.13 14.15 1.11 14.35 1.26L15.2 1.9C15.68 2.26 15.9 2.88 15.75 3.47L14.6 8H21C22.1 8 23 8.9 23 10V12.1C23 12.36 22.95 12.62 22.85 12.87L19.76 20.38C19.6 20.76 19.24 21 18.83 21H8C7.45 21 7 20.55 7 20V8.41C7 8.15 7.11 7.89 7.29 7.71Z"></path>
+                </svg>
+              </span>
+              <span class="text-xs text-gray-400">Likes</span>
+              <span class="font-semibold text-sm">${likes.toLocaleString()}</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-black text-white">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12C3 7 7 4 12 4C17 4 21 7 23 12C21 17 17 20 12 20C7 20 3 17 1 12Z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+              </span>
+              <span class="text-xs text-gray-400">Views</span>
+              <span class="font-semibold text-sm">${views.toLocaleString()}</span>
+            </div>
+          </div>
+          <div class="border-t border-white/10 -mx-4"></div>
+          <div class="max-h-[55vh] overflow-y-auto space-y-2 pr-1">
+            ${listHtml}
+          </div>
+        </div>
+      `,
+      icon: 'none',
+      showGazetteer: false,
+      confirmButtonText: 'Close',
+      showCancelButton: false,
+    });
+
+    config.showConfirmButton = true;
+    config.didOpen = (popup) => {
+      const root = popup as HTMLElement;
+
+      // Wire up follow buttons
+      const buttons = root.querySelectorAll<HTMLButtonElement>('button[data-handle]');
+      buttons.forEach((btn) => {
+        btn.onclick = () => {
+          const handle = btn.getAttribute('data-handle');
+          if (!handle) return;
+          const currentlyFollowing = btn.getAttribute('data-following') === '1';
+          const next = !currentlyFollowing;
+          btn.setAttribute('data-following', next ? '1' : '0');
+          btn.textContent = next ? 'Following' : 'Follow';
+          btn.className =
+            next
+              ? 'px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-white/5 text-gray-200 border border-white/20'
+              : 'px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wide bg-blue-500 text-white border border-blue-400';
+          handleToggleFollowFromLikes(handle);
+        };
+      });
+
+      // Fallback avatars: if image fails, show initials on gray circle
+      const imgs = root.querySelectorAll<HTMLImageElement>('img[data-initial]');
+      imgs.forEach((img) => {
+        img.onerror = () => {
+          const initial = img.getAttribute('data-initial') || '?';
+          const parent = img.parentElement;
+          if (!parent) return;
+          parent.innerHTML = `<div class="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-[10px] text-gray-100">${initial}</div>`;
+        };
+      });
+    };
+
+    Swal.fire(config);
+  }, [likes, views, user, handleToggleFollowFromLikes]);
 
   // Sync with post data changes (including shares so counter updates when post is refreshed)
   React.useEffect(() => {
@@ -2955,8 +3133,9 @@ function EngagementBar({
   }
 
   return (
-    <div className="px-4 pb-4 pt-3 border-t min-w-0" style={{ borderColor: '#030712' }}>
-      <div className="flex items-center justify-between min-w-0">
+    <>
+      <div className="px-4 pb-4 pt-3 border-t min-w-0" style={{ borderColor: '#030712' }}>
+        <div className="flex items-center justify-between min-w-0">
         {/* Left group: Like, Views, Comment, Share to Stories, Reclip (Instagram order) */}
         <div className={`flex items-center min-w-0 flex-shrink ${rowGap}`}>
           {/* Like */}
@@ -2974,7 +3153,15 @@ function EngagementBar({
                 <path d="M2 9H5V21H2C1.45 21 1 20.55 1 20V10C1 9.45 1.45 9 2 9ZM7.29 7.71L13.69 1.31C13.87 1.13 14.15 1.11 14.35 1.26L15.2 1.9C15.68 2.26 15.9 2.88 15.75 3.47L14.6 8H21C22.1 8 23 8.9 23 10V12.1C23 12.36 22.95 12.62 22.85 12.87L19.76 20.38C19.6 20.76 19.24 21 18.83 21H8C7.45 21 7 20.55 7 20V8.41C7 8.15 7.11 7.89 7.29 7.71Z" />
               </svg>
             </span>
-            <span className="text-xs text-white tabular-nums">{likes}</span>
+            <span
+              className="text-xs text-white tabular-nums"
+              onClick={(e) => {
+                e.stopPropagation();
+                openLikesSheet();
+              }}
+            >
+              {likes}
+            </span>
           </button>
 
           {/* Comments */}
@@ -3052,17 +3239,105 @@ function EngagementBar({
             </button>
           )}
         </div>
+        </div>
+        <ShareToStoriesModal
+          isOpen={showShareToStoriesModal}
+          onClose={() => setShowShareToStoriesModal(false)}
+          post={post}
+          onShareSuccess={(postId) => {
+            setShares(prev => prev + 1);
+            onShareSuccess?.(postId);
+          }}
+        />
       </div>
-      <ShareToStoriesModal
-        isOpen={showShareToStoriesModal}
-        onClose={() => setShowShareToStoriesModal(false)}
-        post={post}
-        onShareSuccess={(postId) => {
-          setShares(prev => prev + 1);
-          onShareSuccess?.(postId);
-        }}
-      />
-    </div>
+
+      {/* Likes & plays sheet */}
+      {showLikesSheet && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end justify-center px-3 pb-4"
+          onClick={() => setShowLikesSheet(false)}
+        >
+          <div
+            className="w-full max-w-md bg-[#030712] rounded-3xl rounded-b-none pt-3 pb-4 px-4 shadow-xl border border-white/5 max-h-[70vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-center mb-3">
+              <div className="w-10 h-1 rounded-full bg-white/20" />
+            </div>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs uppercase tracking-[0.16em] text-gray-400">
+                Likes and plays
+              </span>
+              <button
+                onClick={() => setShowLikesSheet(false)}
+                className="p-1.5 rounded-full hover:bg-white/10 text-gray-400"
+                aria-label="Close"
+              >
+                <FiX className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between mb-4 text-sm text-gray-200">
+              <div className="flex items-center gap-2">
+                <FiThumbsUp className="w-4 h-4 text-pink-400" />
+                <span className="text-xs text-gray-400">Likes</span>
+                <span className="font-semibold text-sm">{likes.toLocaleString()}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <FiEye className="w-4 h-4 text-blue-400" />
+                <span className="text-xs text-gray-400">Views</span>
+                <span className="font-semibold text-sm">{views.toLocaleString()}</span>
+              </div>
+            </div>
+
+            <div className="border-t border-white/10 -mx-4 mb-2" />
+
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+              {likers.length === 0 ? (
+                <div className="py-8 text-center text-xs text-gray-500">
+                  No likes yet.
+                </div>
+              ) : (
+                likers.map((handle) => {
+                  const isFollowing = likersFollowing.has(handle);
+                  return (
+                    <div
+                      key={handle}
+                      className="flex items-center justify-between gap-3 py-2"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <Avatar
+                          name={handle}
+                          src={getAvatarForHandle(handle)}
+                          size="sm"
+                        />
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-gray-100 truncate">
+                            {handle}
+                          </div>
+                        </div>
+                      </div>
+                      {user && user.handle !== handle && (
+                        <button
+                          onClick={() => handleToggleFollowFromLikes(handle)}
+                          className={`px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wide ${
+                            isFollowing
+                              ? 'bg-white/5 text-gray-200 border border-white/20'
+                              : 'bg-blue-500 text-white border border-blue-400'
+                          }`}
+                        >
+                          {isFollowing ? 'Following' : 'Follow'}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -3144,7 +3419,7 @@ function BoostMetrics({ post, isOpen }: { post: Post; isOpen: boolean }) {
 
         <div className="flex flex-col">
           <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 mb-1">
-            <FiHeart className="w-4 h-4" />
+            <FiThumbsUp className="w-4 h-4" />
             <span className="text-xs font-medium">Likes</span>
           </div>
           <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">
@@ -3205,7 +3480,7 @@ function PostAnalyticsCard({ post, isOpen }: { post: Post; isOpen: boolean }) {
         </div>
         <div className="flex flex-col">
           <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 mb-1">
-            <FiHeart className="w-4 h-4" />
+            <FiThumbsUp className="w-4 h-4" />
             <span className="text-xs font-medium">Likes</span>
           </div>
           <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">{post.stats.likes.toLocaleString()}</span>

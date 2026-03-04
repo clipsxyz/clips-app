@@ -1,6 +1,5 @@
 import React from 'react';
-import { FiX, FiSend, FiMessageSquare, FiHeart, FiChevronDown, FiChevronUp, FiSmile } from 'react-icons/fi';
-import { AiFillHeart } from 'react-icons/ai';
+import { FiX, FiSend, FiMessageSquare, FiThumbsUp, FiChevronDown, FiChevronUp, FiSmile } from 'react-icons/fi';
 import { useAuth } from '../context/Auth';
 import { useOnline } from '../hooks/useOnline';
 import { fetchComments, addComment, addReply, toggleCommentLike, toggleReplyLike } from '../api/posts';
@@ -127,15 +126,11 @@ function CommentItem({
                             }
                         }}
                         disabled={busy}
-                        className="flex items-center gap-1 text-gray-500 hover:text-red-500 disabled:opacity-50 disabled:pointer-events-none"
+                        className="flex items-center gap-1 text-gray-500 hover:text-blue-500 disabled:opacity-50 disabled:pointer-events-none"
                         aria-pressed={liked}
                         aria-label={liked ? 'Unlike comment' : 'Like comment'}
                     >
-                        {liked ? (
-                            <AiFillHeart className="w-4 h-4 text-red-500" />
-                        ) : (
-                            <FiHeart className="w-4 h-4" />
-                        )}
+                        <FiThumbsUp className={`w-4 h-4 ${liked ? 'text-blue-500' : ''}`} />
                         <span className="text-xs">{likes}</span>
                     </button>
                 </div>
@@ -202,11 +197,7 @@ function CommentItem({
                                                 onClick={() => onLikeReply(comment.id, reply.id)}
                                                 className="flex items-center gap-1 text-xs text-gray-500 hover:text-red-500 transition-colors"
                                             >
-                                                {reply.userLiked ? (
-                                                    <AiFillHeart className="w-3.5 h-3.5 text-red-500" />
-                                                ) : (
-                                                    <FiHeart className="w-3.5 h-3.5" />
-                                                )}
+                                                <FiThumbsUp className={`w-3.5 h-3.5 ${reply.userLiked ? 'text-blue-500' : ''}`} />
                                                 <span className="text-xs">{reply.likes ?? 0}</span>
                                             </button>
                                         </div>

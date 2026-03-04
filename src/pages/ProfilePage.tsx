@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import Avatar from '../components/Avatar';
-import { FiCamera, FiBookmark, FiMessageCircle, FiLock, FiUnlock, FiX, FiUser, FiMapPin, FiHeart, FiGlobe, FiEdit3, FiLink2, FiUsers, FiUserCheck, FiPlus, FiTwitter, FiInstagram, FiVideo, FiSettings, FiFileText, FiLayers, FiType } from 'react-icons/fi';
+import { FiCamera, FiBookmark, FiMessageCircle, FiLock, FiUnlock, FiX, FiUser, FiMapPin, FiThumbsUp, FiGlobe, FiEdit3, FiLink2, FiUsers, FiUserCheck, FiPlus, FiTwitter, FiInstagram, FiVideo, FiSettings, FiFileText, FiLayers, FiType } from 'react-icons/fi';
 import Flag from '../components/Flag';
 import { getUserCollections } from '../api/collections';
 import type { Collection } from '../types';
@@ -920,7 +920,7 @@ export default function ProfilePage() {
               <div className="relative flex flex-col items-center gap-3 p-5 rounded-[1rem] bg-[#020617] border border-gray-800 shadow-sm">
                 <ProfileCardImage
                   imagePath={PROFILE_CARD_IMAGES.interests}
-                  icon={<FiHeart className="w-6 h-6 text-gray-600" />}
+                  icon={<FiThumbsUp className="w-6 h-6 text-gray-600" />}
                 />
                 <div className="text-center w-full">
                   <div className="font-semibold text-sm text-gray-100">Interests</div>

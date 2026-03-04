@@ -1,7 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiHeart, FiVolume2, FiVolumeX, FiMaximize2, FiMapPin, FiSend, FiLink, FiCopy, FiPlus, FiHome, FiClock } from 'react-icons/fi';
-import { AiFillHeart } from 'react-icons/ai';
+import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiThumbsUp, FiVolume2, FiVolumeX, FiMaximize2, FiMapPin, FiSend, FiLink, FiCopy, FiPlus, FiHome, FiClock } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle, voteOnPoll } from '../api/stories';
@@ -3075,15 +3074,11 @@ export default function StoriesPage() {
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     e.preventDefault();
-                                    handleReaction('❤️');
+                                    handleReaction('👍');
                                 }}
                                 className="p-1.5 flex-shrink-0"
                             >
-                                {currentStory?.userReaction ? (
-                                    <AiFillHeart className="w-5 h-5 text-red-500" />
-                                ) : (
-                                    <FiHeart className="w-5 h-5 text-white" />
-                                )}
+                                <FiThumbsUp className={`w-5 h-5 ${currentStory?.userReaction ? 'text-blue-400' : 'text-white'}`} />
                             </button>
 
                             {/* Share Button */}

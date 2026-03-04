@@ -56,8 +56,7 @@ export default function SearchPage() {
     };
 
     return (
-        <div className="p-4 space-y-4">
-            {/* Header removed per request */}
+        <div className="px-4 pb-4 space-y-4">
 
             {/* Search Bar */}
             <div className="relative">
@@ -79,20 +78,37 @@ export default function SearchPage() {
                     </div>
                 </div>
                 {(!searchQuery) && (
-                    <div className="pointer-events-none absolute left-10 right-4 top-1/2 -translate-y-1/2 select-none z-10">
-                        <span
-                            style={{
-                                // Match Discover's feel but with Gazetteer purple→blue gradient and shimmer
-                                background: 'linear-gradient(90deg, #3b82f6, #a855f7, #3b82f6)',
-                                backgroundSize: '200% 100%',
-                                WebkitBackgroundClip: 'text',
-                                backgroundClip: 'text',
-                                WebkitTextFillColor: 'transparent',
-                                animation: 'shimmer 6s linear infinite'
-                            }}
-                        >
-                            {placeholders[placeholderIndex]}
-                        </span>
+                    <div className="pointer-events-none absolute left-10 right-4 top-1/2 -translate-y-1/2 select-none z-10 flex">
+                        {(() => {
+                            const text = placeholders[placeholderIndex];
+                            const prefix = 'Search for ';
+                            const hasPrefix = text.startsWith(prefix);
+                            const rest = hasPrefix ? text.slice(prefix.length) : text;
+                            return (
+                                <>
+                                    {hasPrefix && (
+                                        <span className="text-sm font-medium text-white mr-1">
+                                            {prefix.trimEnd()}
+                                        </span>
+                                    )}
+                                    {rest && (
+                                        <span
+                                            className="text-sm font-medium"
+                                            style={{
+                                                background: 'linear-gradient(90deg, #3b82f6, #a855f7, #3b82f6)',
+                                                backgroundSize: '200% 100%',
+                                                WebkitBackgroundClip: 'text',
+                                                backgroundClip: 'text',
+                                                WebkitTextFillColor: 'transparent',
+                                                animation: 'shimmer 6s linear infinite'
+                                            }}
+                                        >
+                                            {rest}
+                                        </span>
+                                    )}
+                                </>
+                            );
+                        })()}
                     </div>
                 )}
             </div>
