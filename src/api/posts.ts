@@ -657,11 +657,16 @@ function transformLaravelPost(response: any): Post {
     );
   }
 
+  // If we've already seen this post locally (e.g. just after createPost),
+  // prefer any existing venue we stored there so venue survives even when
+  // some API endpoints omit it.
+  const existing = posts.find((p) => String(p.id) === String(response.id));
+
   return {
     id: response.id,
     userHandle: response.user_handle || response.userHandle,
     locationLabel: response.location_label || response.locationLabel || 'Unknown Location',
-    venue: response.venue || undefined,
+    venue: existing?.venue || response.venue || undefined,
     tags: response.tags || [],
     // Use final_video_url if available, else media_url, else first media_items item (for still-image posts)
     mediaUrl: resolvedMediaUrl,
@@ -1852,15 +1857,16 @@ export async function createPost(
     // so media URLs are rewritten correctly for phone (localhost → device IP, etc.)
     let transformed = transformLaravelPost(response);
 
-    // Ensure we preserve/override location from the current user when available
-    if (userLocal || userRegional || userNational) {
-      transformed = {
-        ...transformed,
-        userLocal: userLocal ?? transformed.userLocal,
-        userRegional: userRegional ?? transformed.userRegional,
-        userNational: userNational ?? transformed.userNational,
-      };
-    }
+    // Ensure we preserve/override location from the current user when available,
+    // and always keep the venue that the creator entered so the metadata carousel
+    // and venue-based feeds can rely on it even if the API omits it.
+    transformed = {
+      ...transformed,
+      userLocal: userLocal ?? transformed.userLocal,
+      userRegional: userRegional ?? transformed.userRegional,
+      userNational: userNational ?? transformed.userNational,
+      venue: venue || transformed.venue,
+    };
 
     // Also store newly created posts in the local in-memory array + localStorage
     // so Boost page and mock-mode feeds can see them immediately.

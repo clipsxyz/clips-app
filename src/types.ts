@@ -82,6 +82,8 @@ export type Post = {
   // Stickers and templates
   stickers?: StickerOverlay[]; // Stickers applied to the post
   templateId?: string; // Template used to create the post
+  /** Visual frame/style for the feed card (e.g. Polaroid, Neon, Glass, Magazine). */
+  templateStyle?: 'default' | 'polaroid' | 'neon' | 'glass' | 'magazine';
   // News ticker banner
   bannerText?: string; // Scrolling news ticker banner text
   // Text-only post styling

@@ -245,6 +245,12 @@ function PostHeader({
                     {post.createdAt && (
                         <View style={styles.postMeta}>
                             <Text style={styles.timeText}>{timeAgo(post.createdAt)}</Text>
+                            {(post.locationLabel || post.venue) && (
+                                <Text style={styles.locationText}>
+                                    {post.locationLabel}
+                                    {post.venue ? ` · ${post.venue}` : ''}
+                                </Text>
+                            )}
                         </View>
                     )}
                 </TouchableOpacity>

@@ -268,5 +268,33 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     textSize: 'medium',
     fontFamily: '\"Palatino Linotype\",\"Book Antiqua\",Palatino,serif',
   },
+  // Lightweight story-specific templates (24hr stories)
+  {
+    id: 'neon-frame',
+    name: 'Neon Glow',
+    background:
+      'radial-gradient(circle at top, rgba(56,189,248,0.22), rgba(15,23,42,1))',
+    textColor: '#f9fafb',
+    textSize: 'medium',
+    fontFamily: 'system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif',
+  },
+  {
+    id: 'gradient-motion',
+    name: 'Gradient Motion',
+    background:
+      'linear-gradient(135deg,#22c55e,#06b6d4,#6366f1,#ec4899)',
+    textColor: '#f9fafb',
+    textSize: 'medium',
+    fontFamily: 'system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif',
+  },
+  {
+    id: 'glass-shimmer',
+    name: 'Glass Shimmer',
+    background:
+      'linear-gradient(135deg,rgba(15,23,42,0.95),rgba(15,23,42,0.85))',
+    textColor: '#e5e7eb',
+    textSize: 'medium',
+    fontFamily: 'system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif',
+  },
 ];
 

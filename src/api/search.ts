@@ -4,7 +4,7 @@ export type SearchSections = {
     posts?: { items: any[]; nextCursor: number | null };
 };
 
-// Mock users for testing (Sarah@Artane)
+// Mock users for testing (Sarah, Bob, Ava, Clips24)
 const mockUsers = [
     {
         id: 'sarah-artane-1',
@@ -12,6 +12,27 @@ const mockUsers = [
         display_name: 'Sarah',
         handle: 'Sarah@Artane',
         avatar_url: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=400&fit=crop'
+    },
+    {
+        id: 'bob-artane-1',
+        username: 'bob',
+        display_name: 'Bob',
+        handle: 'Bob@Artane',
+        avatar_url: undefined
+    },
+    {
+        id: 'ava-dublin-1',
+        username: 'ava',
+        display_name: 'Ava',
+        handle: 'Ava@Dublin',
+        avatar_url: undefined
+    },
+    {
+        id: 'clips24-1',
+        username: 'clips24',
+        display_name: 'Clips 24',
+        handle: 'Clips24',
+        avatar_url: undefined
     }
 ];
 
@@ -74,18 +95,28 @@ export async function unifiedSearch(params: {
     } catch (error) {
         // Fallback: return mock results if API fails (for testing)
         const qLower = params.q.toLowerCase();
-        if (params.types?.includes('users') && (qLower.includes('sarah') || qLower.includes('artane') || qLower.includes('sarah@artane'))) {
-            return {
-                q: params.q,
-                sections: {
-                    users: {
-                        items: mockUsers,
-                        nextCursor: null
+        if (params.types?.includes('users')) {
+            const filteredUsers = mockUsers.filter((u) => {
+                return (
+                    u.handle.toLowerCase().includes(qLower) ||
+                    (u.display_name && u.display_name.toLowerCase().includes(qLower)) ||
+                    (u.username && u.username.toLowerCase().includes(qLower))
+                );
+            });
+
+            if (filteredUsers.length > 0) {
+                return {
+                    q: params.q,
+                    sections: {
+                        users: {
+                            items: filteredUsers,
+                            nextCursor: null
+                        }
                     }
-                }
-            };
+                };
+            }
         }
-        
+
         // Return empty results instead of throwing error
         return {
             q: params.q,

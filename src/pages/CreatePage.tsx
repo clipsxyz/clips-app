@@ -1022,6 +1022,8 @@ export default function CreatePage() {
                     </div>
                 </div>
 
+                {/* (Template card-style selector removed – revert to original layout) */}
+
                 {/* Media Upload Placeholder - Enhanced with better styling */}
                 {!selectedMedia && !isProcessingMedia && (
                     <div className="px-4 py-4 border-t border-gray-100 dark:border-gray-800 animate-in fade-in duration-300">

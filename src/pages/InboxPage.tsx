@@ -5,7 +5,7 @@ import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { getAvatarForHandle } from '../api/users';
 import { getNotifications, type Notification, type NotificationType, markNotificationRead, markAllNotificationsRead, getUnreadNotificationCount, deleteNotification } from '../api/notifications';
-import { getStoryInsightsForUser, type StoryInsight } from '../api/stories';
+import { getStoryInsightsForUser, type StoryInsight, fetchFollowedUsersStoryGroups } from '../api/stories';
 import { listConversations, seedMockDMs, type ConversationSummary, pinConversation, unpinConversation, acceptMessageRequest } from '../api/messages';
 import { timeAgo } from '../utils/timeAgo';
 import Swal from 'sweetalert2';
@@ -13,6 +13,7 @@ import { bottomSheet } from '../utils/swalBottomSheet';
 import { acceptFollowRequest as acceptFollowRequestLocal, denyFollowRequest as denyFollowRequestLocal, removeFollowRequest } from '../api/privacy';
 import { showToast } from '../utils/toast';
 import { getFollowedUsers } from '../api/posts';
+import type { StoryGroup } from '../types';
 import { FiBookmark } from 'react-icons/fi';
 import { toggleFollow, acceptFollowRequest, denyFollowRequest } from '../api/client';
 import { getSocket } from '../services/socketio';
@@ -166,6 +167,7 @@ export default function InboxPage() {
     const { user } = useAuth();
     const [notifications, setNotifications] = React.useState<Notification[]>([]);
     const [insights, setInsights] = React.useState<StoryInsight[]>([]);
+    const [storyGroups, setStoryGroups] = React.useState<StoryGroup[]>([]);
     const [items, setItems] = React.useState<ConversationSummary[]>([]);
     const [loading, setLoading] = React.useState(true);
     const [activeTab, setActiveTab] = React.useState<'insights' | 'notifications' | 'messages'>('notifications');
@@ -174,11 +176,12 @@ export default function InboxPage() {
     const loadData = React.useCallback(async () => {
         if (!user?.handle) return;
         try {
-            const [notifs, storyInsights, conversations, followedUsers] = await Promise.all([
+            const [notifs, storyInsights, conversations, followedUsers, followedUsersForStories] = await Promise.all([
                 getNotifications(user.handle),
                 getStoryInsightsForUser(user.handle),
                 listConversations(user.handle),
-                user?.id ? getFollowedUsers(user.id).catch(() => [] as string[]) : Promise.resolve([] as string[])
+                user?.id ? getFollowedUsers(user.id).catch(() => [] as string[]) : Promise.resolve([] as string[]),
+                user?.id ? getFollowedUsers(user.id).catch(() => [] as string[]) : Promise.resolve([] as string[]),
             ]);
             
             // Add follow status to conversations
@@ -221,6 +224,27 @@ export default function InboxPage() {
             setNotifications(allNotifications);
             setInsights(storyInsights);
             setItems(conversationsWithFollowStatus);
+
+            // Load story groups for followed users (for the horizontal stories row)
+            if (user?.id) {
+                try {
+                    const groups = await fetchFollowedUsersStoryGroups(user.id, followedUsersForStories as string[]);
+                    // Enrich with avatar URLs (use current user's avatar or mock avatars from getAvatarForHandle)
+                    const groupsWithAvatars = groups.map((group) => {
+                        if (group.userId === user.id && user.avatarUrl) {
+                            return { ...group, avatarUrl: user.avatarUrl };
+                        }
+                        const avatarUrl = group.avatarUrl || getAvatarForHandle(group.userHandle);
+                        return { ...group, avatarUrl };
+                    });
+                    setStoryGroups(groupsWithAvatars);
+                } catch (e) {
+                    console.warn('Failed to load story groups for inbox header:', e);
+                    setStoryGroups([]);
+                }
+            } else {
+                setStoryGroups([]);
+            }
             setLoading(false);
         } catch (error) {
             console.error('Error loading inbox data:', error);
@@ -589,6 +613,40 @@ export default function InboxPage() {
                     </button>
                 </div>
             </div>
+
+            {/* Stories row (TikTok / Instagram style) */}
+            {storyGroups.length > 0 && (
+                <div className="mb-4 overflow-x-auto scrollbar-hide">
+                    <div className="flex items-center gap-3 px-0.5">
+                        {storyGroups.map((group) => (
+                            <button
+                                key={group.userId || group.userHandle}
+                                type="button"
+                                onClick={() => {
+                                    navigate('/stories', { state: { openUserHandle: group.userHandle } });
+                                }}
+                                className="flex flex-col items-center gap-1 flex-shrink-0"
+                            >
+                                <div className="relative">
+                                    {/* Story ring */}
+                                    <div className="w-14 h-14 rounded-full p-[2px] bg-gradient-to-tr from-teal-400 via-sky-500 to-fuchsia-500">
+                                        <div className="w-full h-full rounded-full bg-black flex items-center justify-center overflow-hidden">
+                                            <Avatar
+                                                name={group.userHandle}
+                                                src={group.avatarUrl}
+                                                size="md"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                                <span className="max-w-[72px] text-[11px] text-gray-300 truncate">
+                                    {group.userHandle}
+                                </span>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* Tabs */}
             <div className="flex mb-4 border-b border-gray-800">

@@ -152,6 +152,7 @@ export async function createPost(postData: {
     subtitleText?: string;
     editTimeline?: any; // Edit timeline for hybrid editing pipeline
     musicTrackId?: number; // Library music track ID
+    templateStyle?: 'default' | 'polaroid' | 'neon' | 'glass' | 'magazine';
 }) {
     return apiRequest('/posts', {
         method: 'POST',

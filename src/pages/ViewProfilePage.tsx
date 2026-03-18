@@ -485,7 +485,7 @@ export default function ViewProfilePage() {
                     // Fetch from tabs in parallel for better performance
                     const tabPromises = allTabs.map(async (tab) => {
                         try {
-                            const page = await fetchPostsPage(tab, null, 100, user?.id || 'me', user?.local || '', user?.regional || '', user?.national || '');
+                            const page = await fetchPostsPage(tab, null, 100, user?.id || 'me', user?.local || '', user?.regional || '', user?.national || '', undefined, null);
                             return page.items.filter(post => post.userHandle === decodedHandle);
                         } catch (error) {
                             return [];
