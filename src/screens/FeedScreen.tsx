@@ -162,14 +162,14 @@ function PostHeader({
     post,
     onFollow,
     isCurrentUser,
-    onAvatarPress,
-    onStoryPress
+    onProfileMenuPress,
+    onHasStoryChange,
 }: {
     post: Post;
     onFollow?: () => Promise<void>;
     isCurrentUser: boolean;
-    onAvatarPress?: () => void;
-    onStoryPress?: () => void;
+    onProfileMenuPress?: () => void;
+    onHasStoryChange?: (hasStory: boolean) => void;
 }) {
     const [hasStory, setHasStory] = useState(false);
     const [showFollowCheck, setShowFollowCheck] = useState(post.isFollowing === true);
@@ -184,6 +184,7 @@ function PostHeader({
                     result = await userHasUnviewedStoriesByHandle(post.userHandle);
                 }
                 setHasStory(result);
+                onHasStoryChange?.(result);
             } catch (error) {
                 console.error('Error checking story:', error);
             }
@@ -213,7 +214,7 @@ function PostHeader({
             <View style={styles.postHeaderLeft}>
                 <TouchableOpacity 
                     style={styles.avatarWrapper}
-                    onPress={hasStory ? onStoryPress : onAvatarPress}
+                    onPress={onProfileMenuPress}
                 >
                     <Avatar
                         src={undefined}
@@ -239,7 +240,7 @@ function PostHeader({
                 </TouchableOpacity>
                 <TouchableOpacity 
                     style={styles.postHeaderInfo}
-                    onPress={onAvatarPress}
+                    onPress={onProfileMenuPress}
                 >
                     <Text style={styles.userHandle}>{post.userHandle}</Text>
                     {post.createdAt && (
@@ -602,8 +603,8 @@ const FeedCard = React.memo(function FeedCard({
     onReclip,
     onBookmark,
     onPostPress,
-    onAvatarPress,
-    onStoryPress,
+    onVisitProfile,
+    onViewStories,
     onNotificationsPress,
     unreadCount,
     hasInbox,
@@ -618,14 +619,16 @@ const FeedCard = React.memo(function FeedCard({
     onReclip: () => Promise<void>;
     onBookmark: () => Promise<void>;
     onPostPress?: () => void;
-    onAvatarPress?: () => void;
-    onStoryPress?: () => void;
+    onVisitProfile?: () => void;
+    onViewStories?: () => void;
     onNotificationsPress?: () => void;
     unreadCount?: number;
     hasInbox?: boolean;
     isCurrentUser: boolean;
 }) {
     const [imageDimensions, setImageDimensions] = React.useState<{ width: number; height: number } | null>(null);
+    const [profileMenuVisible, setProfileMenuVisible] = React.useState(false);
+    const [headerHasStory, setHeaderHasStory] = React.useState(false);
     const screenWidth = Dimensions.get('window').width;
 
     // Auto-detect image dimensions if not provided
@@ -674,8 +677,8 @@ const FeedCard = React.memo(function FeedCard({
                 post={post}
                 onFollow={onFollow}
                 isCurrentUser={isCurrentUser}
-                onAvatarPress={onAvatarPress}
-                onStoryPress={onStoryPress}
+                onProfileMenuPress={() => setProfileMenuVisible(true)}
+                onHasStoryChange={setHeaderHasStory}
             />
 
             {post.isBoosted && (
@@ -772,6 +775,54 @@ const FeedCard = React.memo(function FeedCard({
                     </TouchableOpacity>
                 </View>
             </View>
+
+            {/* Profile quick actions menu (Visit profile / Follow-Unfollow / View stories) */}
+            {profileMenuVisible && (
+                <View style={styles.profileMenuCard}>
+                    <TouchableOpacity
+                        style={styles.profileMenuItem}
+                        onPress={() => {
+                            setProfileMenuVisible(false);
+                            onVisitProfile?.();
+                        }}
+                    >
+                        <Icon name="person-outline" size={18} color="#FFFFFF" />
+                        <Text style={styles.profileMenuItemText}>Visit profile</Text>
+                    </TouchableOpacity>
+
+                    {!isCurrentUser && onFollow && (
+                        <TouchableOpacity
+                            style={styles.profileMenuItem}
+                            onPress={async () => {
+                                setProfileMenuVisible(false);
+                                await onFollow();
+                            }}
+                        >
+                            <Icon
+                                name={post.isFollowing ? 'person-remove-outline' : 'person-add-outline'}
+                                size={18}
+                                color="#FFFFFF"
+                            />
+                            <Text style={styles.profileMenuItemText}>
+                                {post.isFollowing ? 'Unfollow' : 'Follow'}
+                            </Text>
+                        </TouchableOpacity>
+                    )}
+
+                    {headerHasStory && onViewStories && (
+                        <TouchableOpacity
+                            style={styles.profileMenuItem}
+                            onPress={() => {
+                                setProfileMenuVisible(false);
+                                onViewStories();
+                            }}
+                        >
+                            <Icon name="play-circle-outline" size={18} color="#FFFFFF" />
+                            <Text style={styles.profileMenuItemText}>View stories</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
+            )}
         </TouchableOpacity>
     );
 });
@@ -1047,8 +1098,8 @@ function FeedScreen({ navigation }: { navigation?: any }) {
                 }
             }}
             onPostPress={() => navigation.navigate('PostDetail', { postId: post.id })}
-            onAvatarPress={() => navigation.navigate('ViewProfile', { handle: post.userHandle })}
-            onStoryPress={() => navigation.navigate('Stories', { openUserHandle: post.userHandle })}
+            onVisitProfile={() => navigation.navigate('ViewProfile', { handle: post.userHandle })}
+            onViewStories={() => navigation.navigate('Stories', { openUserHandle: post.userHandle })}
             onNotificationsPress={() => navigation.navigate('Inbox')}
             unreadCount={unreadCount}
             hasInbox={hasInbox}
@@ -1201,6 +1252,33 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         fontSize: 9,
         fontWeight: 'bold',
+    },
+    profileMenuCard: {
+        marginTop: 60,
+        marginLeft: 16,
+        backgroundColor: '#020617',
+        borderRadius: 12,
+        paddingVertical: 4,
+        minWidth: 170,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: '#1F2937',
+        shadowColor: '#000',
+        shadowOpacity: 0.35,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 6 },
+        elevation: 12,
+    },
+    profileMenuItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        columnGap: 8,
+    },
+    profileMenuItemText: {
+        fontSize: 14,
+        color: '#F9FAFB',
+        fontWeight: '500',
     },
     tabContainer: {
         backgroundColor: 'transparent',

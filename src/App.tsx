@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { FiHome, FiUser, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX, FiClock } from 'react-icons/fi';
+import { FiHome, FiUser, FiUserPlus, FiUserX, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX, FiClock } from 'react-icons/fi';
 import { VscLiveShare } from 'react-icons/vsc';
 import { SiFigshare } from 'react-icons/si';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from './constants';
@@ -871,11 +871,26 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
     };
   }, [post.userHandle, isCurrentUser]);
 
-  const handleAvatarClick = () => {
-    if (hasStory) {
-      // Navigate to stories page with state to auto-open this user's stories
-      navigate('/stories', { state: { openUserHandle: post.userHandle } });
+  // Small profile action card (visit profile / follow / view stories)
+  const [profileMenuOpen, setProfileMenuOpen] = React.useState(false);
+
+  const handleVisitProfile = (e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
     }
+    setProfileMenuOpen(false);
+    navigate(`/user/${isReclippedPost ? post.originalUserHandle : post.userHandle}`);
+  };
+
+  const handleViewStories = (e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    if (!hasStory) return;
+    setProfileMenuOpen(false);
+    navigate('/stories', { state: { openUserHandle: post.userHandle } });
   };
 
   // Check if this is a reclipped post **by the current user**.
@@ -956,7 +971,11 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
               name={post.userHandle.split('@')[0]} // Extract name from handle like "John@Dublin"
               size="sm"
               hasStory={hasStory}
-              onClick={hasStory ? handleAvatarClick : undefined}
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                setProfileMenuOpen((open) => !open);
+              }}
             />
             {/* + icon overlay on profile picture to follow (TikTok style) */}
             {!isCurrentUser && onFollow && !isFollowingThisUser && (
@@ -1022,7 +1041,8 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                navigate(`/user/${isReclippedPost ? post.originalUserHandle : post.userHandle}`);
+                e.preventDefault();
+                setProfileMenuOpen((open) => !open);
               }}
               className={`text-left transition-opacity w-full ${isOverlaid ? 'hover:opacity-80' : 'hover:opacity-70'}`}
             >
@@ -1080,6 +1100,56 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
           )}
         </div>
       </div>
+
+      {/* Inline profile actions card (Visit profile / Follow-Unfollow / View stories) */}
+      {profileMenuOpen && (
+        <div className="absolute left-4 top-full mt-1 z-40 w-48 rounded-2xl bg-[#020617] border border-white/15 shadow-2xl">
+          <button
+            className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-gray-100 hover:bg-gray-800/90"
+            onClick={handleVisitProfile}
+          >
+            <FiUser className="w-4 h-4 text-sky-400" />
+            <span className="font-medium">Visit profile</span>
+          </button>
+
+          {!isCurrentUser && onFollow && (
+            <button
+              className="w-full flex items-center gap-2 px-3 py-2.5 text-sm border-t border-white/5 hover:bg-gray-800/90"
+              onClick={async (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                try {
+                  await onFollow();
+                } finally {
+                  setProfileMenuOpen(false);
+                }
+              }}
+            >
+              {isFollowingThisUser ? (
+                <>
+                  <FiUserX className="w-4 h-4 text-rose-400" />
+                  <span className="font-medium text-rose-300">Unfollow</span>
+                </>
+              ) : (
+                <>
+                  <FiUserPlus className="w-4 h-4 text-emerald-400" />
+                  <span className="font-medium text-emerald-300">Follow</span>
+                </>
+              )}
+            </button>
+          )}
+
+          {hasStory && (
+            <button
+              className="w-full flex items-center gap-2 px-3 py-2.5 text-sm border-t border-white/5 hover:bg-gray-800/90"
+              onClick={handleViewStories}
+            >
+              <FiPlayCircle className="w-4 h-4 text-violet-400" />
+              <span className="font-medium text-violet-300">View stories</span>
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

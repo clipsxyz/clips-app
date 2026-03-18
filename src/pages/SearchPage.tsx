@@ -316,42 +316,35 @@ export default function SearchPage() {
                     </div>
                     <div className="grid grid-cols-3 gap-2">
                         {[
-                            // Europe
-                            'Paris', 'London', 'Rome', 'Madrid', 'Berlin', 'Amsterdam', 'Lisbon', 'Vienna', 'Prague',
-                            // Ireland & UK
-                            'Dublin', 'Cork', 'Galway', 'Belfast', 'Manchester', 'Birmingham',
-                            // North America
-                            'New York', 'Los Angeles', 'Chicago', 'Toronto', 'Vancouver',
-                            // Asia-Pacific
-                            'Tokyo', 'Seoul', 'Singapore', 'Sydney', 'Melbourne',
-                            // Latin America
-                            'Mexico City', 'Rio de Janeiro', 'São Paulo',
+                            'Paris', 'London', 'Rome', 'Madrid', 'Berlin',
+                            'Amsterdam', 'Lisbon', 'Vienna', 'Prague',
+                            'Dublin', 'Cork', 'Galway', 'Belfast',
+                            'New York', 'Los Angeles', 'Chicago',
                         ].map((city, index) => {
-                            const accentColors = [
-                                'from-pink-500/80 to-orange-400/80',
-                                'from-sky-500/80 to-cyan-400/80',
-                                'from-violet-500/80 to-fuchsia-500/80',
-                                'from-emerald-500/80 to-lime-400/80',
-                                'from-amber-500/80 to-rose-500/80',
-                                'from-indigo-500/80 to-blue-400/80',
+                            const iconColors = [
+                                'text-sky-400',
+                                'text-pink-400',
+                                'text-emerald-400',
+                                'text-amber-400',
+                                'text-purple-400',
+                                'text-red-400',
                             ];
-                            const accent = accentColors[index % accentColors.length];
+                            const iconClass = iconColors[index % iconColors.length];
                             return (
                                 <button
                                     key={city}
                                     type="button"
                                     onClick={() => goToLocation(city)}
-                                    className="group relative overflow-hidden rounded-2xl bg-[#050509] border border-white/10 px-2.5 py-2 text-[11px] text-gray-100 shadow-sm"
+                                    className="rounded-2xl bg-black/60 border border-white/10 px-2.5 py-2 text-[11px] text-gray-100 shadow-sm hover:bg-black/80 transition-colors"
                                 >
-                                    <div className={`pointer-events-none absolute inset-0 opacity-80 bg-gradient-to-br ${accent}`} />
-                                    <div className="relative flex flex-col gap-1 items-start">
+                                    <div className="flex flex-col gap-1 items-start">
                                         <div className="inline-flex items-center gap-1.5">
-                                            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-black/60 border border-white/10">
-                                                <FiMapPin className="w-3 h-3 text-sky-300" />
+                                            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-white/5 border border-white/15">
+                                                <FiMapPin className={`w-3 h-3 ${iconClass}`} />
                                             </span>
                                             <span className="truncate font-medium">{city}</span>
                                         </div>
-                                        <span className="text-[10px] text-gray-500 group-hover:text-gray-200 transition-colors">
+                                        <span className="text-[10px] text-gray-500">
                                             Live news near here
                                         </span>
                                     </div>
