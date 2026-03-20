@@ -904,6 +904,70 @@ video {
   }
 }
 
+@keyframes contributeBadgePop {
+  0% {
+    transform: translate(-50%, 6px) scale(0.6);
+    opacity: 0;
+  }
+  55% {
+    transform: translate(-50%, -2px) scale(1.06);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, 0) scale(1);
+    opacity: 1;
+  }
+}
+
+.contribute-badge-pop {
+  animation: contributeBadgePop 420ms cubic-bezier(0.17, 0.89, 0.32, 1.2) both;
+}
+
+@keyframes contributeBadgeBurst {
+  0% {
+    transform: translate(-50%, 0) scale(1);
+    opacity: 1;
+    filter: blur(0);
+  }
+  100% {
+    transform: translate(-50%, -4px) scale(1.35);
+    opacity: 0;
+    filter: blur(2px);
+  }
+}
+
+.contribute-badge-burst {
+  animation: contributeBadgeBurst 220ms ease-out forwards;
+}
+
+@keyframes contributeConfettiBurst {
+  0% {
+    transform: translate(0, 0) scale(0.6) rotate(0deg);
+    opacity: 0.95;
+  }
+  100% {
+    transform: translate(var(--tx), var(--ty)) scale(1) rotate(180deg);
+    opacity: 0;
+  }
+}
+
+.contribute-confetti {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  animation: contributeConfettiBurst 700ms ease-out forwards;
+}
+
+.contribute-confetti.c1 { --tx: -18px; --ty: -16px; background: #fbbf24; }
+.contribute-confetti.c2 { --tx: 16px; --ty: -18px; background: #60a5fa; }
+.contribute-confetti.c3 { --tx: -22px; --ty: -2px; background: #34d399; }
+.contribute-confetti.c4 { --tx: 20px; --ty: -4px; background: #f472b6; }
+.contribute-confetti.c5 { --tx: -10px; --ty: -24px; background: #a78bfa; }
+.contribute-confetti.c6 { --tx: 8px; --ty: -22px; background: #fb7185; }
+
 /* Bottom-sheet style SweetAlert (lower half of screen, dark, rounded) */
 .swal2-container:has(.swal-bottom-sheet-popup) {
   align-items: flex-end !important;

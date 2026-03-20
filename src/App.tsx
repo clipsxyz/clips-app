@@ -56,6 +56,27 @@ function BottomNav({ onCreateClick, onProfileClick }: { onCreateClick: () => voi
   const nav = useNavigate();
   const loc = useLocation();
   const { user } = useAuth();
+  const [showContributeCue, setShowContributeCue] = React.useState(false);
+  const [showContributeBurst, setShowContributeBurst] = React.useState(false);
+
+  React.useEffect(() => {
+    if (loc.pathname !== '/feed') {
+      setShowContributeCue(false);
+      setShowContributeBurst(false);
+      return;
+    }
+    const appears = window.setTimeout(() => setShowContributeCue(true), 550);
+    const bursts = window.setTimeout(() => setShowContributeBurst(true), 3550);
+    const hides = window.setTimeout(() => {
+      setShowContributeCue(false);
+      setShowContributeBurst(false);
+    }, 4300);
+    return () => {
+      window.clearTimeout(appears);
+      window.clearTimeout(bursts);
+      window.clearTimeout(hides);
+    };
+  }, [loc.pathname]);
 
   // Get user initials for fallback
   const getUserInitials = (name: string): string => {
@@ -91,6 +112,7 @@ function BottomNav({ onCreateClick, onProfileClick }: { onCreateClick: () => voi
 
   const item = (path: string, label: string, icon: React.ReactNode, onClick?: () => void, isCustomIcon?: boolean) => {
     const active = loc.pathname === path;
+    const showContributeBadge = loc.pathname === '/feed' && path === '/create' && showContributeCue;
     
     // For custom icons (like profile), render as-is but wrap in square container
     if (isCustomIcon) {
@@ -126,7 +148,25 @@ function BottomNav({ onCreateClick, onProfileClick }: { onCreateClick: () => voi
         aria-current={active ? 'page' : undefined}
         title={label}
       >
-        {createSquareIcon(icon, active)}
+        <div className="relative">
+          {createSquareIcon(icon, active)}
+          {showContributeBadge && (
+            <span className={`contribute-badge-pop absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-2xl bg-[#ff426d] text-white text-[9px] font-bold px-2.5 py-[3px] shadow-[0_6px_16px_rgba(255,66,109,0.5)] ${showContributeBurst ? 'contribute-badge-burst' : ''}`}>
+              Add Yours
+              <span className="absolute left-1/2 -bottom-1 -translate-x-1/2 w-2 h-2 bg-[#ff426d] rotate-45 rounded-[2px]" />
+            </span>
+          )}
+          {showContributeBadge && showContributeBurst && (
+            <span className="absolute -top-3 left-1/2 -translate-x-1/2 pointer-events-none">
+              <span className="contribute-confetti c1" />
+              <span className="contribute-confetti c2" />
+              <span className="contribute-confetti c3" />
+              <span className="contribute-confetti c4" />
+              <span className="contribute-confetti c5" />
+              <span className="contribute-confetti c6" />
+            </span>
+          )}
+        </div>
         <span className={`text-[10px] mt-1 font-medium transition-colors ${
           active 
             ? 'text-gray-900 dark:text-white' 
