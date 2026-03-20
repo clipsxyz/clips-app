@@ -43,7 +43,6 @@ export default function SearchPage() {
     const { user } = useAuth();
     const [searchQuery, setSearchQuery] = React.useState('');
     const [sections, setSections] = React.useState<SearchSections>({});
-    const [placeholderIndex, setPlaceholderIndex] = React.useState(0);
     const [preloadPosts, setPreloadPosts] = React.useState<Post[] | null>(null);
     const [showSearchMode, setShowSearchMode] = React.useState(false);
     const [isFocused, setIsFocused] = React.useState(false);
@@ -56,18 +55,13 @@ export default function SearchPage() {
     const [searchMode, setSearchMode] = React.useState<SearchMode>('locations');
     const [activeTab, setActiveTab] = React.useState<'locations' | 'users' | 'posts'>('locations');
 
-    // Carousel placeholder between two messages
-    React.useEffect(() => {
-        const id = setInterval(() => {
-            setPlaceholderIndex(i => (i + 1) % 2);
-        }, 2500);
-        return () => clearInterval(id);
-    }, []);
-
-    const placeholders = [
-        'Search locations, venues, people…',
-        'Search people to follow near you'
-    ];
+    const modePlaceholder: Record<SearchMode, string> = {
+        locations: 'Search by location',
+        venues: 'Search by venue',
+        nearby: 'Search near me',
+        users: 'Search by users',
+        posts: 'Search by posts',
+    };
 
     // Debounced unified search – manual search only returns results
     // for the active high-level tab (locations / venues / users / posts / nearby).
@@ -118,9 +112,18 @@ export default function SearchPage() {
     }, [searchMode, user?.local]);
 
     const goToLocation = (loc: string) => {
+        sessionStorage.setItem('pendingFilterType', 'location');
         sessionStorage.setItem('pendingLocation', loc);
-        window.dispatchEvent(new CustomEvent('locationChange', { detail: { location: loc } }));
+        window.dispatchEvent(new CustomEvent('locationChange', { detail: { location: loc, filterType: 'location' } }));
         nav('/feed?location=' + encodeURIComponent(loc));
+    };
+
+    const goToVenue = (venue: string) => {
+        // Reuse feed routing with custom filter key set to the venue name.
+        sessionStorage.setItem('pendingFilterType', 'venue');
+        sessionStorage.setItem('pendingLocation', venue);
+        window.dispatchEvent(new CustomEvent('locationChange', { detail: { location: venue, filterType: 'venue' } }));
+        nav('/feed?location=' + encodeURIComponent(venue) + '&type=venue');
     };
 
     const goToUser = (handle: string) => {
@@ -165,6 +168,8 @@ export default function SearchPage() {
                                     if (!q) return;
                                     if (searchMode === 'locations') {
                                         goToLocation(q);
+                                    } else if (searchMode === 'venues') {
+                                        goToVenue(q);
                                     }
                                 }
                             }}
@@ -186,7 +191,7 @@ export default function SearchPage() {
                 {(!searchQuery) && (
                     <div className="pointer-events-none absolute left-10 right-4 top-1/2 -translate-y-1/2 select-none z-10 flex">
                         {(() => {
-                            const text = placeholders[placeholderIndex];
+                            const text = modePlaceholder[searchMode];
                             const prefix = 'Search for ';
                             const hasPrefix = text.startsWith(prefix);
                             const rest = hasPrefix ? text.slice(prefix.length) : text;
@@ -216,7 +221,6 @@ export default function SearchPage() {
                     { id: 'venues', label: 'Venue' },
                     { id: 'nearby', label: 'Near me' },
                     { id: 'users', label: 'Users' },
-                    { id: 'posts', label: 'Posts' },
                 ] as { id: SearchMode; label: string }[]).map((chip) => {
                     const active = searchMode === chip.id;
                     return (
@@ -226,8 +230,9 @@ export default function SearchPage() {
                                 if (chip.id === 'nearby') {
                                     const local = user?.local || 'Local';
                                     try {
+                                        sessionStorage.setItem('pendingFilterType', 'location');
                                         sessionStorage.setItem('pendingLocation', local);
-                                        window.dispatchEvent(new CustomEvent('locationChange', { detail: { location: local } }));
+                                        window.dispatchEvent(new CustomEvent('locationChange', { detail: { location: local, filterType: 'location' } }));
                                     } catch { }
                                     nav(`/feed?location=${encodeURIComponent(local)}`);
                                     return;
@@ -263,7 +268,7 @@ export default function SearchPage() {
                             Popular venues
                         </span>
                         <span className="text-[11px] text-gray-500">
-                            Tap a venue to see posts
+                            Tap a venue to open venue feed
                         </span>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
@@ -281,7 +286,7 @@ export default function SearchPage() {
                             <button
                                 key={v.name}
                                 type="button"
-                                onClick={() => goToLocation(v.city || v.name)}
+                                onClick={() => goToVenue(v.name)}
                                 className="group relative overflow-hidden rounded-2xl bg-[#050509] border border-white/10 px-3 py-2.5 text-left text-xs text-gray-100 shadow-sm"
                             >
                                 <div className={`pointer-events-none absolute inset-0 opacity-80 bg-gradient-to-br ${accent}`} />
@@ -498,7 +503,7 @@ export default function SearchPage() {
                                     {sections.locations!.items!.map((loc: any) => (
                                         <button
                                             key={`${loc.name}-${loc.country || ''}`}
-                                            onClick={() => goToLocation(loc.name)}
+                                            onClick={() => goToVenue(loc.name)}
                                             className="w-full text-left flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800"
                                         >
                                             <div className="h-8 w-8 rounded-full bg-brand-100 dark:bg-brand-900 flex items-center justify-center">

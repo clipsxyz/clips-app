@@ -456,6 +456,106 @@ video {
   animation: gazetteerWave 10s linear infinite alternate;
 }
 
+/* Header wave choreography:
+   Discover -> Gazetteer -> Clips forward -> Clips reverse -> repeat */
+.header-wave-discover-forward,
+.header-wave-gazetteer-forward,
+.header-wave-gazetteer-reverse,
+.header-wave-clips-forward,
+.header-wave-clips-reverse {
+  stroke-dasharray: 300 420;
+  opacity: 0;
+}
+
+.header-wave-discover-forward {
+  animation:
+    waveTravelForward 16s linear infinite,
+    waveVisibleDiscoverForward 16s linear infinite;
+}
+
+.header-wave-gazetteer-forward {
+  animation:
+    waveTravelForward 16s linear infinite,
+    waveVisibleGazetteerForward 16s linear infinite;
+}
+
+.header-wave-gazetteer-reverse {
+  animation:
+    waveTravelReverse 16s linear infinite,
+    waveVisibleGazetteerReverse 16s linear infinite;
+}
+
+.header-wave-clips-forward {
+  animation:
+    waveTravelForward 16s linear infinite,
+    waveVisibleClipsForward 16s linear infinite;
+}
+
+.header-wave-clips-reverse {
+  animation:
+    waveTravelReverse 16s linear infinite,
+    waveVisibleClipsReverse 16s linear infinite;
+}
+
+@keyframes waveTravelForward {
+  0% {
+    stroke-dashoffset: 420;
+  }
+  100% {
+    stroke-dashoffset: -420;
+  }
+}
+
+@keyframes waveTravelReverse {
+  0% {
+    stroke-dashoffset: -420;
+  }
+  100% {
+    stroke-dashoffset: 420;
+  }
+}
+
+@keyframes waveVisibleDiscover {
+  0%, 18% { opacity: 1; }
+  24%, 86% { opacity: 0; }
+  94%, 100% { opacity: 1; }
+}
+
+@keyframes waveVisibleGazetteer {
+  0%, 16% { opacity: 0; }
+  24%, 42% { opacity: 1; }
+  50% { opacity: 0; }
+  100% { opacity: 0; }
+}
+
+@keyframes waveVisibleClipsForward {
+  0%, 26% { opacity: 1; }
+  32%, 100% { opacity: 0; }
+}
+
+@keyframes waveVisibleClipsReverse {
+  0%, 80% { opacity: 0; }
+  86%, 100% { opacity: 1; }
+}
+
+@keyframes waveVisibleGazetteerForward {
+  0%, 20% { opacity: 0; }
+  26%, 48% { opacity: 1; }
+  54%, 100% { opacity: 0; }
+}
+
+@keyframes waveVisibleDiscoverForward {
+  0%, 42% { opacity: 0; }
+  48%, 70% { opacity: 1; }
+  76%, 100% { opacity: 0; }
+}
+
+@keyframes waveVisibleGazetteerReverse {
+  0%, 64% { opacity: 0; }
+  70%, 86% { opacity: 1; }
+  92%, 100% { opacity: 0; }
+}
+
 @keyframes gazetteerWave {
   0% {
     stroke-dashoffset: 420;

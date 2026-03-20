@@ -409,15 +409,39 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
             }`}
             style={{ outline: 'none', boxShadow: 'none' }}
           >
-            <div
-              className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
-              style={{
-                background:
-                  'linear-gradient(90deg, #3b82f6, #a855f7)', // blue → purple
-              }}
+            <div className="absolute -inset-2 rounded-xl bg-gradient-to-r from-blue-500/70 to-purple-500/70 blur-lg pointer-events-none" />
+            <div className="absolute inset-0 rounded-lg bg-black/75 backdrop-blur-sm" />
+            <svg
+              className="absolute inset-0 w-full h-full pointer-events-none"
+              viewBox="0 0 200 40"
+              aria-hidden="true"
             >
-              <div className="w-full h-full rounded-lg bg-black relative z-10" />
-            </div>
+              <defs>
+                <linearGradient id="clipsWaveGradient" x1="0%" y1="50%" x2="100%" y2="50%">
+                  <stop offset="0%" stopColor="transparent" stopOpacity="0" />
+                  <stop offset="20%" stopColor="#3b82f6" stopOpacity="0.95" />
+                  <stop offset="50%" stopColor="#a855f7" stopOpacity="1" />
+                  <stop offset="80%" stopColor="#3b82f6" stopOpacity="0.95" />
+                  <stop offset="100%" stopColor="transparent" stopOpacity="0" />
+                </linearGradient>
+              </defs>
+              <path
+                d="M-20 26 C 20 4, 80 48, 140 8 S 240 42, 280 16"
+                fill="none"
+                stroke="url(#clipsWaveGradient)"
+                strokeWidth="18"
+                strokeLinecap="round"
+                className="header-wave-clips-forward"
+              />
+              <path
+                d="M-20 26 C 20 4, 80 48, 140 8 S 240 42, 280 16"
+                fill="none"
+                stroke="url(#clipsWaveGradient)"
+                strokeWidth="18"
+                strokeLinecap="round"
+                className="header-wave-clips-reverse"
+              />
+            </svg>
             <span className="relative z-10 text-[11px] sm:text-sm font-extrabold tracking-[0.14em] uppercase">
               Clips24
             </span>
@@ -435,6 +459,8 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
             className="relative px-2 sm:px-4 py-1 flex items-center gap-1 sm:gap-2 hover:opacity-80 transition-opacity flex-shrink-0"
             aria-label="Go to notifications"
           >
+            <div className="absolute -inset-2 rounded-xl bg-gradient-to-r from-blue-500/70 to-purple-500/70 blur-lg pointer-events-none" />
+            <div className="absolute inset-0 rounded-lg bg-black/55 backdrop-blur-sm" />
             <div className="relative flex-shrink-0">
               <span className="relative z-10 text-xs sm:text-sm font-semibold tracking-[0.2em] uppercase text-white whitespace-nowrap">
                 GAZETTEER
@@ -447,19 +473,45 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                 <defs>
                   <linearGradient id="gazetteerWaveGradient" x1="0%" y1="50%" x2="100%" y2="50%">
                     <stop offset="0%" stopColor="transparent" stopOpacity="0" />
-                    <stop offset="20%" stopColor="#3b82f6" stopOpacity="0.8" />
-                    <stop offset="50%" stopColor="#a855f7" stopOpacity="0.95" />
-                    <stop offset="80%" stopColor="#3b82f6" stopOpacity="0.8" />
+                    <stop offset="20%" stopColor="#3b82f6" stopOpacity="0.95" />
+                    <stop offset="50%" stopColor="#a855f7" stopOpacity="1" />
+                    <stop offset="80%" stopColor="#3b82f6" stopOpacity="0.95" />
                     <stop offset="100%" stopColor="transparent" stopOpacity="0" />
                   </linearGradient>
+                  <filter id="gazetteerWaveGlow" x="-30%" y="-200%" width="160%" height="500%">
+                    <feGaussianBlur stdDeviation="3.2" result="blur" />
+                    <feColorMatrix
+                      in="blur"
+                      type="matrix"
+                      values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1.2 0"
+                    />
+                  </filter>
                 </defs>
                 <path
                   d="M-20 26 C 20 4, 80 48, 140 8 S 240 42, 280 16"
                   fill="none"
                   stroke="url(#gazetteerWaveGradient)"
-                  strokeWidth="24"
+                  strokeWidth="30"
                   strokeLinecap="round"
-                  className="gazetteer-wave-path"
+                className="header-wave-gazetteer-forward"
+                  filter="url(#gazetteerWaveGlow)"
+                  opacity="0.85"
+                />
+                <path
+                  d="M-20 26 C 20 4, 80 48, 140 8 S 240 42, 280 16"
+                  fill="none"
+                  stroke="url(#gazetteerWaveGradient)"
+                  strokeWidth="20"
+                  strokeLinecap="round"
+                className="header-wave-gazetteer-forward"
+              />
+              <path
+                d="M-20 26 C 20 4, 80 48, 140 8 S 240 42, 280 16"
+                fill="none"
+                stroke="url(#gazetteerWaveGradient)"
+                strokeWidth="20"
+                strokeLinecap="round"
+                className="header-wave-gazetteer-reverse"
                 />
               </svg>
             </div>
@@ -493,15 +545,31 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
             }`}
             style={{ outline: 'none', boxShadow: 'none' }}
           >
-            <div
-              className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
-              style={{
-                background:
-                  'linear-gradient(90deg, #3b82f6, #a855f7)', // blue → purple
-              }}
+            <div className="absolute -inset-2 rounded-xl bg-gradient-to-r from-blue-500/70 to-purple-500/70 blur-lg pointer-events-none" />
+            <div className="absolute inset-0 rounded-lg bg-black/75 backdrop-blur-sm" />
+            <svg
+              className="absolute inset-0 w-full h-full pointer-events-none"
+              viewBox="0 0 200 40"
+              aria-hidden="true"
             >
-              <div className="w-full h-full rounded-lg bg-black relative z-10" />
-            </div>
+              <defs>
+                <linearGradient id="discoverWaveGradient" x1="0%" y1="50%" x2="100%" y2="50%">
+                  <stop offset="0%" stopColor="transparent" stopOpacity="0" />
+                  <stop offset="20%" stopColor="#3b82f6" stopOpacity="0.95" />
+                  <stop offset="50%" stopColor="#a855f7" stopOpacity="1" />
+                  <stop offset="80%" stopColor="#3b82f6" stopOpacity="0.95" />
+                  <stop offset="100%" stopColor="transparent" stopOpacity="0" />
+                </linearGradient>
+              </defs>
+              <path
+                d="M-20 26 C 20 4, 80 48, 140 8 S 240 42, 280 16"
+                fill="none"
+                stroke="url(#discoverWaveGradient)"
+                strokeWidth="18"
+                strokeLinecap="round"
+                className="header-wave-discover-forward"
+              />
+            </svg>
             <span className="relative z-10 text-[11px] sm:text-sm font-extrabold tracking-[0.14em] uppercase">
               Discover
             </span>
@@ -4114,6 +4182,7 @@ function FeedPageWrapper() {
     return () => window.removeEventListener('locationUpdated', handleLocationUpdate as EventListener);
   }, [active]);
   const [customLocation, setCustomLocation] = React.useState<string | null>(null);
+  const [customFilterType, setCustomFilterType] = React.useState<'location' | 'venue' | null>(null);
   const [pages, setPages] = React.useState<Post[][]>([]);
   const [ads, setAds] = React.useState<Ad[]>([]);
   const [cursor, setCursor] = React.useState<number | null>(0);
@@ -4222,12 +4291,14 @@ function FeedPageWrapper() {
       setShowFollowingFeed(false);
       setActive(user?.national || 'Ireland');
       setCustomLocation(null);
+      setCustomFilterType(null);
       setPages([]);
       setCursor(0);
       setEnd(false);
       setError(null);
       // Clear any pending location from sessionStorage
       sessionStorage.removeItem('pendingLocation');
+      sessionStorage.removeItem('pendingFilterType');
     };
     window.addEventListener('resetFeed', handleResetFeed);
     return () => window.removeEventListener('resetFeed', handleResetFeed);
@@ -4271,14 +4342,20 @@ function FeedPageWrapper() {
     };
   }, [user?.handle]);
 
-  // Determine current filter - use 'discover' whenever user is on Following tab so we never briefly request wrong feed
-  const currentFilter = (active === 'Following' || showFollowingFeed) ? 'discover' : (customLocation || active);
+  // Determine current filter - use 'discover' for Following; encode venue feeds explicitly.
+  const currentFilter =
+    (active === 'Following' || showFollowingFeed)
+      ? 'discover'
+      : (customLocation
+        ? (customFilterType === 'venue' ? `venue:${customLocation}` : customLocation)
+        : active);
 
   // Read location from URL query (?location=...) when arriving from Discover
   React.useEffect(() => {
     const params = new URLSearchParams(routerLocation.search);
     const q = params.get('location');
-    console.log('URL params changed, location param:', q, 'current customLocation:', customLocation, 'pathname:', routerLocation.pathname);
+    const type = params.get('type');
+    console.log('URL params changed, location param:', q, 'type:', type, 'current customLocation:', customLocation, 'pathname:', routerLocation.pathname);
 
     // Only process location changes when we're on the feed page
     if (routerLocation.pathname !== '/feed') {
@@ -4286,6 +4363,7 @@ function FeedPageWrapper() {
       if (customLocation) {
         console.log('Not on feed page, clearing customLocation...');
         setCustomLocation(null);
+        setCustomFilterType(null);
         setPages([]);
         setCursor(0);
         setEnd(false);
@@ -4298,6 +4376,7 @@ function FeedPageWrapper() {
       console.log('URL provided location:', q, 'setting customLocation...');
       console.log('About to call setCustomLocation, will update from:', customLocation, 'to:', q);
       setCustomLocation(q);
+      setCustomFilterType(type === 'venue' ? 'venue' : 'location');
       console.log('setCustomLocation called, customLocation should now be:', q);
       // Also reset pages immediately when changing location
       setPages([]);
@@ -4308,6 +4387,7 @@ function FeedPageWrapper() {
       // URL param was cleared AND we're on feed page, clear customLocation too
       console.log('URL param cleared on feed page, clearing customLocation...');
       setCustomLocation(null);
+      setCustomFilterType(null);
       setPages([]);
       setCursor(0);
       setEnd(false);
@@ -4363,8 +4443,10 @@ function FeedPageWrapper() {
   React.useEffect(() => {
     const handleLocationChange = (event: CustomEvent) => {
       const location = event.detail.location;
+      const filterType = event.detail.filterType as 'location' | 'venue' | undefined;
       console.log('Feed received location change:', location);
       setCustomLocation(location);
+      setCustomFilterType(filterType || 'location');
       setPages([]);
       setCursor(0);
       setEnd(false);
@@ -4381,14 +4463,17 @@ function FeedPageWrapper() {
 
     // Check for pending location from Discover page
     const pendingLocation = sessionStorage.getItem('pendingLocation');
+    const pendingFilterType = sessionStorage.getItem('pendingFilterType') as 'location' | 'venue' | null;
     console.log('Checking for pending location, found:', pendingLocation);
     if (pendingLocation) {
       console.log('Feed found pending location:', pendingLocation, 'setting customLocation...');
       sessionStorage.removeItem('pendingLocation');
+      sessionStorage.removeItem('pendingFilterType');
       // Use a small delay to ensure the component is mounted before setting state
       setTimeout(() => {
         console.log('Actually setting customLocation to:', pendingLocation);
         setCustomLocation(pendingLocation);
+        setCustomFilterType(pendingFilterType || 'location');
         setPages([]);
         setCursor(0);
         setEnd(false);
@@ -4833,7 +4918,9 @@ function FeedPageWrapper() {
               <div
                 className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
                 style={{
-                  background: 'linear-gradient(90deg, #3b82f6 0%, #a855f7 50%, #3b82f6 100%)',
+                  background: customFilterType === 'venue'
+                    ? 'linear-gradient(90deg, #22c55e 0%, #ffffff 50%, #22c55e 100%)'
+                    : 'linear-gradient(90deg, #3b82f6 0%, #a855f7 50%, #3b82f6 100%)',
                 }}
               >
                 {/* Overlay that covers border initially, then rotates to reveal it */}
@@ -4849,8 +4936,15 @@ function FeedPageWrapper() {
               </div>
               {/* Content */}
               <span className="relative z-10 flex items-center gap-2">
-                <FiMapPin className="w-4 h-4" />
-                {customLocation} Feed
+                {customFilterType === 'venue' ? <FiHome className="w-4 h-4" /> : <FiMapPin className="w-4 h-4" />}
+                {customFilterType === 'venue' ? (
+                  <>
+                    <span className="inline-block w-2 h-2 rounded-full bg-green-400" />
+                    {customLocation}
+                  </>
+                ) : (
+                  `${customLocation} Feed`
+                )}
               </span>
             </button>
           </div>

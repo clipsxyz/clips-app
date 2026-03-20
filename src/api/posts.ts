@@ -847,10 +847,16 @@ function dedupeItemsById(items: Post[]): Post[] {
 /** Returns true if the post's AUTHOR location matches the feed tab (for location feeds only). Same rule worldwide: author's local/regional/national must match the place. */
 function postMatchesLocationTab(p: Post, tab: string): boolean {
   const t = tab.toLowerCase();
+  const normalize = (v?: string) => (v || '').trim().toLowerCase();
+  const isVenueFeed = t.startsWith('venue:');
+  const venueQuery = isVenueFeed ? t.slice('venue:'.length).trim() : '';
+  if (isVenueFeed) {
+    const venue = normalize((p as any).venue);
+    return !!venue && (venue === venueQuery || venue.includes(venueQuery) || venueQuery.includes(venue));
+  }
   const predefinedTabs = ['finglas', 'dublin', 'ireland', 'discover'];
   if (predefinedTabs.includes(t)) {
     // Normalize stored author locations: trim + lowercase so "Ireland " matches "ireland"
-    const normalize = (v?: string) => (v || '').trim().toLowerCase();
     const userLocalLower = normalize(p.userLocal);
     const userRegionalLower = normalize(p.userRegional);
     const userNationalLower = normalize(p.userNational);
@@ -860,7 +866,6 @@ function postMatchesLocationTab(p: Post, tab: string): boolean {
     return false;
   }
   const query = t.trim().toLowerCase();
-  const normalize = (v?: string) => (v || '').trim().toLowerCase();
   const local = normalize(p.userLocal);
   const regional = normalize(p.userRegional);
   const national = normalize(p.userNational);
@@ -875,8 +880,9 @@ function postMatchesLocationTab(p: Post, tab: string): boolean {
 
 export async function fetchPostsPage(tab: string, cursor: number | null, limit = 5, userId = 'me', _userLocal = '', _userRegional = '', _userNational = '', _currentUserHandle = ''): Promise<Page> {
   const t = tab.toLowerCase();
+  const isVenueFeed = t.startsWith('venue:');
   // When API is off, use mock for all feeds. For Discover (Following), always use mock so local follows from localStorage are used (fixes phone/tablet where API might return empty).
-  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false' && t !== 'discover';
+  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false' && t !== 'discover' && !isVenueFeed;
 
   if (useLaravelAPI) {
     try {
@@ -1065,8 +1071,15 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
 
       const predefinedTabs = ['finglas', 'dublin', 'ireland', 'discover'];
       if (!predefinedTabs.includes(t)) {
-        const query = t.trim().toLowerCase();
+        const query = t.startsWith('venue:') ? t.slice('venue:'.length).trim().toLowerCase() : t.trim().toLowerCase();
+        const isVenueQuery = t.startsWith('venue:');
         const normalize = (v?: string) => (v || '').trim().toLowerCase();
+        const venue = normalize((p as any).venue);
+        // Venue feeds: if tab matches a venue, keep posts tagged with that venue.
+        if (isVenueQuery) {
+          return !!venue && (venue === query || venue.includes(query) || query.includes(venue));
+        }
+        if (venue && (venue === query || venue.includes(query) || query.includes(venue))) return true;
         const local = normalize(p.userLocal);
         const regional = normalize(p.userRegional);
         const national = normalize(p.userNational);
