@@ -624,7 +624,8 @@ export async function fetchStoryGroupByHandle(userHandle: string): Promise<Story
     await delay();
 
     const now = Date.now();
-    const activeStories = stories.filter(s => s.userHandle === userHandle && s.expiresAt > now);
+    const target = (userHandle || '').trim().toLowerCase();
+    const activeStories = stories.filter(s => (s.userHandle || '').trim().toLowerCase() === target && s.expiresAt > now);
 
     if (activeStories.length === 0) return null;
 
@@ -687,19 +688,20 @@ export async function createStory(
             id: response.id,
             userId: response.user_id || userId,
             userHandle: response.user_handle || userHandle,
-            mediaUrl: response.media_url || undefined,
-            mediaType: response.media_type || undefined,
-            text: response.text || undefined,
-            textColor: response.text_color || undefined,
-            textSize: response.text_size || undefined,
+            mediaUrl: response.media_url || mediaUrl || undefined,
+            mediaType: response.media_type || mediaType || undefined,
+            // Keep local text data if backend response omits it (prevents blank text-only stories).
+            text: response.text || text || undefined,
+            textColor: response.text_color || textColor || undefined,
+            textSize: response.text_size || textSize || undefined,
             textStyle: response.text_style || textStyle || undefined,
             stickers: response.stickers || stickers || undefined,
             taggedUsers: response.tagged_users || taggedUsers || undefined, // Get tagged users from backend
             taggedUsersPositions: response.tagged_users_positions || taggedUsersPositions || undefined, // Get tagged users with positions
             createdAt: new Date(response.created_at).getTime() || now,
             expiresAt: new Date(response.expires_at).getTime() || (now + 24 * 60 * 60 * 1000),
-            location: response.location || undefined,
-            venue: response.venue || undefined,
+            location: response.location || location || undefined,
+            venue: response.venue || venue || undefined,
             views: response.views_count || 0,
             hasViewed: response.has_viewed || false,
             reactions: response.reactions || [],
@@ -965,7 +967,8 @@ export async function userHasStoriesByHandle(userHandle: string): Promise<boolea
     await delay();
 
     const now = Date.now();
-    const activeStories = stories.filter(s => s.userHandle === userHandle && s.expiresAt > now);
+    const target = (userHandle || '').trim().toLowerCase();
+    const activeStories = stories.filter(s => (s.userHandle || '').trim().toLowerCase() === target && s.expiresAt > now);
     return activeStories.length > 0;
 }
 
@@ -974,8 +977,9 @@ export async function userHasUnviewedStoriesByHandle(userHandle: string): Promis
     await delay();
 
     const now = Date.now();
+    const target = (userHandle || '').trim().toLowerCase();
     const unviewedStories = stories.filter(s =>
-        s.userHandle === userHandle &&
+        (s.userHandle || '').trim().toLowerCase() === target &&
         s.expiresAt > now &&
         !s.hasViewed
     );

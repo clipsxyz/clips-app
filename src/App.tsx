@@ -1,6 +1,7 @@
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { FiHome, FiUser, FiUserPlus, FiUserX, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX, FiClock } from 'react-icons/fi';
+import { IoMdTrendingUp } from 'react-icons/io';
 import { VscLiveShare } from 'react-icons/vsc';
 import { SiFigshare } from 'react-icons/si';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from './constants';
@@ -22,7 +23,7 @@ import { getUnreadNotificationCount } from './api/notifications';
 import { getStoryInsightsForUser } from './api/stories';
 import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost } from './api/posts';
 import { updatePost, checkFollowsMe } from './api/client';
-import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory } from './api/stories';
+import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory, fetchFollowedUsersStoryGroups } from './api/stories';
 import { enqueue, drain } from './utils/mutationQueue';
 import { loadFeed, saveFeed } from './utils/feedCache';
 import { getStableUserId } from './utils/userId';
@@ -151,8 +152,11 @@ function BottomNav({ onCreateClick, onProfileClick }: { onCreateClick: () => voi
         <div className="relative">
           {createSquareIcon(icon, active)}
           {showContributeBadge && (
-            <span className={`contribute-badge-pop absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-2xl bg-[#ff426d] text-white text-[9px] font-bold px-2.5 py-[3px] shadow-[0_6px_16px_rgba(255,66,109,0.5)] ${showContributeBurst ? 'contribute-badge-burst' : ''}`}>
-              Add Yours
+            <span className={`contribute-badge-pop absolute -top-9 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-2xl bg-[#ff426d] text-white text-[11px] font-bold px-3.5 py-1 shadow-[0_8px_20px_rgba(255,66,109,0.55)] ${showContributeBurst ? 'contribute-badge-burst' : ''}`}>
+              <span className="inline-flex items-center gap-1">
+                <FiMapPin className="w-3.5 h-3.5" />
+                <span>Add Yours</span>
+              </span>
               <span className="absolute left-1/2 -bottom-1 -translate-x-1/2 w-2 h-2 bg-[#ff426d] rotate-45 rounded-[2px]" />
             </span>
           )}
@@ -202,11 +206,18 @@ function BottomNav({ onCreateClick, onProfileClick }: { onCreateClick: () => voi
     </div>
   );
 
+  const discoverFooterIcon = (
+    <div className="w-full h-full rounded-lg bg-black flex items-center justify-center relative">
+      <div className="w-3 h-3 rotate-45 border-2 border-white rounded-[2px]" />
+      <div className="absolute w-1.5 h-1.5 bg-black rotate-45" />
+    </div>
+  );
+
   return (
     <nav aria-label="Primary navigation" className="fixed bottom-0 inset-x-0 bg-gradient-to-t from-black/60 via-black/40 to-transparent z-40 pb-safe backdrop-blur-sm">
       <div className="mx-auto max-w-md flex items-center justify-around px-2 py-0.5">
         {item('/feed', 'Home', <FiHome size={16} />, handleHomeClick)}
-        {item('/boost', 'Boost', <FiZap size={16} />)}
+        {item('/discover', 'Discover', discoverFooterIcon, () => nav('/discover'), true)}
         {item('/create', 'Create', <FiPlusSquare size={16} />, onCreateClick)}
         {item('/search', 'Search', <FiSearch size={16} />)}
         {item('/profile', 'Passport', profileIcon, onProfileClick, true)}
@@ -300,16 +311,13 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
   const [notificationCount, setNotificationCount] = React.useState(0);
   const [insightsCount, setInsightsCount] = React.useState(0);
   const [questionsCount, setQuestionsCount] = React.useState(0);
+  const [showBoostPrompt, setShowBoostPrompt] = React.useState(false);
   const borderOverlayRef = React.useRef<HTMLDivElement>(null);
   const clipsBorderOverlayRef = React.useRef<HTMLDivElement>(null);
   const discoverBorderOverlayRef = React.useRef<HTMLDivElement>(null);
   const tabBorderOverlayRefs = React.useRef<{ [key: string]: HTMLDivElement | null }>({});
   const prevActiveTabRef = React.useRef<Tab | null>(null);
   const clipsDiscoverAnimatedRef = React.useRef(false);
-
-  // Highlight Clips / Discover pills based on current route
-  const isOnClipsPage = location.pathname === '/stories';
-  const isOnDiscoverPage = location.pathname === '/discover';
 
   // Use user location from props or context, with fallback to defaults
   const local = props.userLocal || user?.local || 'Finglas';
@@ -378,8 +386,10 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
     };
   }, [user?.handle]);
 
-  // Main location / feed tabs (Clips and Discover are rendered beside the header)
-  const tabs: Tab[] = [regional, national, 'Following'];
+  // Main location / feed tabs
+  const hasAnyNotifications = notificationCount > 0 || insightsCount > 0 || questionsCount > 0;
+  const showNotificationsTab = true;
+  const tabs: Tab[] = [regional, national, 'Following', 'Boost', ...(showNotificationsTab ? ['__notifications__'] : [])];
 
 
   // Easing function for smooth animation (ease-out cubic)
@@ -434,192 +444,13 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
       {/* Scrim effect */}
       <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/50 to-transparent pointer-events-none z-0" />
 
-      {/* Top header row with Clips on the left, centered Gazetteer logo, and Discover on the right */}
-      <div className="relative z-10 mb-2 flex items-center px-2 sm:px-3 gap-1 sm:gap-2 min-w-0">
-        {/* Left: Clips pill with progressive white border */}
-        <div className="flex items-center flex-shrink-0">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              navigate('/stories');
-            }}
-            className={`relative px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-bold transition-colors rounded-lg min-w-0 ${
-              isOnClipsPage ? 'bg-white/5 text-white' : 'text-gray-300 hover:text-white'
-            }`}
-            style={{ outline: 'none', boxShadow: 'none' }}
-          >
-            <div className="absolute -inset-2 rounded-xl bg-gradient-to-r from-blue-500/70 to-purple-500/70 blur-lg pointer-events-none" />
-            <div className="absolute inset-0 rounded-lg bg-black/75 backdrop-blur-sm" />
-            <svg
-              className="absolute inset-0 w-full h-full pointer-events-none"
-              viewBox="0 0 200 40"
-              aria-hidden="true"
-            >
-              <defs>
-                <linearGradient id="clipsWaveGradient" x1="0%" y1="50%" x2="100%" y2="50%">
-                  <stop offset="0%" stopColor="transparent" stopOpacity="0" />
-                  <stop offset="20%" stopColor="#3b82f6" stopOpacity="0.95" />
-                  <stop offset="50%" stopColor="#a855f7" stopOpacity="1" />
-                  <stop offset="80%" stopColor="#3b82f6" stopOpacity="0.95" />
-                  <stop offset="100%" stopColor="transparent" stopOpacity="0" />
-                </linearGradient>
-              </defs>
-              <path
-                d="M-20 26 C 20 4, 80 48, 140 8 S 240 42, 280 16"
-                fill="none"
-                stroke="url(#clipsWaveGradient)"
-                strokeWidth="18"
-                strokeLinecap="round"
-                className="header-wave-clips-forward"
-              />
-              <path
-                d="M-20 26 C 20 4, 80 48, 140 8 S 240 42, 280 16"
-                fill="none"
-                stroke="url(#clipsWaveGradient)"
-                strokeWidth="18"
-                strokeLinecap="round"
-                className="header-wave-clips-reverse"
-              />
-            </svg>
-            <span className="relative z-10 text-[11px] sm:text-sm font-extrabold tracking-[0.14em] uppercase">
-              Clips24
-            </span>
-          </button>
-        </div>
-
-        {/* Center: Gazetteer logo with wave */}
-        <div className="flex-1 flex items-center justify-center min-w-0">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              navigate('/inbox');
-            }}
-            className="relative px-2 sm:px-4 py-1 flex items-center gap-1 sm:gap-2 hover:opacity-80 transition-opacity flex-shrink-0"
-            aria-label="Go to notifications"
-          >
-            <div className="absolute -inset-2 rounded-xl bg-gradient-to-r from-blue-500/70 to-purple-500/70 blur-lg pointer-events-none" />
-            <div className="absolute inset-0 rounded-lg bg-black/55 backdrop-blur-sm" />
-            <div className="relative flex-shrink-0">
-              <span className="relative z-10 text-xs sm:text-sm font-semibold tracking-[0.2em] uppercase text-white whitespace-nowrap">
-                GAZETTEER
-              </span>
-              <svg
-                className="absolute inset-0 w-full h-full pointer-events-none gazetteer-wave-svg"
-                viewBox="0 0 200 40"
-                aria-hidden="true"
-              >
-                <defs>
-                  <linearGradient id="gazetteerWaveGradient" x1="0%" y1="50%" x2="100%" y2="50%">
-                    <stop offset="0%" stopColor="transparent" stopOpacity="0" />
-                    <stop offset="20%" stopColor="#3b82f6" stopOpacity="0.95" />
-                    <stop offset="50%" stopColor="#a855f7" stopOpacity="1" />
-                    <stop offset="80%" stopColor="#3b82f6" stopOpacity="0.95" />
-                    <stop offset="100%" stopColor="transparent" stopOpacity="0" />
-                  </linearGradient>
-                  <filter id="gazetteerWaveGlow" x="-30%" y="-200%" width="160%" height="500%">
-                    <feGaussianBlur stdDeviation="3.2" result="blur" />
-                    <feColorMatrix
-                      in="blur"
-                      type="matrix"
-                      values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1.2 0"
-                    />
-                  </filter>
-                </defs>
-                <path
-                  d="M-20 26 C 20 4, 80 48, 140 8 S 240 42, 280 16"
-                  fill="none"
-                  stroke="url(#gazetteerWaveGradient)"
-                  strokeWidth="30"
-                  strokeLinecap="round"
-                className="header-wave-gazetteer-forward"
-                  filter="url(#gazetteerWaveGlow)"
-                  opacity="0.85"
-                />
-                <path
-                  d="M-20 26 C 20 4, 80 48, 140 8 S 240 42, 280 16"
-                  fill="none"
-                  stroke="url(#gazetteerWaveGradient)"
-                  strokeWidth="20"
-                  strokeLinecap="round"
-                className="header-wave-gazetteer-forward"
-              />
-              <path
-                d="M-20 26 C 20 4, 80 48, 140 8 S 240 42, 280 16"
-                fill="none"
-                stroke="url(#gazetteerWaveGradient)"
-                strokeWidth="20"
-                strokeLinecap="round"
-                className="header-wave-gazetteer-reverse"
-                />
-              </svg>
-            </div>
-            <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
-              {/* Green dot for notifications */}
-              {notificationCount > 0 && (
-                <div className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-green-500"></div>
-              )}
-              {/* Purple dot for insights */}
-              {insightsCount > 0 && (
-                <div className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-purple-500"></div>
-              )}
-              {/* Red dot for questions */}
-              {questionsCount > 0 && (
-                <div className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-red-500"></div>
-              )}
-            </div>
-          </button>
-        </div>
-
-        {/* Right: Discover pill with progressive white border */}
-        <div className="flex items-center flex-shrink-0">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              navigate('/discover');
-            }}
-            className={`relative px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-bold transition-colors rounded-lg min-w-0 ${
-              isOnDiscoverPage ? 'bg-white/5 text-white' : 'text-gray-300 hover:text-white'
-            }`}
-            style={{ outline: 'none', boxShadow: 'none' }}
-          >
-            <div className="absolute -inset-2 rounded-xl bg-gradient-to-r from-blue-500/70 to-purple-500/70 blur-lg pointer-events-none" />
-            <div className="absolute inset-0 rounded-lg bg-black/75 backdrop-blur-sm" />
-            <svg
-              className="absolute inset-0 w-full h-full pointer-events-none"
-              viewBox="0 0 200 40"
-              aria-hidden="true"
-            >
-              <defs>
-                <linearGradient id="discoverWaveGradient" x1="0%" y1="50%" x2="100%" y2="50%">
-                  <stop offset="0%" stopColor="transparent" stopOpacity="0" />
-                  <stop offset="20%" stopColor="#3b82f6" stopOpacity="0.95" />
-                  <stop offset="50%" stopColor="#a855f7" stopOpacity="1" />
-                  <stop offset="80%" stopColor="#3b82f6" stopOpacity="0.95" />
-                  <stop offset="100%" stopColor="transparent" stopOpacity="0" />
-                </linearGradient>
-              </defs>
-              <path
-                d="M-20 26 C 20 4, 80 48, 140 8 S 240 42, 280 16"
-                fill="none"
-                stroke="url(#discoverWaveGradient)"
-                strokeWidth="18"
-                strokeLinecap="round"
-                className="header-wave-discover-forward"
-              />
-            </svg>
-            <span className="relative z-10 text-[11px] sm:text-sm font-extrabold tracking-[0.14em] uppercase">
-              Discover
-            </span>
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-3 gap-2 px-3 relative z-10">
-        {tabs.map(t => {
-          const active = props.active === t;
+      <div className="relative px-3 z-10">
+        <div className="absolute inset-x-1 -inset-y-2 rounded-2xl bg-gradient-to-r from-blue-500/40 via-purple-500/40 to-cyan-400/35 blur-xl pointer-events-none" />
+        <div className={`relative grid ${showNotificationsTab ? 'grid-cols-[1fr_1fr_1fr_auto_auto]' : 'grid-cols-[1fr_1fr_1fr_auto]'} gap-1.5`}>
+          {tabs.map(t => {
+          const isNotificationsTab = t === '__notifications__';
+          const isBoostTab = t === 'Boost';
+          const active = props.active === t || (isNotificationsTab && location.pathname === '/inbox');
           const id = `tab-${t}`;
           const panelId = `panel-${t}`;
 
@@ -635,6 +466,10 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               props.onChange('Following');
               window.dispatchEvent(new CustomEvent('setFollowingTab'));
               props.onClearCustom?.();
+            } else if (t === 'Boost') {
+              setShowBoostPrompt(true);
+            } else if (t === '__notifications__') {
+              navigate('/inbox');
             } else {
               props.onChange(t);
               props.onClearCustom?.();
@@ -646,7 +481,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
 
           if (active) {
             // Check if this tab should have shimmer animation (regional, national, or Following)
-            const shouldShimmer = t === regional || t === national || t === 'Following';
+            const shouldShimmer = t === regional || t === national || t === 'Following' || t === 'Boost';
 
             return (
               <button
@@ -657,7 +492,9 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                 aria-controls={panelId}
                 tabIndex={active ? 0 : -1}
                 onClick={handleClick}
-                className="relative rounded-lg px-3 py-1.5 text-white text-sm font-medium transition-transform active:scale-[.98] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 flex items-center justify-center gap-1 max-w-[120px]"
+                className={`relative rounded-lg py-1.5 text-white text-xs sm:text-sm font-medium transition-transform active:scale-[.98] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 flex items-center justify-center gap-1 ${
+                  (isBoostTab || isNotificationsTab) ? 'w-10 px-0 justify-self-end' : 'w-full px-2'
+                }`}
                 style={{
                   outline: 'none',
                   boxShadow: 'none'
@@ -686,8 +523,17 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                   <div className="w-full h-full rounded-lg bg-black relative z-10" />
                 </div>
                 {/* Content */}
-                <span className="relative z-10 truncate whitespace-nowrap">
-                  {shouldShimmer ? (
+                <span className="relative z-10 truncate whitespace-nowrap inline-flex items-center justify-center">
+                  {isNotificationsTab ? (
+                    <span className="relative inline-flex items-center justify-center">
+                      <FiBell className="w-4 h-4 text-white" />
+                      {hasAnyNotifications && (
+                        <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-red-500" />
+                      )}
+                    </span>
+                  ) : isBoostTab ? (
+                    <IoMdTrendingUp className="w-5 h-5 text-white" />
+                  ) : shouldShimmer ? (
                     <span
                       className="truncate"
                       style={{
@@ -720,7 +566,13 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               aria-controls={panelId}
               tabIndex={active ? 0 : -1}
               onClick={handleClick}
-              className="rounded-lg px-3 py-1.5 bg-black text-gray-600 dark:text-gray-500 text-sm font-medium transition-transform active:scale-[.98] hover:text-gray-400 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 opacity-60 max-w-[120px]"
+              className={`rounded-lg py-1.5 bg-black text-xs sm:text-sm font-medium transition-transform active:scale-[.98] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${
+                isBoostTab
+                  ? 'w-10 px-0 justify-self-end text-white opacity-100 hover:text-white'
+                  : isNotificationsTab
+                    ? 'w-10 px-0 justify-self-end text-white opacity-100 hover:text-white'
+                  : 'w-full px-2 text-gray-600 dark:text-gray-500 hover:text-gray-400 opacity-60'
+              }`}
               style={{
                 outline: 'none',
                 boxShadow: 'none',
@@ -731,11 +583,70 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                 e.currentTarget.style.boxShadow = 'none';
               }}
             >
-              <span className="truncate whitespace-nowrap">{tabLabel}</span>
+              <span className="truncate whitespace-nowrap inline-flex items-center justify-center">
+                {isNotificationsTab ? (
+                  <span className="relative inline-flex items-center justify-center">
+                    <FiBell className="w-4 h-4 text-white" />
+                    {hasAnyNotifications && (
+                      <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-red-500" />
+                    )}
+                  </span>
+                ) : isBoostTab ? (
+                  <IoMdTrendingUp className="w-5 h-5 text-white" />
+                ) : (
+                  tabLabel
+                )}
+              </span>
             </button>
           );
-        })}
+          })}
+        </div>
       </div>
+
+      {showBoostPrompt && (
+        <div
+          className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-[1px] flex items-center justify-center px-4"
+          onClick={() => setShowBoostPrompt(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border border-white/15 bg-[#0b1220] shadow-[0_20px_55px_rgba(0,0,0,0.6)] p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="inline-flex items-center gap-2 rounded-full border border-cyan-400/40 bg-cyan-500/10 px-3 py-1 text-cyan-200 text-xs font-semibold">
+              <FiZap className="w-3.5 h-3.5" />
+              <span>Boost</span>
+            </div>
+            <p className="mt-3 text-white text-sm font-semibold leading-snug">
+              Boost your posts for as little as EUR 4.99.
+            </p>
+            <p className="mt-2 text-xs text-gray-300 leading-relaxed">
+              Reach more people, increase views faster, and give your stories a better chance to trend in the feed.
+            </p>
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowBoostPrompt(false);
+                  navigate('/boost');
+                }}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-sm px-3 py-2 transition-colors"
+              >
+                <FiCheck className="w-4 h-4" />
+                <span>Proceed</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowBoostPrompt(false)}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-white/20 bg-white/5 hover:bg-white/10 text-white font-semibold text-sm px-3 py-2 transition-colors"
+              >
+                <FiX className="w-4 h-4" />
+                <span>Cancel</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
@@ -900,8 +811,16 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
   const { user } = useAuth();
   const navigate = useNavigate();
   const [hasStory, setHasStory] = React.useState(false);
+  const [hasAnyStory, setHasAnyStory] = React.useState(false);
   const titleId = `post-title-${post.id}`;
   const userId = getStableUserId(user);
+  const isReclippedPost =
+    !!post.isReclipped &&
+    !!post.originalUserHandle &&
+    !!user?.handle &&
+    post.userHandle === user.handle &&
+    post.userReclipped === true;
+  const profileTargetHandle = isReclippedPost ? post.originalUserHandle! : post.userHandle;
 
   // Metadata carousel: location → venue → timestamp, one at a time
   const metadataItems = React.useMemo(() => {
@@ -933,12 +852,14 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
     async function checkStory() {
       try {
         let result;
+        const anyStory = await userHasStoriesByHandle(profileTargetHandle);
+        setHasAnyStory(anyStory);
         if (isCurrentUser) {
           // For current user, check if they have any stories at all
-          result = await userHasStoriesByHandle(post.userHandle);
+          result = anyStory;
         } else {
           // For other users, check if current user has unviewed stories
-          result = await userHasUnviewedStoriesByHandle(post.userHandle);
+          result = await userHasUnviewedStoriesByHandle(profileTargetHandle);
         }
         setHasStory(result);
       } catch (error) {
@@ -947,26 +868,30 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
     }
 
     checkStory();
-  }, [post.userHandle, isCurrentUser]);
+  }, [profileTargetHandle, isCurrentUser]);
 
   // Listen for stories viewed event
   React.useEffect(() => {
     function handleStoriesViewed(event: CustomEvent) {
-      if (event.detail?.userHandle === post.userHandle) {
+      if (event.detail?.userHandle === profileTargetHandle) {
         // Re-check if user still has unviewed stories
-        userHasUnviewedStoriesByHandle(post.userHandle)
+        userHasUnviewedStoriesByHandle(profileTargetHandle)
           .then(setHasStory)
+          .catch(console.error);
+        userHasStoriesByHandle(profileTargetHandle)
+          .then(setHasAnyStory)
           .catch(console.error);
       }
     }
 
     function handleStoryCreated(event: CustomEvent) {
       // Re-check story status when a new story is created
-      if (event.detail?.userHandle === post.userHandle) {
+      if (event.detail?.userHandle === profileTargetHandle) {
+        userHasStoriesByHandle(profileTargetHandle).then(setHasAnyStory).catch(console.error);
         if (isCurrentUser) {
-          userHasStoriesByHandle(post.userHandle).then(setHasStory).catch(console.error);
+          userHasStoriesByHandle(profileTargetHandle).then(setHasStory).catch(console.error);
         } else {
-          userHasUnviewedStoriesByHandle(post.userHandle).then(setHasStory).catch(console.error);
+          userHasUnviewedStoriesByHandle(profileTargetHandle).then(setHasStory).catch(console.error);
         }
       }
     }
@@ -977,7 +902,7 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
       window.removeEventListener('storiesViewed', handleStoriesViewed as EventListener);
       window.removeEventListener('storyCreated', handleStoryCreated as EventListener);
     };
-  }, [post.userHandle, isCurrentUser]);
+  }, [profileTargetHandle, isCurrentUser]);
 
   // Small profile action card (visit profile / follow / view stories)
   const [profileMenuOpen, setProfileMenuOpen] = React.useState(false);
@@ -988,7 +913,7 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
       e.preventDefault();
     }
     setProfileMenuOpen(false);
-    navigate(`/user/${isReclippedPost ? post.originalUserHandle : post.userHandle}`);
+    navigate(`/user/${profileTargetHandle}`);
   };
 
   const handleViewStories = (e?: React.MouseEvent) => {
@@ -996,23 +921,17 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
       e.stopPropagation();
       e.preventDefault();
     }
-    if (!hasStory) return;
     setProfileMenuOpen(false);
-    navigate('/stories', { state: { openUserHandle: post.userHandle } });
+    navigate('/stories', { state: { openUserHandle: profileTargetHandle } });
   };
 
-  // Check if this is a reclipped post **by the current user**.
-  // We only show the "reclipped" label when BOTH:
-  // - the post is marked as reclipped AND
-  // - local state says YOU reclipped it (userReclipped === true)
-  // This prevents the UI from claiming you reclipped something when only the backend
-  // or seed data says it's a reclip for someone else.
-  const isReclippedPost =
-    !!post.isReclipped &&
-    !!post.originalUserHandle &&
-    !!user?.handle &&
-    post.userHandle === user.handle &&
-    post.userReclipped === true;
+  // Re-check active stories when the quick-actions card opens, so visibility stays accurate.
+  React.useEffect(() => {
+    if (!profileMenuOpen) return;
+    userHasStoriesByHandle(profileTargetHandle)
+      .then(setHasAnyStory)
+      .catch(() => setHasAnyStory(false));
+  }, [profileMenuOpen, profileTargetHandle]);
 
   // Source of truth for follow state on feed cards:
   // read it directly from the shared follow state so the + / check
@@ -1080,8 +999,8 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
               size="sm"
               hasStory={hasStory}
               onClick={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
+                e?.stopPropagation();
+                e?.preventDefault();
                 setProfileMenuOpen((open) => !open);
               }}
             />
@@ -1211,23 +1130,28 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
 
       {/* Inline profile actions card (Visit profile / Follow-Unfollow / View stories) */}
       {profileMenuOpen && (
-        <div className="absolute left-4 top-full mt-1 z-40 w-48 rounded-2xl bg-[#020617] border border-white/15 shadow-2xl">
+        <div className="absolute left-4 top-full mt-2 z-40 w-56 rounded-2xl border border-white/20 bg-gradient-to-b from-[#0b1220] to-[#030712] shadow-[0_18px_45px_rgba(0,0,0,0.55)] backdrop-blur-sm overflow-hidden">
+          <div className="px-3 py-2 border-b border-white/10">
+            <p className="text-[11px] uppercase tracking-[0.12em] text-white/60 font-semibold">Quick actions</p>
+          </div>
           <button
-            className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-gray-100 hover:bg-gray-800/90"
+            className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-gray-100 hover:bg-sky-500/10 transition-colors"
             onClick={handleVisitProfile}
           >
-            <FiUser className="w-4 h-4 text-sky-400" />
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-sky-500/15 border border-sky-400/30">
+              <FiUser className="w-3.5 h-3.5 text-sky-300" />
+            </span>
             <span className="font-medium">Visit profile</span>
           </button>
 
-          {!isCurrentUser && onFollow && (
+          {!isCurrentUser && (
             <button
-              className="w-full flex items-center gap-2 px-3 py-2.5 text-sm border-t border-white/5 hover:bg-gray-800/90"
+              className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm border-t border-white/10 hover:bg-white/5 transition-colors"
               onClick={async (e) => {
                 e.stopPropagation();
                 e.preventDefault();
                 try {
-                  await onFollow();
+                  if (onFollow) await onFollow();
                 } finally {
                   setProfileMenuOpen(false);
                 }
@@ -1235,27 +1159,34 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
             >
               {isFollowingThisUser ? (
                 <>
-                  <FiUserX className="w-4 h-4 text-rose-400" />
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-rose-500/15 border border-rose-400/30">
+                    <FiUserX className="w-3.5 h-3.5 text-rose-300" />
+                  </span>
                   <span className="font-medium text-rose-300">Unfollow</span>
                 </>
               ) : (
                 <>
-                  <FiUserPlus className="w-4 h-4 text-emerald-400" />
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500/15 border border-emerald-400/30">
+                    <FiUserPlus className="w-3.5 h-3.5 text-emerald-300" />
+                  </span>
                   <span className="font-medium text-emerald-300">Follow</span>
                 </>
               )}
             </button>
           )}
 
-          {hasStory && (
+          {hasAnyStory && (
             <button
-              className="w-full flex items-center gap-2 px-3 py-2.5 text-sm border-t border-white/5 hover:bg-gray-800/90"
+              className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm border-t border-white/10 hover:bg-violet-500/10 transition-colors"
               onClick={handleViewStories}
             >
-              <FiPlayCircle className="w-4 h-4 text-violet-400" />
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-violet-500/15 border border-violet-400/30">
+                <FiPlayCircle className="w-3.5 h-3.5 text-violet-300" />
+              </span>
               <span className="font-medium text-violet-300">View stories</span>
             </button>
           )}
+
         </div>
       )}
     </div>
@@ -3388,6 +3319,7 @@ function EngagementBar({
             )}
             <span className="text-xs text-gray-700 dark:text-gray-300 tabular-nums">{reclips}</span>
           </button>
+
         </div>
 
         {/* Right group: Share/DM (paper plane), Metrics – kept inset from edge (Instagram: bookmark on right) */}
@@ -3836,7 +3768,8 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   }
 
   return (
-    <article ref={articleRef} aria-labelledby={titleId} className="mx-0 mb-6 overflow-hidden border-0 border-b border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out]" style={{ backgroundColor: '#030712' }}>
+    <article ref={articleRef} aria-labelledby={titleId} className="mx-0 mb-6 overflow-visible border-0 border-b border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out]" style={{ backgroundColor: '#030712' }}>
+      {/* overflow-visible: PostHeader quick-actions (absolute) must not be clipped by the card */}
       {/* Show PostHeader normally for text-only posts */}
       {isTextOnly && <PostHeader post={post} onFollow={onFollow} onOpenDM={onOpenDM} isOverlaid={false} onMenuClick={() => setMenuOpen(true)} />}
       <TagRow tags={post.tags} />
@@ -3850,7 +3783,8 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
           )}
         </div>
       )}
-      <div className="relative w-full overflow-hidden" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
+      {/* overflow-visible: menu from overlaid PostHeader extends below header; Media clips itself */}
+      <div className="relative w-full overflow-visible" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
         {/* PostHeader overlaid on media for posts with media */}
         {hasMedia && (
           <div className="absolute top-0 left-0 right-0 z-20 pointer-events-none">
@@ -4247,6 +4181,7 @@ function FeedPageWrapper() {
   const [dmSheetOpen, setDmSheetOpen] = React.useState(false);
   const [dmSheetRecipientHandle, setDmSheetRecipientHandle] = React.useState<string | null>(null);
   const [dmSheetMessage, setDmSheetMessage] = React.useState('');
+  const [storiesRailItems, setStoriesRailItems] = React.useState<Array<{ handle: string; title: string; thumb?: string; previewVideoUrl?: string }>>([]);
   const dmSheetInputRef = React.useRef<HTMLTextAreaElement | null>(null);
   const pagesLoadedForFilterRef = React.useRef<string | null>(null);
   // When we clear Following feed after a follow, cursor stays 0 so the load effect doesn't re-run. This forces a refetch.
@@ -4899,6 +4834,184 @@ function FeedPageWrapper() {
       .filter((p) => hasMedia(p));
   }, [flat]);
 
+  const generateTextStoryPreview = React.useCallback(async (text: string, color?: string): Promise<string | undefined> => {
+    const safeText = (text || '').trim();
+    if (!safeText) return undefined;
+    try {
+      const width = 360;
+      const height = 640;
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return undefined;
+
+      const grad = ctx.createLinearGradient(0, 0, width, height);
+      grad.addColorStop(0, '#0f172a');
+      grad.addColorStop(0.55, '#1d4ed8');
+      grad.addColorStop(1, '#7c3aed');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, width, height);
+
+      const textColor = color || '#ffffff';
+      ctx.fillStyle = textColor;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      let fontSize = 28;
+      const maxWidth = width - 44;
+      const lines: string[] = [];
+      const words = safeText.slice(0, 140).split(/\s+/);
+
+      const buildLines = () => {
+        lines.length = 0;
+        ctx.font = `600 ${fontSize}px Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial`;
+        let line = '';
+        for (const word of words) {
+          const next = line ? `${line} ${word}` : word;
+          if (ctx.measureText(next).width > maxWidth) {
+            if (line) lines.push(line);
+            line = word;
+          } else {
+            line = next;
+          }
+        }
+        if (line) lines.push(line);
+      };
+
+      buildLines();
+      while (lines.length > 7 && fontSize > 20) {
+        fontSize -= 2;
+        buildLines();
+      }
+
+      const lineHeight = fontSize * 1.35;
+      const totalHeight = lines.length * lineHeight;
+      let y = height / 2 - totalHeight / 2;
+      for (const line of lines) {
+        ctx.fillText(line, width / 2, y);
+        y += lineHeight;
+      }
+
+      return canvas.toDataURL('image/png');
+    } catch {
+      return undefined;
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (!user?.id || routerLocation.pathname !== '/feed') {
+      setStoriesRailItems([]);
+      return;
+    }
+
+    let cancelled = false;
+    const loadStoriesRail = async () => {
+      try {
+        const { getFollowedUsers } = await import('./api/posts');
+        const followedUserHandles = await getFollowedUsers(user.id);
+        const groups = await fetchFollowedUsersStoryGroups(user.id, followedUserHandles || []);
+        if (cancelled) return;
+
+        const nextItems: Array<{ handle: string; title: string; thumb?: string; previewVideoUrl?: string }> = [];
+        for (const group of groups) {
+          const sortedStories = [...(group.stories || [])].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+          const latest = sortedStories[0];
+          if (!latest) continue;
+
+          const latestMediaUrl = latest.mediaUrl;
+          const latestMediaType = latest.mediaType;
+          const firstImage = sortedStories.find((s) => s.mediaType === 'image' && !!s.mediaUrl)?.mediaUrl;
+          let thumb = firstImage || (latestMediaType !== 'video' ? latestMediaUrl : undefined);
+          const text =
+            (latest.text || (latest as any).text_content || '').trim()
+            || (latest.poll?.question || '').trim()
+            || (latest.sharedFromPost ? 'Shared a post' : 'New story');
+          const title = text.length > 34 ? `${text.slice(0, 34)}...` : text;
+
+          // Dedicated visual fallback for text-only stories in rail cards.
+          if (!thumb && latestMediaType !== 'video') {
+            thumb = await generateTextStoryPreview(text, latest.textStyle?.color);
+          }
+
+          nextItems.push({
+            handle: group.userHandle,
+            title,
+            thumb,
+            previewVideoUrl: latestMediaType === 'video' ? latestMediaUrl : undefined,
+          });
+          if (nextItems.length >= 12) break;
+        }
+
+        setStoriesRailItems(nextItems);
+      } catch (err) {
+        if (!cancelled) {
+          console.warn('Failed to load Stories 24 rail items:', err);
+        }
+      }
+    };
+
+    loadStoriesRail();
+    const interval = setInterval(loadStoriesRail, 12000);
+    const refreshStoriesRail = () => { loadStoriesRail(); };
+    window.addEventListener('storyCreated', refreshStoriesRail as EventListener);
+    window.addEventListener('storiesUpdated', refreshStoriesRail as EventListener);
+    window.addEventListener('storiesViewed', refreshStoriesRail as EventListener);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      window.removeEventListener('storyCreated', refreshStoriesRail as EventListener);
+      window.removeEventListener('storiesUpdated', refreshStoriesRail as EventListener);
+      window.removeEventListener('storiesViewed', refreshStoriesRail as EventListener);
+    };
+  }, [user?.id, routerLocation.pathname, generateTextStoryPreview]);
+
+  const stories24Items = React.useMemo(() => {
+    const fallbackItems: Array<{ handle: string; title: string; thumb?: string; previewVideoUrl?: string }> = [];
+    const seenHandles = new Set<string>();
+    for (const p of postsOnly) {
+      const handle = (p.userHandle || '').trim();
+      if (!handle || seenHandles.has(handle)) continue;
+      seenHandles.add(handle);
+      const firstMedia = p.mediaItems?.find((m) => m.type === 'image' || m.type === 'video');
+      const thumb = firstMedia?.url || p.mediaUrl;
+      const rawTitle = (p.caption || p.text || p.text_content || `${handle} stories`).trim();
+      fallbackItems.push({
+        handle,
+        title: rawTitle.length > 34 ? `${rawTitle.slice(0, 34)}...` : rawTitle,
+        thumb: firstMedia?.type === 'video' ? undefined : thumb,
+        previewVideoUrl: firstMedia?.type === 'video' ? firstMedia?.url : undefined,
+      });
+      if (fallbackItems.length >= 12) break;
+    }
+
+    // Merge live story data with fallback cards so mock/fallback users don't disappear.
+    const mergedByHandle = new Map<string, { handle: string; title: string; thumb?: string; previewVideoUrl?: string }>();
+    for (const item of storiesRailItems) mergedByHandle.set(item.handle.trim().toLowerCase(), item);
+    for (const item of fallbackItems) {
+      const key = item.handle.trim().toLowerCase();
+      if (!mergedByHandle.has(key)) mergedByHandle.set(key, item);
+    }
+    const baseItems = Array.from(mergedByHandle.values());
+    const normalizedUserHandle = (user?.handle || '').trim().toLowerCase();
+    const userItemIndex = baseItems.findIndex((item) => item.handle.trim().toLowerCase() === normalizedUserHandle);
+
+    const ordered = userItemIndex > 0
+      ? [baseItems[userItemIndex], ...baseItems.filter((_, idx) => idx !== userItemIndex)]
+      : [...baseItems];
+
+    // If user has no active story in rail, prepend "Add yours" card.
+    if (normalizedUserHandle && userItemIndex === -1) {
+      ordered.unshift({
+        handle: '__add_yours__',
+        title: 'Add yours',
+      });
+    }
+
+    return ordered.slice(0, 12);
+  }, [postsOnly, storiesRailItems, user?.handle]);
+
   // Human-readable feed label for Scenes carousel header
   const feedLabelForScenes = React.useMemo(() => {
     const f = currentFilter?.toLowerCase() || '';
@@ -4959,7 +5072,7 @@ function FeedPageWrapper() {
                 className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
                 style={{
                   background: customFilterType === 'venue'
-                    ? 'linear-gradient(90deg, #22c55e 0%, #ffffff 50%, #22c55e 100%)'
+                    ? 'linear-gradient(90deg, #3b82f6 0%, #a855f7 50%, #3b82f6 100%)'
                     : 'linear-gradient(90deg, #3b82f6 0%, #a855f7 50%, #3b82f6 100%)',
                 }}
               >
@@ -4983,7 +5096,10 @@ function FeedPageWrapper() {
                     {customLocation}
                   </>
                 ) : (
-                  `${customLocation} Feed`
+                  <>
+                    <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
+                    {`${customLocation} Feed`}
+                  </>
                 )}
               </span>
             </button>
@@ -5007,47 +5123,58 @@ function FeedPageWrapper() {
         </div>
       )}
 
-      {flat.map((feedItem, index) => {
-        if (feedItem.type === 'ad') {
-          const ad = feedItem.item as Ad;
+      {(() => {
+        let postCounter = 0;
+        let nextStoriesInsertAt = 2;
+        let nextStoriesGap = 3;
+        return flat.map((feedItem, index) => {
+          if (feedItem.type === 'ad') {
+            const ad = feedItem.item as Ad;
+            return (
+              <AdCard
+                key={ad.id}
+                ad={ad}
+                onImpression={async () => {
+                  try {
+                    await trackAdImpression(ad.id, userId);
+                  } catch (err) {
+                    console.error('Error tracking ad impression:', err);
+                  }
+                }}
+                onClick={async () => {
+                  try {
+                    await trackAdClick(ad.id, userId);
+                  } catch (err) {
+                    console.error('Error tracking ad click:', err);
+                  }
+                }}
+              />
+            );
+          }
+
+          const p = feedItem.item as Post;
+          postCounter += 1;
+          // Priority loading: first 1-3 posts with media get priority
+          const hasMedia = !!(p.mediaUrl || (p.mediaItems && p.mediaItems.length > 0));
+          const priorityPostsCount = flat.slice(0, index + 1).filter(item => {
+            if (item.type === 'ad') return false;
+            const post = item.item as Post;
+            return !!(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0));
+          }).length;
+          const isPriority = hasMedia && priorityPostsCount <= 3;
+          const showStoriesRail = stories24Items.length > 0 && postCounter === nextStoriesInsertAt;
+          if (showStoriesRail) {
+            nextStoriesInsertAt += nextStoriesGap;
+            if (nextStoriesGap < 5) nextStoriesGap += 1;
+          }
+
           return (
-            <AdCard
-              key={ad.id}
-              ad={ad}
-              onImpression={async () => {
-                try {
-                  await trackAdImpression(ad.id, userId);
-                } catch (err) {
-                  console.error('Error tracking ad impression:', err);
-                }
-              }}
-              onClick={async () => {
-                try {
-                  await trackAdClick(ad.id, userId);
-                } catch (err) {
-                  console.error('Error tracking ad click:', err);
-                }
-              }}
-            />
-          );
-        }
-
-        const p = feedItem.item as Post;
-        // Priority loading: first 1-3 posts with media get priority
-        const hasMedia = !!(p.mediaUrl || (p.mediaItems && p.mediaItems.length > 0));
-        const priorityPostsCount = flat.slice(0, index + 1).filter(item => {
-          if (item.type === 'ad') return false;
-          const post = item.item as Post;
-          return !!(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0));
-        }).length;
-        const isPriority = hasMedia && priorityPostsCount <= 3;
-
-        return (
-          <FeedCard
-            key={p.id ? `post-${p.id}-${index}` : `post-${index}`}
-            post={p}
-            priority={isPriority}
-            onLike={async () => {
+            <React.Fragment key={p.id ? `post-wrap-${p.id}-${index}` : `post-wrap-${index}`}>
+              <FeedCard
+                key={p.id ? `post-${p.id}-${index}` : `post-${index}`}
+                post={p}
+                priority={isPriority}
+                onLike={async () => {
               if (!online) {
                 updateOne(p.id, post => ({ ...post, userLiked: !post.userLiked }));
                 await enqueue({ type: 'like', postId: p.id, userId });
@@ -5419,10 +5546,10 @@ function FeedPageWrapper() {
               window.dispatchEvent(new CustomEvent(`scenesOpening-${p.id}`));
             }}
             showBoostIcon={user?.handle === p.userHandle && !p.originalUserHandle}
-            onBoost={user?.handle === p.userHandle && !p.originalUserHandle ? async () => {
-              setSelectedPostForBoost(p);
-              setBoostModalOpen(true);
-            } : undefined}
+            onBoost={async () => {
+              // Keep boost entry visible from feed cards; route to Boost page.
+              navigate('/boost');
+            }}
             onDelete={user?.handle === p.userHandle && !p.originalUserHandle ? async () => {
               const result = await Swal.fire(bottomSheet({
                 title: 'Delete post?',
@@ -5451,10 +5578,94 @@ function FeedPageWrapper() {
               setDmSheetOpen(true);
               setTimeout(() => dmSheetInputRef.current?.focus(), 100);
             } : undefined}
-            onShareSuccess={(postId) => updateOne(postId, p => ({ ...p, stats: { ...p.stats, shares: p.stats.shares + 1 } }))}
-          />
-        );
-      })}
+                onShareSuccess={(postId) => updateOne(postId, p => ({ ...p, stats: { ...p.stats, shares: p.stats.shares + 1 } }))}
+              />
+
+              {showStoriesRail && (
+                <div className="mx-3 my-3 rounded-2xl border border-slate-700/60 bg-[#0a1323] p-3 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-white text-base font-semibold">Stories 24</h3>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/clip')}
+                      className="inline-flex items-center gap-1 rounded-full border border-cyan-300/35 bg-cyan-400/10 px-2.5 py-1 text-[11px] font-semibold text-cyan-200 hover:bg-cyan-400/20 transition-colors"
+                    >
+                      <FiPlus className="w-3 h-3" />
+                      <span>Add yours</span>
+                    </button>
+                  </div>
+                  <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
+                    {stories24Items.map((storyItem) => (
+                      storyItem.handle === '__add_yours__' ? (
+                        <button
+                          key="stories24-add-yours"
+                          type="button"
+                          onClick={() => navigate('/clip')}
+                          className="relative w-[112px] h-[156px] shrink-0 rounded-2xl border border-cyan-300/35 overflow-hidden bg-gradient-to-br from-[#0e1a30] via-[#12243f] to-[#1e3a5f] text-left"
+                        >
+                          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+                            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-cyan-400 text-[#021428]">
+                              <FiPlus className="w-5 h-5" />
+                            </span>
+                            <p className="text-[12px] font-semibold text-white">Add yours</p>
+                            <p className="text-[10px] text-cyan-100/90">Post to Stories 24</p>
+                          </div>
+                        </button>
+                      ) : (
+                        <button
+                          key={`stories24-${storyItem.handle}`}
+                          type="button"
+                          onClick={() => navigate('/stories', {
+                            state: {
+                              openUserHandle: storyItem.handle,
+                              railHandles: stories24Items
+                                .map((item) => item.handle)
+                                .filter((handle) => handle && handle !== '__add_yours__'),
+                            },
+                          })}
+                          className="relative w-[112px] h-[156px] shrink-0 rounded-2xl border border-white/10 overflow-hidden bg-[#101b2f] text-left"
+                        >
+                          <div className="absolute inset-0 bg-gradient-to-br from-slate-500/25 via-sky-500/20 to-indigo-500/25" />
+                          {storyItem.previewVideoUrl ? (
+                            <video
+                              src={storyItem.previewVideoUrl}
+                              className="absolute inset-0 w-full h-full object-cover"
+                              muted
+                              playsInline
+                              autoPlay
+                              loop
+                              preload="metadata"
+                              onTimeUpdate={(e) => {
+                                if (e.currentTarget.currentTime > 3) {
+                                  e.currentTarget.currentTime = 0;
+                                }
+                              }}
+                            />
+                          ) : storyItem.thumb ? (
+                            <img
+                              src={storyItem.thumb}
+                              alt={`${storyItem.handle} story`}
+                              className="absolute inset-0 w-full h-full object-cover"
+                              loading="lazy"
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                              }}
+                            />
+                          ) : null}
+                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/45 to-transparent p-2">
+                            <p className="text-[11px] text-white font-semibold leading-tight line-clamp-2">{storyItem.title}</p>
+                            <p className="text-[10px] text-sky-200/90 mt-1 truncate">@{storyItem.handle}</p>
+                          </div>
+                        </button>
+                      )
+                    ))}
+                  </div>
+                </div>
+              )}
+            </React.Fragment>
+          );
+        });
+      })()}
 
       {/* In-feed DM compose sheet (TikTok-style overlay) */}
       {dmSheetOpen && dmSheetRecipientHandle && user?.handle && (
@@ -5879,7 +6090,7 @@ function FeedPageWrapper() {
               setShareModalOpen(true);
             }}
             onOpenComments={() => handleOpenComments(p.id)}
-            onBoost={user?.handle === p.userHandle && !p.originalUserHandle ? () => { setSelectedPostForBoost(p); setBoostModalOpen(true); } : undefined}
+            onBoost={() => { navigate('/boost'); }}
             onReclip={async () => {
               if (p.userHandle === user?.handle) return;
               if (p.userReclipped) return;

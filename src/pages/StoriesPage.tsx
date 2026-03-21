@@ -91,6 +91,10 @@ export default function StoriesPage() {
     const navigate = useNavigate();
     const location = useLocation();
     const openUserHandle = location.state?.openUserHandle;
+    const railHandles = Array.isArray(location.state?.railHandles)
+        ? (location.state.railHandles as string[])
+        : [];
+    const railHandlesKey = railHandles.join('|');
     const [storyGroups, setStoryGroups] = React.useState<StoryGroup[]>([]);
     const [currentGroupIndex, setCurrentGroupIndex] = React.useState(0);
     const [currentStoryIndex, setCurrentStoryIndex] = React.useState(0);
@@ -185,16 +189,27 @@ export default function StoriesPage() {
             // Fetch only followed users' stories (including current user's stories)
             let groups = await fetchFollowedUsersStoryGroups(user.id, followedUserHandles);
 
-            // If opening a specific user's stories from profile click, add their stories even if not followed
-            if (openUserHandle) {
-                const storyGroup = await fetchStoryGroupByHandle(openUserHandle);
-                if (storyGroup) {
-                    // Check if this user is already in the groups
-                    const existingGroupIndex = groups.findIndex(g => g.userHandle === openUserHandle);
-
+            // If opening from feed rail, load all handles in that rail order.
+            // This keeps autoplay moving through the next users instead of closing after first group.
+            const requestedHandles = Array.from(
+                new Set(
+                    [
+                        ...railHandles,
+                        ...(openUserHandle ? [openUserHandle] : [])
+                    ]
+                        .map((h) => (h || '').trim())
+                        .filter(Boolean)
+                )
+            );
+            if (requestedHandles.length > 0) {
+                const requestedGroups = await Promise.all(requestedHandles.map((handle) => fetchStoryGroupByHandle(handle)));
+                for (const storyGroup of requestedGroups) {
+                    if (!storyGroup) continue;
+                    const existingGroupIndex = groups.findIndex(g => g.userHandle === storyGroup.userHandle);
                     if (existingGroupIndex === -1) {
-                        // Add the user's story group
                         groups.push(storyGroup);
+                    } else {
+                        groups[existingGroupIndex] = storyGroup;
                     }
                 }
             }
@@ -233,13 +248,30 @@ export default function StoriesPage() {
             }));
 
             // Always inject Gazetteer world highlights as a mock story group (first position)
-            setStoryGroups(withGazetteerWorldGroup(groupsWithAvatars));
+            let finalGroups = withGazetteerWorldGroup(groupsWithAvatars);
+
+            // Keep feed rail playback order when provided.
+            if (requestedHandles.length > 0) {
+                const orderMap = new Map<string, number>(
+                    requestedHandles.map((h, idx) => [h.toLowerCase(), idx])
+                );
+                finalGroups = [...finalGroups].sort((a, b) => {
+                    const aRank = orderMap.get((a.userHandle || '').toLowerCase());
+                    const bRank = orderMap.get((b.userHandle || '').toLowerCase());
+                    if (aRank === undefined && bRank === undefined) return 0;
+                    if (aRank === undefined) return 1;
+                    if (bRank === undefined) return -1;
+                    return aRank - bRank;
+                });
+            }
+
+            setStoryGroups(finalGroups);
         } catch (error) {
             console.error('Error loading stories:', error);
         } finally {
             setLoading(false);
         }
-    }, [user?.id, user?.avatarUrl, openUserHandle]);
+    }, [user?.id, user?.avatarUrl, openUserHandle, railHandlesKey]);
 
     // Load story groups when user is available
     React.useEffect(() => {
@@ -272,7 +304,8 @@ export default function StoriesPage() {
     // Auto-open specific user's stories if requested
     React.useEffect(() => {
         if (openUserHandle && storyGroups.length > 0) {
-            const targetGroup = storyGroups.find(g => g.userHandle === openUserHandle);
+            const target = openUserHandle.trim().toLowerCase();
+            const targetGroup = storyGroups.find(g => (g.userHandle || '').trim().toLowerCase() === target);
             if (targetGroup) {
                 startViewingStories(targetGroup);
             }
@@ -375,135 +408,33 @@ export default function StoriesPage() {
 
     // Handle moving to next user's stories
     function handleNextUserStories(currentGroups: StoryGroup[], currentIdx: number) {
-        console.log('handleNextUserStories called. Current group index:', currentIdx, 'Total groups:', currentGroups.length);
-        console.log('All groups:', currentGroups.map((g, idx) => ({ index: idx, userHandle: g.userHandle, userId: g.userId, storiesCount: g.stories?.length || 0 })));
-        
         const currentGroup = currentGroups[currentIdx];
-        const isViewingOwnStories = currentGroup && (currentGroup.userId === user?.id || currentGroup.userHandle === user?.handle);
-        
-        // Find the next group
-        let nextGroupIndex = -1;
-        let nextGroup: StoryGroup | null = null;
-        
-        // Start searching from the next index
-        for (let i = currentIdx + 1; i < currentGroups.length; i++) {
-            const candidate = currentGroups[i];
-            // When viewing own stories, skip looping back to own group. Otherwise allow any group.
-            if (
-                candidate &&
-                (!isViewingOwnStories ||
-                    (candidate.userId !== user?.id && candidate.userHandle !== user?.handle))
-            ) {
-                nextGroupIndex = i;
-                nextGroup = candidate;
-                break;
-            }
-        }
-        
-        // If no next group found after current index, search from the beginning
-        if (nextGroupIndex === -1) {
-            for (let i = 0; i < currentIdx; i++) {
-                const candidate = currentGroups[i];
-                if (
-                    candidate &&
-                    (!isViewingOwnStories ||
-                        (candidate.userId !== user?.id && candidate.userHandle !== user?.handle))
-                ) {
-                    nextGroupIndex = i;
-                    nextGroup = candidate;
-                    break;
-                }
-            }
-        }
-        
-        console.log('Next group search result:', {
-            found: nextGroupIndex !== -1,
-            index: nextGroupIndex,
-            userHandle: nextGroup?.userHandle,
-            userId: nextGroup?.userId,
-            isViewingOwnStories
-        });
-        
-        if (nextGroupIndex !== -1 && nextGroup) {
-            // Always fetch stories for next user to ensure they're loaded
-            if (user?.id && nextGroup.userId) {
-                console.log('Fetching stories for next user:', nextGroup.userHandle);
-                fetchUserStories(user.id, nextGroup.userId)
-                    .then((stories) => {
-                        console.log('Fetched stories for next user:', stories?.length || 0);
-                        if (stories && stories.length > 0) {
-                            // Update the group with fetched stories - find by userId to handle array updates
-                            setStoryGroups(prev => {
-                                const updated = [...prev];
-                                const groupIndex = updated.findIndex(g => g.userId === nextGroup.userId);
-                                if (groupIndex !== -1) {
-                                    updated[groupIndex] = { ...nextGroup, stories, avatarUrl: nextGroup.avatarUrl };
-                                } else {
-                                    // If group not found, add it
-                                    updated.push({ ...nextGroup, stories, avatarUrl: nextGroup.avatarUrl });
-                                }
-                                
-                                // Find the actual index after update (in case array order changed)
-                                const actualIndex = updated.findIndex(g => g.userId === nextGroup.userId);
-                                if (actualIndex !== -1) {
-                                    // Navigate to the next user's first story
-                                    console.log('Navigating to next user stories at index:', actualIndex);
-                                    setCurrentGroupIndex(actualIndex);
-                                    currentGroupIndexRef.current = actualIndex;
-                                    setCurrentStoryIndex(0);
-                                    currentStoryIndexRef.current = 0;
-                                    setProgress(0);
-                                    setIsMuted(true);
-                                    elapsedTimeRef.current = 0;
-                                    setPaused(false);
-                                    pausedRef.current = false;
-                                }
-                                
-                                return updated;
-                            });
-                        } else {
-                            console.warn('Next user group has no stories after fetching, trying next group or closing');
-                            // Try to find next group with stories, or close
-                            setStoryGroups(prev => {
-                                // Find next group after nextGroupIndex (optionally skipping user's own group)
-                                const nextGroupWithStories = prev.find((g, idx) =>
-                                    idx > nextGroupIndex &&
-                                    (!isViewingOwnStories ||
-                                        (g.userId !== user?.id && g.userHandle !== user?.handle)) &&
-                                    g.stories &&
-                                    g.stories.length > 0
-                                );
-                                if (nextGroupWithStories) {
-                                    const foundIndex = prev.findIndex(g => g.userId === nextGroupWithStories.userId);
-                                    setCurrentGroupIndex(foundIndex);
-                                    currentGroupIndexRef.current = foundIndex;
-                                    setCurrentStoryIndex(0);
-                                    currentStoryIndexRef.current = 0;
-                                    setProgress(0);
-                                    setIsMuted(true);
-                                    elapsedTimeRef.current = 0;
-                                    setPaused(false);
-                                    pausedRef.current = false;
-                                } else {
-                                    closeStories();
-                                }
-                                return prev;
-                            });
-                        }
-                    })
-                    .catch((error) => {
-                        console.error('Error fetching next user stories:', error);
-                        closeStories();
-                    });
-            } else {
-                console.warn('Next user group is invalid:', { nextGroup: !!nextGroup, userId: user?.id, nextGroupUserId: nextGroup?.userId });
-                closeStories();
-            }
-        } else {
-            // No next group found (excluding user's own group), close
-            console.log('No more user stories to view. Current index:', currentIdx, 'Total groups:', currentGroups.length, 'Is viewing own stories:', isViewingOwnStories);
+        const isViewingOwnStories = !!currentGroup && (currentGroup.userId === user?.id || currentGroup.userHandle === user?.handle);
+        const total = currentGroups.length;
+        if (total <= 1) {
             closeStories();
+            return;
         }
+
+        for (let step = 1; step < total; step++) {
+            const idx = (currentIdx + step) % total;
+            const candidate = currentGroups[idx];
+            if (!candidate || !candidate.stories || candidate.stories.length === 0) continue;
+            if (isViewingOwnStories && (candidate.userId === user?.id || candidate.userHandle === user?.handle)) continue;
+
+            setCurrentGroupIndex(idx);
+            currentGroupIndexRef.current = idx;
+            setCurrentStoryIndex(0);
+            currentStoryIndexRef.current = 0;
+            setProgress(0);
+            setIsMuted(true);
+            elapsedTimeRef.current = 0;
+            setPaused(false);
+            pausedRef.current = false;
+            return;
+        }
+
+        closeStories();
     }
 
     // Navigate to next story
@@ -1183,6 +1114,12 @@ export default function StoriesPage() {
 
     const currentGroup = storyGroups[currentGroupIndex];
     const currentStory = currentGroup?.stories?.[currentStoryIndex];
+    const currentStoryText = (
+        currentStory?.text
+        || (currentStory as any)?.text_content
+        || (((currentStory as any)?.mediaItems || []).find((m: any) => m?.type === 'text')?.text)
+        || ''
+    ).trim();
     const hasStories = storyGroups.length > 0;
 
     // Story viewing UI
@@ -1624,7 +1561,7 @@ export default function StoriesPage() {
                                     }
 
                                     // Text-only story display (directly created, not shared) - keep original style with gradient/textStyle
-                                    if (currentStory?.text) {
+                                    if (currentStoryText) {
                                         // Get tagged users positions from story (not from textStyle)
                                         const taggedUsersPositions = currentStory?.taggedUsersPositions as Array<{ handle: string; x: number; y: number }> | undefined;
                                         
@@ -1650,7 +1587,7 @@ export default function StoriesPage() {
                                                             color: currentStory?.textStyle?.color || '#ffffff'
                                                         }}
                                                     >
-                                                        {currentStory?.text}
+                                                        {currentStoryText}
                                                     </div>
                                                     {/* Tagged Users Display at their positions */}
                                                     {taggedUsersPositions && taggedUsersPositions.length > 0 && (
@@ -2754,6 +2691,11 @@ export default function StoriesPage() {
                                         {/* Metadata carousel: location → venue → timestamp (white pill, black text - same as newsfeed cards) */}
                                         {storyMetadataItems.length > 0 ? (() => {
                                             const current = storyMetadataItems[storyMetadataIndex];
+                                            if (!current) {
+                                                return currentStory?.createdAt ? (
+                                                    <p className="text-white/70 text-xs">{getTimeAgo(currentStory.createdAt)}</p>
+                                                ) : null;
+                                            }
                                             const Icon = current.type === 'location' ? FiMapPin : current.type === 'venue' ? FiHome : FiClock;
                                             return (
                                                 <div
@@ -2942,7 +2884,7 @@ export default function StoriesPage() {
 
                     {/* Story Text - Only show for original stories (not feed re-shares),
                         and only if media is not a generated text image (data URL) */}
-                    {currentStory?.text && !currentStory?.sharedFromPost && currentStory?.mediaUrl && !currentStory.mediaUrl.startsWith('data:image') && (
+                    {currentStoryText && !currentStory?.sharedFromPost && currentStory?.mediaUrl && !currentStory.mediaUrl.startsWith('data:image') && (
                         <div className="absolute bottom-32 left-0 right-0 px-4 z-[55] pointer-events-none">
                             <div className="backdrop-blur-md bg-black/30 rounded-2xl px-4 py-3 border border-white/10 shadow-lg max-w-md mx-auto pointer-events-auto">
                                 <p
@@ -2957,7 +2899,7 @@ export default function StoriesPage() {
                                 >
                                     {(() => {
                                         // Parse mentions (@handle) and make them clickable
-                                        const text = currentStory.text || '';
+                                        const text = currentStoryText || '';
                                         const parts: (string | React.ReactNode)[] = [];
                                         // Match @handle (including @ in handle like @Sarah@Artane)
                                         // Updated regex to match @ followed by word characters, @, and more word characters

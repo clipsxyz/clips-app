@@ -100,15 +100,20 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
     try {
       // Truncate text to 200 characters for stories
       const maxLength = 200;
-      const truncatedText = post.text && post.text.length > maxLength
-        ? post.text.substring(0, maxLength) + '...'
-        : post.text;
+      const postText = post.text || post.text_content || post.caption || post.imageText || '';
+      const truncatedText = postText && postText.length > maxLength
+        ? postText.substring(0, maxLength) + '...'
+        : postText;
 
       let mediaUrl = post.mediaUrl;
       let mediaType: 'image' | 'video' = (post.mediaType || 'image');
+      const hasRealMediaItems = !!post.mediaItems?.some((m) => m.type === 'image' || m.type === 'video');
+      const isTextOnlyShare = !mediaUrl && !hasRealMediaItems;
+      const shareText = (truncatedText || 'Shared from feed').trim();
 
-      // If no media on post, render a text image
-      if (!mediaUrl) {
+      // Keep text-only shares as text stories so their feed style/template can be preserved on Stories.
+      // Only generate an image fallback when the post is not clearly text-only.
+      if (!mediaUrl && !isTextOnlyShare) {
         mediaUrl = await generateImageFromText(truncatedText || '');
         mediaType = 'image';
       }
@@ -118,14 +123,18 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
         user.id,
         user.handle || '',
         mediaUrl,
-        mediaType,
-        truncatedText,
+        isTextOnlyShare ? undefined : mediaType,
+        shareText,
         post.locationLabel,
         undefined, // textColor
         undefined, // textSize
-        post.id, // sharedFromPost
-        post.userHandle, // sharedFromUser
-        post.textStyle ?? undefined, // textStyle so stories page can render shared text post with same style
+        isTextOnlyShare ? undefined : post.id, // sharedFromPost (text-only uses normal story path)
+        isTextOnlyShare ? undefined : post.userHandle, // sharedFromUser
+        post.textStyle ?? {
+          color: '#ffffff',
+          size: 'medium',
+          background: 'linear-gradient(135deg, #0f172a 0%, #1d4ed8 50%, #8b5cf6 100%)'
+        }, // preserve text look for text-only shares
         undefined, // stickers
         undefined, // taggedUsers
         undefined, // poll
@@ -141,20 +150,16 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
         // Ignore; UI already updated optimistically
       }
 
-      // Close the modal
+      // Notify feed/story rails to refresh immediately.
+      window.dispatchEvent(new CustomEvent('storyCreated', {
+        detail: { userHandle: user.handle }
+      }));
+      window.dispatchEvent(new CustomEvent('storiesUpdated'));
+
+      // Close the modal and return to feed with success confirmation.
       onClose();
-
-      // Show success toast
-      showToast?.('You shared this to Clips 24!');
-
-      // Delay navigation so the feed's share-count update commits before we unmount
-      setTimeout(() => {
-        navigate('/stories', {
-          state: {
-            openUserHandle: user.handle // Open current user's clips
-          }
-        });
-      }, 150);
+      showToast?.('Successfully shared to Stories 24!');
+      navigate('/feed');
     } catch (e) {
       console.error('Failed to share to clips:', e);
       alert('Failed to share to Clips 24. Please try again.');

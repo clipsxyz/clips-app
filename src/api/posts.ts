@@ -869,13 +869,20 @@ function postMatchesLocationTab(p: Post, tab: string): boolean {
   const local = normalize(p.userLocal);
   const regional = normalize(p.userRegional);
   const national = normalize(p.userNational);
+  const locationLabel = normalize((p as any).locationLabel);
   if (LOCATION_COUNTRIES.has(query)) {
-    return national === query || (query === 'uk' && (national === 'united kingdom' || national === 'uk')) || (query === 'usa' && (national === 'usa' || national === 'united states'));
+    return (
+      national === query ||
+      (query === 'uk' && (national === 'united kingdom' || national === 'uk')) ||
+      (query === 'usa' && (national === 'usa' || national === 'united states')) ||
+      locationLabel === query ||
+      locationLabel.includes(query)
+    );
   }
   if (LOCATION_CITIES.has(query)) {
-    return regional === query;
+    return regional === query || local === query || locationLabel === query || locationLabel.includes(query);
   }
-  return local === query;
+  return local === query || regional === query || national === query || locationLabel === query || locationLabel.includes(query);
 }
 
 export async function fetchPostsPage(tab: string, cursor: number | null, limit = 5, userId = 'me', _userLocal = '', _userRegional = '', _userNational = '', _currentUserHandle = ''): Promise<Page> {
@@ -1083,10 +1090,17 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
         const local = normalize(p.userLocal);
         const regional = normalize(p.userRegional);
         const national = normalize(p.userNational);
+        const locationLabel = normalize((p as any).locationLabel);
         if (LOCATION_COUNTRIES.has(query))
-          return national === query || (query === 'uk' && (national === 'united kingdom' || national === 'uk')) || (query === 'usa' && (national === 'usa' || national === 'united states'));
-        if (LOCATION_CITIES.has(query)) return regional === query;
-        return local === query;
+          return (
+            national === query ||
+            (query === 'uk' && (national === 'united kingdom' || national === 'uk')) ||
+            (query === 'usa' && (national === 'usa' || national === 'united states')) ||
+            locationLabel === query ||
+            locationLabel.includes(query)
+          );
+        if (LOCATION_CITIES.has(query)) return regional === query || local === query || locationLabel === query || locationLabel.includes(query);
+        return local === query || regional === query || national === query || locationLabel === query || locationLabel.includes(query);
       }
 
       const tabLower = t.toLowerCase();

@@ -120,6 +120,9 @@ class PostController extends Controller
             $userModel = $userId ? User::find($userId) : null;
             $transformedPosts = $posts->map(function ($post) use ($userModel) {
                 $postData = $post->toArray();
+                // Ensure venue is always present in API response so frontend metadata
+                // carousel and venue feeds can rely on it for all post types.
+                $postData['venue'] = $post->venue;
                 $postData['taggedUsers'] = $post->taggedUsers->pluck('handle')->toArray();
                 if ($userModel) {
                     $postData['user_liked'] = $post->isLikedBy($userModel);

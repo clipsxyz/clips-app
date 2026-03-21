@@ -177,14 +177,11 @@ function PostHeader({
     useEffect(() => {
         async function checkStory() {
             try {
-                let result;
-                if (isCurrentUser) {
-                    result = await userHasStoriesByHandle(post.userHandle);
-                } else {
-                    result = await userHasUnviewedStoriesByHandle(post.userHandle);
-                }
-                setHasStory(result);
-                onHasStoryChange?.(result);
+                // For profile quick-actions, we want "View stories" whenever the user has
+                // any active 24h story (not only unviewed).
+                const hasAnyActiveStory = await userHasStoriesByHandle(post.userHandle);
+                setHasStory(hasAnyActiveStory);
+                onHasStoryChange?.(hasAnyActiveStory);
             } catch (error) {
                 console.error('Error checking story:', error);
             }
@@ -809,7 +806,7 @@ const FeedCard = React.memo(function FeedCard({
                         </TouchableOpacity>
                     )}
 
-                    {headerHasStory && onViewStories && (
+                    {onViewStories && (
                         <TouchableOpacity
                             style={styles.profileMenuItem}
                             onPress={() => {
