@@ -247,12 +247,35 @@ export default function App() {
 
   const isLoginPage = loc.pathname === '/login';
   const isClipPage = loc.pathname === '/clip';
+  const isFeedPage = loc.pathname === '/feed';
   const isFullViewportPage = isLoginPage || isClipPage; // No scroll, no bottom nav
+
+  // Feed uses an inner scroll area; lock document scroll so iOS rubber-band doesn’t shift fixed chrome
+  React.useEffect(() => {
+    if (!isFeedPage) return;
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtml = html.style.overflow;
+    const prevBody = body.style.overflow;
+    html.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
+    return () => {
+      html.style.overflow = prevHtml;
+      body.style.overflow = prevBody;
+    };
+  }, [isFeedPage]);
+
   return (
     <>
       <main
         id="main"
-        className={`mx-auto max-w-md md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800 ${isFullViewportPage ? 'h-screen min-h-[100dvh] overflow-hidden flex flex-col' : 'min-h-screen pb-[calc(56px+theme(spacing.safe))]'}`}
+        className={`mx-auto max-w-md md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800 ${
+          isFullViewportPage
+            ? 'h-screen min-h-[100dvh] overflow-hidden flex flex-col'
+            : isFeedPage
+              ? 'h-[100dvh] max-h-[100dvh] overflow-hidden flex flex-col pb-[calc(56px+theme(spacing.safe))]'
+              : 'min-h-screen pb-[calc(56px+theme(spacing.safe))]'
+        }`}
         style={{ backgroundColor: '#030712' }}
       >
         {loc.pathname !== '/login'
@@ -265,7 +288,13 @@ export default function App() {
           && !loc.pathname.startsWith('/user/')
           && !loc.pathname.startsWith('/create/text-only')
           && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
-        <div className={isFullViewportPage ? 'flex-1 min-h-0 overflow-hidden flex flex-col' : undefined}>
+        <div
+          className={
+            isFullViewportPage || isFeedPage
+              ? 'flex-1 min-h-0 overflow-hidden flex flex-col'
+              : undefined
+          }
+        >
           <Outlet context={{ activeTab, setActiveTab, customLocation, setCustomLocation }} />
         </div>
         {loc.pathname !== '/discover'
@@ -440,7 +469,8 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
   }, [runBorderRevealAnimation]);
 
   return (
-    <div role="tablist" aria-label="Locations" className="sticky top-0 z-30 bg-[#030712] py-2 relative">
+    <div role="tablist" aria-label="Locations" className="z-30 bg-[#030712] py-2 relative">
+      {/* Not sticky: /feed uses an inner scroll container so this chrome stays pinned */}
       {/* Scrim effect */}
       <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/50 to-transparent pointer-events-none z-0" />
 
@@ -1629,7 +1659,6 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   const [showControls, setShowControls] = React.useState(false);
   const [isMuted, setIsMuted] = React.useState(true);
   const [isPaused, setIsPaused] = React.useState(false);
-  const [isViewInScenesExpanded, setIsViewInScenesExpanded] = React.useState(true);
   const [showMuteButton, setShowMuteButton] = React.useState(true); // show when scroll onto card, hide after 2s; one tap brings back
   const muteButtonHideTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [progress, setProgress] = React.useState(0); // 0..1 for video progress
@@ -1638,6 +1667,8 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   const lastTap = React.useRef<number>(0);
   const touchHandled = React.useRef<boolean>(false);
   const singleTapTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Avoid opening Scenes twice when both touchend and click fire (mobile). */
+  const openScenesCooldownRef = React.useRef(0);
   const isProcessingDoubleTap = React.useRef<boolean>(false);
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const imageRef = React.useRef<HTMLImageElement>(null);
@@ -2120,17 +2151,6 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     };
   }, [currentIndex]); // Reset when switching media items
 
-  // Retract "View in Scenes" button after 2 seconds (for both video and image)
-  React.useEffect(() => {
-    if ((currentItem?.type === 'video' || currentItem?.type === 'image') && onOpenScenes && !isLoading) {
-      setIsViewInScenesExpanded(true);
-      const timer = setTimeout(() => {
-        setIsViewInScenesExpanded(false);
-      }, 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [currentItem?.type, currentIndex, isLoading, onOpenScenes]);
-
   // Reset video state when switching items
   React.useEffect(() => {
     // Reset aspect ratio when switching items
@@ -2451,56 +2471,57 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                 </div>
               )}
 
-              {/* View in Scenes Button - bottom-right (Scenes only for image/video; text-only posts won't show it) */}
+              {/* Scenes: icon — touchend must stopPropagation: outer media div's touchend+preventDefault blocks synthetic click on phones */}
               {!isLoading && !hasError && (currentItem.type === 'video' || currentItem.type === 'image') && onOpenScenes && (
-                <div className="absolute bottom-4 right-4 z-20 pointer-events-auto" style={{ touchAction: 'auto' }}>
+                <div className="absolute bottom-4 right-4 z-[60] pointer-events-auto" style={{ touchAction: 'manipulation' }}>
                   <button
+                    type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      // Store current video time before opening Scenes for seamless transition
+                      const now = Date.now();
+                      if (now - openScenesCooldownRef.current < 450) return;
+                      openScenesCooldownRef.current = now;
+                      if (singleTapTimer.current) {
+                        clearTimeout(singleTapTimer.current);
+                        singleTapTimer.current = null;
+                      }
                       if (videoRef.current && postId) {
                         const currentTime = videoRef.current.currentTime;
                         videoTimesMap.set(postId, currentTime);
-                        // Dispatch event to store time
                         window.dispatchEvent(new CustomEvent(`storeVideoTime-${postId}`, {
                           detail: { time: currentTime }
                         }));
                       }
-                      // Don't pause immediately - let ScenesModal handle the transition
-                      // This allows for a smoother, Instagram-like experience
                       onOpenScenes();
                     }}
                     onTouchEnd={(e) => {
                       e.stopPropagation();
-                      e.preventDefault();
-                      // Store current video time before opening Scenes for seamless transition
+                      try {
+                        e.preventDefault();
+                      } catch (_) {
+                        /* passive listener edge cases */
+                      }
+                      const now = Date.now();
+                      if (now - openScenesCooldownRef.current < 450) return;
+                      openScenesCooldownRef.current = now;
+                      if (singleTapTimer.current) {
+                        clearTimeout(singleTapTimer.current);
+                        singleTapTimer.current = null;
+                      }
                       if (videoRef.current && postId) {
                         const currentTime = videoRef.current.currentTime;
                         videoTimesMap.set(postId, currentTime);
-                        // Dispatch event to store time
                         window.dispatchEvent(new CustomEvent(`storeVideoTime-${postId}`, {
                           detail: { time: currentTime }
                         }));
                       }
-                      // Don't pause immediately - let ScenesModal handle the transition
-                      // This allows for a smoother, Instagram-like experience
                       onOpenScenes();
                     }}
-                    onMouseEnter={() => setIsViewInScenesExpanded(true)}
-                    onMouseLeave={() => {
-                      // Retract after 2 seconds when mouse leaves
-                      setTimeout(() => {
-                        setIsViewInScenesExpanded(false);
-                      }, 2000);
-                    }}
-                    className={`${isViewInScenesExpanded ? 'px-2' : 'px-1.5'} py-1 bg-white rounded-full text-black text-[10px] font-semibold hover:bg-gray-100 active:bg-gray-200 transition-all duration-300 shadow-lg pointer-events-auto flex items-center gap-1`}
-                    aria-label="View in Scenes"
-                    title="View in Scenes"
+                    className="p-2 rounded-full bg-black/55 hover:bg-black/70 active:bg-black/80 text-white shadow-lg pointer-events-auto transition-colors"
+                    aria-label="Open in Scenes"
+                    title="Open in Scenes"
                   >
-                    <FiMaximize className="w-3 h-3 flex-shrink-0" />
-                    {isViewInScenesExpanded && (
-                      <span className="whitespace-nowrap">View in Scenes</span>
-                    )}
+                    <FiMaximize className="w-4 h-4" strokeWidth={2.25} />
                   </button>
                 </div>
               )}
@@ -4119,6 +4140,103 @@ const AdCard = React.memo(function AdCard({ ad, onImpression, onClick }: {
   );
 });
 
+type Stories24RailItem = { handle: string; title: string; thumb?: string; previewVideoUrl?: string };
+
+/** Horizontal Stories 24 strip (map pin + title + cards). */
+function Stories24FeedRail({
+  stories24Items,
+  navigate,
+}: {
+  stories24Items: Stories24RailItem[];
+  navigate: ReturnType<typeof useNavigate>;
+}) {
+  if (stories24Items.length === 0) return null;
+  return (
+    <div className="mx-3 my-3 rounded-2xl border border-slate-700/60 bg-[#0a1323] p-3 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-white text-base font-semibold flex items-center gap-1.5">
+          <FiMapPin className="w-4 h-4 text-cyan-300 shrink-0" aria-hidden />
+          <span>Stories 24</span>
+        </h3>
+        <button
+          type="button"
+          onClick={() => navigate('/clip')}
+          className="inline-flex items-center gap-1 rounded-full border border-cyan-300/35 bg-cyan-400/10 px-2.5 py-1 text-[11px] font-semibold text-cyan-200 hover:bg-cyan-400/20 transition-colors"
+        >
+          <FiPlus className="w-3 h-3" />
+          <span>Add yours</span>
+        </button>
+      </div>
+      <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
+        {stories24Items.map((storyItem) => (
+          storyItem.handle === '__add_yours__' ? (
+            <button
+              key="stories24-add-yours"
+              type="button"
+              onClick={() => navigate('/clip')}
+              className="relative w-[112px] h-[156px] shrink-0 rounded-2xl border border-cyan-300/35 overflow-hidden bg-gradient-to-br from-[#0e1a30] via-[#12243f] to-[#1e3a5f] text-left"
+            >
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-cyan-400 text-[#021428]">
+                  <FiPlus className="w-5 h-5" />
+                </span>
+                <p className="text-[12px] font-semibold text-white">Add yours</p>
+                <p className="text-[10px] text-cyan-100/90">Post to Stories 24</p>
+              </div>
+            </button>
+          ) : (
+            <button
+              key={`stories24-${storyItem.handle}`}
+              type="button"
+              onClick={() => navigate('/stories', {
+                state: {
+                  openUserHandle: storyItem.handle,
+                  railHandles: stories24Items
+                    .map((item) => item.handle)
+                    .filter((handle) => handle && handle !== '__add_yours__'),
+                },
+              })}
+              className="relative w-[112px] h-[156px] shrink-0 rounded-2xl border border-white/10 overflow-hidden bg-[#101b2f] text-left"
+            >
+              <div className="absolute inset-0 bg-gradient-to-br from-slate-500/25 via-sky-500/20 to-indigo-500/25" />
+              {storyItem.previewVideoUrl ? (
+                <video
+                  src={storyItem.previewVideoUrl}
+                  className="absolute inset-0 w-full h-full object-cover"
+                  muted
+                  playsInline
+                  autoPlay
+                  loop
+                  preload="metadata"
+                  onTimeUpdate={(e) => {
+                    if (e.currentTarget.currentTime > 3) {
+                      e.currentTarget.currentTime = 0;
+                    }
+                  }}
+                />
+              ) : storyItem.thumb ? (
+                <img
+                  src={storyItem.thumb}
+                  alt={`${storyItem.handle} story`}
+                  className="absolute inset-0 w-full h-full object-cover"
+                  loading="lazy"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                  }}
+                />
+              ) : null}
+              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/45 to-transparent p-2">
+                <p className="text-[11px] text-white font-semibold leading-tight line-clamp-2">{storyItem.title}</p>
+                <p className="text-[10px] text-sky-200/90 mt-1 truncate">@{storyItem.handle}</p>
+              </div>
+            </button>
+          )
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function FeedPageWrapper() {
   const { user } = useAuth();
   const userId = getStableUserId(user);
@@ -5029,7 +5147,15 @@ function FeedPageWrapper() {
   }
 
   return (
-    <div key={`${currentFilter}-${customLocation || 'default'}`} id={`panel-${active}`} role="tabpanel" aria-labelledby={`tab-${active}`} className="pb-2">
+    <div
+      key={`${currentFilter}-${customLocation || 'default'}`}
+      id={`panel-${active}`}
+      role="tabpanel"
+      aria-labelledby={`tab-${active}`}
+      className="flex flex-col h-full min-h-0"
+    >
+      {/* Pinned chrome: only the list below scrolls (stable header + footer on mobile) */}
+      <div className="shrink-0 pt-[env(safe-area-inset-top)]">
       <div className="h-4" />
 
       {/* Offline banner */}
@@ -5123,10 +5249,19 @@ function FeedPageWrapper() {
         </div>
       )}
 
+      </div>
+
+      <div
+        className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain pb-2"
+        style={{ WebkitOverflowScrolling: 'touch' }}
+      >
+      <Stories24FeedRail stories24Items={stories24Items} navigate={navigate} />
+
       {(() => {
+        // Inline rails: after post #3, then #7 (+4), then #12 (+5), then every 5 posts until feed remount/refresh.
         let postCounter = 0;
-        let nextStoriesInsertAt = 2;
-        let nextStoriesGap = 3;
+        let nextInlineRailAfterPost = 3;
+
         return flat.map((feedItem, index) => {
           if (feedItem.type === 'ad') {
             const ad = feedItem.item as Ad;
@@ -5154,6 +5289,14 @@ function FeedPageWrapper() {
 
           const p = feedItem.item as Post;
           postCounter += 1;
+          const showInlineStoriesRail =
+            stories24Items.length > 0 && postCounter === nextInlineRailAfterPost;
+          if (showInlineStoriesRail) {
+            if (nextInlineRailAfterPost === 3) nextInlineRailAfterPost = 7;
+            else if (nextInlineRailAfterPost === 7) nextInlineRailAfterPost = 12;
+            else nextInlineRailAfterPost += 5;
+          }
+
           // Priority loading: first 1-3 posts with media get priority
           const hasMedia = !!(p.mediaUrl || (p.mediaItems && p.mediaItems.length > 0));
           const priorityPostsCount = flat.slice(0, index + 1).filter(item => {
@@ -5162,16 +5305,10 @@ function FeedPageWrapper() {
             return !!(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0));
           }).length;
           const isPriority = hasMedia && priorityPostsCount <= 3;
-          const showStoriesRail = stories24Items.length > 0 && postCounter === nextStoriesInsertAt;
-          if (showStoriesRail) {
-            nextStoriesInsertAt += nextStoriesGap;
-            if (nextStoriesGap < 5) nextStoriesGap += 1;
-          }
 
           return (
             <React.Fragment key={p.id ? `post-wrap-${p.id}-${index}` : `post-wrap-${index}`}>
               <FeedCard
-                key={p.id ? `post-${p.id}-${index}` : `post-${index}`}
                 post={p}
                 priority={isPriority}
                 onLike={async () => {
@@ -5580,171 +5717,13 @@ function FeedPageWrapper() {
             } : undefined}
                 onShareSuccess={(postId) => updateOne(postId, p => ({ ...p, stats: { ...p.stats, shares: p.stats.shares + 1 } }))}
               />
-
-              {showStoriesRail && (
-                <div className="mx-3 my-3 rounded-2xl border border-slate-700/60 bg-[#0a1323] p-3 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-white text-base font-semibold">Stories 24</h3>
-                    <button
-                      type="button"
-                      onClick={() => navigate('/clip')}
-                      className="inline-flex items-center gap-1 rounded-full border border-cyan-300/35 bg-cyan-400/10 px-2.5 py-1 text-[11px] font-semibold text-cyan-200 hover:bg-cyan-400/20 transition-colors"
-                    >
-                      <FiPlus className="w-3 h-3" />
-                      <span>Add yours</span>
-                    </button>
-                  </div>
-                  <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
-                    {stories24Items.map((storyItem) => (
-                      storyItem.handle === '__add_yours__' ? (
-                        <button
-                          key="stories24-add-yours"
-                          type="button"
-                          onClick={() => navigate('/clip')}
-                          className="relative w-[112px] h-[156px] shrink-0 rounded-2xl border border-cyan-300/35 overflow-hidden bg-gradient-to-br from-[#0e1a30] via-[#12243f] to-[#1e3a5f] text-left"
-                        >
-                          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-                            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-cyan-400 text-[#021428]">
-                              <FiPlus className="w-5 h-5" />
-                            </span>
-                            <p className="text-[12px] font-semibold text-white">Add yours</p>
-                            <p className="text-[10px] text-cyan-100/90">Post to Stories 24</p>
-                          </div>
-                        </button>
-                      ) : (
-                        <button
-                          key={`stories24-${storyItem.handle}`}
-                          type="button"
-                          onClick={() => navigate('/stories', {
-                            state: {
-                              openUserHandle: storyItem.handle,
-                              railHandles: stories24Items
-                                .map((item) => item.handle)
-                                .filter((handle) => handle && handle !== '__add_yours__'),
-                            },
-                          })}
-                          className="relative w-[112px] h-[156px] shrink-0 rounded-2xl border border-white/10 overflow-hidden bg-[#101b2f] text-left"
-                        >
-                          <div className="absolute inset-0 bg-gradient-to-br from-slate-500/25 via-sky-500/20 to-indigo-500/25" />
-                          {storyItem.previewVideoUrl ? (
-                            <video
-                              src={storyItem.previewVideoUrl}
-                              className="absolute inset-0 w-full h-full object-cover"
-                              muted
-                              playsInline
-                              autoPlay
-                              loop
-                              preload="metadata"
-                              onTimeUpdate={(e) => {
-                                if (e.currentTarget.currentTime > 3) {
-                                  e.currentTarget.currentTime = 0;
-                                }
-                              }}
-                            />
-                          ) : storyItem.thumb ? (
-                            <img
-                              src={storyItem.thumb}
-                              alt={`${storyItem.handle} story`}
-                              className="absolute inset-0 w-full h-full object-cover"
-                              loading="lazy"
-                              onError={(e) => {
-                                e.currentTarget.style.display = 'none';
-                              }}
-                            />
-                          ) : null}
-                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/45 to-transparent p-2">
-                            <p className="text-[11px] text-white font-semibold leading-tight line-clamp-2">{storyItem.title}</p>
-                            <p className="text-[10px] text-sky-200/90 mt-1 truncate">@{storyItem.handle}</p>
-                          </div>
-                        </button>
-                      )
-                    ))}
-                  </div>
-                </div>
+              {showInlineStoriesRail && (
+                <Stories24FeedRail stories24Items={stories24Items} navigate={navigate} />
               )}
             </React.Fragment>
           );
         });
       })()}
-
-      {/* In-feed DM compose sheet (TikTok-style overlay) */}
-      {dmSheetOpen && dmSheetRecipientHandle && user?.handle && (
-        <div
-          className="fixed inset-0 z-[100] flex flex-col justify-end"
-          role="dialog"
-          aria-label="Message"
-        >
-          <div
-            className="absolute inset-0 bg-black/50"
-            onClick={() => {
-              setDmSheetOpen(false);
-              setDmSheetRecipientHandle(null);
-              setDmSheetMessage('');
-            }}
-            aria-hidden="true"
-          />
-          <div
-            className="relative z-10 bg-[#0f172a] dark:bg-[#0f172a] rounded-t-2xl shadow-xl border-t border-gray-700/50 flex flex-col max-h-[70vh]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700/50">
-              <span className="text-sm font-medium text-gray-300">Message {dmSheetRecipientHandle}</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setDmSheetOpen(false);
-                  setDmSheetRecipientHandle(null);
-                  setDmSheetMessage('');
-                }}
-                className="p-2 rounded-full hover:bg-gray-700/50 text-gray-400 hover:text-white transition-colors"
-                aria-label="Close"
-              >
-                <FiX className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-4 flex gap-3 items-end">
-              <textarea
-                ref={dmSheetInputRef}
-                value={dmSheetMessage}
-                onChange={(e) => setDmSheetMessage(e.target.value)}
-                placeholder={`Message ${dmSheetRecipientHandle}. It's j...`}
-                className="flex-1 min-h-[44px] max-h-32 px-4 py-3 rounded-xl bg-gray-800 border border-gray-600 text-white placeholder-gray-500 resize-none focus:outline-none focus:ring-2 focus:ring-[#0095f6] focus:border-transparent"
-                rows={2}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    const text = dmSheetMessage.trim();
-                    if (text && user?.handle) {
-                      appendMessage(user.handle, dmSheetRecipientHandle!, { text }).then(() => {
-                        setDmSheetMessage('');
-                        setDmSheetOpen(false);
-                        setDmSheetRecipientHandle(null);
-                      }).catch((err) => console.error('Send DM failed:', err));
-                    }
-                  }
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  const text = dmSheetMessage.trim();
-                  if (!text || !user?.handle) return;
-                  appendMessage(user.handle, dmSheetRecipientHandle!, { text }).then(() => {
-                    setDmSheetMessage('');
-                    setDmSheetOpen(false);
-                    setDmSheetRecipientHandle(null);
-                  }).catch((err) => console.error('Send DM failed:', err));
-                }}
-                disabled={!dmSheetMessage.trim()}
-                className="flex-shrink-0 w-11 h-11 rounded-full bg-[#0095f6] hover:bg-[#0084d4] disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center text-white transition-colors"
-                aria-label="Send message"
-              >
-                <VscLiveShare className="w-5 h-5" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {(loading || (pages.length === 0 && !end)) && (
         <div className="space-y-4 px-4 py-6">
@@ -5854,6 +5833,87 @@ function FeedPageWrapper() {
 
       {end && flat.length > 0 && (
         <div className="p-4 text-center text-xs text-gray-500 dark:text-gray-400">You're all caught up.</div>
+      )}
+
+      </div>
+
+      {/* In-feed DM sheet: outside scroll so position:fixed works reliably on iOS */}
+      {dmSheetOpen && dmSheetRecipientHandle && user?.handle && (
+        <div
+          className="fixed inset-0 z-[100] flex flex-col justify-end"
+          role="dialog"
+          aria-label="Message"
+        >
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => {
+              setDmSheetOpen(false);
+              setDmSheetRecipientHandle(null);
+              setDmSheetMessage('');
+            }}
+            aria-hidden="true"
+          />
+          <div
+            className="relative z-10 bg-[#0f172a] dark:bg-[#0f172a] rounded-t-2xl shadow-xl border-t border-gray-700/50 flex flex-col max-h-[70vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700/50">
+              <span className="text-sm font-medium text-gray-300">Message {dmSheetRecipientHandle}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setDmSheetOpen(false);
+                  setDmSheetRecipientHandle(null);
+                  setDmSheetMessage('');
+                }}
+                className="p-2 rounded-full hover:bg-gray-700/50 text-gray-400 hover:text-white transition-colors"
+                aria-label="Close"
+              >
+                <FiX className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 flex gap-3 items-end">
+              <textarea
+                ref={dmSheetInputRef}
+                value={dmSheetMessage}
+                onChange={(e) => setDmSheetMessage(e.target.value)}
+                placeholder={`Message ${dmSheetRecipientHandle}. It's j...`}
+                className="flex-1 min-h-[44px] max-h-32 px-4 py-3 rounded-xl bg-gray-800 border border-gray-600 text-white placeholder-gray-500 resize-none focus:outline-none focus:ring-2 focus:ring-[#0095f6] focus:border-transparent"
+                rows={2}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    const text = dmSheetMessage.trim();
+                    if (text && user?.handle) {
+                      appendMessage(user.handle, dmSheetRecipientHandle!, { text }).then(() => {
+                        setDmSheetMessage('');
+                        setDmSheetOpen(false);
+                        setDmSheetRecipientHandle(null);
+                      }).catch((err) => console.error('Send DM failed:', err));
+                    }
+                  }
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const text = dmSheetMessage.trim();
+                  if (!text || !user?.handle) return;
+                  appendMessage(user.handle, dmSheetRecipientHandle!, { text }).then(() => {
+                    setDmSheetMessage('');
+                    setDmSheetOpen(false);
+                    setDmSheetRecipientHandle(null);
+                  }).catch((err) => console.error('Send DM failed:', err));
+                }}
+                disabled={!dmSheetMessage.trim()}
+                className="flex-shrink-0 w-11 h-11 rounded-full bg-[#0095f6] hover:bg-[#0084d4] disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center text-white transition-colors"
+                aria-label="Send message"
+              >
+                <VscLiveShare className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Comments Modal */}
