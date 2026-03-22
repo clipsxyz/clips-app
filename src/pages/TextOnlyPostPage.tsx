@@ -24,6 +24,7 @@ export default function TextOnlyPostPage() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [locationText, setLocationText] = useState<string>(locationState?.location || '');
     const [venueText, setVenueText] = useState<string>(locationState?.venue || '');
+    const [landmarkText, setLandmarkText] = useState<string>(locationState?.landmark || '');
     const [taggedUsers, setTaggedUsers] = useState<string[]>(locationState?.taggedUsers || []);
     const [showLocationSheet, setShowLocationSheet] = useState(false);
     const [tagSearchQuery, setTagSearchQuery] = useState('');
@@ -98,6 +99,7 @@ export default function TextOnlyPostPage() {
                     setText('');
                     setLocationText('');
                     setVenueText('');
+                    setLandmarkText('');
                     setTaggedUsers([]);
                     setSelectedTemplateId(null);
                     return;
@@ -228,7 +230,8 @@ export default function TextOnlyPostPage() {
                 undefined, // subtitleText
                 undefined, // editTimeline
                 undefined, // musicTrackId
-                venueText.trim() || undefined // venue
+                venueText.trim() || undefined, // venue
+                landmarkText.trim() || undefined // landmark
             );
 
             window.dispatchEvent(new CustomEvent('postCreated'));
@@ -270,7 +273,7 @@ export default function TextOnlyPostPage() {
                         <button
                             onClick={handleOpenLocationSheet}
                             className="p-2 rounded-full text-white hover:bg-white/10 transition-colors"
-                            aria-label="Add location and venue"
+                            aria-label="Add location, venue, and landmark"
                         >
                             <MdOutlineShareLocation className="w-6 h-6 text-white" />
                         </button>
@@ -374,6 +377,16 @@ export default function TextOnlyPostPage() {
                                     value={venueText}
                                     onChange={(e) => setVenueText(e.target.value)}
                                     placeholder="Add venue (e.g. café, stadium)"
+                                    className="w-full px-3 py-2.5 rounded-lg bg-[#1f1f23] border border-gray-700 text-white text-sm outline-none focus:ring-2 focus:ring-white/30"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Landmark</label>
+                                <input
+                                    type="text"
+                                    value={landmarkText}
+                                    onChange={(e) => setLandmarkText(e.target.value)}
+                                    placeholder="Add landmark (e.g. Phoenix Park, river)"
                                     className="w-full px-3 py-2.5 rounded-lg bg-[#1f1f23] border border-gray-700 text-white text-sm outline-none focus:ring-2 focus:ring-white/30"
                                 />
                             </div>

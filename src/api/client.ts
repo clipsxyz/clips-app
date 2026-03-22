@@ -136,6 +136,7 @@ export async function createPost(postData: {
     text?: string;
     location?: string;
     venue?: string;
+    landmark?: string;
     mediaUrl?: string;
     mediaType?: 'image' | 'video';
     caption?: string;
@@ -170,6 +171,7 @@ export async function updatePost(postId: string, postData: {
     text?: string;
     location?: string;
     venue?: string;
+    landmark?: string;
 }) {
     return apiRequest(`/posts/${postId}`, {
         method: 'PUT',

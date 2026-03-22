@@ -62,6 +62,8 @@ export default function GalleryPreviewPage() {
         draftMediaType?: 'image' | 'video';
         draftCaption?: string;
         draftLocation?: string;
+        draftVenue?: string;
+        draftLandmark?: string;
         draftVideoDuration?: number;
         draftId?: string;
         draftMediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>;
@@ -159,7 +161,8 @@ export default function GalleryPreviewPage() {
     const [cardTab, setCardTab] = useState<'caption' | 'filters' | 'stickers' | 'location' | 'carousel'>('caption');
     const [caption, setCaption] = useState(isFromDraft ? (state.draftCaption ?? '') : '');
     const [storyLocation, setStoryLocation] = useState(isFromDraft ? (state.draftLocation ?? '') : '');
-    const [venue, setVenue] = useState('');
+    const [venue, setVenue] = useState(isFromDraft ? (state.draftVenue ?? '') : '');
+    const [landmark, setLandmark] = useState(isFromDraft ? (state.draftLandmark ?? '') : '');
     const [taggedUsers, setTaggedUsers] = useState<string[]>([]);
     const [showTagUserModal, setShowTagUserModal] = useState(false);
     const [selectedFilter, setSelectedFilter] = useState('None');
@@ -397,6 +400,8 @@ export default function GalleryPreviewPage() {
                 videoDuration: first.duration || 0,
                 location: storyLocation.trim() || undefined,
                 caption: caption.trim() || undefined,
+                venue: venue.trim() || undefined,
+                landmark: landmark.trim() || undefined,
                 mediaType: first.type,
                 mediaItems: persistentItems,
             });
@@ -421,7 +426,7 @@ export default function GalleryPreviewPage() {
         } finally {
             setIsSavingDraft(false);
         }
-    }, [mediaUrl, carouselItems, videoDuration, storyLocation, caption, mediaType, navigate]);
+    }, [mediaUrl, carouselItems, videoDuration, storyLocation, caption, venue, landmark, mediaType, navigate]);
 
     const handlePost = useCallback(async () => {
         if (!user) {
@@ -499,27 +504,25 @@ export default function GalleryPreviewPage() {
                 storyLocation.trim() || '',
                 persistentMediaUrl,
                 mediaType,
-                undefined,
+                undefined, // imageText
                 caption.trim() || undefined,
                 user.local,
                 user.regional,
                 user.national,
                 stickers.length > 0 ? stickers : undefined,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
+                undefined, // templateId
+                undefined, // mediaItems
+                undefined, // bannerText
+                undefined, // textStyle
                 taggedUsers.length > 0 ? taggedUsers : undefined,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                venue.trim() || undefined
+                undefined, // videoCaptionsEnabled
+                undefined, // videoCaptionText
+                undefined, // subtitlesEnabled
+                undefined, // subtitleText
+                undefined, // editTimeline
+                undefined, // musicTrackId
+                venue.trim() || undefined,
+                landmark.trim() || undefined
             );
             showToast('Post created successfully!');
             window.dispatchEvent(new CustomEvent('postCreated'));
@@ -535,7 +538,7 @@ export default function GalleryPreviewPage() {
         } finally {
             setIsUploading(false);
         }
-    }, [user, mediaUrl, mediaType, carouselItems, stickers, storyLocation, venue, taggedUsers, navigate, videoFrameDataUrl]);
+    }, [user, mediaUrl, mediaType, carouselItems, stickers, storyLocation, venue, landmark, taggedUsers, navigate, videoFrameDataUrl]);
 
     if (hasCheckedCache && !mediaUrl) return null;
 
@@ -949,6 +952,23 @@ export default function GalleryPreviewPage() {
                                         value={venue}
                                         onChange={(e) => setVenue(e.target.value)}
                                         placeholder="Add venue"
+                                        className="w-full px-4 pb-3 bg-transparent text-white placeholder-gray-500 focus:outline-none focus:ring-0 text-sm"
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Landmark */}
+                            <div
+                                className="rounded-2xl p-[1.5px]"
+                                style={{ background: 'linear-gradient(135deg,#f59e0b,#a855f7)' }}
+                            >
+                                <div className="rounded-[1rem] bg-[#020617] overflow-hidden">
+                                    <label className="block px-4 py-3 text-xs font-medium text-white/70 uppercase tracking-wide">Landmark</label>
+                                    <input
+                                        type="text"
+                                        value={landmark}
+                                        onChange={(e) => setLandmark(e.target.value)}
+                                        placeholder="Add landmark (optional)"
                                         className="w-full px-4 pb-3 bg-transparent text-white placeholder-gray-500 focus:outline-none focus:ring-0 text-sm"
                                     />
                                 </div>

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { FiHome, FiUser, FiUserPlus, FiUserX, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX, FiClock } from 'react-icons/fi';
+import { GiGreekTemple } from 'react-icons/gi';
 import { IoMdTrendingUp } from 'react-icons/io';
 import { VscLiveShare } from 'react-icons/vsc';
 import { SiFigshare } from 'react-icons/si';
@@ -852,15 +853,16 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
     post.userReclipped === true;
   const profileTargetHandle = isReclippedPost ? post.originalUserHandle! : post.userHandle;
 
-  // Metadata carousel: location → venue → timestamp, one at a time
+  // Metadata carousel: location → venue → landmark → timestamp, one at a time
   const metadataItems = React.useMemo(() => {
-    const out: Array<{ label: string; type: 'location' | 'venue' | 'timestamp' }> = [];
+    const out: Array<{ label: string; type: 'location' | 'venue' | 'landmark' | 'timestamp' }> = [];
     if (post.locationLabel && post.locationLabel !== 'Unknown Location') out.push({ label: post.locationLabel, type: 'location' });
     if (post.venue) out.push({ label: post.venue, type: 'venue' });
+    if (post.landmark) out.push({ label: post.landmark, type: 'landmark' });
     const ts = post.createdAt != null ? (typeof post.createdAt === 'string' ? parseInt(post.createdAt, 10) : post.createdAt) : null;
     if (typeof ts === 'number' && !Number.isNaN(ts)) out.push({ label: timeAgo(ts), type: 'timestamp' });
     return out;
-  }, [post.locationLabel, post.venue, post.createdAt]);
+  }, [post.locationLabel, post.venue, post.landmark, post.createdAt]);
   const [metadataIndex, setMetadataIndex] = React.useState(0);
   // Transition style for carousel (currently fixed to slide-left)
   const metadataTransitionClass = 'metadata-carousel-slide-left';
@@ -1114,10 +1116,14 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
           </div>
         </div>
         <div className="relative z-10 flex flex-col items-end gap-0.5 flex-shrink-0">
-          {/* Metadata pill on top: location → venue → timestamp (Instagram-style: clean, minimal, no shimmer) */}
+          {/* Metadata pill on top: location → venue → landmark → timestamp (Instagram-style: clean, minimal, no shimmer) */}
           {metadataItems.length > 0 && (() => {
             const current = metadataItems[metadataIndex];
-            const Icon = current.type === 'location' ? FiMapPin : current.type === 'venue' ? FiHome : FiClock;
+            const Icon =
+              current.type === 'location' ? FiMapPin
+                : current.type === 'venue' ? FiHome
+                  : current.type === 'landmark' ? GiGreekTemple
+                    : FiClock;
             return (
               <div
                 className="flex items-center gap-0.5 min-w-0 max-w-[140px] justify-end min-h-[0.9rem] overflow-visible"
@@ -3173,11 +3179,11 @@ function EngagementBar({
     window.addEventListener(`viewAdded-${post.id}`, handleViewAdded);
     window.addEventListener(`likeToggled-${post.id}`, handleLikeToggled as EventListener);
 
-    // Listen for post updates (text/location/venue edits)
+    // Listen for post updates (text/location/venue/landmark edits)
     const handlePostUpdated = ((e: CustomEvent) => {
-      const { text, location, venue } = e.detail;
+      const { text, location, venue, landmark } = e.detail;
       window.dispatchEvent(new CustomEvent(`updatePostInFeed-${post.id}`, {
-        detail: { text, location, venue }
+        detail: { text, location, venue, landmark }
       }));
     }) as EventListener;
     window.addEventListener(`postUpdated-${post.id}`, handlePostUpdated);
@@ -4020,9 +4026,14 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             post={post}
             isOpen={editModalOpen}
             onClose={() => setEditModalOpen(false)}
-            onSave={async (text: string, location: string, venue: string) => {
+            onSave={async (text: string, location: string, venue: string, landmark: string) => {
               try {
-                await updatePost(post.id, { text, location, venue: venue || undefined });
+                await updatePost(post.id, {
+                  text,
+                  location,
+                  venue: venue || undefined,
+                  landmark: landmark || undefined,
+                });
               } catch (err: any) {
                 const isConnectionError =
                   err?.message === 'CONNECTION_REFUSED' ||
@@ -4034,14 +4045,14 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
                 if (isConnectionError) {
                   console.warn('Backend not available, updating post locally');
                   window.dispatchEvent(new CustomEvent(`updatePostInFeed-${post.id}`, {
-                    detail: { text, location, venue }
+                    detail: { text, location, venue, landmark }
                   }));
                   return;
                 }
                 throw err;
               }
               window.dispatchEvent(new CustomEvent(`postUpdated-${post.id}`, {
-                detail: { text, location, venue }
+                detail: { text, location, venue, landmark }
               }));
             }}
           />
@@ -4274,7 +4285,7 @@ function FeedPageWrapper() {
     return () => window.removeEventListener('locationUpdated', handleLocationUpdate as EventListener);
   }, [active]);
   const [customLocation, setCustomLocation] = React.useState<string | null>(null);
-  const [customFilterType, setCustomFilterType] = React.useState<'location' | 'venue' | null>(null);
+  const [customFilterType, setCustomFilterType] = React.useState<'location' | 'venue' | 'landmark' | null>(null);
   const [pages, setPages] = React.useState<Post[][]>([]);
   const [ads, setAds] = React.useState<Ad[]>([]);
   const [cursor, setCursor] = React.useState<number | null>(0);
@@ -4440,7 +4451,11 @@ function FeedPageWrapper() {
     (active === 'Following' || showFollowingFeed)
       ? 'discover'
       : (customLocation
-        ? (customFilterType === 'venue' ? `venue:${customLocation}` : customLocation)
+        ? (customFilterType === 'venue'
+          ? `venue:${customLocation}`
+          : customFilterType === 'landmark'
+            ? `landmark:${customLocation}`
+            : customLocation)
         : active);
 
   // Read location from URL query (?location=...) when arriving from Discover
@@ -4469,7 +4484,9 @@ function FeedPageWrapper() {
       console.log('URL provided location:', q, 'setting customLocation...');
       console.log('About to call setCustomLocation, will update from:', customLocation, 'to:', q);
       setCustomLocation(q);
-      setCustomFilterType(type === 'venue' ? 'venue' : 'location');
+      setCustomFilterType(
+        type === 'venue' ? 'venue' : type === 'landmark' ? 'landmark' : 'location'
+      );
       console.log('setCustomLocation called, customLocation should now be:', q);
       // Also reset pages immediately when changing location
       setPages([]);
@@ -4536,7 +4553,7 @@ function FeedPageWrapper() {
   React.useEffect(() => {
     const handleLocationChange = (event: CustomEvent) => {
       const location = event.detail.location;
-      const filterType = event.detail.filterType as 'location' | 'venue' | undefined;
+      const filterType = event.detail.filterType as 'location' | 'venue' | 'landmark' | undefined;
       console.log('Feed received location change:', location);
       setCustomLocation(location);
       setCustomFilterType(filterType || 'location');
@@ -4556,7 +4573,7 @@ function FeedPageWrapper() {
 
     // Check for pending location from Discover page
     const pendingLocation = sessionStorage.getItem('pendingLocation');
-    const pendingFilterType = sessionStorage.getItem('pendingFilterType') as 'location' | 'venue' | null;
+    const pendingFilterType = sessionStorage.getItem('pendingFilterType') as 'location' | 'venue' | 'landmark' | null;
     console.log('Checking for pending location, found:', pendingLocation);
     if (pendingLocation) {
       console.log('Feed found pending location:', pendingLocation, 'setting customLocation...');
@@ -4821,13 +4838,14 @@ function FeedPageWrapper() {
       // Add listeners for all posts in the feed
       pages.flat().forEach(post => {
         const handler = ((e: CustomEvent) => {
-          const { text, location, venue } = e.detail;
+          const { text, location, venue, landmark } = e.detail;
           updateOne(post.id, p => ({
             ...p,
             text: text !== undefined ? text : p.text,
             text_content: text !== undefined ? text : p.text_content,
             locationLabel: location !== undefined ? location : p.locationLabel,
-            venue: venue !== undefined ? venue : p.venue
+            venue: venue !== undefined ? venue : p.venue,
+            landmark: landmark !== undefined ? landmark : p.landmark
           }), (newPages) => {
             saveFeed(userId, currentFilter, newPages).catch(() => {});
           });
@@ -5086,31 +5104,10 @@ function FeedPageWrapper() {
   }, [user?.id, routerLocation.pathname, generateTextStoryPreview]);
 
   const stories24Items = React.useMemo(() => {
-    const fallbackItems: Array<{ handle: string; title: string; thumb?: string; previewVideoUrl?: string }> = [];
-    const seenHandles = new Set<string>();
-    for (const p of postsOnly) {
-      const handle = (p.userHandle || '').trim();
-      if (!handle || seenHandles.has(handle)) continue;
-      seenHandles.add(handle);
-      const firstMedia = p.mediaItems?.find((m) => m.type === 'image' || m.type === 'video');
-      const thumb = firstMedia?.url || p.mediaUrl;
-      const rawTitle = (p.caption || p.text || p.text_content || `${handle} stories`).trim();
-      fallbackItems.push({
-        handle,
-        title: rawTitle.length > 34 ? `${rawTitle.slice(0, 34)}...` : rawTitle,
-        thumb: firstMedia?.type === 'video' ? undefined : thumb,
-        previewVideoUrl: firstMedia?.type === 'video' ? firstMedia?.url : undefined,
-      });
-      if (fallbackItems.length >= 12) break;
-    }
-
-    // Merge live story data with fallback cards so mock/fallback users don't disappear.
+    // Only real 24h stories belong here. Do NOT derive cards from feed posts — a newsfeed
+    // post is not a story; showing it made the rail preview match the feed but /stories had nothing.
     const mergedByHandle = new Map<string, { handle: string; title: string; thumb?: string; previewVideoUrl?: string }>();
     for (const item of storiesRailItems) mergedByHandle.set(item.handle.trim().toLowerCase(), item);
-    for (const item of fallbackItems) {
-      const key = item.handle.trim().toLowerCase();
-      if (!mergedByHandle.has(key)) mergedByHandle.set(key, item);
-    }
     const baseItems = Array.from(mergedByHandle.values());
     const normalizedUserHandle = (user?.handle || '').trim().toLowerCase();
     const userItemIndex = baseItems.findIndex((item) => item.handle.trim().toLowerCase() === normalizedUserHandle);
@@ -5128,7 +5125,7 @@ function FeedPageWrapper() {
     }
 
     return ordered.slice(0, 12);
-  }, [postsOnly, storiesRailItems, user?.handle]);
+  }, [storiesRailItems, user?.handle]);
 
   // Human-readable feed label for Scenes carousel header
   const feedLabelForScenes = React.useMemo(() => {
@@ -5193,13 +5190,15 @@ function FeedPageWrapper() {
               className="relative px-3 py-1.5 text-sm font-medium text-white rounded-lg"
               onClick={() => setCustomLocation(null)}
             >
-              {/* Gradient border wrapper – blue → purple, with rotating reveal */}
+              {/* Gradient border: venue = green; landmark = orange only; location = blue/purple */}
               <div
                 className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
                 style={{
                   background: customFilterType === 'venue'
-                    ? 'linear-gradient(90deg, #3b82f6 0%, #a855f7 50%, #3b82f6 100%)'
-                    : 'linear-gradient(90deg, #3b82f6 0%, #a855f7 50%, #3b82f6 100%)',
+                    ? 'linear-gradient(90deg, #16a34a 0%, #4ade80 50%, #22c55e 100%)'
+                    : customFilterType === 'landmark'
+                      ? 'linear-gradient(90deg, #f97316 0%, #fb923c 45%, #ea580c 100%)'
+                      : 'linear-gradient(90deg, #3b82f6 0%, #a855f7 50%, #3b82f6 100%)',
                 }}
               >
                 {/* Overlay that covers border initially, then rotates to reveal it */}
@@ -5215,10 +5214,21 @@ function FeedPageWrapper() {
               </div>
               {/* Content */}
               <span className="relative z-10 flex items-center gap-2">
-                {customFilterType === 'venue' ? <FiHome className="w-4 h-4" /> : <FiMapPin className="w-4 h-4" />}
+                {customFilterType === 'venue' ? (
+                  <FiHome className="w-4 h-4" />
+                ) : customFilterType === 'landmark' ? (
+                  <GiGreekTemple className="w-4 h-4" />
+                ) : (
+                  <FiMapPin className="w-4 h-4" />
+                )}
                 {customFilterType === 'venue' ? (
                   <>
                     <span className="inline-block w-2 h-2 rounded-full bg-green-400" />
+                    {customLocation}
+                  </>
+                ) : customFilterType === 'landmark' ? (
+                  <>
+                    <span className="inline-block w-2 h-2 rounded-full bg-orange-400" />
                     {customLocation}
                   </>
                 ) : (
@@ -5255,12 +5265,9 @@ function FeedPageWrapper() {
         className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain pb-2"
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
-      <Stories24FeedRail stories24Items={stories24Items} navigate={navigate} />
-
       {(() => {
-        // Inline rails: after post #3, then #7 (+4), then #12 (+5), then every 5 posts until feed remount/refresh.
+        // Stories 24: show once after the first post card (not above the feed). Custom/search feeds omit entirely.
         let postCounter = 0;
-        let nextInlineRailAfterPost = 3;
 
         return flat.map((feedItem, index) => {
           if (feedItem.type === 'ad') {
@@ -5289,13 +5296,8 @@ function FeedPageWrapper() {
 
           const p = feedItem.item as Post;
           postCounter += 1;
-          const showInlineStoriesRail =
-            stories24Items.length > 0 && postCounter === nextInlineRailAfterPost;
-          if (showInlineStoriesRail) {
-            if (nextInlineRailAfterPost === 3) nextInlineRailAfterPost = 7;
-            else if (nextInlineRailAfterPost === 7) nextInlineRailAfterPost = 12;
-            else nextInlineRailAfterPost += 5;
-          }
+          const showStories24AfterThisPost =
+            !customLocation && stories24Items.length > 0 && postCounter === 1;
 
           // Priority loading: first 1-3 posts with media get priority
           const hasMedia = !!(p.mediaUrl || (p.mediaItems && p.mediaItems.length > 0));
@@ -5717,7 +5719,7 @@ function FeedPageWrapper() {
             } : undefined}
                 onShareSuccess={(postId) => updateOne(postId, p => ({ ...p, stats: { ...p.stats, shares: p.stats.shares + 1 } }))}
               />
-              {showInlineStoriesRail && (
+              {showStories24AfterThisPost && (
                 <Stories24FeedRail stories24Items={stories24Items} navigate={navigate} />
               )}
             </React.Fragment>

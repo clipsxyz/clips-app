@@ -324,6 +324,8 @@ if (!postsInitialized) {
       id: `artane-post-6-${artaneNow - 259200000}-${Math.random().toString(36).substr(2, 9)}`,
       userHandle: 'Sarah@Artane',
       locationLabel: 'Phoenix Park, Dublin',
+      venue: 'Phoenix Park',
+      landmark: 'Phoenix Park',
       tags: [],
       mediaUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800',
       mediaType: 'image',
@@ -667,6 +669,7 @@ function transformLaravelPost(response: any): Post {
     userHandle: response.user_handle || response.userHandle,
     locationLabel: response.location_label || response.locationLabel || 'Unknown Location',
     venue: existing?.venue || response.venue || undefined,
+    landmark: existing?.landmark || response.landmark || undefined,
     tags: response.tags || [],
     // Use final_video_url if available, else media_url, else first media_items item (for still-image posts)
     mediaUrl: resolvedMediaUrl,
@@ -854,6 +857,12 @@ function postMatchesLocationTab(p: Post, tab: string): boolean {
     const venue = normalize((p as any).venue);
     return !!venue && (venue === venueQuery || venue.includes(venueQuery) || venueQuery.includes(venue));
   }
+  const isLandmarkFeed = t.startsWith('landmark:');
+  const landmarkQuery = isLandmarkFeed ? t.slice('landmark:'.length).trim() : '';
+  if (isLandmarkFeed) {
+    const lm = normalize((p as any).landmark);
+    return !!lm && (lm === landmarkQuery || lm.includes(landmarkQuery) || landmarkQuery.includes(lm));
+  }
   const predefinedTabs = ['finglas', 'dublin', 'ireland', 'discover'];
   if (predefinedTabs.includes(t)) {
     // Normalize stored author locations: trim + lowercase so "Ireland " matches "ireland"
@@ -888,8 +897,9 @@ function postMatchesLocationTab(p: Post, tab: string): boolean {
 export async function fetchPostsPage(tab: string, cursor: number | null, limit = 5, userId = 'me', _userLocal = '', _userRegional = '', _userNational = '', _currentUserHandle = ''): Promise<Page> {
   const t = tab.toLowerCase();
   const isVenueFeed = t.startsWith('venue:');
+  const isLandmarkFeed = t.startsWith('landmark:');
   // When API is off, use mock for all feeds. For Discover (Following), always use mock so local follows from localStorage are used (fixes phone/tablet where API might return empty).
-  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false' && t !== 'discover' && !isVenueFeed;
+  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false' && t !== 'discover' && !isVenueFeed && !isLandmarkFeed;
 
   if (useLaravelAPI) {
     try {
@@ -1078,15 +1088,25 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
 
       const predefinedTabs = ['finglas', 'dublin', 'ireland', 'discover'];
       if (!predefinedTabs.includes(t)) {
-        const query = t.startsWith('venue:') ? t.slice('venue:'.length).trim().toLowerCase() : t.trim().toLowerCase();
-        const isVenueQuery = t.startsWith('venue:');
         const normalize = (v?: string) => (v || '').trim().toLowerCase();
+        const isVenueQuery = t.startsWith('venue:');
+        const isLandmarkQuery = t.startsWith('landmark:');
+        const query = isVenueQuery
+          ? t.slice('venue:'.length).trim().toLowerCase()
+          : isLandmarkQuery
+            ? t.slice('landmark:'.length).trim().toLowerCase()
+            : t.trim().toLowerCase();
         const venue = normalize((p as any).venue);
+        const landmark = normalize((p as any).landmark);
         // Venue feeds: if tab matches a venue, keep posts tagged with that venue.
         if (isVenueQuery) {
           return !!venue && (venue === query || venue.includes(query) || query.includes(venue));
         }
+        if (isLandmarkQuery) {
+          return !!landmark && (landmark === query || landmark.includes(query) || query.includes(landmark));
+        }
         if (venue && (venue === query || venue.includes(query) || query.includes(venue))) return true;
+        if (landmark && (landmark === query || landmark.includes(query) || query.includes(landmark))) return true;
         const local = normalize(p.userLocal);
         const regional = normalize(p.userRegional);
         const national = normalize(p.userNational);
@@ -1852,7 +1872,8 @@ export async function createPost(
   subtitleText?: string, // Subtitle text to display on video
   editTimeline?: any, // Edit timeline for hybrid editing pipeline (clips, trims, transitions, etc.)
   musicTrackId?: number, // Library music track ID
-  venue?: string // Venue / place name for metadata carousel
+  venue?: string, // Venue / place name for metadata carousel
+  landmark?: string // Named landmark (e.g. River Liffey) for carousel + landmark feeds
 ): Promise<Post> {
   // Use real Laravel API
   const { createPost: createPostAPI } = await import('./client');
@@ -1862,6 +1883,7 @@ export async function createPost(
       text: text || undefined,
       location: location || undefined,
       venue: venue || undefined,
+      landmark: landmark || undefined,
       mediaUrl: imageUrl || undefined,
       mediaType: mediaType || undefined,
       caption: caption || undefined,
@@ -1885,14 +1907,15 @@ export async function createPost(
     let transformed = transformLaravelPost(response);
 
     // Ensure we preserve/override location from the current user when available,
-    // and always keep the venue that the creator entered so the metadata carousel
-    // and venue-based feeds can rely on it even if the API omits it.
+    // and always keep the venue/landmark that the creator entered so the metadata carousel
+    // and feeds can rely on them even if the API omits them.
     transformed = {
       ...transformed,
       userLocal: userLocal ?? transformed.userLocal,
       userRegional: userRegional ?? transformed.userRegional,
       userNational: userNational ?? transformed.userNational,
       venue: venue || transformed.venue,
+      landmark: landmark || transformed.landmark,
     };
 
     // Also store newly created posts in the local in-memory array + localStorage
@@ -2038,6 +2061,7 @@ export async function createPost(
       userHandle,
       locationLabel: location || 'Unknown Location',
       venue: venue || undefined,
+      landmark: landmark || undefined,
       tags: [],
       // Only set mediaUrl if we have actual media (not empty string for text-only posts)
       mediaUrl: persistentImageUrl && persistentImageUrl.trim() !== '' ? persistentImageUrl : undefined,

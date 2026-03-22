@@ -123,6 +123,7 @@ class PostController extends Controller
                 // Ensure venue is always present in API response so frontend metadata
                 // carousel and venue feeds can rely on it for all post types.
                 $postData['venue'] = $post->venue;
+                $postData['landmark'] = $post->landmark;
                 $postData['taggedUsers'] = $post->taggedUsers->pluck('handle')->toArray();
                 if ($userModel) {
                     $postData['user_liked'] = $post->isLikedBy($userModel);
@@ -216,6 +217,7 @@ class PostController extends Controller
             'text' => 'nullable|string|max:500',
             'location' => 'nullable|string|max:200',
             'venue' => 'nullable|string|max:200',
+            'landmark' => 'nullable|string|max:200',
             'mediaUrl' => 'nullable|url',
             'mediaType' => 'nullable|in:image,video',
             'caption' => 'nullable|string|max:500',
@@ -261,6 +263,7 @@ class PostController extends Controller
                 'media_type' => $request->mediaType,
                 'location_label' => $request->location,
                 'venue' => $request->venue,
+                'landmark' => $request->landmark,
                 'caption' => $request->caption,
                 'image_text' => $request->imageText,
                 'banner_text' => $request->bannerText,
@@ -349,6 +352,7 @@ class PostController extends Controller
             'text' => 'nullable|string|max:500',
             'location' => 'nullable|string|max:200',
             'venue' => 'nullable|string|max:200',
+            'landmark' => 'nullable|string|max:200',
         ]);
 
         if ($validator->fails()) {
@@ -363,7 +367,7 @@ class PostController extends Controller
             return response()->json(['error' => 'Unauthorized'], 403);
         }
 
-        // Update only text, location, and venue
+        // Update only text, location, venue, and landmark
         if ($request->has('text')) {
             $post->text_content = $request->text;
         }
@@ -372,6 +376,9 @@ class PostController extends Controller
         }
         if ($request->has('venue')) {
             $post->venue = $request->venue;
+        }
+        if ($request->has('landmark')) {
+            $post->landmark = $request->landmark;
         }
 
         $post->save();

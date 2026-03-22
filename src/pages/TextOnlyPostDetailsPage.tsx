@@ -19,6 +19,7 @@ export default function TextOnlyPostDetailsPage() {
 
     const [locationText, setLocationText] = useState('');
     const [venueText, setVenueText] = useState('');
+    const [landmarkText, setLandmarkText] = useState('');
     const [taggedUsers, setTaggedUsers] = useState<string[]>([]);
     const [showUserTagging, setShowUserTagging] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -26,10 +27,11 @@ export default function TextOnlyPostDetailsPage() {
 
     // Pre-fill from draft when opened from Profile
     useEffect(() => {
-        const s = location.state as { fromDraft?: boolean; location?: string; venue?: string; taggedUsers?: string[] } | null;
+        const s = location.state as { fromDraft?: boolean; location?: string; venue?: string; landmark?: string; taggedUsers?: string[] } | null;
         if (s?.fromDraft) {
             if (s.location) setLocationText(s.location);
             if (s.venue) setVenueText(s.venue);
+            if (s.landmark) setLandmarkText(s.landmark);
             if (s.taggedUsers?.length) setTaggedUsers(s.taggedUsers);
         }
     }, [location.state]);
@@ -147,7 +149,8 @@ export default function TextOnlyPostDetailsPage() {
                 undefined, // subtitleText
                 undefined, // editTimeline
                 undefined, // musicTrackId
-                venueText.trim() || undefined // venue
+                venueText.trim() || undefined, // venue
+                landmarkText.trim() || undefined // landmark
             );
 
             window.dispatchEvent(new CustomEvent('postCreated'));
@@ -179,6 +182,7 @@ export default function TextOnlyPostDetailsPage() {
                 textBody: text.trim(),
                 location: locationText.trim() || undefined,
                 venue: venueText.trim() || undefined,
+                landmark: landmarkText.trim() || undefined,
                 taggedUsers: taggedUsers.length > 0 ? taggedUsers : undefined,
             });
             await new Promise<void>((r) => setTimeout(r, 50));
@@ -280,6 +284,18 @@ export default function TextOnlyPostDetailsPage() {
                         value={venueText}
                         onChange={(e) => setVenueText(e.target.value)}
                         placeholder="Add venue (e.g. café, stadium)"
+                        className="flex-1 bg-transparent text-white placeholder-gray-500 text-base border-none outline-none"
+                    />
+                </div>
+
+                {/* Landmark — metadata carousel + landmark feeds */}
+                <div className="flex items-center gap-3 p-4 rounded-xl bg-gray-900/30 border border-gray-800">
+                    <FiMapPin className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                    <input
+                        type="text"
+                        value={landmarkText}
+                        onChange={(e) => setLandmarkText(e.target.value)}
+                        placeholder="Add landmark (e.g. Phoenix Park, river)"
                         className="flex-1 bg-transparent text-white placeholder-gray-500 text-base border-none outline-none"
                     />
                 </div>

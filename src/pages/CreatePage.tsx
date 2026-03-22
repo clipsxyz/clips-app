@@ -78,6 +78,7 @@ export default function CreatePage() {
     const [text, setText] = useState(''); // Main text - used for text-only posts OR captions for image posts
     const [location, setLocation] = useState('');
     const [venue, setVenue] = useState('');
+    const [landmark, setLandmark] = useState('');
     const [selectedMedia, setSelectedMedia] = useState<string | null>(null);
     const [mediaType, setMediaType] = useState<'image' | 'video' | null>(null);
     const [imageText, setImageText] = useState(''); // Text overlay for images
@@ -99,6 +100,8 @@ export default function CreatePage() {
     const [filterSaturation, setFilterSaturation] = useState(1.0);
     const [filterHue, setFilterHue] = useState(0);
     const [showUserTagging, setShowUserTagging] = useState(false);
+    /** Location / venue / landmark — same fields as text-only “Add details” sheet (Gallery + Instant Create land here). */
+    const [showLocationMetaSheet, setShowLocationMetaSheet] = useState(false);
     const [taggedUsers, setTaggedUsers] = useState<string[]>([]);
     const [showMusicPicker, setShowMusicPicker] = useState(false);
     const [selectedMusicTrack, setSelectedMusicTrack] = useState<MusicTrack | null>(null);
@@ -723,7 +726,8 @@ export default function CreatePage() {
                 undefined, // subtitleText
                 editTimeline, // Pass editTimeline for hybrid pipeline
                 locationState?.musicTrackId || selectedMusicTrack?.id, // Pass music track ID from locationState (InstantCreatePage) or selected track (CreatePage)
-                venue.trim() || undefined // Venue for metadata carousel
+                venue.trim() || undefined, // Venue for metadata carousel
+                landmark.trim() || undefined // Named landmark for carousel + landmark feeds
             );
 
             // Dispatch event to refresh feed with render job info if available
@@ -779,6 +783,7 @@ export default function CreatePage() {
                 setText('');
                 setLocation('');
                 setVenue('');
+                setLandmark('');
                 setSelectedMedia(null);
                 setMediaType(null);
                 setImageText('');
@@ -814,7 +819,7 @@ export default function CreatePage() {
         } finally {
             setIsUploading(false);
         }
-    }, [text, selectedMedia, user, location, mediaType, imageText, stickers, bannerText, wantsToBoost, navigate]);
+    }, [text, selectedMedia, user, location, venue, landmark, mediaType, imageText, stickers, bannerText, wantsToBoost, navigate, locationState, taggedUsers, selectedMusicTrack]);
 
     const removeMedia = useCallback(() => {
         // Cleanup object URL if it's a blob URL
@@ -960,6 +965,16 @@ export default function CreatePage() {
                         </button>
                     </div>
                     <h1 className="font-semibold text-base text-gray-900 dark:text-gray-100">New Post</h1>
+                    <div className="flex items-center gap-1">
+                    <button
+                        type="button"
+                        onClick={() => setShowLocationMetaSheet(true)}
+                        className="p-2 rounded-full text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-all"
+                        aria-label="Add location, venue, and landmark"
+                        title="Location & details"
+                    >
+                        <FiMapPin className="w-5 h-5" />
+                    </button>
                     <button
                         onClick={handleSubmit}
                         disabled={!canSubmit}
@@ -977,6 +992,7 @@ export default function CreatePage() {
                             'Share'
                         )}
                     </button>
+                    </div>
                 </div>
             </div>
 
@@ -1280,39 +1296,31 @@ export default function CreatePage() {
                     </div>
                 )}
 
-                {/* Location Input - Enhanced */}
-                <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2 mb-2">
-                        <FiMapPin className="w-4 h-4 text-gray-400 dark:text-gray-500" />
-                        <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                            Location
-                        </label>
-                    </div>
-                    <input
-                        type="text"
-                        value={location}
-                        onChange={(e) => setLocation(e.target.value)}
-                        placeholder="Add location"
-                        className="w-full px-0 py-1.5 text-[15px] text-gray-900 dark:text-gray-100 bg-transparent border-none focus:outline-none placeholder-gray-400 dark:placeholder-gray-500 transition-colors duration-200"
-                    />
-                </div>
-
-                {/* Venue Input - Shown in metadata carousel on feed */}
-                <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-800">
-                    <div className="flex items-center gap-2 mb-2">
-                        <FiMapPin className="w-4 h-4 text-gray-400 dark:text-gray-500" />
-                        <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                            Venue
-                        </label>
-                    </div>
-                    <input
-                        type="text"
-                        value={venue}
-                        onChange={(e) => setVenue(e.target.value)}
-                        placeholder="Add venue (e.g. café, stadium)"
-                        className="w-full px-0 py-1.5 text-[15px] text-gray-900 dark:text-gray-100 bg-transparent border-none focus:outline-none placeholder-gray-400 dark:placeholder-gray-500 transition-colors duration-200"
-                    />
-                </div>
+                {/* Location / venue / landmark: tap pin in header to open sheet (same pattern as Text-only flow). */}
+                {(location.trim() || venue.trim() || landmark.trim()) ? (
+                    <button
+                        type="button"
+                        onClick={() => setShowLocationMetaSheet(true)}
+                        className="w-full px-4 py-3 border-t border-gray-100 dark:border-gray-800 text-left flex items-start gap-2 hover:bg-gray-50 dark:hover:bg-gray-900/40 transition-colors"
+                    >
+                        <FiMapPin className="w-4 h-4 text-gray-400 dark:text-gray-500 mt-0.5 flex-shrink-0" />
+                        <div className="min-w-0">
+                            <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-0.5">Location & details</div>
+                            <div className="text-sm text-gray-800 dark:text-gray-200 truncate">
+                                {[location, venue, landmark].filter(Boolean).join(' · ') || 'Tap header pin to add'}
+                            </div>
+                        </div>
+                    </button>
+                ) : (
+                    <button
+                        type="button"
+                        onClick={() => setShowLocationMetaSheet(true)}
+                        className="w-full px-4 py-3 border-t border-gray-100 dark:border-gray-800 text-left flex items-center gap-2 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-900/40 transition-colors"
+                    >
+                        <FiMapPin className="w-4 h-4 flex-shrink-0" />
+                        <span className="text-sm font-medium">Add location, venue & landmark</span>
+                    </button>
+                )}
 
                 {/* Tag People - Enhanced */}
                 <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-800">
@@ -1432,6 +1440,69 @@ export default function CreatePage() {
                 }}
                 selectedTrackId={selectedMusicTrack?.id}
             />
+
+            {/* Location / venue / landmark — same “card” pattern as Text-only composer */}
+            {showLocationMetaSheet && (
+                <div className="fixed inset-0 z-[100] flex items-end bg-black/50 dark:bg-black/60" onClick={() => setShowLocationMetaSheet(false)}>
+                    <div
+                        className="w-full max-h-[85vh] overflow-y-auto bg-white dark:bg-[#1a1a1a] rounded-t-2xl border-t border-gray-200 dark:border-white/10 shadow-2xl"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="sticky top-0 z-10 bg-white dark:bg-[#1a1a1a] border-b border-gray-100 dark:border-white/10 px-4 py-3 flex items-center justify-between">
+                            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Add details</h2>
+                            <button
+                                type="button"
+                                onClick={() => setShowLocationMetaSheet(false)}
+                                className="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10"
+                                aria-label="Close"
+                            >
+                                <FiX className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="p-4 space-y-4">
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Location</label>
+                                <input
+                                    type="text"
+                                    value={location}
+                                    onChange={(e) => setLocation(e.target.value)}
+                                    placeholder="Add location"
+                                    className="w-full px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-[#1f1f23] border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-brand-500/40"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Venue</label>
+                                <input
+                                    type="text"
+                                    value={venue}
+                                    onChange={(e) => setVenue(e.target.value)}
+                                    placeholder="Add venue (e.g. café, stadium)"
+                                    className="w-full px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-[#1f1f23] border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-brand-500/40"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Landmark</label>
+                                <input
+                                    type="text"
+                                    value={landmark}
+                                    onChange={(e) => setLandmark(e.target.value)}
+                                    placeholder="Add landmark (e.g. Phoenix Park, river)"
+                                    className="w-full px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-[#1f1f23] border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-brand-500/40"
+                                />
+                            </div>
+                        </div>
+                        <div className="p-4 pt-0 pb-6">
+                            <button
+                                type="button"
+                                onClick={() => setShowLocationMetaSheet(false)}
+                                className="w-full py-3 rounded-xl bg-brand-500 hover:bg-brand-600 text-white font-semibold text-sm"
+                            >
+                                Done
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Footer - Navigation Bar */}
             <div className="fixed bottom-0 left-0 right-0 z-40 bg-gray-900 dark:bg-gray-950 border-t border-gray-800 dark:border-gray-700 shadow-lg">

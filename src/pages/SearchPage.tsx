@@ -1,5 +1,9 @@
 import React from 'react';
 import { FiSearch, FiMapPin, FiUsers, FiPlayCircle, FiChevronLeft, FiX } from 'react-icons/fi';
+import { GiRiver, GiSuspensionBridge, GiTorch } from 'react-icons/gi';
+import { MdOutlinePark } from 'react-icons/md';
+import { LuClock, LuLandmark } from 'react-icons/lu';
+import { TbTower, TbBuilding } from 'react-icons/tb';
 import { useNavigate } from 'react-router-dom';
 import { fetchPostsByUser } from '../api/posts';
 import { unifiedSearch, type SearchSections } from '../api/search';
@@ -19,6 +23,51 @@ const MOCK_TOP_LOCATIONS = [
     { name: 'Dublin', type: 'City', country: 'Ireland' },
     { name: 'Dubai', type: 'City', country: 'UAE' },
 ];
+
+const MOCK_TOP_LANDMARKS = [
+    { name: 'Phoenix Park', type: 'Park', country: 'Ireland', city: 'Dublin' },
+    { name: 'River Liffey', type: 'River', country: 'Ireland', city: 'Dublin' },
+    { name: 'Eiffel Tower', type: 'Monument', country: 'France', city: 'Paris' },
+    { name: 'Big Ben', type: 'Landmark', country: 'UK', city: 'London' },
+    { name: 'Statue of Liberty', type: 'Monument', country: 'USA', city: 'New York' },
+    { name: 'Golden Gate Bridge', type: 'Bridge', country: 'USA', city: 'San Francisco' },
+];
+
+/** Distinct icon per landmark name (popular grid + typed search). Order: specific → generic. */
+function LandmarkIconForName(name: string, className = 'w-3 h-3') {
+    const n = name.trim().toLowerCase();
+    if (n.includes('eiffel')) {
+        return <TbTower className={`${className} text-rose-300`} aria-hidden />;
+    }
+    if (n.includes('phoenix')) {
+        return <MdOutlinePark className={`${className} text-emerald-300`} aria-hidden />;
+    }
+    if (n.includes('liffey')) {
+        return <GiRiver className={`${className} text-sky-300`} aria-hidden />;
+    }
+    if (n.includes('big ben') || (n.includes('westminster') && n.includes('clock'))) {
+        return <LuClock className={`${className} text-amber-200`} aria-hidden />;
+    }
+    if (n.includes('liberty') || n.includes('statue of liberty')) {
+        return <GiTorch className={`${className} text-cyan-300`} aria-hidden />;
+    }
+    if (n.includes('golden gate')) {
+        return <GiSuspensionBridge className={`${className} text-orange-300`} aria-hidden />;
+    }
+    if (n.includes('bridge')) {
+        return <GiSuspensionBridge className={`${className} text-orange-300`} aria-hidden />;
+    }
+    if (n.includes('river')) {
+        return <GiRiver className={`${className} text-sky-300`} aria-hidden />;
+    }
+    if (n.includes('tower')) {
+        return <TbTower className={`${className} text-violet-300`} aria-hidden />;
+    }
+    if (n.includes('park')) {
+        return <MdOutlinePark className={`${className} text-emerald-300`} aria-hidden />;
+    }
+    return <LuLandmark className={`${className} text-amber-300`} aria-hidden />;
+}
 
 const MOCK_TOP_VENUES = [
     { name: 'Madison Square Garden', type: 'Arena', country: 'USA', city: 'New York' },
@@ -51,13 +100,14 @@ export default function SearchPage() {
     const [localFollowState, setLocalFollowState] = React.useState<Record<string, boolean>>({});
 
     // High-level search mode chips: location / venue / users / posts / near me
-    type SearchMode = 'locations' | 'venues' | 'users' | 'posts' | 'nearby';
+    type SearchMode = 'locations' | 'venues' | 'landmarks' | 'users' | 'posts' | 'nearby';
     const [searchMode, setSearchMode] = React.useState<SearchMode>('locations');
     const [activeTab, setActiveTab] = React.useState<'locations' | 'users' | 'posts'>('locations');
 
     const modePlaceholder: Record<SearchMode, string> = {
         locations: 'Search by location',
         venues: 'Search by venue',
+        landmarks: 'Search by landmark',
         nearby: 'Search near me',
         users: 'Search by users',
         posts: 'Search by posts',
@@ -76,7 +126,8 @@ export default function SearchPage() {
             let types: string;
             switch (searchMode) {
                 case 'locations':
-                case 'venues': // treat venues as a locations search
+                case 'venues':
+                case 'landmarks': // manual landmark text for now; reuse location suggestions as hints
                     types = 'locations';
                     break;
                 case 'nearby':
@@ -126,6 +177,13 @@ export default function SearchPage() {
         nav('/feed?location=' + encodeURIComponent(venue) + '&type=venue');
     };
 
+    const goToLandmark = (name: string) => {
+        sessionStorage.setItem('pendingFilterType', 'landmark');
+        sessionStorage.setItem('pendingLocation', name);
+        window.dispatchEvent(new CustomEvent('locationChange', { detail: { location: name, filterType: 'landmark' } }));
+        nav('/feed?location=' + encodeURIComponent(name) + '&type=landmark');
+    };
+
     const goToUser = (handle: string) => {
         nav('/user/' + encodeURIComponent(handle));
     };
@@ -170,6 +228,8 @@ export default function SearchPage() {
                                         goToLocation(q);
                                     } else if (searchMode === 'venues') {
                                         goToVenue(q);
+                                    } else if (searchMode === 'landmarks') {
+                                        goToLandmark(q);
                                     }
                                 }
                             }}
@@ -217,12 +277,14 @@ export default function SearchPage() {
             {/* Mode chips */}
             <div className="flex gap-1.5 overflow-x-auto pt-1 pb-1 scrollbar-hide">
                 {([
-                    { id: 'locations', label: 'Location' },
-                    { id: 'venues', label: 'Venue' },
-                    { id: 'nearby', label: 'Near me' },
-                    { id: 'users', label: 'Users' },
-                ] as { id: SearchMode; label: string }[]).map((chip) => {
+                    { id: 'locations' as const, label: 'Location', Icon: FiMapPin },
+                    { id: 'venues' as const, label: 'Venue', Icon: TbBuilding },
+                    { id: 'landmarks' as const, label: 'Landmark', Icon: LuLandmark },
+                    { id: 'nearby' as const, label: 'Near me', Icon: FiMapPin },
+                    { id: 'users' as const, label: 'Users', Icon: FiUsers },
+                ]).map((chip) => {
                     const active = searchMode === chip.id;
+                    const ChipIcon = chip.Icon;
                     return (
                         <button
                             key={chip.id}
@@ -239,7 +301,7 @@ export default function SearchPage() {
                                 }
                                 setSearchMode(chip.id);
                                 // For Locations, keep the preloaded grid visible until the user starts typing
-                                if (chip.id === 'locations') {
+                                if (chip.id === 'locations' || chip.id === 'landmarks') {
                                     setShowSearchMode(false);
                                 } else if (chip.id === 'posts') {
                                     setShowSearchMode(false);
@@ -259,6 +321,52 @@ export default function SearchPage() {
 
             {/* Outer card */}
             <div className="mt-1 rounded-3xl bg-[#050505] border border-[#181818] shadow-[0_18px_60px_rgba(0,0,0,0.85)] overflow-hidden">
+
+            {/* Popular landmarks when Landmark mode is active */}
+            {searchMode === 'landmarks' && (
+                <div className="px-3 pt-3 pb-3 border-b border-[#181818] space-y-3 bg-gradient-to-r from-[#050510] via-[#050507] to-[#050510]">
+                    <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-[0.18em]">
+                            Popular landmarks
+                        </span>
+                        <span className="text-[11px] text-gray-500">
+                            Tap to open landmark feed
+                        </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                        {MOCK_TOP_LANDMARKS.map((L, index) => {
+                            const accentColors = [
+                                'from-amber-500/80 via-orange-500/70 to-yellow-400/80',
+                                'from-sky-500/80 via-cyan-400/80 to-emerald-400/80',
+                                'from-purple-500/80 via-pink-500/70 to-orange-400/80',
+                                'from-indigo-500/80 via-violet-500/80 to-fuchsia-500/80',
+                            ];
+                            const accent = accentColors[index % accentColors.length];
+                            return (
+                            <button
+                                key={L.name}
+                                type="button"
+                                onClick={() => goToLandmark(L.name)}
+                                className="group relative overflow-hidden rounded-2xl bg-[#050509] border border-white/10 px-3 py-2.5 text-left text-xs text-gray-100 shadow-sm"
+                            >
+                                <div className={`pointer-events-none absolute inset-0 opacity-80 bg-gradient-to-br ${accent}`} />
+                                <div className="relative flex flex-col gap-1">
+                                    <div className="inline-flex items-center gap-1.5">
+                                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-black/60 border border-white/10">
+                                            {LandmarkIconForName(L.name)}
+                                        </span>
+                                        <span className="truncate font-medium">{L.name}</span>
+                                    </div>
+                                    <span className="text-[10px] text-gray-500 group-hover:text-gray-200 transition-colors truncate">
+                                        {L.type}{L.city ? ` • ${L.city}` : ''}{L.country ? ` • ${L.country}` : ''}
+                                    </span>
+                                </div>
+                            </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
 
             {/* Popular venues when Venue mode is active */}
             {searchMode === 'venues' && (
@@ -293,7 +401,7 @@ export default function SearchPage() {
                                 <div className="relative flex flex-col gap-1">
                                     <div className="inline-flex items-center gap-1.5">
                                         <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-black/60 border border-white/10">
-                                            <FiMapPin className="w-3 h-3 text-pink-300" />
+                                            <TbBuilding className="w-3 h-3 text-pink-300" aria-hidden />
                                         </span>
                                         <span className="truncate font-medium">{v.name}</span>
                                     </div>
@@ -503,7 +611,7 @@ export default function SearchPage() {
                                     {sections.locations!.items!.map((loc: any) => (
                                         <button
                                             key={`${loc.name}-${loc.country || ''}`}
-                                            onClick={() => goToVenue(loc.name)}
+                                            onClick={() => goToLocation(loc.name)}
                                             className="w-full text-left flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800"
                                         >
                                             <div className="h-8 w-8 rounded-full bg-brand-100 dark:bg-brand-900 flex items-center justify-center">
@@ -530,11 +638,38 @@ export default function SearchPage() {
                                     {sections.locations!.items!.map((loc: any) => (
                                         <button
                                             key={`${loc.name}-${loc.country || ''}`}
-                                            onClick={() => goToLocation(loc.name)}
+                                            onClick={() => goToVenue(loc.name)}
                                             className="w-full text-left flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800"
                                         >
                                             <div className="h-8 w-8 rounded-full bg-brand-100 dark:bg-brand-900 flex items-center justify-center">
-                                                <FiMapPin className="text-brand-600 dark:text-brand-400" />
+                                                <TbBuilding className="w-4 h-4 text-brand-600 dark:text-brand-400" aria-hidden />
+                                            </div>
+                                            <div>
+                                                <div className="font-medium text-gray-900 dark:text-gray-100">{loc.name}</div>
+                                                <div className="text-xs text-gray-500">{loc.type}{loc.country ? ` • ${loc.country}` : ''}</div>
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Landmark tab: location API hints; open landmark feed with per-row icon */}
+                    {searchMode === 'landmarks' && (
+                        <div>
+                            {!(sections.locations?.items?.length) ? (
+                                <div className="text-sm text-gray-500 dark:text-gray-400">No matching landmarks</div>
+                            ) : (
+                                <div className="divide-y divide-gray-200 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
+                                    {sections.locations!.items!.map((loc: any) => (
+                                        <button
+                                            key={`landmark-${loc.name}-${loc.country || ''}`}
+                                            onClick={() => goToLandmark(loc.name)}
+                                            className="w-full text-left flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800"
+                                        >
+                                            <div className="h-8 w-8 rounded-full bg-amber-500/15 dark:bg-amber-500/20 border border-amber-400/30 flex items-center justify-center">
+                                                {LandmarkIconForName(loc.name, 'w-4 h-4')}
                                             </div>
                                             <div>
                                                 <div className="font-medium text-gray-900 dark:text-gray-100">{loc.name}</div>

@@ -6,7 +6,7 @@ interface EditPostModalProps {
     post: Post;
     isOpen: boolean;
     onClose: () => void;
-    onSave: (text: string, location: string, venue: string) => Promise<void>;
+    onSave: (text: string, location: string, venue: string, landmark: string) => Promise<void>;
 }
 
 export default function EditPostModal({
@@ -18,6 +18,7 @@ export default function EditPostModal({
     const [text, setText] = useState('');
     const [location, setLocation] = useState('');
     const [venue, setVenue] = useState('');
+    const [landmark, setLandmark] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -26,6 +27,7 @@ export default function EditPostModal({
             setText(post.text || post.text_content || '');
             setLocation(post.locationLabel || '');
             setVenue(post.venue || '');
+            setLandmark(post.landmark || '');
             setError(null);
         }
     }, [isOpen, post]);
@@ -39,7 +41,7 @@ export default function EditPostModal({
         setIsSaving(true);
 
         try {
-            await onSave(text.trim(), location.trim(), venue.trim());
+            await onSave(text.trim(), location.trim(), venue.trim(), landmark.trim());
             onClose();
         } catch (err: any) {
             const isConnectionError =
@@ -132,6 +134,21 @@ export default function EditPostModal({
                                 value={venue}
                                 onChange={(e) => setVenue(e.target.value)}
                                 placeholder="Add venue (e.g. café, stadium)"
+                                className="w-full pl-10 pr-3 py-2.5 rounded-lg bg-[#1f1f23] border border-white/10 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-white/30"
+                                maxLength={200}
+                                disabled={isSaving}
+                            />
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-semibold text-white/80 uppercase tracking-wide mb-1.5">Landmark</label>
+                        <div className="relative">
+                            <FiMapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/50" />
+                            <input
+                                type="text"
+                                value={landmark}
+                                onChange={(e) => setLandmark(e.target.value)}
+                                placeholder="Add landmark (e.g. Phoenix Park, river)"
                                 className="w-full pl-10 pr-3 py-2.5 rounded-lg bg-[#1f1f23] border border-white/10 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-white/30"
                                 maxLength={200}
                                 disabled={isSaving}
