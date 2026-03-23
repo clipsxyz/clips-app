@@ -303,8 +303,6 @@ export default function SearchPage() {
                                 // For Locations, keep the preloaded grid visible until the user starts typing
                                 if (chip.id === 'locations' || chip.id === 'landmarks') {
                                     setShowSearchMode(false);
-                                } else if (chip.id === 'posts') {
-                                    setShowSearchMode(false);
                                 }
                             }}
                             className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap border transition-colors ${
@@ -324,7 +322,7 @@ export default function SearchPage() {
 
             {/* Popular landmarks when Landmark mode is active */}
             {searchMode === 'landmarks' && (
-                <div className="px-3 pt-3 pb-3 border-b border-[#181818] space-y-3 bg-gradient-to-r from-[#050510] via-[#050507] to-[#050510]">
+                <div className="px-3 pt-3 pb-3 border-b border-[#181818] space-y-3 bg-[#050505]">
                     <div className="flex items-center justify-between">
                         <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-[0.18em]">
                             Popular landmarks
@@ -334,25 +332,17 @@ export default function SearchPage() {
                         </span>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
-                        {MOCK_TOP_LANDMARKS.map((L, index) => {
-                            const accentColors = [
-                                'from-amber-500/80 via-orange-500/70 to-yellow-400/80',
-                                'from-sky-500/80 via-cyan-400/80 to-emerald-400/80',
-                                'from-purple-500/80 via-pink-500/70 to-orange-400/80',
-                                'from-indigo-500/80 via-violet-500/80 to-fuchsia-500/80',
-                            ];
-                            const accent = accentColors[index % accentColors.length];
+                        {MOCK_TOP_LANDMARKS.map((L) => {
                             return (
                             <button
                                 key={L.name}
                                 type="button"
                                 onClick={() => goToLandmark(L.name)}
-                                className="group relative overflow-hidden rounded-2xl bg-[#050509] border border-white/10 px-3 py-2.5 text-left text-xs text-gray-100 shadow-sm"
+                                className="group relative overflow-hidden rounded-2xl bg-black border border-white/25 px-3 py-2.5 text-left text-xs text-gray-100 shadow-sm"
                             >
-                                <div className={`pointer-events-none absolute inset-0 opacity-80 bg-gradient-to-br ${accent}`} />
                                 <div className="relative flex flex-col gap-1">
                                     <div className="inline-flex items-center gap-1.5">
-                                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-black/60 border border-white/10">
+                                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-black border border-white/35">
                                             {LandmarkIconForName(L.name)}
                                         </span>
                                         <span className="truncate font-medium">{L.name}</span>
@@ -370,7 +360,7 @@ export default function SearchPage() {
 
             {/* Popular venues when Venue mode is active */}
             {searchMode === 'venues' && (
-                <div className="px-3 pt-3 pb-3 border-b border-[#181818] space-y-3 bg-gradient-to-r from-[#050510] via-[#050507] to-[#050510]">
+                <div className="px-3 pt-3 pb-3 border-b border-[#181818] space-y-3 bg-[#050505]">
                     <div className="flex items-center justify-between">
                         <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-[0.18em]">
                             Popular venues
@@ -380,28 +370,18 @@ export default function SearchPage() {
                         </span>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
-                        {MOCK_TOP_VENUES.map((v, index) => {
-                            const accentColors = [
-                                'from-purple-500/80 via-pink-500/70 to-orange-400/80',
-                                'from-sky-500/80 via-cyan-400/80 to-emerald-400/80',
-                                'from-amber-500/80 via-orange-500/80 to-rose-500/80',
-                                'from-indigo-500/80 via-violet-500/80 to-fuchsia-500/80',
-                                'from-emerald-500/80 via-lime-400/80 to-teal-400/80',
-                                'from-red-500/80 via-rose-500/80 to-yellow-400/80',
-                            ];
-                            const accent = accentColors[index % accentColors.length];
+                        {MOCK_TOP_VENUES.map((v) => {
                             return (
                             <button
                                 key={v.name}
                                 type="button"
                                 onClick={() => goToVenue(v.name)}
-                                className="group relative overflow-hidden rounded-2xl bg-[#050509] border border-white/10 px-3 py-2.5 text-left text-xs text-gray-100 shadow-sm"
+                                className="group relative overflow-hidden rounded-2xl bg-black border border-white/25 px-3 py-2.5 text-left text-xs text-gray-100 shadow-sm"
                             >
-                                <div className={`pointer-events-none absolute inset-0 opacity-80 bg-gradient-to-br ${accent}`} />
                                 <div className="relative flex flex-col gap-1">
                                     <div className="inline-flex items-center gap-1.5">
-                                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-black/60 border border-white/10">
-                                            <TbBuilding className="w-3 h-3 text-pink-300" aria-hidden />
+                                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-black border border-white/35">
+                                            <TbBuilding className="w-3 h-3 text-white" aria-hidden />
                                         </span>
                                         <span className="truncate font-medium">{v.name}</span>
                                     </div>

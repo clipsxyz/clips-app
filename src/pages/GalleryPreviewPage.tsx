@@ -177,7 +177,7 @@ export default function GalleryPreviewPage() {
     const [stickersLoading, setStickersLoading] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
     const [isSavingDraft, setIsSavingDraft] = useState(false);
-    const [cardBodyExpanded, setCardBodyExpanded] = useState(true);
+    const [cardBodyExpanded, setCardBodyExpanded] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
     const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
     const videoRef = useRef<HTMLVideoElement>(null);
@@ -188,6 +188,56 @@ export default function GalleryPreviewPage() {
     const dragTriggeredRef = useRef<boolean>(false);
     const dragThreshold = 24;
     const [isMuted, setIsMuted] = useState(true);
+    const pickerRailRef = useRef<HTMLDivElement>(null);
+    const pickerRafRef = useRef<number | null>(null);
+    const [isPickerDragging, setIsPickerDragging] = useState(false);
+    const [centeredPickerTab, setCenteredPickerTab] = useState<'caption' | 'filters' | 'location' | 'carousel'>('caption');
+    const [pulsingPickerTab, setPulsingPickerTab] = useState<'caption' | 'filters' | 'location' | 'carousel' | null>(null);
+    const pulseTimerRef = useRef<number | null>(null);
+    const prevCenteredPickerRef = useRef<'caption' | 'filters' | 'location' | 'carousel' | null>(null);
+
+    const pickerTabs = useMemo(() => ([
+        { id: 'caption' as const, title: 'Caption', icon: FiType },
+        { id: 'location' as const, title: 'Location, venue, tag user', icon: MdOutlineShareLocation },
+        { id: 'carousel' as const, title: 'Add photos/videos (carousel, max 10)', icon: FiLayers },
+        { id: 'filters' as const, title: 'Filters', icon: FiFilter },
+    ]), []);
+
+    const updateCenteredPickerTab = useCallback(() => {
+        const rail = pickerRailRef.current;
+        if (!rail) return;
+        const railRect = rail.getBoundingClientRect();
+        const centerX = railRect.left + (railRect.width / 2);
+
+        let closestId: 'caption' | 'filters' | 'location' | 'carousel' | null = null;
+        let closestDist = Number.POSITIVE_INFINITY;
+        const nodes = rail.querySelectorAll<HTMLButtonElement>('[data-picker-tab]');
+        nodes.forEach((node) => {
+            const id = node.dataset.pickerTab as 'caption' | 'filters' | 'location' | 'carousel' | undefined;
+            if (!id) return;
+            const rect = node.getBoundingClientRect();
+            const itemCenter = rect.left + (rect.width / 2);
+            const dist = Math.abs(itemCenter - centerX);
+            if (dist < closestDist) {
+                closestDist = dist;
+                closestId = id;
+            }
+        });
+
+        if (closestId) {
+            setCenteredPickerTab(closestId);
+            setCardTab(closestId);
+        }
+    }, []);
+
+    const centerPickerTab = useCallback((tabId: 'caption' | 'filters' | 'location' | 'carousel', smooth = true) => {
+        const rail = pickerRailRef.current;
+        if (!rail) return;
+        const target = rail.querySelector<HTMLButtonElement>(`[data-picker-tab="${tabId}"]`);
+        if (!target) return;
+        const desiredLeft = target.offsetLeft - (rail.clientWidth / 2) + (target.clientWidth / 2);
+        rail.scrollTo({ left: Math.max(0, desiredLeft), behavior: smooth ? 'smooth' : 'auto' });
+    }, []);
 
     useEffect(() => {
         if (mediaType !== 'video' || !mediaUrl) {
@@ -251,6 +301,51 @@ export default function GalleryPreviewPage() {
         if (el.readyState >= 2) play();
         return () => el.removeEventListener('loadeddata', play);
     }, [mediaType, mediaUrl]);
+
+    useEffect(() => {
+        const id = window.setTimeout(() => {
+            centerPickerTab(cardTab as 'caption' | 'filters' | 'location' | 'carousel', false);
+            updateCenteredPickerTab();
+        }, 0);
+        return () => window.clearTimeout(id);
+    }, [centerPickerTab, updateCenteredPickerTab]);
+
+    useEffect(() => {
+        const rail = pickerRailRef.current;
+        if (!rail) return;
+        const onScroll = () => {
+            if (pickerRafRef.current != null) cancelAnimationFrame(pickerRafRef.current);
+            pickerRafRef.current = requestAnimationFrame(updateCenteredPickerTab);
+        };
+        rail.addEventListener('scroll', onScroll, { passive: true });
+        return () => {
+            rail.removeEventListener('scroll', onScroll);
+            if (pickerRafRef.current != null) cancelAnimationFrame(pickerRafRef.current);
+        };
+    }, [updateCenteredPickerTab]);
+
+    // Small "haptic-like" visual pulse when the centered picker item changes.
+    useEffect(() => {
+        if (!centeredPickerTab) return;
+        if (prevCenteredPickerRef.current === null) {
+            prevCenteredPickerRef.current = centeredPickerTab;
+            return;
+        }
+        if (prevCenteredPickerRef.current !== centeredPickerTab) {
+            setPulsingPickerTab(centeredPickerTab);
+            if (pulseTimerRef.current != null) window.clearTimeout(pulseTimerRef.current);
+            pulseTimerRef.current = window.setTimeout(() => {
+                setPulsingPickerTab(null);
+            }, 220);
+        }
+        prevCenteredPickerRef.current = centeredPickerTab;
+    }, [centeredPickerTab]);
+
+    useEffect(() => {
+        return () => {
+            if (pulseTimerRef.current != null) window.clearTimeout(pulseTimerRef.current);
+        };
+    }, []);
 
     const filterStyle = useMemo(
         () => getFilterStyle(selectedFilter, brightness, contrast, saturation, hue),
@@ -520,7 +615,7 @@ export default function GalleryPreviewPage() {
                 undefined, // subtitlesEnabled
                 undefined, // subtitleText
                 undefined, // editTimeline
-                undefined, // musicTrackId
+                undefined, // reserved optional slot
                 venue.trim() || undefined,
                 landmark.trim() || undefined
             );
@@ -589,8 +684,24 @@ export default function GalleryPreviewPage() {
                             </button>
                         </div>
                     )}
-                    {/* Post button with rounded blue/purple border */}
-                    <div className="rounded-full p-[1.5px]" style={{ background: 'linear-gradient(135deg,#3b82f6,#a855f7)' }}>
+                    {mediaType === 'video' && (
+                        <button
+                            type="button"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                const next = !isMuted;
+                                setIsMuted(next);
+                                if (videoRef.current) videoRef.current.muted = next;
+                            }}
+                            className="p-2 bg-black/50 backdrop-blur-sm text-white rounded-full hover:bg-black/70"
+                            aria-label={isMuted ? 'Unmute video' : 'Mute video'}
+                            title={isMuted ? 'Unmute' : 'Mute'}
+                        >
+                            {isMuted ? <FiVolumeX className="w-5 h-5" /> : <FiVolume2 className="w-5 h-5" />}
+                        </button>
+                    )}
+                    {/* Post button with white border */}
+                    <div className="rounded-full p-[1.5px] bg-white">
                         <button
                             onClick={handlePost}
                             disabled={isUploading}
@@ -619,21 +730,6 @@ export default function GalleryPreviewPage() {
                     {mediaType === 'video'
                         ? (mediaUrl && mediaUrl.trim()) ? (
                             <>
-                                {/* Mute toggle button */}
-                                <button
-                                    type="button"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        const next = !isMuted;
-                                        setIsMuted(next);
-                                        if (videoRef.current) videoRef.current.muted = next;
-                                    }}
-                                    className="absolute bottom-24 left-1/2 -translate-x-1/2 z-10 p-2 rounded-full bg-black/60 text-white hover:bg-black/80"
-                                    aria-label={isMuted ? 'Unmute video' : 'Mute video'}
-                                >
-                                    {isMuted ? <FiVolumeX className="w-5 h-5" /> : <FiVolume2 className="w-5 h-5" />}
-                                </button>
-
                                 <motion.video
                                     layoutId="gallery-media"
                                     ref={videoRef}
@@ -680,125 +776,103 @@ export default function GalleryPreviewPage() {
                     paddingBottom: 'env(safe-area-inset-bottom, 0)',
                     borderWidth: '1.5px 0 0 0',
                     borderStyle: 'solid',
-                    borderImage: 'linear-gradient(90deg, #3b82f6, #a855f7) 1',
+                    borderColor: 'rgba(255,255,255,0.65)',
                 }}
             >
-                {/* Gradient for card option icons (purple → blue) */}
-                <svg width="0" height="0" aria-hidden="true" style={{ position: 'absolute' }}>
-                    <defs>
-                        <linearGradient id="cardOptionIconGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stopColor="#a855f7" />
-                            <stop offset="100%" stopColor="#3b82f6" />
-                        </linearGradient>
-                    </defs>
-                </svg>
-                <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setCardBodyExpanded((e) => !e)}
-                    onPointerDown={(e) => {
-                        dragStartYRef.current = e.clientY ?? (e as React.PointerEvent & { touches?: { clientY: number }[] }).touches?.[0]?.clientY ?? 0;
-                        dragTriggeredRef.current = false;
-                    }}
-                    onPointerMove={(e) => {
-                        if (dragTriggeredRef.current) return;
-                        const clientY = e.clientY ?? (e as React.PointerEvent & { touches?: { clientY: number }[] }).touches?.[0]?.clientY;
-                        if (clientY == null || dragStartYRef.current == null) return;
-                        const dy = clientY - dragStartYRef.current;
-                        if (Math.abs(dy) < dragThreshold) return;
-                        dragTriggeredRef.current = true;
-                        if (dy > 0) {
-                            setCardBodyExpanded(false);
-                        } else {
-                            setCardBodyExpanded(true);
-                        }
-                    }}
-                    onPointerUp={() => { dragStartYRef.current = 0; dragTriggeredRef.current = false; }}
-                    onPointerLeave={() => { dragStartYRef.current = 0; dragTriggeredRef.current = false; }}
-                    onPointerCancel={() => { dragStartYRef.current = 0; dragTriggeredRef.current = false; }}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCardBodyExpanded((e) => !e); } }}
-                    className="w-full pt-2 pb-2 flex flex-col items-center gap-1 cursor-grab active:cursor-grabbing active:bg-white/5 transition-colors select-none"
-                    style={{ touchAction: 'none' }}
-                    aria-label={cardBodyExpanded ? 'Drag down to collapse or tap to toggle' : 'Tap to expand'}
-                >
-                    <div className="w-16 h-1.5 bg-white/50 rounded-full pointer-events-none" />
-                    <span className="text-[10px] text-white/60 pointer-events-none">{cardBodyExpanded ? 'Drag down to collapse' : 'Tap to expand'}</span>
-                </div>
-                {/* Card header: Caption, Location, Carousel, Filters, then Save far right - option icons use purple→blue gradient */}
-                <div className="flex items-center gap-2 px-4 pb-2 mt-3 border-b border-white/10 overflow-x-auto scrollbar-hide">
-                    <button
-                        onClick={() => setCardTab('caption')}
-                        title="Caption"
-                        aria-label="Caption"
-                        className={`flex-shrink-0 flex items-center justify-center p-2.5 rounded-xl transition-colors ${
-                            cardTab === 'caption' ? 'bg-white/10' : 'hover:bg-white/5'
-                        }`}
+                <div className="relative">
+                    {/* Scrim: makes picker area feel like it glides over image */}
+                    <div
+                        aria-hidden
+                        className="pointer-events-none absolute inset-x-0 -top-16 h-24 bg-gradient-to-t from-black/72 via-black/38 to-transparent"
+                    />
+                    <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setCardBodyExpanded((e) => !e)}
+                        onPointerDown={(e) => {
+                            dragStartYRef.current = e.clientY ?? (e as React.PointerEvent & { touches?: { clientY: number }[] }).touches?.[0]?.clientY ?? 0;
+                            dragTriggeredRef.current = false;
+                        }}
+                        onPointerMove={(e) => {
+                            if (dragTriggeredRef.current) return;
+                            const clientY = e.clientY ?? (e as React.PointerEvent & { touches?: { clientY: number }[] }).touches?.[0]?.clientY;
+                            if (clientY == null || dragStartYRef.current == null) return;
+                            const dy = clientY - dragStartYRef.current;
+                            if (Math.abs(dy) < dragThreshold) return;
+                            dragTriggeredRef.current = true;
+                            if (dy > 0) {
+                                setCardBodyExpanded(false);
+                            } else {
+                                setCardBodyExpanded(true);
+                            }
+                        }}
+                        onPointerUp={() => { dragStartYRef.current = 0; dragTriggeredRef.current = false; }}
+                        onPointerLeave={() => { dragStartYRef.current = 0; dragTriggeredRef.current = false; }}
+                        onPointerCancel={() => { dragStartYRef.current = 0; dragTriggeredRef.current = false; }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCardBodyExpanded((e) => !e); } }}
+                        className="relative z-10 w-full pt-2 pb-2 flex flex-col items-center gap-1 cursor-grab active:cursor-grabbing active:bg-white/5 transition-colors select-none"
+                        style={{ touchAction: 'none' }}
+                        aria-label={cardBodyExpanded ? 'Drag down to collapse or tap to toggle' : 'Tap to expand'}
                     >
-                        <div
-                            className="p-[1.5px] rounded-full"
-                            style={{ background: 'linear-gradient(135deg,#a855f7,#3b82f6)' }}
-                        >
-                            <div className="w-8 h-8 rounded-full bg-black flex items-center justify-center">
-                                <FiType className="w-4 h-4 text-white" />
-                            </div>
-                        </div>
-                    </button>
-                    <button
-                        onClick={() => setCardTab('location')}
-                        title="Location, venue, tag user"
-                        aria-label="Location"
-                        className={`flex-shrink-0 flex items-center justify-center p-2.5 rounded-xl transition-colors ${
-                            cardTab === 'location' ? 'bg-white/10' : 'hover:bg-white/5'
-                        }`}
+                        <div className="w-16 h-1.5 bg-white/50 rounded-full pointer-events-none" />
+                        <span className="text-[10px] text-white/60 pointer-events-none">{cardBodyExpanded ? 'Drag down to collapse' : 'Tap to expand'}</span>
+                    </div>
+                    {/* Card header: centered snap picker + Save. Drag selects, tap centered item opens content. */}
+                    <div className="relative z-10 flex items-center gap-2 px-3 pb-2 mt-3 border-b border-white/10 bg-black/25 backdrop-blur-[1px]">
+                    <div
+                        ref={pickerRailRef}
+                        className="flex-1 flex items-center gap-1.5 overflow-x-auto scrollbar-hide py-1"
+                        style={{ scrollSnapType: 'x mandatory' }}
+                        onPointerDown={() => setIsPickerDragging(true)}
+                        onPointerUp={() => window.setTimeout(() => setIsPickerDragging(false), 80)}
+                        onPointerCancel={() => setIsPickerDragging(false)}
+                        onPointerLeave={() => setIsPickerDragging(false)}
                     >
-                        <div
-                                className="p-[2px] rounded-full"
-                            style={{ background: 'linear-gradient(135deg,#a855f7,#3b82f6)' }}
-                        >
-                                <div className="w-9 h-9 rounded-full bg-black flex items-center justify-center">
-                                    <MdOutlineShareLocation className="w-5 h-5 text-white" />
-                                </div>
-                        </div>
-                    </button>
-                    <button
-                        onClick={() => setCardTab('carousel')}
-                        title="Add photos/videos (carousel, max 10)"
-                        aria-label="Carousel"
-                        className={`flex-shrink-0 flex items-center justify-center p-2.5 rounded-xl transition-colors relative ${
-                            cardTab === 'carousel' ? 'bg-white/10' : 'hover:bg-white/5'
-                        }`}
-                    >
-                        <div
-                            className="p-[1.5px] rounded-full"
-                            style={{ background: 'linear-gradient(135deg,#a855f7,#3b82f6)' }}
-                        >
-                            <div className="w-8 h-8 rounded-full bg-black flex items-center justify-center">
-                                <FiLayers className="w-4 h-4 text-white" />
-                            </div>
-                        </div>
-                        {carouselItems.length > 1 && (
-                            <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-3.5 px-1 rounded-full bg-white/90 text-black text-[10px] font-bold flex items-center justify-center">
-                                {carouselItems.length}
-                            </span>
-                        )}
-                    </button>
-                    <button
-                        onClick={() => setCardTab('filters')}
-                        title="Filters"
-                        aria-label="Filters"
-                        className={`flex-shrink-0 flex items-center justify-center p-2.5 rounded-xl transition-colors ${
-                            cardTab === 'filters' ? 'bg-white/10' : 'hover:bg-white/5'
-                        }`}
-                    >
-                        <div
-                            className="p-[1.5px] rounded-full"
-                            style={{ background: 'linear-gradient(135deg,#a855f7,#3b82f6)' }}
-                        >
-                            <div className="w-8 h-8 rounded-full bg-black flex items-center justify-center">
-                                <FiFilter className="w-4 h-4 text-white" />
-                            </div>
-                        </div>
-                    </button>
+                        <div className="shrink-0 w-[38%]" aria-hidden />
+                        {pickerTabs.map((tab) => {
+                            const Icon = tab.icon as React.ComponentType<{ className?: string }>;
+                            const isCentered = centeredPickerTab === tab.id;
+                            const isPulsing = pulsingPickerTab === tab.id;
+                            return (
+                                <button
+                                    key={tab.id}
+                                    data-picker-tab={tab.id}
+                                    onClick={() => {
+                                        if (isPickerDragging) return;
+                                        if (!isCentered) {
+                                            centerPickerTab(tab.id, true);
+                                            return;
+                                        }
+                                        setCardTab(tab.id);
+                                        setCardBodyExpanded(true);
+                                    }}
+                                    title={tab.title}
+                                    aria-label={tab.title}
+                                    className="relative shrink-0 w-[62px] h-[62px] flex items-center justify-center transition-transform duration-200"
+                                    style={{
+                                        scrollSnapAlign: 'center',
+                                        transform: `scale(${isCentered ? (isPulsing ? 1.15 : 1.10) : 0.86})`,
+                                        opacity: isCentered ? 1 : 0.62,
+                                    }}
+                                >
+                                    <div
+                                        className={`p-[2px] rounded-full transition-shadow duration-200 ${isCentered ? (isPulsing ? 'shadow-[0_0_30px_rgba(168,85,247,0.45)]' : 'shadow-[0_0_24px_rgba(255,255,255,0.22)]') : ''}`}
+                                        style={{ background: isCentered ? '#ffffff' : 'rgba(255,255,255,0.78)' }}
+                                    >
+                                        <div className={`${isCentered ? 'w-11 h-11' : 'w-10 h-10'} rounded-full bg-black flex items-center justify-center transition-all duration-200`}>
+                                            <Icon className="w-5 h-5 text-white" />
+                                        </div>
+                                    </div>
+                                    {tab.id === 'carousel' && carouselItems.length > 1 && (
+                                        <span className="absolute top-1 right-1 min-w-[14px] h-3.5 px-1 rounded-full bg-white/90 text-black text-[10px] font-bold flex items-center justify-center">
+                                            {carouselItems.length}
+                                        </span>
+                                    )}
+                                </button>
+                            );
+                        })}
+                        <div className="shrink-0 w-[38%]" aria-hidden />
+                    </div>
                     <button
                         onClick={handleSaveToDrafts}
                         disabled={!(mediaUrl || (carouselItems.length > 0 && carouselItems[0]?.url)) || isSavingDraft}
@@ -814,6 +888,7 @@ export default function GalleryPreviewPage() {
                     >
                         <FiBookmark className="w-5 h-5" />
                     </button>
+                </div>
                 </div>
                 {/* Card body - collapses so header icons stay reachable */}
                 <div

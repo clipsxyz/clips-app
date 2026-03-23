@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiThumbsUp, FiVolume2, FiVolumeX, FiMaximize2, FiMapPin, FiSend, FiLink, FiCopy, FiPlus, FiHome, FiClock } from 'react-icons/fi';
+import { FiX, FiChevronRight, FiChevronLeft, FiChevronDown, FiChevronUp, FiMessageCircle, FiThumbsUp, FiVolume2, FiVolumeX, FiMaximize2, FiMapPin, FiSend, FiLink, FiCopy, FiPlus, FiHome, FiClock } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle, voteOnPoll } from '../api/stories';
@@ -116,9 +116,14 @@ export default function StoriesPage() {
     const [isMuted, setIsMuted] = React.useState(true);
     const [hasVideo, setHasVideo] = React.useState(false);
     const [showEmojiPicker, setShowEmojiPicker] = React.useState(false);
-    const [showReplyModal, setShowReplyModal] = React.useState(false);
+    const [showReplyComposer, setShowReplyComposer] = React.useState(false);
     const [replyText, setReplyText] = React.useState('');
     const [showStoryShareModal, setShowStoryShareModal] = React.useState(false);
+    const [metadataExpanded, setMetadataExpanded] = React.useState(false);
+    const [showInsightsSheet, setShowInsightsSheet] = React.useState(false);
+    const [insightsTab, setInsightsTab] = React.useState<'viewers' | 'replies'>('viewers');
+    const [viewerFollowMap, setViewerFollowMap] = React.useState<Record<string, boolean>>({});
+    const [viewerFollowLoadingHandle, setViewerFollowLoadingHandle] = React.useState<string | null>(null);
     const [showControls, setShowControls] = React.useState(true);
     const [showScenesModal, setShowScenesModal] = React.useState(false);
     const [fullPost, setFullPost] = React.useState<Post | null>(null);
@@ -170,11 +175,21 @@ export default function StoriesPage() {
     const swipeStartXRef = React.useRef<number | null>(null);
     const swipeStartYRef = React.useRef<number | null>(null);
     const swipeStartedOnPollRef = React.useRef<boolean>(false);
+    const mentionTouchStartRef = React.useRef<{ x: number; y: number } | null>(null);
+    const mentionTouchMovedRef = React.useRef(false);
+    const holdPauseTimerRef = React.useRef<number | null>(null);
+    const holdPauseActiveRef = React.useRef(false);
 
     // Keep ref in sync with state
     React.useEffect(() => {
         pausedRef.current = paused;
     }, [paused]);
+
+    React.useEffect(() => () => {
+        if (holdPauseTimerRef.current != null) {
+            window.clearTimeout(holdPauseTimerRef.current);
+        }
+    }, []);
 
     // Load stories function  
     const loadStories = React.useCallback(async () => {
@@ -336,7 +351,8 @@ export default function StoriesPage() {
             return;
         }
 
-        const stories = await fetchUserStories(user.id, group.userId);
+        const followedUserHandles = await getFollowedUsers(user.id);
+        const stories = await fetchUserStories(user.id, group.userId, followedUserHandles || []);
         if (!stories || stories.length === 0) return;
 
         // Find the group index in the original array, or add it if not found
@@ -484,6 +500,13 @@ export default function StoriesPage() {
         if (!viewingStories) return;
         // Check if touch started on poll area
         const target = e.target as HTMLElement;
+        const isInteractiveArea = target.closest(
+            '[data-story-interactive],button,input,textarea,select,a,[role="button"],[contenteditable="true"]'
+        );
+        if (isInteractiveArea) {
+            swipeStartedOnPollRef.current = true;
+            return;
+        }
         const isOnPoll = target.closest('[data-poll-container]');
         if (isOnPoll) {
             swipeStartedOnPollRef.current = true;
@@ -543,6 +566,27 @@ export default function StoriesPage() {
         swipeStartXRef.current = null;
         swipeStartYRef.current = null;
         swipeStartedOnPollRef.current = false;
+    }
+
+    function handleHoldPauseStart() {
+        if (holdPauseTimerRef.current != null) window.clearTimeout(holdPauseTimerRef.current);
+        holdPauseTimerRef.current = window.setTimeout(() => {
+            holdPauseActiveRef.current = true;
+            setPaused(true);
+            pausedRef.current = true;
+        }, 180);
+    }
+
+    function handleHoldPauseEnd() {
+        if (holdPauseTimerRef.current != null) {
+            window.clearTimeout(holdPauseTimerRef.current);
+            holdPauseTimerRef.current = null;
+        }
+        if (holdPauseActiveRef.current) {
+            holdPauseActiveRef.current = false;
+            setPaused(false);
+            pausedRef.current = false;
+        }
     }
 
     // Navigate to previous story (within same user)
@@ -709,7 +753,7 @@ export default function StoriesPage() {
                 showToast?.('Reply sent');
             }
             setReplyText('');
-            setShowReplyModal(false);
+            setShowReplyComposer(false);
         } catch (error) {
             console.error('Error adding reply:', error);
         }
@@ -794,7 +838,7 @@ export default function StoriesPage() {
 
         // Mark story as viewed for real user stories only (skip Gazetteer mock stories)
         if (currentStory.userId !== GAZETTEER_WORLD_USER_ID) {
-            markStoryViewed(currentStory.id, user.id).catch(console.error);
+            markStoryViewed(currentStory.id, user.id, user.handle).catch(console.error);
             incrementStoryViews(currentStory.id).catch(console.error);
         }
 
@@ -1084,6 +1128,40 @@ export default function StoriesPage() {
         }
     };
 
+    React.useEffect(() => {
+        setMetadataExpanded(false);
+    }, [currentGroupIndex, currentStoryIndex]);
+
+    React.useEffect(() => {
+        if (showInsightsSheet) {
+            setPaused(true);
+            pausedRef.current = true;
+            return;
+        }
+        setPaused(false);
+        pausedRef.current = false;
+    }, [showInsightsSheet]);
+
+    React.useEffect(() => {
+        if (!showInsightsSheet || insightsTab !== 'viewers' || !user?.id) return;
+        const loadViewerFollowState = async () => {
+            try {
+                const followed = await getFollowedUsers(user.id);
+                const followedSet = new Set((followed || []).map((h) => (h || '').toLowerCase()));
+                const nextMap: Record<string, boolean> = {};
+                const handles = Array.from(new Set((currentStoryForMeta?.viewerHandles || []).filter(Boolean)));
+                handles.forEach((handle) => {
+                    const normalized = (handle || '').toLowerCase();
+                    nextMap[handle] = normalized === (user.handle || '').toLowerCase() || followedSet.has(normalized);
+                });
+                setViewerFollowMap(nextMap);
+            } catch (error) {
+                console.error('Failed to load viewer follow state:', error);
+            }
+        };
+        loadViewerFollowState();
+    }, [showInsightsSheet, insightsTab, user?.id, user?.handle, currentStoryForMeta?.id, (currentStoryForMeta?.viewerHandles || []).join('|')]);
+
     if (loading) {
         return (
             <div className="flex items-center justify-center min-h-screen">
@@ -1120,6 +1198,20 @@ export default function StoriesPage() {
         || (((currentStory as any)?.mediaItems || []).find((m: any) => m?.type === 'text')?.text)
         || ''
     ).trim();
+    const currentStoryAudienceLabel = currentStory?.audience === 'close_friends'
+        ? 'Followers'
+        : currentStory?.audience === 'only_me'
+            ? 'Only me'
+            : 'Public';
+    const currentStoryAudienceBadgeClass = currentStory?.audience === 'close_friends'
+        ? 'border-emerald-300/70 bg-emerald-500/25 text-emerald-100'
+        : currentStory?.audience === 'only_me'
+            ? 'border-slate-300/60 bg-slate-500/25 text-slate-100'
+            : 'border-white/35 bg-black/45 text-white/95';
+    const isViewingOwnStory = !!(currentGroup && user && (currentGroup.userId === user.id || currentGroup.userHandle === user.handle));
+    const storyViewsCount = Number(currentStory?.views || 0);
+    const storyRepliesCount = Number(currentStory?.replies?.length || 0);
+    const storyViewerHandles = Array.from(new Set((currentStory?.viewerHandles || []).filter(Boolean)));
     const hasStories = storyGroups.length > 0;
 
     // Story viewing UI
@@ -1165,6 +1257,10 @@ export default function StoriesPage() {
                         onTouchStart={handleSwipeStart}
                         onTouchEnd={handleSwipeEnd}
                         onTouchCancel={handleSwipeCancel}
+                        onPointerDown={handleHoldPauseStart}
+                        onPointerUp={handleHoldPauseEnd}
+                        onPointerCancel={handleHoldPauseEnd}
+                        onPointerLeave={handleHoldPauseEnd}
                     >
                         <div className="relative w-full h-full flex items-center justify-center">
                             <div className="relative w-full h-full overflow-hidden bg-black">
@@ -2666,7 +2762,7 @@ export default function StoriesPage() {
 
 
                     {/* Header with user info - Instagram style */}
-                    <div className="absolute top-3 left-0 right-0 px-4 z-50">
+                    <div className="absolute top-3 left-0 right-0 px-4 z-50" data-story-interactive>
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3 flex-1">
                                 <div 
@@ -2687,9 +2783,14 @@ export default function StoriesPage() {
                                         size="sm"
                                     />
                                     <div className="flex flex-col gap-0.5 min-w-0">
-                                        <p className="text-white font-semibold text-sm">{currentGroup?.userHandle}</p>
-                                        {/* Metadata carousel: location → venue → timestamp (white pill, black text - same as newsfeed cards) */}
-                                        {storyMetadataItems.length > 0 ? (() => {
+                                        <div className="flex items-center gap-1.5 min-w-0">
+                                            <p className="text-white font-semibold text-sm truncate">{currentGroup?.userHandle}</p>
+                                            <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${currentStoryAudienceBadgeClass}`}>
+                                                {currentStoryAudienceLabel}
+                                            </span>
+                                        </div>
+                                        {/* Metadata carousel: location → venue → timestamp (collapsible for cleaner header) */}
+                                        {metadataExpanded && storyMetadataItems.length > 0 ? (() => {
                                             const current = storyMetadataItems[storyMetadataIndex];
                                             if (!current) {
                                                 return currentStory?.createdAt ? (
@@ -2717,6 +2818,19 @@ export default function StoriesPage() {
                                             <p className="text-white/70 text-xs">{getTimeAgo(currentStory.createdAt)}</p>
                                         ) : null}
                                     </div>
+                                    {storyMetadataItems.length > 1 && (
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setMetadataExpanded((v) => !v);
+                                            }}
+                                            className="shrink-0 p-1 rounded-full bg-black/35 border border-white/20 text-white/85 hover:bg-black/55 transition-colors"
+                                            aria-label={metadataExpanded ? 'Collapse metadata' : 'Expand metadata'}
+                                        >
+                                            {metadataExpanded ? <FiChevronUp className="w-3.5 h-3.5" /> : <FiChevronDown className="w-3.5 h-3.5" />}
+                                        </button>
+                                    )}
                                 </div>
                                 
                                 {/* Follow/Following button */}
@@ -2882,6 +2996,25 @@ export default function StoriesPage() {
                         </div>
                     </div>
 
+                    {isViewingOwnStory && (
+                        <div className="absolute top-16 left-0 right-0 px-4 z-50" data-story-interactive>
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setShowInsightsSheet(true);
+                                }}
+                                className="w-full max-w-md mx-auto rounded-full border border-white/20 bg-black/45 backdrop-blur-sm px-3 py-1.5 text-[11px] text-white/90 flex items-center justify-between"
+                            >
+                                <span>{storyViewsCount} views</span>
+                                <span className="opacity-60">•</span>
+                                <span>{storyRepliesCount} replies</span>
+                                <span className="opacity-60">•</span>
+                                <span className="text-white/70">tap for insights</span>
+                            </button>
+                        </div>
+                    )}
+
                     {/* Story Text - Only show for original stories (not feed re-shares),
                         and only if media is not a generated text image (data URL) */}
                     {currentStoryText && !currentStory?.sharedFromPost && currentStory?.mediaUrl && !currentStory.mediaUrl.startsWith('data:image') && (
@@ -2944,9 +3077,28 @@ export default function StoriesPage() {
                                                         }}
                                                         onTouchStart={(e) => {
                                                             e.stopPropagation();
+                                                            const touch = e.touches[0];
+                                                            mentionTouchStartRef.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
+                                                            mentionTouchMovedRef.current = false;
+                                                        }}
+                                                        onTouchMove={(e) => {
+                                                            e.stopPropagation();
+                                                            const start = mentionTouchStartRef.current;
+                                                            const touch = e.touches[0];
+                                                            if (!start || !touch) return;
+                                                            const dx = Math.abs(touch.clientX - start.x);
+                                                            const dy = Math.abs(touch.clientY - start.y);
+                                                            if (dx > 10 || dy > 10) {
+                                                                mentionTouchMovedRef.current = true;
+                                                            }
                                                         }}
                                                         onTouchEnd={(e) => {
                                                             e.stopPropagation();
+                                                            if (mentionTouchMovedRef.current) {
+                                                                mentionTouchMovedRef.current = false;
+                                                                mentionTouchStartRef.current = null;
+                                                                return;
+                                                            }
                                                             e.preventDefault();
                                                             console.log('Touched mention:', handle);
                                                             // Close stories first, then navigate
@@ -2954,6 +3106,7 @@ export default function StoriesPage() {
                                                             setTimeout(() => {
                                                                 navigate(`/user/${encodeURIComponent(handle)}`);
                                                             }, 100);
+                                                            mentionTouchStartRef.current = null;
                                                         }}
                                                         onMouseDown={(e) => {
                                                             e.stopPropagation();
@@ -2991,25 +3144,52 @@ export default function StoriesPage() {
                     )}
 
                     {/* Bottom Action Bar - Instagram Style */}
-                    <div className="absolute bottom-0 left-0 right-0 z-[60] px-2 pb-4">
+                    <div className="absolute bottom-0 left-0 right-0 z-[60] px-2 pb-4" data-story-interactive>
                         <div className="flex items-center gap-1.5 max-w-md mx-auto" style={{ flexWrap: 'nowrap' }}>
                             {/* Send Message Input */}
-                            <input
-                                type="text"
-                                value={replyText}
-                                onChange={(e) => setReplyText(e.target.value)}
-                                onFocus={(e) => {
-                                    e.stopPropagation();
-                                    setShowReplyModal(true);
-                                }}
-                                placeholder="Send message"
-                                className="flex-1 bg-white/10 rounded-full px-3 py-2 text-white placeholder-white/60 text-xs outline-none border-0 min-w-0"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    setShowReplyModal(true);
-                                }}
-                                readOnly
-                            />
+                            {showReplyComposer ? (
+                                <div className="flex-1 flex items-center gap-1.5">
+                                    <input
+                                        type="text"
+                                        value={replyText}
+                                        onChange={(e) => setReplyText(e.target.value)}
+                                        placeholder={`Reply to ${currentGroup?.userHandle || 'story'}`}
+                                        className="flex-1 rounded-full px-3 py-2 text-white placeholder-white/60 text-xs border border-white/20 min-w-0 bg-black/45 focus:bg-black/65 focus:text-white focus:placeholder-white/55 focus:border-white/35 focus:outline-none focus:ring-1 focus:ring-white/35 appearance-none"
+                                        style={{ color: '#ffffff', WebkitTextFillColor: '#ffffff', caretColor: '#ffffff' }}
+                                        autoFocus
+                                    />
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleReply();
+                                        }}
+                                        disabled={!replyText.trim()}
+                                        className="px-2.5 py-2 rounded-full bg-white text-black text-xs font-semibold disabled:opacity-50"
+                                    >
+                                        Send
+                                    </button>
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setShowReplyComposer(false);
+                                            setReplyText('');
+                                        }}
+                                        className="px-2.5 py-2 rounded-full bg-white/10 text-white text-xs font-semibold"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            ) : (
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setShowReplyComposer(true);
+                                    }}
+                                    className="flex-1 bg-white/10 rounded-full px-3 py-2 text-left text-white/60 text-xs min-w-0"
+                                >
+                                    Send message
+                                </button>
+                            )}
                             
                             {/* Like Button */}
                             <button
@@ -3130,83 +3310,7 @@ export default function StoriesPage() {
                     {/* Swipe navigation is handled on the main media container - no tap zones to avoid conflicts with polls */}
                 </div>
 
-                {/* Reply Modal - Inside story viewer */}
-                {showReplyModal && currentStory && (
-                    <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-end" onClick={() => setShowReplyModal(false)}>
-                        <div className="w-full bg-white dark:bg-gray-900 rounded-t-3xl p-6 animate-in slide-in-from-bottom duration-300" onClick={(e) => e.stopPropagation()}>
-                            <div className="flex items-center justify-between mb-4">
-                                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                                    Reply to {currentGroup?.userHandle}
-                                </h3>
-                                <button
-                                    onClick={() => setShowReplyModal(false)}
-                                    className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                                >
-                                    <FiX className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-                                </button>
-                            </div>
-                            <textarea
-                                value={replyText}
-                                onChange={(e) => setReplyText(e.target.value)}
-                                placeholder="Type a reply..."
-                                className="w-full h-24 p-3 rounded-xl border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 resize-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                                autoFocus
-                            />
-                            <div className="mt-4 flex items-center gap-3">
-                                <button
-                                    onClick={handleReply}
-                                    disabled={!replyText.trim()}
-                                    className="flex-1 py-3 rounded-xl bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
-                                >
-                                    Send Reply
-                                </button>
-                                {currentGroup?.userHandle && (
-                                    <button
-                                        onClick={async () => {
-                                            setShowReplyModal(false);
-                                            
-                                            // Check if user can message (privacy check)
-                                            if (user?.id && user?.handle && currentGroup.userHandle) {
-                                                const followedUsers = await getFollowedUsers(user.id);
-                                                if (!canSendMessage(user.handle, currentGroup.userHandle, followedUsers)) {
-                                                    Swal.fire(bottomSheet({
-                                                        title: 'Cannot Send Message',
-                                                        message: 'You must follow this user to send them a message.',
-                                                        icon: 'alert',
-                                                    }));
-                                                    return;
-                                                }
-                                            }
-                                            
-                                            setViewingStories(false);
-
-                                                // Get the current story to check if it's a shared post
-                                                const group = storyGroups[currentGroupIndex];
-                                                const story = group?.stories?.[currentStoryIndex];
-
-                                                // If this is a shared post, pass the post URL
-                                                let shareState: any = undefined;
-                                                if (story?.sharedFromPost) {
-                                                    const postUrl = `${window.location.origin}/post/${story.sharedFromPost}`;
-                                                    shareState = {
-                                                        sharePostUrl: postUrl,
-                                                        sharePostId: story.sharedFromPost
-                                                    };
-                                                }
-
-                                                navigate(`/messages/${encodeURIComponent(currentGroup.userHandle!)}`, {
-                                                    state: shareState
-                                                });
-                                        }}
-                                        className="px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                                    >
-                                        View in chat
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                )}
+                
 
                 {/* Response Detail Modal (for creator viewing responses) */}
                 {selectedResponse && (
@@ -3420,6 +3524,149 @@ export default function StoriesPage() {
                                     </div>
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Owner Insights Sheet */}
+                {showInsightsSheet && isViewingOwnStory && currentStory && (
+                    <div
+                        className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-sm flex items-end"
+                        onClick={() => setShowInsightsSheet(false)}
+                    >
+                        <div
+                            className="w-full bg-gray-900 text-white rounded-t-3xl p-4 pb-6 animate-in slide-in-from-bottom duration-300 max-h-[75vh] overflow-y-auto"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <div className="w-12 h-1.5 bg-white/25 rounded-full mx-auto mb-3" />
+                            <div className="flex items-center justify-between mb-3">
+                                <h3 className="text-base font-semibold">Story insights</h3>
+                                <button
+                                    onClick={() => setShowInsightsSheet(false)}
+                                    className="p-2 rounded-full hover:bg-gray-800 transition-colors"
+                                >
+                                    <FiX className="w-5 h-5 text-gray-300" />
+                                </button>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2 mb-4">
+                                <button
+                                    onClick={() => setInsightsTab('viewers')}
+                                    className={`px-3 py-2 rounded-xl text-sm font-semibold transition-colors ${
+                                        insightsTab === 'viewers'
+                                            ? 'bg-white text-black'
+                                            : 'bg-gray-800 text-white/90 hover:bg-gray-700'
+                                    }`}
+                                >
+                                    Viewers ({storyViewsCount})
+                                </button>
+                                <button
+                                    onClick={() => setInsightsTab('replies')}
+                                    className={`px-3 py-2 rounded-xl text-sm font-semibold transition-colors ${
+                                        insightsTab === 'replies'
+                                            ? 'bg-white text-black'
+                                            : 'bg-gray-800 text-white/90 hover:bg-gray-700'
+                                    }`}
+                                >
+                                    Replies ({storyRepliesCount})
+                                </button>
+                            </div>
+
+                            {insightsTab === 'viewers' ? (
+                                <div className="space-y-2">
+                                    <div className="rounded-2xl border border-white/10 bg-black/30 p-4 text-sm">
+                                        <div className="font-semibold text-white mb-1">{storyViewsCount} total views</div>
+                                        <div className="text-white/70">
+                                            Unique viewers: {storyViewerHandles.length}
+                                        </div>
+                                    </div>
+                                    {storyViewerHandles.length === 0 ? (
+                                        <div className="rounded-2xl border border-white/10 bg-black/30 p-4 text-sm text-white/70">
+                                            No viewer identities yet.
+                                        </div>
+                                    ) : (
+                                        storyViewerHandles.map((handle) => (
+                                            <button
+                                                key={handle}
+                                                type="button"
+                                                onClick={() => {
+                                                    setShowInsightsSheet(false);
+                                                    setViewingStories(false);
+                                                    setTimeout(() => {
+                                                        navigate(`/user/${encodeURIComponent(handle)}`);
+                                                    }, 100);
+                                                }}
+                                                className="w-full text-left rounded-2xl border border-white/10 bg-black/30 px-3 py-2.5 flex items-center gap-2.5 hover:bg-black/45 transition-colors"
+                                            >
+                                                <Avatar
+                                                    name={handle}
+                                                    src={getAvatarForHandle(handle)}
+                                                    size="sm"
+                                                />
+                                                <span className="text-sm font-semibold text-white truncate flex-1">{handle}</span>
+                                                {user?.handle && handle.toLowerCase() !== user.handle.toLowerCase() && (
+                                                    <button
+                                                        onClick={async (e) => {
+                                                            e.stopPropagation();
+                                                            if (!user?.id || viewerFollowLoadingHandle) return;
+                                                            const prev = !!viewerFollowMap[handle];
+                                                            setViewerFollowLoadingHandle(handle);
+                                                            setViewerFollowMap((m) => ({ ...m, [handle]: !prev }));
+                                                            try {
+                                                                const result = await toggleFollow(handle);
+                                                                const next =
+                                                                    result?.status === 'unfollowed'
+                                                                        ? false
+                                                                        : result?.status === 'accepted' || result?.following === true
+                                                                            ? true
+                                                                            : !prev;
+                                                                setViewerFollowMap((m) => ({ ...m, [handle]: next }));
+                                                                showToast?.(next ? 'Following' : 'Unfollowed');
+                                                            } catch (error) {
+                                                                setViewerFollowMap((m) => ({ ...m, [handle]: prev }));
+                                                                console.error('Failed to toggle viewer follow:', error);
+                                                                showToast?.('Could not update follow status');
+                                                            } finally {
+                                                                setViewerFollowLoadingHandle(null);
+                                                            }
+                                                        }}
+                                                        disabled={viewerFollowLoadingHandle === handle}
+                                                        className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors disabled:opacity-60 ${
+                                                            viewerFollowMap[handle]
+                                                                ? 'bg-white/20 text-white border border-white/30'
+                                                                : 'bg-blue-500 text-white hover:bg-blue-600'
+                                                        }`}
+                                                    >
+                                                        {viewerFollowLoadingHandle === handle
+                                                            ? '...'
+                                                            : viewerFollowMap[handle]
+                                                                ? 'Following'
+                                                                : 'Follow'}
+                                                    </button>
+                                                )}
+                                            </button>
+                                        ))
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    {(currentStory.replies || []).length === 0 ? (
+                                        <div className="rounded-2xl border border-white/10 bg-black/30 p-4 text-sm text-white/70">
+                                            No replies yet.
+                                        </div>
+                                    ) : (
+                                        (currentStory.replies || []).map((reply) => (
+                                            <div key={reply.id} className="rounded-2xl border border-white/10 bg-black/30 px-3 py-2.5">
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <span className="text-sm font-semibold text-white">{reply.userHandle}</span>
+                                                    <span className="text-[11px] text-white/60">{timeAgo(reply.createdAt)}</span>
+                                                </div>
+                                                <p className="mt-1 text-sm text-white/85">{reply.text}</p>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}

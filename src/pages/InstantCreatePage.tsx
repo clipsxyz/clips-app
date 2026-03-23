@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiArrowLeft, FiCircle, FiX, FiCheck, FiPlay, FiPause, FiRotateCw, FiMic, FiMicOff, FiImage, FiMusic, FiLayers, FiZap, FiGrid, FiUser, FiFilter, FiRefreshCw, FiEdit3, FiSearch, FiBookmark, FiUpload, FiSliders, FiDroplet, FiVideo, FiVideoOff, FiCopy, FiSave, FiPlus, FiType, FiCamera } from 'react-icons/fi';
+import { FiArrowLeft, FiCircle, FiX, FiPlay, FiPause, FiRotateCw, FiMic, FiMicOff, FiImage, FiLayers, FiZap, FiGrid, FiUser, FiFilter, FiRefreshCw, FiEdit3, FiBookmark, FiUpload, FiSliders, FiDroplet, FiVideo, FiVideoOff, FiCopy, FiSave, FiPlus, FiType, FiCamera } from 'react-icons/fi';
 import { saveDraft } from '../api/drafts';
 import { getTemplate } from '../api/templates';
 import { TEMPLATE_IDS } from '../constants';
@@ -50,14 +50,6 @@ export default function InstantCreatePage() {
     const [featherPx, setFeatherPx] = React.useState(3);
     const [showGuides, setShowGuides] = React.useState(false);
     const [showEffectsCard, setShowEffectsCard] = React.useState(false);
-    const [showMusicCard, setShowMusicCard] = React.useState(false);
-    const [activeMusicTab, setActiveMusicTab] = React.useState('For you');
-    const [selectedMusicTrackId, setSelectedMusicTrackId] = React.useState<number | null>(null);
-    const [libraryTracks, setLibraryTracks] = React.useState<any[]>([]);
-    const [libraryLoading, setLibraryLoading] = React.useState(false);
-    const [librarySearch, setLibrarySearch] = React.useState('');
-    const [libraryGenre, setLibraryGenre] = React.useState('');
-    const [libraryMood, setLibraryMood] = React.useState('');
     const [showLayoutOptions, setShowLayoutOptions] = React.useState(false);
     const [selectedLayout, setSelectedLayout] = React.useState<string | null>(null);
     const [showGreenScreenOptions, setShowGreenScreenOptions] = React.useState(false);
@@ -105,10 +97,24 @@ export default function InstantCreatePage() {
 
     // Recording mode selector (TikTok-style): 60s, 30s, 15s, Photo
     type RecordingMode = '60' | '30' | '15' | 'photo';
+    type FooterAction = 'mode-60' | 'mode-30' | 'mode-15' | 'mode-photo' | 'gallery' | 'story' | 'text';
+    type StoryAudience = 'public' | 'close_friends' | 'only_me';
+    type StoryPreviewAction = 'filters' | 'audience' | 'save' | 'next';
     const [recordingMode, setRecordingMode] = React.useState<RecordingMode>('60');
     const [currentRecordingLimit, setCurrentRecordingLimit] = React.useState<number>(MAX_VIDEO_SECONDS);
     const [recordingTime, setRecordingTime] = React.useState(MAX_VIDEO_SECONDS); // Countdown from selected limit to 0
     const recordingTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+    const footerRailRef = React.useRef<HTMLDivElement | null>(null);
+    const footerRafRef = React.useRef<number | null>(null);
+    const [isFooterDragging, setIsFooterDragging] = React.useState(false);
+    const [centeredFooterAction, setCenteredFooterAction] = React.useState<FooterAction>('text');
+    const [isStoryMode, setIsStoryMode] = React.useState(false);
+    const [storyAudience, setStoryAudience] = React.useState<StoryAudience>('public');
+    const [showStoryAudienceSheet, setShowStoryAudienceSheet] = React.useState(false);
+    const storyPreviewRailRef = React.useRef<HTMLDivElement | null>(null);
+    const storyPreviewRafRef = React.useRef<number | null>(null);
+    const [isStoryPreviewDragging, setIsStoryPreviewDragging] = React.useState(false);
+    const [centeredStoryPreviewAction, setCenteredStoryPreviewAction] = React.useState<StoryPreviewAction>('next');
 
     const getSecondsForMode = (mode: RecordingMode): number => {
         switch (mode) {
@@ -127,6 +133,108 @@ export default function InstantCreatePage() {
     const recordingLimitForDisplay = currentRecordingLimit || getSecondsForMode(recordingMode) || MAX_VIDEO_SECONDS;
     const TIMER_CIRCUMFERENCE = 2 * Math.PI * 20;
 
+    const centerRailItem = React.useCallback((rail: HTMLDivElement | null, selector: string, smooth = true) => {
+        if (!rail) return;
+        const target = rail.querySelector<HTMLElement>(selector);
+        if (!target) return;
+        const desiredLeft = target.offsetLeft - (rail.clientWidth / 2) + (target.clientWidth / 2);
+        rail.scrollTo({ left: Math.max(0, desiredLeft), behavior: smooth ? 'smooth' : 'auto' });
+    }, []);
+
+    const updateCenteredFooterAction = React.useCallback(() => {
+        const rail = footerRailRef.current;
+        if (!rail) return;
+        const rect = rail.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        let closestId: FooterAction | null = null;
+        let closestDist = Number.POSITIVE_INFINITY;
+        rail.querySelectorAll<HTMLButtonElement>('[data-footer-action]').forEach((node) => {
+            const id = node.dataset.footerAction as FooterAction | undefined;
+            if (!id) return;
+            const nRect = node.getBoundingClientRect();
+            const dist = Math.abs((nRect.left + nRect.width / 2) - centerX);
+            if (dist < closestDist) {
+                closestDist = dist;
+                closestId = id;
+            }
+        });
+        if (closestId) setCenteredFooterAction(closestId);
+    }, []);
+
+    const updateCenteredStoryPreviewAction = React.useCallback(() => {
+        const rail = storyPreviewRailRef.current;
+        if (!rail) return;
+        const railRect = rail.getBoundingClientRect();
+        const centerX = railRect.left + (railRect.width / 2);
+        let closestId: StoryPreviewAction | null = null;
+        let closestDist = Number.POSITIVE_INFINITY;
+        const nodes = rail.querySelectorAll<HTMLButtonElement>('[data-story-preview-action]');
+        nodes.forEach((node) => {
+            const id = node.dataset.storyPreviewAction as StoryPreviewAction | undefined;
+            if (!id) return;
+            const rect = node.getBoundingClientRect();
+            const itemCenter = rect.left + (rect.width / 2);
+            const dist = Math.abs(itemCenter - centerX);
+            if (dist < closestDist) {
+                closestDist = dist;
+                closestId = id;
+            }
+        });
+        if (closestId) setCenteredStoryPreviewAction(closestId);
+    }, []);
+
+    React.useEffect(() => {
+        const t = window.setTimeout(() => {
+            const rail = footerRailRef.current;
+            if (rail) {
+                const firstItem = rail.querySelector<HTMLElement>('[data-footer-action="text"]');
+                if (firstItem) {
+                    // Start with the first icon visible on the left, while keeping enough left runway
+                    // so users can still drag it back into center to select.
+                    const startLeft = Math.max(0, firstItem.offsetLeft - 14);
+                    rail.scrollTo({ left: startLeft, behavior: 'auto' });
+                } else {
+                    rail.scrollTo({ left: 0, behavior: 'auto' });
+                }
+            }
+            updateCenteredFooterAction();
+        }, 0);
+        return () => window.clearTimeout(t);
+    }, [updateCenteredFooterAction]);
+
+    React.useEffect(() => {
+        const rail = footerRailRef.current;
+        if (!rail) return;
+        const onScroll = () => {
+            if (footerRafRef.current != null) cancelAnimationFrame(footerRafRef.current);
+            footerRafRef.current = requestAnimationFrame(updateCenteredFooterAction);
+        };
+        rail.addEventListener('scroll', onScroll, { passive: true });
+        return () => {
+            rail.removeEventListener('scroll', onScroll);
+            if (footerRafRef.current != null) cancelAnimationFrame(footerRafRef.current);
+        };
+    }, [updateCenteredFooterAction]);
+
+    React.useEffect(() => {
+        const rail = storyPreviewRailRef.current;
+        if (!rail) return;
+        const t = window.setTimeout(() => {
+            centerRailItem(rail, `[data-story-preview-action="${centeredStoryPreviewAction}"]`, false);
+            updateCenteredStoryPreviewAction();
+        }, 0);
+        const onScroll = () => {
+            if (storyPreviewRafRef.current != null) cancelAnimationFrame(storyPreviewRafRef.current);
+            storyPreviewRafRef.current = requestAnimationFrame(updateCenteredStoryPreviewAction);
+        };
+        rail.addEventListener('scroll', onScroll, { passive: true });
+        return () => {
+            window.clearTimeout(t);
+            rail.removeEventListener('scroll', onScroll);
+            if (storyPreviewRafRef.current != null) cancelAnimationFrame(storyPreviewRafRef.current);
+        };
+    }, [centeredStoryPreviewAction, updateCenteredStoryPreviewAction]);
+
     // Load draft when navigated from profile drafts
     React.useEffect(() => {
         const state = location.state as {
@@ -135,6 +243,7 @@ export default function InstantCreatePage() {
             draftVideoDuration?: number;
             trimStart?: number;
             trimEnd?: number;
+            storyMode?: boolean;
         } | null;
 
         if (state?.draftVideoUrl) {
@@ -145,6 +254,9 @@ export default function InstantCreatePage() {
             setVideoDuration(duration);
             setTrimStart(start);
             setTrimEnd(end);
+        }
+        if (state?.storyMode) {
+            setIsStoryMode(true);
         }
     }, [location.state]);
 
@@ -1130,7 +1242,9 @@ export default function InstantCreatePage() {
                 },
                 filtered: selectedFilter !== 'None' || brightness !== 1 || contrast !== 1 || saturation !== 1 || hue !== 0,
                 mediaType: 'video',
-                musicTrackId: selectedMusicTrackId
+                storyMode: isStoryMode,
+                storyAudience,
+                storyExpiresHours: isStoryMode ? 24 : undefined,
             }
         });
     }
@@ -1403,7 +1517,7 @@ export default function InstantCreatePage() {
                             onClick={handleNext}
                             className="px-3 py-1.5 rounded-full bg-white text-black text-xs font-semibold hover:bg-gray-100 transition-colors"
                         >
-                            Next
+                            {isStoryMode ? 'Share story' : 'Next'}
                         </button>
                     )}
                     {/* 60 Second Timer - Circular Progress Bar when recording */}
@@ -1454,60 +1568,105 @@ export default function InstantCreatePage() {
                             />
                         )}
 
-                        {/* Footer: Gallery, Stories, Text - gradient ring only around icons */}
-                        <div className="absolute bottom-0 left-0 right-0 z-30 flex items-center justify-between px-4 py-2.5 bg-gradient-to-t from-black/60 to-transparent border-t border-white/5 gap-2">
-                            {/* Gallery with blue→purple gradient icon border */}
-                            <div className="flex-1">
-                                <button
-                                    onClick={() => cameraRollInputRef.current?.click()}
-                                    className="w-full flex flex-row items-center justify-center gap-2 px-3 py-1.5 rounded-full bg-black/30 backdrop-blur-sm text-white/90 hover:bg-white/10 active:scale-95 transition-all"
-                                >
+                        {/* Footer action snap rail: Gallery / Story / Text */}
+                        <div className="absolute bottom-0 left-0 right-0 z-30">
+                            <div
+                                aria-hidden
+                                className="pointer-events-none absolute inset-x-0 -top-16 h-24 bg-gradient-to-t from-black/72 via-black/38 to-transparent"
+                            />
+                            <div className="bg-black/25 backdrop-blur-[1px] border-t border-white/20 shadow-lg">
+                                <div className="px-3 py-2" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0) + 0.4rem)' }}>
                                     <div
-                                        className="rounded-full p-[1.5px]"
-                                        style={{ background: 'linear-gradient(135deg,#3b82f6,#a855f7)' }}
+                                        ref={footerRailRef}
+                                        className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide py-1"
+                                        style={{ scrollSnapType: 'x mandatory' }}
+                                        onPointerDown={() => setIsFooterDragging(true)}
+                                        onPointerUp={() => window.setTimeout(() => setIsFooterDragging(false), 80)}
+                                        onPointerCancel={() => setIsFooterDragging(false)}
+                                        onPointerLeave={() => setIsFooterDragging(false)}
                                     >
-                                        <div className="rounded-full bg-black px-1.5 py-1.5 flex items-center justify-center">
-                                            <FiUpload className="w-4 h-4" />
-                                        </div>
+                                        <div className="shrink-0 w-[38%]" aria-hidden />
+                                        {([
+                                            { id: 'text' as const, title: 'Text', icon: FiType },
+                                            { id: 'story' as const, title: '24h Story', icon: FiCamera },
+                                            { id: 'gallery' as const, title: 'Gallery', icon: FiUpload },
+                                            { id: 'mode-60' as const, title: '60s', icon: FiCircle },
+                                            { id: 'mode-30' as const, title: '30s', icon: FiCircle },
+                                            { id: 'mode-15' as const, title: '15s', icon: FiCircle },
+                                            { id: 'mode-photo' as const, title: 'Photo', icon: FiImage },
+                                        ]).map((item) => {
+                                            const Icon = item.icon;
+                                            const isCentered = centeredFooterAction === item.id;
+                                            return (
+                                                <button
+                                                    key={item.id}
+                                                    data-footer-action={item.id}
+                                                    onClick={() => {
+                                                        if (isFooterDragging) return;
+                                                        if (!isCentered) {
+                                                            centerRailItem(footerRailRef.current, `[data-footer-action="${item.id}"]`, true);
+                                                            return;
+                                                        }
+                                                        if (item.id === 'mode-60' || item.id === 'mode-30' || item.id === 'mode-15' || item.id === 'mode-photo') {
+                                                            if (recording) return;
+                                                            const nextMode = item.id === 'mode-photo'
+                                                                    ? 'photo'
+                                                                    : item.id === 'mode-15'
+                                                                    ? '15'
+                                                                    : item.id === 'mode-30'
+                                                                        ? '30'
+                                                                        : '60';
+                                                            setRecordingMode(nextMode);
+                                                            const limit = getSecondsForMode(nextMode) || MAX_VIDEO_SECONDS;
+                                                            setRecordingTime(limit || MAX_VIDEO_SECONDS);
+                                                            setCurrentRecordingLimit(limit || MAX_VIDEO_SECONDS);
+                                                            return;
+                                                        }
+                                                        if (item.id === 'gallery') {
+                                                            setIsStoryMode(false);
+                                                            cameraRollInputRef.current?.click();
+                                                            return;
+                                                        }
+                                                        if (item.id === 'story') {
+                                                            setIsStoryMode(true);
+                                                            navigate('/clip', { state: { storyMode: true, storyAudience } });
+                                                            return;
+                                                        }
+                                                        setIsStoryMode(false);
+                                                        navigate('/create/text-only');
+                                                    }}
+                                                    title={item.title}
+                                                    aria-label={item.title}
+                                                    className="relative shrink-0 w-[72px] h-[76px] flex items-center justify-center transition-transform duration-200"
+                                                    style={{
+                                                        scrollSnapAlign: 'center',
+                                                        transform: `scale(${isCentered ? 1.10 : 0.86})`,
+                                                        opacity: isCentered ? 1 : 0.62,
+                                                    }}
+                                                >
+                                                    <div className="flex flex-col items-center gap-1">
+                                                        <div
+                                                            className={`p-[2px] rounded-full transition-shadow duration-200 ${isCentered ? 'shadow-[0_0_24px_rgba(255,255,255,0.22)]' : ''}`}
+                                                            style={{ background: isCentered ? '#ffffff' : 'rgba(255,255,255,0.78)' }}
+                                                        >
+                                                            <div className={`${isCentered ? 'w-11 h-11' : 'w-10 h-10'} rounded-full bg-black flex items-center justify-center transition-all duration-200`}>
+                                                                {(item.id === 'mode-60' || item.id === 'mode-30' || item.id === 'mode-15') ? (
+                                                                    <span className="text-[11px] font-semibold text-white">{item.title}</span>
+                                                                ) : (
+                                                                    <Icon className="w-5 h-5 text-white" />
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        <span className={`text-[10px] leading-none font-medium text-white ${isCentered ? 'opacity-95' : 'opacity-75'}`}>
+                                                            {item.title}
+                                                        </span>
+                                                    </div>
+                                                </button>
+                                            );
+                                        })}
+                                        <div className="shrink-0 w-[38%]" aria-hidden />
                                     </div>
-                                    <span className="text-[11px] font-medium">Gallery</span>
-                                </button>
-                            </div>
-
-                            {/* Story with blue→purple gradient icon border */}
-                            <div className="flex-1">
-                                <button
-                                    onClick={() => navigate('/clip')}
-                                    className="w-full flex flex-row items-center justify-center gap-2 px-3 py-1.5 rounded-full bg-black/30 backdrop-blur-sm text-white/90 hover:bg-white/10 active:scale-95 transition-all"
-                                >
-                                    <div
-                                        className="rounded-full p-[1.5px]"
-                                        style={{ background: 'linear-gradient(135deg,#3b82f6,#a855f7)' }}
-                                    >
-                                        <div className="rounded-full bg-black px-1.5 py-1.5 flex items-center justify-center">
-                                            <FiCamera className="w-4 h-4" />
-                                        </div>
-                                    </div>
-                                    <span className="text-[11px] font-medium">Story</span>
-                                </button>
-                            </div>
-
-                            {/* Text with blue→purple gradient icon border */}
-                            <div className="flex-1">
-                                <button
-                                    onClick={() => navigate('/create/text-only')}
-                                    className="w-full flex flex-row items-center justify-center gap-2 px-3 py-1.5 rounded-full bg-black/30 backdrop-blur-sm text-white/90 hover:bg-white/10 active:scale-95 transition-all"
-                                >
-                                    <div
-                                        className="rounded-full p-[1.5px]"
-                                        style={{ background: 'linear-gradient(135deg,#3b82f6,#a855f7)' }}
-                                    >
-                                        <div className="rounded-full bg-black px-1.5 py-1.5 flex items-center justify-center">
-                                            <FiType className="w-4 h-4" />
-                                        </div>
-                                    </div>
-                                    <span className="text-[11px] font-medium">Text</span>
-                                </button>
+                                </div>
                             </div>
                         </div>
                     </>
@@ -1656,43 +1815,115 @@ export default function InstantCreatePage() {
                                 </div>
                             </div>
                         </div>
+
+                        {isStoryMode && (
+                            <>
+                                <div className="absolute left-3 right-3 bottom-[124px] z-40 pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+                                    <div className="rounded-2xl border border-white/20 bg-black/55 backdrop-blur-md px-3 py-2 text-white">
+                                        <div className="flex items-center justify-between gap-3 text-[11px]">
+                                            <div className="font-semibold">Story preflight</div>
+                                            <div className="text-white/70">Expires in 24h</div>
+                                        </div>
+                                        <div className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] text-white/80">
+                                            <span>{previewUrl ? '✓ clip ready' : '• add clip'}</span>
+                                            <span>✓ audience: {storyAudience === 'close_friends' ? 'Followers' : storyAudience === 'only_me' ? 'Only me' : 'Public'}</span>
+                                            <span>✓ safe area visible</span>
+                                            <span>✓ audio: {micOn ? 'on' : 'off'}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="absolute bottom-0 left-0 right-0 z-40" onClick={(e) => e.stopPropagation()}>
+                                    <div
+                                        aria-hidden
+                                        className="pointer-events-none absolute inset-x-0 -top-16 h-24 bg-gradient-to-t from-black/72 via-black/38 to-transparent"
+                                    />
+                                    <div className="bg-black/30 backdrop-blur-[1px] border-t border-white/20 shadow-lg">
+                                        <div className="px-3 py-2" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0) + 0.4rem)' }}>
+                                            <div
+                                                ref={storyPreviewRailRef}
+                                                className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide py-1"
+                                                style={{ scrollSnapType: 'x mandatory' }}
+                                                onPointerDown={() => setIsStoryPreviewDragging(true)}
+                                                onPointerUp={() => window.setTimeout(() => setIsStoryPreviewDragging(false), 80)}
+                                                onPointerCancel={() => setIsStoryPreviewDragging(false)}
+                                                onPointerLeave={() => setIsStoryPreviewDragging(false)}
+                                            >
+                                                <div className="shrink-0 w-[36%]" aria-hidden />
+                                                {([
+                                                    { id: 'filters' as const, title: 'Filters', icon: FiFilter },
+                                                    { id: 'audience' as const, title: 'Audience', icon: FiUser },
+                                                    { id: 'save' as const, title: 'Draft', icon: FiSave },
+                                                    { id: 'next' as const, title: 'Share', icon: FiArrowLeft },
+                                                ]).map((item) => {
+                                                    const Icon = item.icon;
+                                                    const isCentered = centeredStoryPreviewAction === item.id;
+                                                    return (
+                                                        <button
+                                                            key={item.id}
+                                                            data-story-preview-action={item.id}
+                                                            onClick={() => {
+                                                                if (isStoryPreviewDragging) return;
+                                                                if (!isCentered) {
+                                                                    centerRailItem(storyPreviewRailRef.current, `[data-story-preview-action="${item.id}"]`, true);
+                                                                    return;
+                                                                }
+                                                                if (item.id === 'filters') {
+                                                                    setShowFilters(true);
+                                                                    return;
+                                                                }
+                                                                if (item.id === 'audience') {
+                                                                    setShowStoryAudienceSheet(true);
+                                                                    return;
+                                                                }
+                                                                if (item.id === 'save') {
+                                                                    handleSaveToDrafts();
+                                                                    return;
+                                                                }
+                                                                handleNext();
+                                                            }}
+                                                            title={item.title}
+                                                            aria-label={item.title}
+                                                            className="relative shrink-0 w-[72px] h-[76px] flex items-center justify-center transition-transform duration-200"
+                                                            style={{
+                                                                scrollSnapAlign: 'center',
+                                                                transform: `scale(${isCentered ? 1.1 : 0.86})`,
+                                                                opacity: isCentered ? 1 : 0.62,
+                                                            }}
+                                                        >
+                                                            <div className="flex flex-col items-center gap-1">
+                                                                <div
+                                                                    className={`p-[2px] rounded-full transition-shadow duration-200 ${isCentered ? 'shadow-[0_0_24px_rgba(255,255,255,0.22)]' : ''}`}
+                                                                    style={{ background: isCentered ? '#ffffff' : 'rgba(255,255,255,0.78)' }}
+                                                                >
+                                                                    <div className={`${isCentered ? 'w-11 h-11' : 'w-10 h-10'} rounded-full bg-black flex items-center justify-center transition-all duration-200`}>
+                                                                        <Icon className={`w-5 h-5 ${item.id === 'next' ? 'rotate-180' : ''} text-white`} />
+                                                                    </div>
+                                                                </div>
+                                                                <span className={`text-[10px] leading-none font-medium text-white ${isCentered ? 'opacity-95' : 'opacity-75'}`}>
+                                                                    {item.title}
+                                                                </span>
+                                                            </div>
+                                                        </button>
+                                                    );
+                                                })}
+                                                <div className="shrink-0 w-[36%]" aria-hidden />
+                                            </div>
+                                            <div className="pt-1 text-center text-[10px] text-white/70">
+                                                This story is live for 24 hours. Audience: {storyAudience === 'close_friends' ? 'Followers' : storyAudience === 'only_me' ? 'Only me' : 'Public'}.
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </>
+                        )}
                     </div>
                 )}
             </div>
 
-            {/* Record Button + duration mode selector */}
+            {/* Record Button */}
             {!previewUrl && (
-                <div className="absolute bottom-24 left-0 right-0 z-50 flex flex-col items-center justify-center gap-3">
-                    {/* Duration / Photo selector (60s · 30s · 15s · Photo) */}
-                    <div className="flex items-center gap-4 text-xs font-semibold text-white">
-                        {[
-                            { id: '60' as RecordingMode, label: '60s' },
-                            { id: '30' as RecordingMode, label: '30s' },
-                            { id: '15' as RecordingMode, label: '15s' },
-                            { id: 'photo' as RecordingMode, label: 'Photo' },
-                        ].map((mode) => (
-                            <button
-                                key={mode.id}
-                                type="button"
-                                disabled={recording}
-                                onClick={() => {
-                                    if (recording) return;
-                                    setRecordingMode(mode.id);
-                                    const limit = getSecondsForMode(mode.id) || MAX_VIDEO_SECONDS;
-                                    setRecordingTime(limit || MAX_VIDEO_SECONDS);
-                                    setCurrentRecordingLimit(limit || MAX_VIDEO_SECONDS);
-                                }}
-                                className={`px-2 py-0.5 rounded-full transition-colors ${
-                                    recordingMode === mode.id
-                                        ? 'bg-white/20 text-white'
-                                        : 'text-white/70 hover:text-white'
-                                } ${recording ? 'opacity-60 cursor-default' : ''}`}
-                            >
-                                {mode.label}
-                            </button>
-                        ))}
-                    </div>
-
+                <div className="absolute bottom-28 left-0 right-0 z-50 flex flex-col items-center justify-center gap-3">
                     {/* Main record button */}
                     {!recording && countdown === null ? (
                         <button
@@ -1817,7 +2048,6 @@ export default function InstantCreatePage() {
                                                     },
                                                     filtered: selectedFilter !== 'None' || brightness !== 1 || contrast !== 1 || saturation !== 1 || hue !== 0,
                                                     mediaType: 'video',
-                                                    musicTrackId: selectedMusicTrackId
                                                 }
                                             });
                                         }
@@ -1850,7 +2080,7 @@ export default function InstantCreatePage() {
             )}
 
             {/* Filters Card - Slides up from bottom */}
-            {showFilters && !previewUrl && (
+            {showFilters && (
                 <div className="absolute inset-0 z-50 flex items-end">
                     {/* Backdrop */}
                     <div 
@@ -1907,7 +2137,7 @@ export default function InstantCreatePage() {
             )}
 
             {/* Adjustments Card - Slides up from bottom */}
-            {showAdjustments && !previewUrl && (
+            {showAdjustments && (
                 <div className="absolute inset-0 z-50 flex items-end">
                     {/* Backdrop */}
                     <div 
@@ -2045,278 +2275,43 @@ export default function InstantCreatePage() {
                 </div>
             )}
 
-            {/* Music Card - Slides up from bottom */}
-            {showMusicCard && !previewUrl && (
-                <div className="absolute inset-0 z-50 flex items-end">
-                    {/* Backdrop */}
-                    <div 
-                        className="absolute inset-0 bg-black/50 transition-opacity"
-                        onClick={() => setShowMusicCard(false)}
-                    />
-                    {/* Card */}
-                    <div className="relative w-full bg-gray-900 rounded-t-3xl h-[85vh] flex flex-col transform transition-transform duration-300 ease-out">
-                        {/* Handle bar */}
-                        <div className="w-12 h-1 bg-gray-600 rounded-full mx-auto mt-3 mb-4" />
-                        
-                        {/* Search Bar and Import Button */}
-                        <div className="px-4 mb-4 flex gap-2">
-                            <div className="flex-1 relative">
-                                <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                                <input
-                                    type="text"
-                                    placeholder="Search music"
-                                    value={librarySearch}
-                                    onChange={(e) => {
-                                        setLibrarySearch(e.target.value);
-                                        // Auto-load when typing (debounced)
-                                        const timer = setTimeout(async () => {
-                                            if (e.target.value.length > 2 || e.target.value.length === 0) {
-                                                setLibraryLoading(true);
-                                                try {
-                                                    const { getMusicLibrary } = await import('../api/music');
-                                                    const result = await getMusicLibrary({
-                                                        genre: libraryGenre || undefined,
-                                                        mood: libraryMood || undefined,
-                                                        search: e.target.value || undefined,
-                                                    });
-                                                    if (result.success && result.data) {
-                                                        setLibraryTracks(result.data);
-                                                    }
-                                                } catch (error) {
-                                                    console.error('Failed to search music:', error);
-                                                } finally {
-                                                    setLibraryLoading(false);
-                                                }
-                                            }
-                                        }, 500);
-                                        return () => clearTimeout(timer);
-                                    }}
-                                    className="w-full bg-gray-800 text-white placeholder-gray-400 rounded-lg pl-10 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500"
-                                />
-                            </div>
-                            <button className="px-4 py-3 bg-gray-800 hover:bg-gray-700 rounded-lg flex items-center gap-2 text-white transition-colors">
-                                <FiUpload className="w-5 h-5" />
-                                <span className="text-sm font-medium">Import</span>
-                            </button>
-                        </div>
-
-                        {/* Tabs */}
-                        <div className="px-4 mb-4 flex gap-4 border-b border-gray-700 overflow-x-auto">
-                            {['Library'].map((tab) => (
+            {showStoryAudienceSheet && isStoryMode && (
+                <div className="fixed inset-0 z-[110] flex items-end bg-black/60 backdrop-blur-sm" onClick={() => setShowStoryAudienceSheet(false)}>
+                    <div
+                        className="w-full rounded-t-2xl border-t border-white/15 bg-[#0b0b0f] p-4"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-white/25" />
+                        <h3 className="text-white text-base font-semibold">Story audience</h3>
+                        <p className="mt-1 text-xs text-white/70">Choose who can view this 24-hour story.</p>
+                        <div className="mt-4 space-y-2">
+                            {([
+                                { id: 'public' as const, title: 'Public', desc: 'Anyone who can view your stories' },
+                                { id: 'close_friends' as const, title: 'Followers', desc: 'Only users who follow you can view' },
+                                { id: 'only_me' as const, title: 'Only me', desc: 'Private story for your own archive' },
+                            ]).map((option) => (
                                 <button
-                                    key={tab}
-                                    onClick={async () => {
-                                        setActiveMusicTab(tab);
-                                        // Auto-load library when tab is clicked
-                                        if (libraryTracks.length === 0) {
-                                            setLibraryLoading(true);
-                                            try {
-                                                const { getMusicLibrary } = await import('../api/music');
-                                                const result = await getMusicLibrary({
-                                                    genre: libraryGenre || undefined,
-                                                    mood: libraryMood || undefined,
-                                                    search: librarySearch || undefined,
-                                                });
-                                                if (result.success && result.data) {
-                                                    setLibraryTracks(result.data);
-                                                }
-                                            } catch (error) {
-                                                console.error('Failed to load music library:', error);
-                                            } finally {
-                                                setLibraryLoading(false);
-                                            }
-                                        }
+                                    key={option.id}
+                                    type="button"
+                                    onClick={() => {
+                                        setStoryAudience(option.id);
+                                        setShowStoryAudienceSheet(false);
                                     }}
-                                    className={`pb-3 px-2 text-sm font-medium whitespace-nowrap transition-colors ${
-                                        activeMusicTab === tab
-                                            ? 'text-white border-b-2 border-white'
-                                            : 'text-gray-400'
+                                    className={`w-full rounded-xl border px-3 py-3 text-left transition-colors ${
+                                        storyAudience === option.id
+                                            ? 'border-white bg-white/15 text-white'
+                                            : 'border-white/20 bg-black/30 text-white/90 hover:bg-white/10'
                                     }`}
                                 >
-                                    {tab}
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div>
+                                            <div className="text-sm font-semibold">{option.title}</div>
+                                            <div className="text-xs text-white/70">{option.desc}</div>
+                                        </div>
+                                        <div className={`h-2.5 w-2.5 rounded-full ${storyAudience === option.id ? 'bg-white' : 'bg-white/35'}`} />
+                                    </div>
                                 </button>
                             ))}
-                        </div>
-                        
-                        {/* Genre and Mood Filters */}
-                        <div className="px-4 mb-4 grid grid-cols-2 gap-2">
-                            <select
-                                value={libraryGenre}
-                                onChange={(e) => {
-                                    setLibraryGenre(e.target.value);
-                                    // Auto-reload when filter changes
-                                    setLibraryLoading(true);
-                                    (async () => {
-                                        try {
-                                            const { getMusicLibrary } = await import('../api/music');
-                                            const result = await getMusicLibrary({
-                                                genre: e.target.value || undefined,
-                                                mood: libraryMood || undefined,
-                                                search: librarySearch || undefined,
-                                            });
-                                            if (result.success && result.data) {
-                                                setLibraryTracks(result.data);
-                                            }
-                                        } catch (error) {
-                                            console.error('Failed to filter music:', error);
-                                        } finally {
-                                            setLibraryLoading(false);
-                                        }
-                                    })();
-                                }}
-                                className="px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500"
-                            >
-                                <option value="">All Genres</option>
-                                <option value="pop">Pop</option>
-                                <option value="rock">Rock</option>
-                                <option value="electronic">Electronic</option>
-                                <option value="hip-hop">Hip-Hop</option>
-                                <option value="jazz">Jazz</option>
-                                <option value="classical">Classical</option>
-                                <option value="ambient">Ambient</option>
-                            </select>
-                            <select
-                                value={libraryMood}
-                                onChange={(e) => {
-                                    setLibraryMood(e.target.value);
-                                    // Auto-reload when filter changes
-                                    setLibraryLoading(true);
-                                    (async () => {
-                                        try {
-                                            const { getMusicLibrary } = await import('../api/music');
-                                            const result = await getMusicLibrary({
-                                                genre: libraryGenre || undefined,
-                                                mood: e.target.value || undefined,
-                                                search: librarySearch || undefined,
-                                            });
-                                            if (result.success && result.data) {
-                                                setLibraryTracks(result.data);
-                                            }
-                                        } catch (error) {
-                                            console.error('Failed to filter music:', error);
-                                        } finally {
-                                            setLibraryLoading(false);
-                                        }
-                                    })();
-                                }}
-                                className="px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500"
-                            >
-                                <option value="">All Moods</option>
-                                <option value="happy">Happy</option>
-                                <option value="energetic">Energetic</option>
-                                <option value="calm">Calm</option>
-                                <option value="dramatic">Dramatic</option>
-                                <option value="romantic">Romantic</option>
-                                <option value="upbeat">Upbeat</option>
-                            </select>
-                        </div>
-
-                        {/* Featured Music Carousel */}
-                        <div className="px-4 mb-4">
-                            <div className="relative h-48 rounded-xl overflow-hidden bg-gradient-to-br from-purple-600 to-blue-600">
-                                <div className="absolute inset-0 bg-black/30" />
-                                <div className="absolute bottom-0 left-0 right-0 p-4">
-                                    <div className="text-white font-bold text-lg">HARD</div>
-                                    <div className="text-white/80 text-sm">FKA twigs</div>
-                                </div>
-                                {/* Carousel dots */}
-                                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5">
-                                    {[true, false, false, false, false].map((active, i) => (
-                                        <div
-                                            key={i}
-                                            className={`w-1.5 h-1.5 rounded-full ${active ? 'bg-white' : 'bg-white/40'}`}
-                                        />
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Music List */}
-                        <div className="flex-1 overflow-y-auto px-4 pb-4">
-                            {libraryLoading ? (
-                                <div className="flex items-center justify-center py-12">
-                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-yellow-500"></div>
-                                </div>
-                            ) : libraryTracks.length > 0 ? (
-                                libraryTracks.map((track) => {
-                                    const isSelected = selectedMusicTrackId === track.id;
-                                    const duration = track.duration ? `${Math.floor(track.duration / 60)}:${(track.duration % 60).toString().padStart(2, '0')}` : 'N/A';
-                                    
-                                    return (
-                                        <button
-                                            key={track.id}
-                                            onClick={async () => {
-                                                setSelectedMusicTrackId(track.id);
-                                                setShowMusicCard(false);
-                                                Swal.fire(bottomSheet({
-                                                    title: 'Music Selected!',
-                                                    message: `"${track.title}" by ${track.artist || 'Unknown'}`,
-                                                    icon: 'success',
-                                                }));
-                                            }}
-                                            className={`w-full flex items-center gap-3 p-3 hover:bg-gray-800 rounded-lg transition-colors mb-2 ${
-                                                isSelected ? 'bg-yellow-500/20 border border-yellow-500/50' : ''
-                                            }`}
-                                        >
-                                            {/* Album Art Placeholder */}
-                                            <div className="w-14 h-14 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg flex-shrink-0 flex items-center justify-center">
-                                                <FiMusic className="w-6 h-6 text-white" />
-                                            </div>
-                                            
-                                            {/* Track Info */}
-                                            <div className="flex-1 text-left min-w-0">
-                                                <div className="text-white font-medium text-sm truncate">{track.title}</div>
-                                                <div className="text-gray-400 text-xs truncate">{track.artist || 'Unknown Artist'}</div>
-                                                <div className="text-gray-500 text-xs mt-1">
-                                                    {track.genre || 'N/A'} • {track.mood || 'N/A'} • {duration}
-                                                    {track.license_type && (
-                                                        <span className="ml-2">({track.license_type})</span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                            
-                                            {isSelected && (
-                                                <div className="w-6 h-6 rounded-full bg-yellow-500 flex items-center justify-center flex-shrink-0">
-                                                    <FiCheck className="w-4 h-4 text-black" />
-                                                </div>
-                                            )}
-                                        </button>
-                                    );
-                                })
-                            ) : (
-                                <div className="text-center py-12">
-                                    <FiMusic className="w-12 h-12 text-gray-600 mx-auto mb-4" />
-                                    <p className="text-gray-400 text-sm mb-4">No tracks loaded</p>
-                                    <button
-                                        onClick={async () => {
-                                            setLibraryLoading(true);
-                                            try {
-                                                const { getMusicLibrary } = await import('../api/music');
-                                                const result = await getMusicLibrary({
-                                                    genre: libraryGenre || undefined,
-                                                    mood: libraryMood || undefined,
-                                                    search: librarySearch || undefined,
-                                                });
-                                                if (result.success && result.data) {
-                                                    setLibraryTracks(result.data);
-                                                }
-                                            } catch (error: any) {
-                                                console.error('Failed to load music library:', error);
-                                                Swal.fire(bottomSheet({
-                                                    title: 'Load Failed',
-                                                    message: error.message || 'Failed to load music library.',
-                                                    icon: 'alert',
-                                                }));
-                                            } finally {
-                                                setLibraryLoading(false);
-                                            }
-                                        }}
-                                        className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white rounded-lg font-medium"
-                                    >
-                                        Load Music Library
-                                    </button>
-                                </div>
-                            )}
                         </div>
                     </div>
                 </div>
@@ -2385,7 +2380,7 @@ export default function InstantCreatePage() {
                             <button
                                 onClick={() => {
                                     setShowGazetteerMenu(false);
-                                    navigate('/clip');
+                                    navigate('/clip', { state: { storyMode: true, storyAudience } });
                                 }}
                                 className="w-full p-4 rounded-xl bg-gradient-to-br from-green-500/20 to-white/10 border border-green-500/30 hover:border-green-500/50 transition-all text-left"
                             >

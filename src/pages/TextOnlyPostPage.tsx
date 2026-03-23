@@ -229,7 +229,7 @@ export default function TextOnlyPostPage() {
                 undefined, // subtitlesEnabled
                 undefined, // subtitleText
                 undefined, // editTimeline
-                undefined, // musicTrackId
+                undefined, // reserved optional slot
                 venueText.trim() || undefined, // venue
                 landmarkText.trim() || undefined // landmark
             );

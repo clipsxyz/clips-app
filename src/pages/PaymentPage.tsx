@@ -9,7 +9,7 @@ import { useAuth } from '../context/Auth';
 import { activateBoost } from '../api/boost';
 import { createBoostPaymentIntent } from '../api/client';
 import type { Post } from '../types';
-import type { BoostFeedType } from '../components/BoostSelectionModal';
+import type { BoostFeedType, BoostGoal, BoostDuration } from '../components/BoostSelectionModal';
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 const isPlaceholderKey = !stripePublishableKey || stripePublishableKey.includes('your_publishable_key_here') || stripePublishableKey === 'pk_test_xxx';
@@ -19,6 +19,9 @@ interface PaymentPageLocationState {
     post: Post;
     feedType: BoostFeedType;
     price: number;
+    goal?: BoostGoal;
+    durationHours?: BoostDuration;
+    estimatedReach?: string;
 }
 
 function getFeedTypeLabel(type: BoostFeedType): string {
@@ -26,6 +29,16 @@ function getFeedTypeLabel(type: BoostFeedType): string {
         case 'local': return 'Local Newsfeed';
         case 'regional': return 'Regional Newsfeed';
         case 'national': return 'National Newsfeed';
+    }
+}
+
+function getGoalLabel(goal?: BoostGoal): string {
+    switch (goal) {
+        case 'profile_visits': return 'Profile visits';
+        case 'messages': return 'Messages';
+        case 'views':
+        default:
+            return 'More views';
     }
 }
 
@@ -159,12 +172,13 @@ export default function PaymentPage() {
         return null;
     }
 
-    const { post, feedType, price } = state;
+    const { post, feedType, price, goal, durationHours, estimatedReach } = state;
+    const durationLabel = durationHours ? `${durationHours} hours` : '6 hours';
 
     const showSuccessAndNavigate = async () => {
         const result = await Swal.fire(bottomSheet({
             title: 'Payment Complete!',
-            message: `Your payment is complete and your post is boosted for 6 hours in the ${getFeedTypeLabel(feedType)}. Thank you for using our boost service!`,
+            message: `Your payment is complete and your post is boosted for ${durationLabel} in the ${getFeedTypeLabel(feedType)}. Thank you for using our boost service!`,
             icon: 'success',
             showCancelButton: true,
             confirmButtonText: 'Back to Newsfeed',
@@ -228,14 +242,24 @@ export default function PaymentPage() {
                     <div className="bg-white dark:bg-gray-900 rounded-xl shadow-lg p-4 mb-4">
                         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 uppercase tracking-wide">Order Summary</h2>
                         <div className="space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-gray-600 dark:text-gray-400">Goal</span>
+                                    <span className="font-semibold text-gray-900 dark:text-gray-100">{getGoalLabel(goal)}</span>
+                                </div>
                             <div className="flex items-center justify-between">
                                 <span className="text-gray-600 dark:text-gray-400">Boost Type</span>
                                 <span className="font-semibold text-gray-900 dark:text-gray-100">{getFeedTypeLabel(feedType)}</span>
                             </div>
                             <div className="flex items-center justify-between">
                                 <span className="text-gray-600 dark:text-gray-400">Duration</span>
-                                <span className="font-semibold text-gray-900 dark:text-gray-100">6 hours</span>
+                                    <span className="font-semibold text-gray-900 dark:text-gray-100">{durationLabel}</span>
                             </div>
+                                {estimatedReach && (
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-gray-600 dark:text-gray-400">Estimated Reach</span>
+                                        <span className="font-semibold text-gray-900 dark:text-gray-100">{estimatedReach}</span>
+                                    </div>
+                                )}
                             <div className="border-t border-gray-200 dark:border-gray-800 pt-3 flex items-center justify-between">
                                 <span className="text-lg font-semibold text-gray-900 dark:text-gray-100">Total</span>
                                 <span className="text-2xl font-bold text-brand-600 dark:text-brand-400">€{price.toFixed(2)}</span>

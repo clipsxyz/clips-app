@@ -13,6 +13,7 @@ import UserTaggingModal from '../components/UserTaggingModal';
 import StickerOverlayComponent from '../components/StickerOverlay';
 import type { Post, StickerOverlay, Sticker } from '../types';
 import { TEXT_STORY_TEMPLATES, TextStoryTemplate } from '../textStoryTemplates';
+import { showUploadOverlay } from '../utils/uploadOverlay';
 
 // Tagged User Overlay Component (draggable)
 interface TaggedUserOverlayProps {
@@ -310,6 +311,7 @@ function TaggedUserOverlay({
 }
 
 export default function ClipPage() {
+  type ClipRailAction = 'text' | 'location' | 'link' | 'tag' | 'audience';
   const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -363,6 +365,11 @@ export default function ClipPage() {
   const [sharedPostInfo, setSharedPostInfo] = React.useState<{ postId?: string; userId?: string } | null>(null);
   const [keyboardOffset, setKeyboardOffset] = React.useState(0);
   const [showStoryLocationSheet, setShowStoryLocationSheet] = React.useState(false);
+  const [showStoryAudienceSheet, setShowStoryAudienceSheet] = React.useState(false);
+  const [storyAudience, setStoryAudience] = React.useState<'public' | 'close_friends' | 'only_me'>('public');
+  const clipRailRef = React.useRef<HTMLDivElement | null>(null);
+  const clipRailRafRef = React.useRef<number | null>(null);
+  const [centeredClipRailAction, setCenteredClipRailAction] = React.useState<ClipRailAction>('link');
   const [filteredFromFlow, setFilteredFromFlow] = React.useState(false);
   const [videoSegments, setVideoSegments] = React.useState<string[]>([]);
   const [currentSegmentIndex, setCurrentSegmentIndex] = React.useState(0);
@@ -373,6 +380,56 @@ export default function ClipPage() {
   const textAreaRef = React.useRef<HTMLTextAreaElement | null>(null);
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
   const [videoSize, setVideoSize] = React.useState<{ w: number; h: number } | null>(null);
+
+  const centerClipRailAction = React.useCallback((actionId: ClipRailAction, smooth = true) => {
+    const rail = clipRailRef.current;
+    if (!rail) return;
+    const target = rail.querySelector<HTMLButtonElement>(`[data-clip-rail-action="${actionId}"]`);
+    if (!target) return;
+    const desiredLeft = target.offsetLeft - (rail.clientWidth / 2) + (target.clientWidth / 2);
+    rail.scrollTo({ left: Math.max(0, desiredLeft), behavior: smooth ? 'smooth' : 'auto' });
+  }, []);
+
+  const updateCenteredClipRailAction = React.useCallback(() => {
+    const rail = clipRailRef.current;
+    if (!rail) return;
+    const railRect = rail.getBoundingClientRect();
+    const centerX = railRect.left + (railRect.width / 2);
+    let closestId: ClipRailAction | null = null;
+    let closestDist = Number.POSITIVE_INFINITY;
+    const nodes = rail.querySelectorAll<HTMLButtonElement>('[data-clip-rail-action]');
+    nodes.forEach((node) => {
+      const id = node.dataset.clipRailAction as ClipRailAction | undefined;
+      if (!id) return;
+      const rect = node.getBoundingClientRect();
+      const itemCenter = rect.left + (rect.width / 2);
+      const dist = Math.abs(itemCenter - centerX);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closestId = id;
+      }
+    });
+    if (closestId) setCenteredClipRailAction(closestId);
+  }, []);
+
+  React.useEffect(() => {
+    const rail = clipRailRef.current;
+    if (!rail) return;
+    const t = window.setTimeout(() => {
+      centerClipRailAction(centeredClipRailAction, false);
+      updateCenteredClipRailAction();
+    }, 0);
+    const onScroll = () => {
+      if (clipRailRafRef.current != null) cancelAnimationFrame(clipRailRafRef.current);
+      clipRailRafRef.current = requestAnimationFrame(updateCenteredClipRailAction);
+    };
+    rail.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.clearTimeout(t);
+      rail.removeEventListener('scroll', onScroll);
+      if (clipRailRafRef.current != null) cancelAnimationFrame(clipRailRafRef.current);
+    };
+  }, [centerClipRailAction, updateCenteredClipRailAction, selectedMedia]);
 
   // Check for shared post data on mount
   React.useEffect(() => {
@@ -439,6 +496,10 @@ export default function ClipPage() {
       setReplyToQuestion(replyData);
       // Pre-fill text with the response
       setText(replyData.response);
+    }
+    const passedAudience = location.state?.storyAudience as 'public' | 'close_friends' | 'only_me' | undefined;
+    if (passedAudience) {
+      setStoryAudience(passedAudience);
     }
   }, [location.state]);
 
@@ -512,14 +573,26 @@ export default function ClipPage() {
     }
     if (!user) return;
 
-    // If we have multiple segments, post them sequentially
+    const overlay = showUploadOverlay({
+      thumbUrl: selectedMedia || undefined,
+      thumbType: mediaType === 'video' ? 'video' : 'image',
+      background: !selectedMedia ? background : undefined,
+      label: !selectedMedia ? 'Aa' : undefined,
+      initialMessage: 'Posting story…',
+      uploadingTitle: 'Preparing story…',
+      successTitle: 'Story posted!',
+      errorTitle: 'Story failed',
+    });
+    navigate('/feed');
+
+    // If we have multiple segments, post them sequentially in background
     if (videoSegments.length > 1) {
-      await postAllSegmentsSequentially();
+      void postAllSegmentsSequentially(overlay);
       return;
     }
 
-    // Single segment, regular clip, or text-only story
-    setIsUploading(true);
+    // Single segment, regular clip, or text-only story in background
+    void (async () => {
     try {
       // Convert text and location to sticker overlays when media is present
       let allStickers = [...gifOverlays, ...linkOverlays, ...textStickers, ...locationStickers];
@@ -648,7 +721,8 @@ export default function ClipPage() {
         undefined, // poll
         taggedUsers.length > 0 ? taggedUsers.map(tu => ({ handle: tu.handle, x: tu.x, y: tu.y })) : undefined, // taggedUsersPositions
         undefined, // question
-        venue.trim() || undefined // venue for metadata carousel
+        venue.trim() || undefined, // venue for metadata carousel
+        storyAudience
       );
       
       // Mark question as replied if this was a question reply
@@ -661,20 +735,20 @@ export default function ClipPage() {
       window.dispatchEvent(new CustomEvent('storyCreated', {
         detail: { userHandle: user.handle }
       }));
-
-      navigate('/feed');
+      overlay.success('Your story is now live.');
     } catch (error) {
       console.error('Error creating story:', error);
-      alert('Failed to create story. Please try again.');
-    } finally {
-      setIsUploading(false);
+      overlay.error('Story upload failed. Please try again.');
     }
+    })();
   };
 
-  const postAllSegmentsSequentially = async () => {
+  const postAllSegmentsSequentially = async (overlay?: { success: (msg?: string) => void; error: (msg?: string) => void }) => {
     if (!user || videoSegments.length === 0) return;
 
-    setIsPostingSegments(true);
+    if (!overlay) {
+      setIsPostingSegments(true);
+    }
     try {
       // Convert text and location to sticker overlays for all segments
       let allStickers: StickerOverlay[] = [...linkOverlays];
@@ -731,7 +805,9 @@ export default function ClipPage() {
       
       // Post each segment sequentially
       for (let i = 0; i < videoSegments.length; i++) {
-        setCurrentSegmentIndex(i); // Update UI to show current segment being posted
+        if (!overlay) {
+          setCurrentSegmentIndex(i); // Update UI to show current segment being posted
+        }
         const segmentUrl = videoSegments[i];
 
         await createStory(
@@ -750,7 +826,8 @@ export default function ClipPage() {
           undefined, // taggedUsers
           undefined, // poll
           undefined, // taggedUsersPositions
-          undefined // question
+          undefined, // question
+          storyAudience
         );
 
         // Dispatch event to refresh story indicators after each post
@@ -764,14 +841,15 @@ export default function ClipPage() {
         }
       }
 
-      // All segments posted, navigate to feed
-      navigate('/feed');
+      overlay?.success(`Posted ${videoSegments.length} story clips.`);
     } catch (error) {
       console.error('Error creating story segments:', error);
-      alert(`Failed to create story segment ${currentSegmentIndex + 1}. Please try again.`);
+      overlay?.error(`Failed to post story clip ${currentSegmentIndex + 1}.`);
     } finally {
-      setIsPostingSegments(false);
-      setCurrentSegmentIndex(0);
+      if (!overlay) {
+        setIsPostingSegments(false);
+        setCurrentSegmentIndex(0);
+      }
     }
   };
 
@@ -1062,7 +1140,9 @@ export default function ClipPage() {
                     undefined, // taggedUsers
                     undefined, // poll
                     undefined, // taggedUsersPositions
-                    questionPrompt.trim() // question prompt
+                    questionPrompt.trim(), // question prompt
+                    undefined, // venue
+                    storyAudience
                   );
 
                   // Dispatch event to refresh story indicators
@@ -1287,7 +1367,11 @@ export default function ClipPage() {
                       option1: pollOption1.trim(),
                       option2: pollOption2.trim(),
                       option3: showPollOption3 && pollOption3.trim() ? pollOption3.trim() : undefined
-                    } // poll data
+                    }, // poll data
+                    undefined, // taggedUsersPositions
+                    undefined, // question
+                    undefined, // venue
+                    storyAudience
                   );
 
                   // Dispatch event to refresh story indicators
@@ -2205,117 +2289,124 @@ export default function ClipPage() {
           )}
         </div>
 
-        {/* Footer with Icon Buttons */}
-        <svg width="0" height="0" className="absolute" aria-hidden>
-          <defs>
-            <linearGradient id="clipPageIconGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#3b82f6" />
-              <stop offset="100%" stopColor="#a855f7" />
-            </linearGradient>
-          </defs>
-        </svg>
-        <div className="absolute bottom-0 left-0 right-0 flex items-center justify-center gap-4 p-4 bg-black/20 backdrop-blur-sm z-10">
-          {/* Add Text Button - gradient border, white icon */}
-          <div className="rounded-full p-[2px] flex-shrink-0" style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}>
-            <button
-              onClick={() => {
-                setShowTextCard(true);
-                setShowLocationCard(false);
-                setShowLinkCard(false);
-                setShowTagUserCard(false);
-              }}
-              className="p-3 bg-black/80 hover:bg-black/90 rounded-full text-white transition-colors relative"
-              aria-label="Add Text"
-            >
-              <FiType className="w-5 h-5 shrink-0 text-white" />
-            {textStickers.length > 0 && (
-              <span className="absolute -top-1 -right-1 w-5 h-5 bg-blue-500 rounded-full text-xs flex items-center justify-center text-white">
-                {textStickers.length}
-              </span>
-            )}
-            </button>
+        {/* Footer snap rail with centered active action */}
+        <div className="absolute bottom-0 left-0 right-0 bg-black/20 backdrop-blur-sm z-10">
+          <div
+            className={`px-4 pt-2 text-center text-[11px] ${
+              storyAudience === 'close_friends'
+                ? 'text-emerald-200'
+                : storyAudience === 'only_me'
+                  ? 'text-slate-200'
+                  : 'text-sky-200'
+            }`}
+          >
+            Audience: {storyAudience === 'close_friends' ? 'Followers' : storyAudience === 'only_me' ? 'Only me' : 'Public'}
           </div>
-
-          {/* Add Location Button - gradient border, white icon */}
-          <div className="rounded-full p-[2px] flex-shrink-0" style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}>
-            <button
-              onClick={() => {
-                setShowLocationCard(true);
-                setShowTextCard(false);
-                setShowLinkCard(false);
-                setShowTagUserCard(false);
-              }}
-              className="p-3 bg-black/80 hover:bg-black/90 rounded-full text-white transition-colors relative"
-              aria-label="Add Location"
-            >
-              <FiMapPin className="w-5 h-5 shrink-0 text-white" />
-              {locationStickers.length > 0 && (
-                <span className="absolute -top-1 -right-1 w-5 h-5 bg-blue-500 rounded-full text-xs flex items-center justify-center text-white">
-                  {locationStickers.length}
-                </span>
-              )}
-            </button>
-          </div>
-
-          {/* Add Link Button - gradient border, white icon */}
-          <div className="rounded-full p-[2px] flex-shrink-0" style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}>
-            <button
-              onClick={() => {
-                setShowLinkCard(true);
-                setShowTextCard(false);
-                setShowLocationCard(false);
-                setShowTagUserCard(false);
-              }}
-              className="p-3 bg-black/80 hover:bg-black/90 rounded-full text-white transition-colors relative"
-              aria-label="Add Link"
-            >
-              <FiLink className="w-5 h-5 shrink-0 text-white" />
-              {linkOverlays.length > 0 && (
-                <span className="absolute -top-1 -right-1 w-5 h-5 bg-blue-500 rounded-full text-xs flex items-center justify-center text-white">
-                  {linkOverlays.length}
-                </span>
-              )}
-            </button>
-          </div>
-
-          {/* Tag User Button - gradient border, white icon */}
-          <div className="rounded-full p-[2px] flex-shrink-0" style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}>
-            <button
-              onClick={() => {
-                setShowTagUserCard(true);
-                setShowTextCard(false);
-                setShowLocationCard(false);
-                setShowLinkCard(false);
-              }}
-              className="p-3 bg-black/80 hover:bg-black/90 rounded-full text-white transition-colors relative"
-              aria-label="Tag User"
-            >
-              <FiUser className="w-5 h-5 shrink-0 text-white" />
-              {taggedUsers.length > 0 && (
-                <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-xs flex items-center justify-center text-white">
-                  {taggedUsers.length}
-                </span>
-              )}
-            </button>
+          <div
+            ref={clipRailRef}
+            className="flex items-center gap-2 overflow-x-auto scrollbar-hide px-4 pb-4 pt-2"
+            style={{ scrollSnapType: 'x mandatory', WebkitOverflowScrolling: 'touch' }}
+          >
+            <div className="shrink-0 w-[40%]" aria-hidden />
+            {([
+              { id: 'text' as const, label: 'Text', Icon: FiType, count: textStickers.length },
+              { id: 'location' as const, label: 'Location', Icon: FiMapPin, count: locationStickers.length },
+              { id: 'link' as const, label: 'Link', Icon: FiLink, count: linkOverlays.length },
+              { id: 'tag' as const, label: 'Tag', Icon: FiUser, count: taggedUsers.length },
+              { id: 'audience' as const, label: storyAudience === 'close_friends' ? 'Followers' : storyAudience === 'only_me' ? 'Only me' : 'Public', Icon: FiUser },
+            ]).map((item) => {
+              const isCentered = centeredClipRailAction === item.id;
+              const isAudience = item.id === 'audience';
+              return (
+                <button
+                  key={item.id}
+                  data-clip-rail-action={item.id}
+                  onClick={() => {
+                    if (isAudience) {
+                      setStoryAudience((prev) => (
+                        prev === 'public'
+                          ? 'close_friends'
+                          : prev === 'close_friends'
+                            ? 'only_me'
+                            : 'public'
+                      ));
+                      setShowStoryAudienceSheet(false);
+                      setShowTextCard(false);
+                      setShowLocationCard(false);
+                      setShowLinkCard(false);
+                      setShowTagUserCard(false);
+                      return;
+                    }
+                    if (!isCentered) {
+                      centerClipRailAction(item.id, true);
+                      return;
+                    }
+                    setShowTextCard(item.id === 'text');
+                    setShowLocationCard(item.id === 'location');
+                    setShowLinkCard(item.id === 'link');
+                    setShowTagUserCard(item.id === 'tag');
+                  }}
+                  title={item.label}
+                  aria-label={item.label}
+                  className="relative shrink-0 w-[72px] h-[76px] flex items-center justify-center transition-transform duration-200"
+                  style={{
+                    scrollSnapAlign: 'center',
+                    transform: `scale(${isCentered ? 1.1 : 0.86})`,
+                    opacity: isCentered ? 1 : 0.62,
+                  }}
+                >
+                  <div className="flex flex-col items-center gap-1">
+                    <div
+                      className={`p-[2px] rounded-full transition-shadow duration-200 ${isCentered ? 'shadow-[0_0_24px_rgba(255,255,255,0.24)]' : ''}`}
+                      style={{
+                        background: isAudience
+                          ? storyAudience === 'close_friends'
+                            ? (isCentered ? '#34d399' : 'rgba(52,211,153,0.78)')
+                            : storyAudience === 'only_me'
+                              ? (isCentered ? '#cbd5e1' : 'rgba(203,213,225,0.78)')
+                              : (isCentered ? '#7dd3fc' : 'rgba(125,211,252,0.78)')
+                          : (isCentered ? '#ffffff' : 'rgba(255,255,255,0.8)')
+                      }}
+                    >
+                      <div
+                        className={`${isCentered ? 'w-11 h-11' : 'w-10 h-10'} rounded-full flex items-center justify-center transition-all duration-200 relative`}
+                        style={{
+                          background: isAudience
+                            ? storyAudience === 'close_friends'
+                              ? 'rgba(5,46,22,0.9)'
+                              : storyAudience === 'only_me'
+                                ? 'rgba(30,41,59,0.9)'
+                                : 'rgba(8,47,73,0.9)'
+                            : 'rgba(0,0,0,0.85)'
+                        }}
+                      >
+                        <item.Icon className="w-5 h-5 text-white" />
+                        {!!item.count && !isAudience && (
+                          <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-white text-black text-[10px] font-semibold leading-[18px] text-center">
+                            {item.count}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span className={`text-[10px] leading-none font-medium text-white ${isCentered ? 'opacity-95' : 'opacity-75'}`}>
+                      {item.label}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+            <div className="shrink-0 w-[40%]" aria-hidden />
           </div>
         </div>
 
         {/* Text Card Modal */}
         {showTextCard && (
           <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm">
-            <div className="rounded-2xl p-[2px] max-w-md w-full mx-4" style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}>
-              <svg width="0" height="0" aria-hidden="true" style={{ position: 'absolute' }}>
-                <defs>
-                  <linearGradient id="clipPageTextCardIconGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#3b82f6" />
-                    <stop offset="100%" stopColor="#a855f7" />
-                  </linearGradient>
-                </defs>
-              </svg>
+            <div className="rounded-2xl p-[2px] max-w-md w-full mx-4 border border-white/30 bg-white/90">
               <div className="bg-gray-900 rounded-[14px] p-6 w-full">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
-                  <FiType className="w-6 h-6 shrink-0" style={{ stroke: 'url(#clipPageTextCardIconGrad)', fill: 'none', strokeWidth: 2 }} />
+                  <FiType className="w-6 h-6 shrink-0 text-white" />
                   <h2 className="text-xl font-bold text-white">Add Text</h2>
                 </div>
                 <button
@@ -2370,7 +2461,7 @@ export default function ClipPage() {
                   <textarea
                     name="text"
                     placeholder="Enter your text..."
-                    className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                    className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-white/40 focus:border-white/40 resize-none"
                     rows={3}
                     maxLength={100}
                     required
@@ -2424,7 +2515,7 @@ export default function ClipPage() {
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 px-4 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
+                    className="flex-1 px-4 py-3 bg-white text-black rounded-xl font-medium hover:bg-gray-200 transition-colors"
                   >
                     Add Text
                   </button>
@@ -2438,19 +2529,11 @@ export default function ClipPage() {
         {/* Location Card Modal */}
         {showLocationCard && (
           <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm">
-            <div className="rounded-2xl p-[2px] max-w-md w-full mx-4" style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}>
-              <svg width="0" height="0" aria-hidden="true" style={{ position: 'absolute' }}>
-                <defs>
-                  <linearGradient id="clipPageLocationCardIconGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#3b82f6" />
-                    <stop offset="100%" stopColor="#a855f7" />
-                  </linearGradient>
-                </defs>
-              </svg>
+            <div className="rounded-2xl p-[2px] max-w-md w-full mx-4 border border-white/30 bg-white/90">
               <div className="bg-gray-900 rounded-[14px] p-6 w-full">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
-                  <FiMapPin className="w-6 h-6 shrink-0" style={{ stroke: 'url(#clipPageLocationCardIconGrad)', fill: 'none', strokeWidth: 2 }} />
+                  <FiMapPin className="w-6 h-6 shrink-0 text-white" />
                   <h2 className="text-xl font-bold text-white">Add Location</h2>
                 </div>
                 <button
@@ -2501,7 +2584,7 @@ export default function ClipPage() {
                     type="text"
                     name="location"
                     placeholder="e.g., Dublin, Ireland"
-                    className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-white/40 focus:border-white/40"
                     maxLength={50}
                     required
                   />
@@ -2516,7 +2599,7 @@ export default function ClipPage() {
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 px-4 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
+                    className="flex-1 px-4 py-3 bg-white text-black rounded-xl font-medium hover:bg-gray-200 transition-colors"
                   >
                     Add Location
                   </button>
@@ -2530,19 +2613,11 @@ export default function ClipPage() {
         {/* Link Card Modal */}
         {showLinkCard && (
           <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm">
-            <div className="rounded-2xl p-[2px] max-w-md w-full mx-4" style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}>
-              <svg width="0" height="0" aria-hidden="true" style={{ position: 'absolute' }}>
-                <defs>
-                  <linearGradient id="clipPageLinkCardIconGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#3b82f6" />
-                    <stop offset="100%" stopColor="#a855f7" />
-                  </linearGradient>
-                </defs>
-              </svg>
+            <div className="rounded-2xl p-[2px] max-w-md w-full mx-4 border border-white/30 bg-white/90">
               <div className="bg-gray-900 rounded-[14px] p-6 w-full">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
-                  <FiLink className="w-6 h-6 shrink-0" style={{ stroke: 'url(#clipPageLinkCardIconGrad)', fill: 'none', strokeWidth: 2 }} />
+                  <FiLink className="w-6 h-6 shrink-0 text-white" />
                   <h2 className="text-xl font-bold text-white">Add Link</h2>
                 </div>
                 <button
@@ -2573,7 +2648,7 @@ export default function ClipPage() {
                     type="text"
                     name="name"
                     placeholder="e.g., Check out my website"
-                    className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-white/40 focus:border-white/40"
                     maxLength={50}
                   />
                 </div>
@@ -2586,7 +2661,7 @@ export default function ClipPage() {
                     name="url"
                     placeholder="https://example.com"
                     required
-                    className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-white/40 focus:border-white/40"
                   />
                 </div>
                 <div className="flex gap-3">
@@ -2599,7 +2674,7 @@ export default function ClipPage() {
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 px-4 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
+                    className="flex-1 px-4 py-3 bg-white text-black rounded-xl font-medium hover:bg-gray-200 transition-colors"
                   >
                     Add Link
                   </button>
@@ -3020,6 +3095,82 @@ export default function ClipPage() {
                 Done
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Story Audience Sheet */}
+      {showStoryAudienceSheet && (
+        <div
+          className="fixed inset-0 z-[225] flex items-end bg-black/70 backdrop-blur-sm"
+          onClick={() => setShowStoryAudienceSheet(false)}
+        >
+          <div
+            className="w-full max-h-[75vh] bg-[#050816] rounded-t-2xl border-t border-white/10 p-4 pt-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-3" />
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <FiUser className="w-4 h-4 text-white/80" />
+                <h2 className="text-white text-base font-semibold">Story audience</h2>
+              </div>
+              <button
+                onClick={() => setShowStoryAudienceSheet(false)}
+                className="p-1.5 rounded-full text-white/70 hover:bg-white/10 transition-colors"
+                aria-label="Close"
+              >
+                <FiX className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => setStoryAudience('public')}
+                className={`w-full rounded-xl border px-3 py-3 text-left transition-colors ${
+                  storyAudience === 'public'
+                    ? 'border-white bg-white/15 text-white'
+                    : 'border-white/20 bg-black/30 text-white/90 hover:bg-white/10'
+                }`}
+              >
+                <div className="text-sm font-semibold">Public</div>
+                <div className="text-xs text-white/70">Anyone who can view your stories.</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setStoryAudience('close_friends')}
+                className={`w-full rounded-xl border px-3 py-3 text-left transition-colors ${
+                  storyAudience === 'close_friends'
+                    ? 'border-emerald-300/70 bg-emerald-500/20 text-emerald-100'
+                    : 'border-white/20 bg-black/30 text-white/90 hover:bg-white/10'
+                }`}
+              >
+                <div className="text-sm font-semibold">Followers</div>
+                <div className="text-xs text-white/70">Only users who follow you can view.</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setStoryAudience('only_me')}
+                className={`w-full rounded-xl border px-3 py-3 text-left transition-colors ${
+                  storyAudience === 'only_me'
+                    ? 'border-slate-300/70 bg-slate-500/20 text-slate-100'
+                    : 'border-white/20 bg-black/30 text-white/90 hover:bg-white/10'
+                }`}
+              >
+                <div className="text-sm font-semibold">Only me</div>
+                <div className="text-xs text-white/70">Private story visible only to you.</div>
+              </button>
+            </div>
+
+            <button
+              onClick={() => setShowStoryAudienceSheet(false)}
+              className="mt-4 w-full py-3 rounded-full bg-white text-black font-semibold text-sm hover:bg-gray-100 transition-colors"
+            >
+              Done
+            </button>
           </div>
         </div>
       )}

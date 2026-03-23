@@ -2,15 +2,13 @@ import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react'
 import { useAuth } from '../context/Auth';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { createPost } from '../api/posts';
-import { FiImage, FiMapPin, FiX, FiZap, FiLayers, FiSmile, FiEdit, FiLoader, FiHome, FiSliders, FiType, FiCircle, FiUser, FiMusic } from 'react-icons/fi';
+import { FiImage, FiMapPin, FiX, FiZap, FiLayers, FiSmile, FiEdit, FiLoader, FiHome, FiSliders, FiType, FiCircle, FiUser } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import type { Post, StickerOverlay, Sticker } from '../types';
 import StickerPicker from '../components/StickerPicker';
 import StickerOverlayComponent from '../components/StickerOverlay';
 import TextStickerModal from '../components/TextStickerModal';
 import UserTaggingModal from '../components/UserTaggingModal';
-import MusicPicker from '../components/MusicPicker';
-import type { MusicTrack } from '../api/music';
 import { showToast } from '../utils/toast';
 
 // Debounce hook for performance
@@ -72,7 +70,6 @@ export default function CreatePage() {
         voiceoverUrl?: string; // Voiceover audio URL
         greenScreenEnabled?: boolean; // Green screen enabled
         greenScreenBackgroundUrl?: string; // Background URL for green screen
-        musicTrackId?: number; // Music track ID from library (from InstantCreatePage)
     } | null;
     const MAX_VIDEO_SECONDS = 90;
     const [text, setText] = useState(''); // Main text - used for text-only posts OR captions for image posts
@@ -103,13 +100,55 @@ export default function CreatePage() {
     /** Location / venue / landmark — same fields as text-only “Add details” sheet (Gallery + Instant Create land here). */
     const [showLocationMetaSheet, setShowLocationMetaSheet] = useState(false);
     const [taggedUsers, setTaggedUsers] = useState<string[]>([]);
-    const [showMusicPicker, setShowMusicPicker] = useState(false);
-    const [selectedMusicTrack, setSelectedMusicTrack] = useState<MusicTrack | null>(null);
+    const pickerRailRef = useRef<HTMLDivElement | null>(null);
+    const pickerRafRef = useRef<number | null>(null);
+    const [isPickerDragging, setIsPickerDragging] = useState(false);
+    const [centeredPickerAction, setCenteredPickerAction] = useState<'filters' | 'stickers' | 'location' | 'text'>('filters');
+    const [pulsingPickerAction, setPulsingPickerAction] = useState<'filters' | 'stickers' | 'location' | 'text' | null>(null);
+    const pulseTimerRef = useRef<number | null>(null);
+    const prevCenteredPickerRef = useRef<'filters' | 'stickers' | 'location' | 'text' | null>(null);
     const mediaContainerRef = useRef<HTMLDivElement>(null);
     const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
     const captionRef = useRef<HTMLTextAreaElement | null>(null);
     const videoRef = useRef<HTMLVideoElement | null>(null);
     const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const pickerActions = useMemo(() => ([
+        { id: 'filters' as const, title: 'Filters', icon: FiSliders },
+        { id: 'stickers' as const, title: 'Stickers', icon: FiSmile },
+        { id: 'location' as const, title: 'Location details', icon: FiMapPin },
+        { id: 'text' as const, title: 'Text post', icon: FiType },
+    ]), []);
+
+    const centerPickerAction = useCallback((actionId: 'filters' | 'stickers' | 'location' | 'text', smooth = true) => {
+        const rail = pickerRailRef.current;
+        if (!rail) return;
+        const target = rail.querySelector<HTMLButtonElement>(`[data-picker-action="${actionId}"]`);
+        if (!target) return;
+        const desiredLeft = target.offsetLeft - (rail.clientWidth / 2) + (target.clientWidth / 2);
+        rail.scrollTo({ left: Math.max(0, desiredLeft), behavior: smooth ? 'smooth' : 'auto' });
+    }, []);
+
+    const updateCenteredPickerAction = useCallback(() => {
+        const rail = pickerRailRef.current;
+        if (!rail) return;
+        const railRect = rail.getBoundingClientRect();
+        const centerX = railRect.left + (railRect.width / 2);
+        let closestId: 'filters' | 'stickers' | 'location' | 'text' | null = null;
+        let closestDist = Number.POSITIVE_INFINITY;
+        const nodes = rail.querySelectorAll<HTMLButtonElement>('[data-picker-action]');
+        nodes.forEach((node) => {
+            const id = node.dataset.pickerAction as 'filters' | 'stickers' | 'location' | 'text' | undefined;
+            if (!id) return;
+            const rect = node.getBoundingClientRect();
+            const itemCenter = rect.left + (rect.width / 2);
+            const dist = Math.abs(itemCenter - centerX);
+            if (dist < closestDist) {
+                closestDist = dist;
+                closestId = id;
+            }
+        });
+        if (closestId) setCenteredPickerAction(closestId);
+    }, []);
 
     // Debounce text inputs for better performance
     const debouncedText = useDebounce(text, 300);
@@ -123,6 +162,46 @@ export default function CreatePage() {
             }
         };
     }, [selectedMedia]);
+
+    useEffect(() => {
+        const t = window.setTimeout(() => {
+            centerPickerAction(centeredPickerAction, false);
+            updateCenteredPickerAction();
+        }, 0);
+        return () => window.clearTimeout(t);
+    }, [centerPickerAction, centeredPickerAction, updateCenteredPickerAction]);
+
+    useEffect(() => {
+        const rail = pickerRailRef.current;
+        if (!rail) return;
+        const onScroll = () => {
+            if (pickerRafRef.current != null) cancelAnimationFrame(pickerRafRef.current);
+            pickerRafRef.current = requestAnimationFrame(updateCenteredPickerAction);
+        };
+        rail.addEventListener('scroll', onScroll, { passive: true });
+        return () => {
+            rail.removeEventListener('scroll', onScroll);
+            if (pickerRafRef.current != null) cancelAnimationFrame(pickerRafRef.current);
+        };
+    }, [updateCenteredPickerAction]);
+
+    useEffect(() => {
+        if (!centeredPickerAction) return;
+        if (prevCenteredPickerRef.current === null) {
+            prevCenteredPickerRef.current = centeredPickerAction;
+            return;
+        }
+        if (prevCenteredPickerRef.current !== centeredPickerAction) {
+            setPulsingPickerAction(centeredPickerAction);
+            if (pulseTimerRef.current != null) window.clearTimeout(pulseTimerRef.current);
+            pulseTimerRef.current = window.setTimeout(() => setPulsingPickerAction(null), 220);
+        }
+        prevCenteredPickerRef.current = centeredPickerAction;
+    }, [centeredPickerAction]);
+
+    useEffect(() => () => {
+        if (pulseTimerRef.current != null) window.clearTimeout(pulseTimerRef.current);
+    }, []);
 
     // Force video to load in Edge when media changes
     useEffect(() => {
@@ -725,7 +804,7 @@ export default function CreatePage() {
                 undefined, // subtitlesEnabled
                 undefined, // subtitleText
                 editTimeline, // Pass editTimeline for hybrid pipeline
-                locationState?.musicTrackId || selectedMusicTrack?.id, // Pass music track ID from locationState (InstantCreatePage) or selected track (CreatePage)
+                undefined, // reserved optional slot
                 venue.trim() || undefined, // Venue for metadata carousel
                 landmark.trim() || undefined // Named landmark for carousel + landmark feeds
             );
@@ -790,7 +869,6 @@ export default function CreatePage() {
                 setBannerText('');
                 setStickers([]);
                 setTaggedUsers([]);
-                setSelectedMusicTrack(null);
 
                 // Navigate back to feed
                 navigate('/feed');
@@ -819,7 +897,7 @@ export default function CreatePage() {
         } finally {
             setIsUploading(false);
         }
-    }, [text, selectedMedia, user, location, venue, landmark, mediaType, imageText, stickers, bannerText, wantsToBoost, navigate, locationState, taggedUsers, selectedMusicTrack]);
+    }, [text, selectedMedia, user, location, venue, landmark, mediaType, imageText, stickers, bannerText, wantsToBoost, navigate, locationState, taggedUsers]);
 
     const removeMedia = useCallback(() => {
         // Cleanup object URL if it's a blob URL
@@ -1266,35 +1344,6 @@ export default function CreatePage() {
                     </div>
                 )}
 
-                {/* Music Selection Display */}
-                {selectedMusicTrack && (
-                    <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 rounded-lg bg-brand-100 dark:bg-brand-900/30">
-                                    <FiMusic className="w-4 h-4 text-brand-600 dark:text-brand-400" />
-                                </div>
-                                <div>
-                                    <div className="font-semibold text-sm text-gray-900 dark:text-gray-100">
-                                        {selectedMusicTrack.title}
-                                    </div>
-                                    <div className="text-xs text-gray-500 dark:text-gray-400">
-                                        {selectedMusicTrack.artist || 'Unknown Artist'}
-                                        {selectedMusicTrack.license_requires_attribution && (
-                                            <span className="ml-2 text-gray-400">({selectedMusicTrack.license_type})</span>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                            <button
-                                onClick={() => setSelectedMusicTrack(null)}
-                                className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-full transition-colors"
-                            >
-                                <FiX className="w-4 h-4 text-gray-500" />
-                            </button>
-                        </div>
-                    </div>
-                )}
 
                 {/* Location / venue / landmark: tap pin in header to open sheet (same pattern as Text-only flow). */}
                 {(location.trim() || venue.trim() || landmark.trim()) ? (
@@ -1428,19 +1477,6 @@ export default function CreatePage() {
                 taggedUsers={taggedUsers}
             />
 
-            {/* Music Picker Modal */}
-            <MusicPicker
-                isOpen={showMusicPicker}
-                onClose={() => setShowMusicPicker(false)}
-                onSelectTrack={(track) => {
-                    setSelectedMusicTrack(track);
-                    if (track) {
-                        showToast(`Selected: ${track.title} by ${track.artist || 'Unknown'}`);
-                    }
-                }}
-                selectedTrackId={selectedMusicTrack?.id}
-            />
-
             {/* Location / venue / landmark — same “card” pattern as Text-only composer */}
             {showLocationMetaSheet && (
                 <div className="fixed inset-0 z-[100] flex items-end bg-black/50 dark:bg-black/60" onClick={() => setShowLocationMetaSheet(false)}>
@@ -1504,73 +1540,77 @@ export default function CreatePage() {
                 </div>
             )}
 
-            {/* Footer - Navigation Bar */}
-            <div className="fixed bottom-0 left-0 right-0 z-40 bg-gray-900 dark:bg-gray-950 border-t border-gray-800 dark:border-gray-700 shadow-lg">
-                <div className="mx-auto max-w-md h-16 flex items-center justify-around px-4">
-                    {/* Filters Button */}
-                    <button
-                        onClick={() => {
-                            if (selectedMedia) {
-                                setShowFilters(true);
-                            } else {
-                                showToast('Please select media first to apply filters');
-                            }
-                        }}
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-gray-800 dark:bg-gray-800 text-white border border-gray-700 dark:border-gray-700 hover:bg-gray-700 dark:hover:bg-gray-700 transition-all duration-200 active:scale-95 text-sm font-medium shadow-sm"
-                        aria-label="Filters"
+            {/* Footer - centered snap action picker (matched to Gallery preview spacing/scrim) */}
+            <div className="fixed bottom-0 left-0 right-0 z-40 translate-y-[-3px]">
+                <div
+                    aria-hidden
+                    className="pointer-events-none absolute inset-x-0 -top-16 h-24 bg-gradient-to-t from-black/72 via-black/38 to-transparent"
+                />
+                <div className="bg-black/25 backdrop-blur-[1px] border-t border-white/20 shadow-lg">
+                <div className="mx-auto max-w-md px-3 py-1.5" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0) + 0.4rem)' }}>
+                    <div
+                        ref={pickerRailRef}
+                        className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide py-1"
+                        style={{ scrollSnapType: 'x mandatory' }}
+                        onPointerDown={() => setIsPickerDragging(true)}
+                        onPointerUp={() => window.setTimeout(() => setIsPickerDragging(false), 80)}
+                        onPointerCancel={() => setIsPickerDragging(false)}
+                        onPointerLeave={() => setIsPickerDragging(false)}
                     >
-                        <FiSliders className="w-4 h-4" />
-                        <span>Filters</span>
-                    </button>
-
-                    {/* Stickers Button */}
-                    <button
-                        onClick={() => {
-                            if (selectedMedia) {
-                                setShowStickerPicker(true);
-                            } else {
-                                showToast('Please select media first to add stickers');
-                            }
-                        }}
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-gray-800 dark:bg-gray-800 text-white border border-gray-700 dark:border-gray-700 hover:bg-gray-700 dark:hover:bg-gray-700 transition-all duration-200 active:scale-95 text-sm font-medium shadow-sm"
-                        aria-label="Stickers"
-                    >
-                        <FiSmile className="w-4 h-4" />
-                        <span>Stickers</span>
-                    </button>
-
-
-                    {/* Music Button */}
-                    <button
-                        onClick={() => {
-                            if (selectedMedia && mediaType === 'video') {
-                                setShowMusicPicker(true);
-                            } else {
-                                showToast('Please select a video first to add music');
-                            }
-                        }}
-                        className={`flex items-center gap-1.5 px-4 py-2 rounded-full border transition-all duration-200 active:scale-95 text-sm font-medium shadow-sm ${
-                            selectedMusicTrack
-                                ? 'bg-brand-500 border-brand-500 text-white hover:bg-brand-600'
-                                : 'bg-gray-800 dark:bg-gray-800 text-white border-gray-700 dark:border-gray-700 hover:bg-gray-700 dark:hover:bg-gray-700'
-                        }`}
-                        aria-label="Add Music"
-                    >
-                        <FiMusic className="w-4 h-4" />
-                        <span>Music</span>
-                    </button>
-
-                    {/* Create Text Only Post Button */}
-                    <button
-                        onClick={() => {
-                            navigate('/create/text-only');
-                        }}
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-gray-800 dark:bg-gray-800 text-white border border-gray-700 dark:border-gray-700 hover:bg-gray-700 dark:hover:bg-gray-700 transition-all duration-200 active:scale-95 text-sm font-medium shadow-sm"
-                        aria-label="Text Post"
-                    >
-                        <FiType className="w-4 h-4" />
-                        <span>Text</span>
-                    </button>
+                        <div className="shrink-0 w-[38%]" aria-hidden />
+                        {pickerActions.map((action) => {
+                            const Icon = action.icon as React.ComponentType<{ className?: string }>;
+                            const isCentered = centeredPickerAction === action.id;
+                            const isPulsing = pulsingPickerAction === action.id;
+                            return (
+                                <button
+                                    key={action.id}
+                                    data-picker-action={action.id}
+                                    onClick={() => {
+                                        if (isPickerDragging) return;
+                                        if (!isCentered) {
+                                            centerPickerAction(action.id, true);
+                                            return;
+                                        }
+                                        if (action.id === 'filters') {
+                                            if (selectedMedia) setShowFilters(true);
+                                            else showToast('Please select media first to apply filters');
+                                            return;
+                                        }
+                                        if (action.id === 'stickers') {
+                                            if (selectedMedia) setShowStickerPicker(true);
+                                            else showToast('Please select media first to add stickers');
+                                            return;
+                                        }
+                                        if (action.id === 'location') {
+                                            setShowLocationMetaSheet(true);
+                                            return;
+                                        }
+                                        navigate('/create/text-only');
+                                    }}
+                                    title={action.title}
+                                    aria-label={action.title}
+                                    className="relative shrink-0 w-[62px] h-[62px] flex items-center justify-center transition-transform duration-200"
+                                    style={{
+                                        scrollSnapAlign: 'center',
+                                        transform: `scale(${isCentered ? (isPulsing ? 1.15 : 1.10) : 0.86})`,
+                                        opacity: isCentered ? 1 : 0.62,
+                                    }}
+                                >
+                                    <div
+                                        className={`p-[2px] rounded-full transition-shadow duration-200 ${isCentered ? (isPulsing ? 'shadow-[0_0_30px_rgba(168,85,247,0.45)]' : 'shadow-[0_0_24px_rgba(255,255,255,0.22)]') : ''}`}
+                                        style={{ background: isCentered ? '#ffffff' : 'rgba(255,255,255,0.78)' }}
+                                    >
+                                        <div className={`${isCentered ? 'w-11 h-11' : 'w-10 h-10'} rounded-full bg-black flex items-center justify-center transition-all duration-200`}>
+                                            <Icon className="w-5 h-5 text-white" />
+                                        </div>
+                                    </div>
+                                </button>
+                            );
+                        })}
+                        <div className="shrink-0 w-[38%]" aria-hidden />
+                    </div>
+                </div>
                 </div>
             </div>
 

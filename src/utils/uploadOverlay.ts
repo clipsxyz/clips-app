@@ -7,9 +7,13 @@ export interface UploadOverlayController {
 
 type Options = {
   thumbUrl?: string;
+  thumbType?: 'image' | 'video';
   initialMessage?: string;
   background?: string;
   label?: string;
+  uploadingTitle?: string;
+  successTitle?: string;
+  errorTitle?: string;
 };
 
 function createContainer(): HTMLDivElement {
@@ -32,7 +36,16 @@ export function showUploadOverlay(opts: Options): UploadOverlayController {
     };
   }
 
-  const { thumbUrl, initialMessage = 'Posting to Gazetteer…', background, label } = opts;
+  const {
+    thumbUrl,
+    thumbType = 'image',
+    initialMessage = 'Posting to Gazetteer…',
+    background,
+    label,
+    uploadingTitle = 'Preparing post…',
+    successTitle = 'Posted!',
+    errorTitle = 'Post failed',
+  } = opts;
   const container = createContainer();
 
   const card = document.createElement('div');
@@ -57,13 +70,27 @@ export function showUploadOverlay(opts: Options): UploadOverlayController {
   thumb.style.backgroundColor = '#020617';
 
   if (thumbUrl) {
-    const img = document.createElement('img');
-    img.src = thumbUrl;
-    img.alt = 'Uploading preview';
-    img.style.width = '100%';
-    img.style.height = '100%';
-    img.style.objectFit = 'cover';
-    thumb.appendChild(img);
+    if (thumbType === 'video') {
+      const video = document.createElement('video');
+      video.src = thumbUrl;
+      video.muted = true;
+      video.playsInline = true;
+      video.loop = true;
+      video.autoplay = true;
+      video.preload = 'metadata';
+      video.style.width = '100%';
+      video.style.height = '100%';
+      video.style.objectFit = 'cover';
+      thumb.appendChild(video);
+    } else {
+      const img = document.createElement('img');
+      img.src = thumbUrl;
+      img.alt = 'Uploading preview';
+      img.style.width = '100%';
+      img.style.height = '100%';
+      img.style.objectFit = 'cover';
+      thumb.appendChild(img);
+    }
   } else {
     // Text-only / template fallback: block that can match template background
     const placeholder = document.createElement('div');
@@ -92,7 +119,7 @@ export function showUploadOverlay(opts: Options): UploadOverlayController {
   textWrap.style.minWidth = '0';
 
   const title = document.createElement('div');
-  title.textContent = 'Preparing post…';
+  title.textContent = uploadingTitle;
   title.style.fontSize = '11px';
   title.style.fontWeight = '600';
   title.style.color = '#e5e7eb';
@@ -117,11 +144,11 @@ export function showUploadOverlay(opts: Options): UploadOverlayController {
   const updateStatus = (status: UploadOverlayStatus, msg: string) => {
     if (!container.parentNode) return;
     if (status === 'uploading') {
-      title.textContent = 'Preparing post…';
+      title.textContent = uploadingTitle;
     } else if (status === 'success') {
-      title.textContent = 'Posted!';
+      title.textContent = successTitle;
     } else if (status === 'error') {
-      title.textContent = 'Post failed';
+      title.textContent = errorTitle;
     }
     message.textContent = msg;
   };

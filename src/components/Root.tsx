@@ -8,6 +8,7 @@ import ClipPage from '../pages/ClipPage';
 import CreatePage from '../pages/CreatePage';
 import LoginPage from '../pages/LoginPage';
 import ProfilePage from '../pages/ProfilePage';
+import ProfileCoverPage from '../pages/ProfileCoverPage';
 import SearchPage from '../pages/SearchPage';
 import DiscoverPage from '../pages/DiscoverPage';
 import StoriesPage from '../pages/StoriesPage';
@@ -83,6 +84,7 @@ export default function Root() {
                                 <Route path="discover" element={<DiscoverPage />} />
                                 <Route path="search" element={<SearchPage />} />
                                 <Route path="profile" element={<ProfilePage />} />
+                                <Route path="profile/cover" element={<ProfileCoverPage />} />
                                 <Route path="user/:handle" element={<ViewProfilePage />} />
                                 <Route path="collection/:collectionId" element={<CollectionFeedPage />} />
                             </Route>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FiX, FiPlay, FiPause, FiScissors, FiType, FiSmile, FiMusic, FiImage, FiChevronLeft, FiChevronRight } from 'react-icons/fi';
+import { FiX, FiPlay, FiPause, FiScissors, FiType, FiSmile, FiImage, FiChevronLeft, FiChevronRight } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile } from '@ffmpeg/util';

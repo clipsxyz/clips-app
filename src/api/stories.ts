@@ -585,7 +585,12 @@ export async function fetchStoryGroups(userId: string): Promise<StoryGroup[]> {
 
     // Filter out expired stories
     const now = Date.now();
-    const activeStories = stories.filter(s => s.expiresAt > now);
+    const activeStories = stories.filter(s => {
+        if (s.expiresAt <= now) return false;
+        const audience = s.audience || 'public';
+        if (s.userId === userId) return true;
+        return audience === 'public';
+    });
 
     // Group stories by user
     const groups = activeStories.reduce((acc, story) => {
@@ -610,12 +615,20 @@ export async function fetchStoryGroups(userId: string): Promise<StoryGroup[]> {
 }
 
 // Get stories for a specific user
-export async function fetchUserStories(_viewerUserId: string, targetUserId: string): Promise<Story[]> {
+export async function fetchUserStories(viewerUserId: string, targetUserId: string, followedUserHandles: string[] = []): Promise<Story[]> {
     await delay();
 
     const now = Date.now();
     return stories.filter(s =>
-        s.userId === targetUserId && s.expiresAt > now
+        s.userId === targetUserId &&
+        s.expiresAt > now &&
+        (() => {
+            const audience = s.audience || 'public';
+            if (viewerUserId === targetUserId) return true;
+            if (audience === 'public') return true;
+            if (audience === 'only_me') return false;
+            return followedUserHandles.includes(s.userHandle);
+        })()
     ).sort((a, b) => a.createdAt - b.createdAt);
 }
 
@@ -656,7 +669,8 @@ export async function createStory(
     poll?: { question: string; option1: string; option2: string; option3?: string }, // Poll data
     taggedUsersPositions?: Array<{ handle: string; x: number; y: number }>, // Tagged users with positions
     question?: string, // Question prompt (e.g., "Ask me anything")
-    venue?: string // Venue / place name (for metadata when story is shown on feed)
+    venue?: string, // Venue / place name (for metadata when story is shown on feed)
+    audience: 'public' | 'close_friends' | 'only_me' = 'public'
 ): Promise<Story> {
     // Use real Laravel API
     const { apiRequest } = await import('./client');
@@ -678,7 +692,8 @@ export async function createStory(
                 taggedUsersPositions: taggedUsersPositions || undefined, // Send tagged users with positions
                 poll: poll || undefined,
                 question: question || undefined, // Question prompt
-                venue: venue || undefined
+                venue: venue || undefined,
+                audience: audience || 'public',
             }),
         });
 
@@ -702,7 +717,11 @@ export async function createStory(
             expiresAt: new Date(response.expires_at).getTime() || (now + 24 * 60 * 60 * 1000),
             location: response.location || location || undefined,
             venue: response.venue || venue || undefined,
+            audience: response.audience || audience || 'public',
             views: response.views_count || 0,
+            viewerHandles: Array.isArray((response as any).viewer_handles)
+                ? (response as any).viewer_handles
+                : [],
             hasViewed: response.has_viewed || false,
             reactions: response.reactions || [],
             replies: response.replies || [],
@@ -722,7 +741,7 @@ export async function createStory(
             question: response.question || (question ? {
                 prompt: question,
                 responses: []
-            } : undefined)
+            } : undefined),
         };
 
         // Also add to local stories array for immediate UI update
@@ -753,7 +772,9 @@ export async function createStory(
             expiresAt,
             location,
             venue: venue || undefined,
+            audience: audience || 'public',
             views: 0,
+            viewerHandles: [],
             hasViewed: false,
             reactions: [],
             replies: [],
@@ -783,13 +804,21 @@ export async function createStory(
 }
 
 // Mark story as viewed
-export async function markStoryViewed(storyId: string, _userId: string): Promise<void> {
+export async function markStoryViewed(storyId: string, _userId: string, viewerHandle?: string): Promise<void> {
     await delay();
 
     const story = stories.find(s => s.id === storyId);
-    if (story && !story.hasViewed) {
+    if (story) {
+        const normalizedHandle = (viewerHandle || '').trim();
+        if (!Array.isArray(story.viewerHandles)) story.viewerHandles = [];
+        const alreadyCounted = normalizedHandle
+            ? story.viewerHandles.some((h) => (h || '').trim().toLowerCase() === normalizedHandle.toLowerCase())
+            : story.hasViewed;
+        if (!alreadyCounted) {
+            if (normalizedHandle) story.viewerHandles.push(normalizedHandle);
+            story.views += 1;
+        }
         story.hasViewed = true;
-        story.views += 1;
     }
 }
 
@@ -797,10 +826,9 @@ export async function markStoryViewed(storyId: string, _userId: string): Promise
 export async function incrementStoryViews(storyId: string): Promise<void> {
     await delay();
 
-    const story = stories.find(s => s.id === storyId);
-    if (story) {
-        story.views += 1;
-    }
+    // Kept for backward compatibility; view counts are now deduped in markStoryViewed.
+    const _story = stories.find(s => s.id === storyId);
+    void _story;
 }
 
 // Add reaction to story
@@ -992,7 +1020,14 @@ export async function fetchFollowedUsersStoryGroups(userId: string, followedUser
 
     // Filter out expired stories
     const now = Date.now();
-    const activeStories = stories.filter(s => s.expiresAt > now);
+    const activeStories = stories.filter(s => {
+        if (s.expiresAt <= now) return false;
+        const audience = s.audience || 'public';
+        if (s.userId === userId) return true;
+        if (!followedUserHandles.includes(s.userHandle)) return false;
+        if (audience === 'only_me') return false;
+        return true; // public + close_friends for followed users
+    });
 
     // Group stories by user and filter by followed users
     const groups = activeStories.reduce((acc, story) => {

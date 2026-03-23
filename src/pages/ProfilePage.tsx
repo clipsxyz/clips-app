@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import Avatar from '../components/Avatar';
-import { FiCamera, FiBookmark, FiMessageCircle, FiLock, FiUnlock, FiX, FiUser, FiMapPin, FiThumbsUp, FiGlobe, FiEdit3, FiLink2, FiUsers, FiUserCheck, FiPlus, FiTwitter, FiInstagram, FiVideo, FiSettings, FiFileText, FiLayers, FiType } from 'react-icons/fi';
+import { FiCamera, FiBookmark, FiMessageCircle, FiLock, FiUnlock, FiX, FiUser, FiMapPin, FiThumbsUp, FiGlobe, FiEdit3, FiLink2, FiUsers, FiUserCheck, FiPlus, FiTwitter, FiInstagram, FiVideo, FiSettings, FiFileText, FiLayers, FiType, FiImage } from 'react-icons/fi';
 import Flag from '../components/Flag';
 import { getUserCollections } from '../api/collections';
 import type { Collection } from '../types';
@@ -197,6 +197,23 @@ export default function ProfilePage() {
       });
     }
   }, [user?.socialLinks]);
+
+  const profileCompletion = React.useMemo(() => {
+    const checks = [
+      Boolean(user?.avatarUrl),
+      Boolean((user as any)?.profileBackgroundUrl),
+      Boolean((bio || '').trim()),
+      Boolean((socialLinks.website || socialLinks.instagram || socialLinks.tiktok || socialLinks.x || '').trim()),
+      Boolean((national || regional || local || '').trim()),
+    ];
+    const completed = checks.filter(Boolean).length;
+    const total = checks.length;
+    return {
+      completed,
+      total,
+      percent: Math.round((completed / total) * 100),
+    };
+  }, [user?.avatarUrl, (user as any)?.profileBackgroundUrl, bio, socialLinks.website, socialLinks.instagram, socialLinks.tiktok, socialLinks.x, national, regional, local]);
 
   React.useEffect(() => {
     if (user?.is_private !== undefined) {
@@ -620,89 +637,102 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* Tabs: Messages, Drafts, Collections, Settings */}
-          <div className="flex items-center justify-around border-t border-gray-800 mt-3 pt-3">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                nav('/inbox');
-              }}
-              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors relative pointer-events-auto"
-            >
-              <FiMessageCircle className="w-5 h-5 text-gray-200" />
-              <span className="text-xs font-medium text-gray-200">Messages</span>
-              {unreadCount > 0 && (
-                <span className="absolute top-0 right-0 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
-                  {unreadCount > 9 ? '9+' : unreadCount}
-                </span>
-              )}
-            </button>
+          {/* Quick actions rail: horizontal snap chips */}
+          <div className="border-t border-gray-800 mt-3 pt-3">
+            <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide pb-1 px-0.5" style={{ scrollSnapType: 'x mandatory' }}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  nav('/profile/cover');
+                }}
+                className="shrink-0 min-h-[44px] px-3.5 py-2 rounded-xl border border-white/15 bg-black/40 text-gray-100 hover:bg-white/10 transition-colors flex items-center gap-2"
+                style={{ scrollSnapAlign: 'start' }}
+              >
+                <FiCamera className="w-4 h-4" />
+                <span className="text-xs font-semibold">Cover</span>
+              </button>
 
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                // Close other modals first
-                setSettingsOpen(false);
-                setCollectionsOpen(false);
-                // Refresh drafts each time before opening
-                loadDrafts();
-                // Then open drafts
-                setDraftsOpen(true);
-              }}
-              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors relative pointer-events-auto"
-            >
-              <FiFileText className="w-5 h-5 text-gray-200" />
-              <span className="text-xs font-medium text-gray-200">Drafts</span>
-              {drafts.length > 0 && (
-                <span className="absolute top-0 right-0 w-5 h-5 bg-blue-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
-                  {drafts.length > 9 ? '9+' : drafts.length}
-                </span>
-              )}
-            </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  nav('/inbox');
+                }}
+                className="relative shrink-0 min-h-[44px] px-3.5 py-2 rounded-xl border border-white/15 bg-black/40 text-gray-100 hover:bg-white/10 transition-colors flex items-center gap-2"
+                style={{ scrollSnapAlign: 'start' }}
+              >
+                <FiMessageCircle className="w-4 h-4" />
+                <span className="text-xs font-semibold">Messages</span>
+                {unreadCount > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+              </button>
 
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                // Close other modals first
-                setSettingsOpen(false);
-                setDraftsOpen(false);
-                // Then open collections
-                loadCollections(); // Refresh collections before opening
-                setCollectionsOpen(true);
-              }}
-              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors relative pointer-events-auto"
-            >
-              <FiBookmark className="w-5 h-5 text-gray-200" />
-              <span className="text-xs font-medium text-gray-200">Collections</span>
-              {collections.length > 0 && (
-                <span className="absolute top-0 right-0 w-5 h-5 bg-purple-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
-                  {collections.length > 9 ? '9+' : collections.length}
-                </span>
-              )}
-            </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setSettingsOpen(false);
+                  setCollectionsOpen(false);
+                  loadDrafts();
+                  setDraftsOpen(true);
+                }}
+                className="relative shrink-0 min-h-[44px] px-3.5 py-2 rounded-xl border border-white/15 bg-black/40 text-gray-100 hover:bg-white/10 transition-colors flex items-center gap-2"
+                style={{ scrollSnapAlign: 'start' }}
+              >
+                <FiFileText className="w-4 h-4" />
+                <span className="text-xs font-semibold">Drafts</span>
+                {drafts.length > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-blue-500 text-white text-[10px] font-bold">
+                    {drafts.length > 9 ? '9+' : drafts.length}
+                  </span>
+                )}
+              </button>
 
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                // Close other modals first
-                setCollectionsOpen(false);
-                setDraftsOpen(false);
-                // Then open settings
-                setSettingsOpen(true);
-              }}
-              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors pointer-events-auto"
-            >
-              <FiSettings className="w-5 h-5 text-gray-200" />
-              <span className="text-xs font-medium text-gray-200">Settings</span>
-            </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setSettingsOpen(false);
+                  setDraftsOpen(false);
+                  loadCollections();
+                  setCollectionsOpen(true);
+                }}
+                className="relative shrink-0 min-h-[44px] px-3.5 py-2 rounded-xl border border-white/15 bg-black/40 text-gray-100 hover:bg-white/10 transition-colors flex items-center gap-2"
+                style={{ scrollSnapAlign: 'start' }}
+              >
+                <FiBookmark className="w-4 h-4" />
+                <span className="text-xs font-semibold">Collections</span>
+                {collections.length > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-purple-500 text-white text-[10px] font-bold">
+                    {collections.length > 9 ? '9+' : collections.length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setCollectionsOpen(false);
+                  setDraftsOpen(false);
+                  setSettingsOpen(true);
+                }}
+                className="shrink-0 min-h-[44px] px-3.5 py-2 rounded-xl border border-white/15 bg-black/40 text-gray-100 hover:bg-white/10 transition-colors flex items-center gap-2"
+                style={{ scrollSnapAlign: 'start' }}
+              >
+                <FiSettings className="w-4 h-4" />
+                <span className="text-xs font-semibold">Settings</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -780,179 +810,207 @@ export default function ProfilePage() {
           </div>
         )}
 
-        {/* Profile Cards - Airbnb style: white, rounded, subtle shadow, side-by-side */}
-        <div className="px-4 py-4">
-          <div className="grid grid-cols-2 gap-4">
-            {/* Followers Card - top left */}
-            <button
-              onClick={() => setSelectedCard('followers')}
-              className="relative rounded-2xl cursor-pointer text-left w-full group"
-            >
-              <div
-                className="absolute -inset-3 rounded-2xl bg-[conic-gradient(from_180deg_at_50%_0%,#3b82f6,#a855f7,#3b82f6)] opacity-70 blur-xl group-hover:opacity-100 group-hover:blur-[26px] transition-all duration-300"
-                aria-hidden="true"
-              />
-              <div className="relative flex flex-col items-center gap-3 p-5 rounded-[1rem] bg-[#020617] border border-gray-800 shadow-sm">
-                <ProfileCardImage
-                  imagePath={PROFILE_CARD_IMAGES.followers}
-                  icon={<FiUsers className="w-6 h-6 text-gray-600" />}
-                />
-                <div className="text-center w-full">
-                  <div className="font-semibold text-sm text-gray-100">Followers</div>
-                  <div className="text-lg font-bold text-white mt-0.5">{followersCount}</div>
-                </div>
+        {/* Edit profile hub (Instagram/TikTok-style quick management) */}
+        <div className="px-4 mb-4">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold text-white">Edit Profile</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Quickly update your identity and profile presence.</p>
               </div>
-            </button>
+              <span className="text-xs px-2 py-1 rounded-full border border-white/20 bg-black/50 text-gray-200">
+                {profileCompletion.percent}% complete
+              </span>
+            </div>
 
-            {/* Following Card - top right */}
-            <button
-              onClick={() => setSelectedCard('following')}
-              className="relative rounded-2xl cursor-pointer text-left w-full group"
-            >
+            <div className="mt-3 h-2 w-full rounded-full bg-white/10 overflow-hidden">
               <div
-                className="absolute -inset-3 rounded-2xl bg-[conic-gradient(from_180deg_at_50%_0%,#3b82f6,#a855f7,#3b82f6)] opacity-70 blur-xl group-hover:opacity-100 group-hover:blur-[26px] transition-all duration-300"
-                aria-hidden="true"
+                className="h-full rounded-full bg-white transition-all duration-300"
+                style={{ width: `${profileCompletion.percent}%` }}
               />
-              <div className="relative flex flex-col items-center gap-3 p-5 rounded-[1rem] bg-[#020617] border border-gray-800 shadow-sm">
-                <ProfileCardImage
-                  imagePath={PROFILE_CARD_IMAGES.following}
-                  icon={<FiUserCheck className="w-6 h-6 text-gray-600" />}
-                />
-                <div className="text-center w-full">
-                  <div className="font-semibold text-sm text-gray-100">Following</div>
-                  <div className="text-lg font-bold text-white mt-0.5">{followingCount}</div>
-                </div>
-              </div>
-            </button>
+            </div>
 
-            {/* Bio Card */}
-            <button
-              onClick={() => setSelectedCard('bio')}
-              className="relative rounded-2xl cursor-pointer text-left w-full group"
-            >
-              <div
-                className="absolute -inset-3 rounded-2xl bg-[conic-gradient(from_180deg_at_50%_0%,#3b82f6,#a855f7,#3b82f6)] opacity-70 blur-xl group-hover:opacity-100 group-hover:blur-[26px] transition-all duration-300"
-                aria-hidden="true"
-              />
-              <div className="relative flex flex-col items-center gap-3 p-5 rounded-[1rem] bg-[#020617] border border-gray-800 shadow-sm">
-                <ProfileCardImage
-                  imagePath={PROFILE_CARD_IMAGES.bio}
-                  icon={<FiEdit3 className="w-6 h-6 text-gray-600" />}
-                />
-                <div className="text-center w-full">
-                  <div className="font-semibold text-sm text-gray-100">Bio</div>
-                  <div className="text-xs text-gray-400 mt-0.5">
-                    {bio ? 'Edit bio' : 'Add bio'}
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setShowProfilePictureModal(true)}
+                className="py-2.5 rounded-xl border border-white/20 bg-black text-white text-sm font-semibold hover:bg-white/10 transition-colors flex items-center justify-center gap-2"
+              >
+                <FiCamera className="w-4 h-4" />
+                Photo
+              </button>
+              <button
+                type="button"
+                onClick={() => nav('/profile/cover')}
+                className="py-2.5 rounded-xl border border-white/20 bg-black text-white text-sm font-semibold hover:bg-white/10 transition-colors flex items-center justify-center gap-2"
+              >
+                <FiImage className="w-4 h-4" />
+                Cover
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedCard('bio')}
+                className="py-2.5 rounded-xl border border-white/20 bg-black text-white text-sm font-semibold hover:bg-white/10 transition-colors flex items-center justify-center gap-2"
+              >
+                <FiEdit3 className="w-4 h-4" />
+                Bio
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedCard('social')}
+                className="py-2.5 rounded-xl border border-white/20 bg-black text-white text-sm font-semibold hover:bg-white/10 transition-colors flex items-center justify-center gap-2"
+              >
+                <FiLink2 className="w-4 h-4" />
+                Links
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Profile cards grouped by function (cleaner hierarchy) */}
+        <div className="px-4 py-4 space-y-4">
+          <section className="space-y-2">
+            <div className="px-1 text-[11px] uppercase tracking-[0.16em] text-gray-500 font-semibold">Audience</div>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => setSelectedCard('followers')}
+                className="rounded-2xl cursor-pointer text-left w-full group"
+              >
+                <div className="h-full flex flex-col items-center gap-3 p-4 rounded-2xl bg-[#020617] border border-white/12 hover:border-white/28 hover:bg-[#0a1226] transition-colors">
+                  <ProfileCardImage
+                    imagePath={PROFILE_CARD_IMAGES.followers}
+                    icon={<FiUsers className="w-6 h-6 text-gray-600" />}
+                  />
+                  <div className="text-center w-full">
+                    <div className="font-semibold text-sm text-gray-100">Followers</div>
+                    <div className="text-lg font-bold text-white mt-0.5">{followersCount}</div>
                   </div>
                 </div>
-              </div>
-            </button>
+              </button>
 
-            {/* Social Links Card */}
-            <button
-              onClick={() => setSelectedCard('social')}
-              className="relative rounded-2xl cursor-pointer text-left w-full group"
-            >
-              <div
-                className="absolute -inset-3 rounded-2xl bg-[conic-gradient(from_180deg_at_50%_0%,#3b82f6,#a855f7,#3b82f6)] opacity-70 blur-xl group-hover:opacity-100 group-hover:blur-[26px] transition-all duration-300"
-                aria-hidden="true"
-              />
-              <div className="relative flex flex-col items-center gap-3 p-5 rounded-[1rem] bg-[#020617] border border-gray-800 shadow-sm">
-                <ProfileCardImage
-                  imagePath={PROFILE_CARD_IMAGES.social}
-                  icon={<FiLink2 className="w-6 h-6 text-gray-600" />}
-                />
-                <div className="text-center w-full">
-                  <div className="font-semibold text-sm text-gray-100">Social Links</div>
-                  <div className="text-xs text-gray-400 mt-0.5">Add links</div>
+              <button
+                onClick={() => setSelectedCard('following')}
+                className="rounded-2xl cursor-pointer text-left w-full group"
+              >
+                <div className="h-full flex flex-col items-center gap-3 p-4 rounded-2xl bg-[#020617] border border-white/12 hover:border-white/28 hover:bg-[#0a1226] transition-colors">
+                  <ProfileCardImage
+                    imagePath={PROFILE_CARD_IMAGES.following}
+                    icon={<FiUserCheck className="w-6 h-6 text-gray-600" />}
+                  />
+                  <div className="text-center w-full">
+                    <div className="font-semibold text-sm text-gray-100">Following</div>
+                    <div className="text-lg font-bold text-white mt-0.5">{followingCount}</div>
+                  </div>
                 </div>
-              </div>
-            </button>
+              </button>
+            </div>
+          </section>
 
-            {/* Travel Info Card */}
-            <button
-              onClick={() => setSelectedCard('personal')}
-              className="relative rounded-2xl cursor-pointer text-left w-full group"
-            >
-              <div
-                className="absolute -inset-3 rounded-2xl bg-[conic-gradient(from_180deg_at_50%_0%,#3b82f6,#a855f7,#3b82f6)] opacity-70 blur-xl group-hover:opacity-100 group-hover:blur-[26px] transition-all duration-300"
-                aria-hidden="true"
-              />
-              <div className="relative flex flex-col items-center gap-3 p-5 rounded-[1rem] bg-[#020617] border border-gray-800 shadow-sm">
-                <ProfileCardImage
-                  imagePath={PROFILE_CARD_IMAGES.personal}
-                  icon={<FiUser className="w-6 h-6 text-gray-600" />}
-                />
-                <div className="text-center w-full">
-                  <div className="font-semibold text-sm text-gray-100">Travel Info</div>
-                  <div className="text-xs text-gray-400 mt-0.5">Edit details</div>
+          <section className="space-y-2">
+            <div className="px-1 text-[11px] uppercase tracking-[0.16em] text-gray-500 font-semibold">Identity</div>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => setSelectedCard('bio')}
+                className="rounded-2xl cursor-pointer text-left w-full group"
+              >
+                <div className="h-full flex flex-col items-center gap-3 p-4 rounded-2xl bg-[#020617] border border-white/12 hover:border-white/28 hover:bg-[#0a1226] transition-colors">
+                  <ProfileCardImage
+                    imagePath={PROFILE_CARD_IMAGES.bio}
+                    icon={<FiEdit3 className="w-6 h-6 text-gray-600" />}
+                  />
+                  <div className="text-center w-full">
+                    <div className="font-semibold text-sm text-gray-100">Bio</div>
+                    <div className="text-xs text-gray-400 mt-0.5">{bio ? 'Edit bio' : 'Add bio'}</div>
+                  </div>
                 </div>
-              </div>
-            </button>
+              </button>
 
-            {/* Location Card */}
-            <button
-              onClick={() => setSelectedCard('location')}
-              className="relative rounded-2xl cursor-pointer text-left w-full group"
-            >
-              <div
-                className="absolute -inset-3 rounded-2xl bg-[conic-gradient(from_180deg_at_50%_0%,#3b82f6,#a855f7,#3b82f6)] opacity-70 blur-xl group-hover:opacity-100 group-hover:blur-[26px] transition-all duration-300"
-                aria-hidden="true"
-              />
-              <div className="relative flex flex-col items-center gap-3 p-5 rounded-[1rem] bg-[#020617] border border-gray-800 shadow-sm">
-                <ProfileCardImage
-                  imagePath={PROFILE_CARD_IMAGES.location}
-                  icon={<FiMapPin className="w-6 h-6 text-gray-600" />}
-                />
-                <div className="text-center w-full">
-                  <div className="font-semibold text-sm text-gray-100">Location</div>
-                  <div className="text-xs text-gray-400 mt-0.5">Set location</div>
+              <button
+                onClick={() => setSelectedCard('social')}
+                className="rounded-2xl cursor-pointer text-left w-full group"
+              >
+                <div className="h-full flex flex-col items-center gap-3 p-4 rounded-2xl bg-[#020617] border border-white/12 hover:border-white/28 hover:bg-[#0a1226] transition-colors">
+                  <ProfileCardImage
+                    imagePath={PROFILE_CARD_IMAGES.social}
+                    icon={<FiLink2 className="w-6 h-6 text-gray-600" />}
+                  />
+                  <div className="text-center w-full">
+                    <div className="font-semibold text-sm text-gray-100">Social Links</div>
+                    <div className="text-xs text-gray-400 mt-0.5">Add links</div>
+                  </div>
                 </div>
-              </div>
-            </button>
+              </button>
 
-            {/* Interests Card */}
-            <button
-              onClick={() => setSelectedCard('interests')}
-              className="relative rounded-2xl cursor-pointer text-left w-full group"
-            >
-              <div
-                className="absolute -inset-3 rounded-2xl bg-[conic-gradient(from_180deg_at_50%_0%,#3b82f6,#a855f7,#3b82f6)] opacity-70 blur-xl group-hover:opacity-100 group-hover:blur-[26px] transition-all duration-300"
-                aria-hidden="true"
-              />
-              <div className="relative flex flex-col items-center gap-3 p-5 rounded-[1rem] bg-[#020617] border border-gray-800 shadow-sm">
-                <ProfileCardImage
-                  imagePath={PROFILE_CARD_IMAGES.interests}
-                  icon={<FiThumbsUp className="w-6 h-6 text-gray-600" />}
-                />
-                <div className="text-center w-full">
-                  <div className="font-semibold text-sm text-gray-100">Interests</div>
-                  <div className="text-xs text-gray-400 mt-0.5">Add interests</div>
+              <button
+                onClick={() => setSelectedCard('location')}
+                className="rounded-2xl cursor-pointer text-left w-full group"
+              >
+                <div className="h-full flex flex-col items-center gap-3 p-4 rounded-2xl bg-[#020617] border border-white/12 hover:border-white/28 hover:bg-[#0a1226] transition-colors">
+                  <ProfileCardImage
+                    imagePath={PROFILE_CARD_IMAGES.location}
+                    icon={<FiMapPin className="w-6 h-6 text-gray-600" />}
+                  />
+                  <div className="text-center w-full">
+                    <div className="font-semibold text-sm text-gray-100">Location</div>
+                    <div className="text-xs text-gray-400 mt-0.5">Set location</div>
+                  </div>
                 </div>
-              </div>
-            </button>
+              </button>
 
-            {/* Country Flag Card */}
-            <button
-              onClick={() => setSelectedCard('flag')}
-              className="relative rounded-2xl cursor-pointer text-left w-full group"
-            >
-              <div
-                className="absolute -inset-3 rounded-2xl bg-[conic-gradient(from_180deg_at_50%_0%,#3b82f6,#a855f7,#3b82f6)] opacity-70 blur-xl group-hover:opacity-100 group-hover:blur-[26px] transition-all duration-300"
-                aria-hidden="true"
-              />
-              <div className="relative flex flex-col items-center gap-3 p-5 rounded-[1rem] bg-[#020617] border border-gray-800 shadow-sm">
-                <ProfileCardImage
-                  imagePath={PROFILE_CARD_IMAGES.flag}
-                  icon={<FiGlobe className="w-6 h-6 text-gray-600" />}
-                />
-                <div className="text-center w-full">
-                  <div className="font-semibold text-sm text-gray-100">Country Flag</div>
-                  <div className="text-xs text-gray-400 mt-0.5">Select flag</div>
+              <button
+                onClick={() => setSelectedCard('flag')}
+                className="rounded-2xl cursor-pointer text-left w-full group"
+              >
+                <div className="h-full flex flex-col items-center gap-3 p-4 rounded-2xl bg-[#020617] border border-white/12 hover:border-white/28 hover:bg-[#0a1226] transition-colors">
+                  <ProfileCardImage
+                    imagePath={PROFILE_CARD_IMAGES.flag}
+                    icon={<FiGlobe className="w-6 h-6 text-gray-600" />}
+                  />
+                  <div className="text-center w-full">
+                    <div className="font-semibold text-sm text-gray-100">Country Flag</div>
+                    <div className="text-xs text-gray-400 mt-0.5">Select flag</div>
+                  </div>
                 </div>
-              </div>
-            </button>
-          </div>
+              </button>
+            </div>
+          </section>
+
+          <section className="space-y-2">
+            <div className="px-1 text-[11px] uppercase tracking-[0.16em] text-gray-500 font-semibold">Preferences</div>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => setSelectedCard('personal')}
+                className="rounded-2xl cursor-pointer text-left w-full group"
+              >
+                <div className="h-full flex flex-col items-center gap-3 p-4 rounded-2xl bg-[#020617] border border-white/12 hover:border-white/28 hover:bg-[#0a1226] transition-colors">
+                  <ProfileCardImage
+                    imagePath={PROFILE_CARD_IMAGES.personal}
+                    icon={<FiUser className="w-6 h-6 text-gray-600" />}
+                  />
+                  <div className="text-center w-full">
+                    <div className="font-semibold text-sm text-gray-100">Travel Info</div>
+                    <div className="text-xs text-gray-400 mt-0.5">Edit details</div>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => setSelectedCard('interests')}
+                className="rounded-2xl cursor-pointer text-left w-full group"
+              >
+                <div className="h-full flex flex-col items-center gap-3 p-4 rounded-2xl bg-[#020617] border border-white/12 hover:border-white/28 hover:bg-[#0a1226] transition-colors">
+                  <ProfileCardImage
+                    imagePath={PROFILE_CARD_IMAGES.interests}
+                    icon={<FiThumbsUp className="w-6 h-6 text-gray-600" />}
+                  />
+                  <div className="text-center w-full">
+                    <div className="font-semibold text-sm text-gray-100">Interests</div>
+                    <div className="text-xs text-gray-400 mt-0.5">Add interests</div>
+                  </div>
+                </div>
+              </button>
+            </div>
+          </section>
         </div>
       </div>
 

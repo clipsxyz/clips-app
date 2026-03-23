@@ -428,7 +428,7 @@ function drawFaceWithLipSync(
     analysis: AudioAnalysis,
     size: number,
     time: number,
-    animationParams: ReturnType<typeof import('./audioAnalysis').getAnimationParams>,
+    _animationParams: ReturnType<typeof import('./audioAnalysis').getAnimationParams>,
     mouthShape: MouthShape
 ) {
     const eyeY = -size * 0.12;
@@ -539,8 +539,8 @@ function drawMouthWithLipSync(
     mouthY: number,
     size: number,
     mouthShape: MouthShape,
-    style: AvatarStyle,
-    analysis: AudioAnalysis
+    _style: AvatarStyle,
+    _analysis: AudioAnalysis
 ) {
     ctx.strokeStyle = '#8B4513';
     ctx.lineWidth = 6;
@@ -704,7 +704,7 @@ function drawThoughtBubble(
     x: number,
     y: number,
     emotion: AudioAnalysis['emotion'],
-    time: number
+    _time: number
 ) {
     const bubbleSize = 100;
     const iconSize = 50;

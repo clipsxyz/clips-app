@@ -12,6 +12,7 @@ export type User = {
   handle: string;
   countryFlag?: string; // Emoji flag for national country
   avatarUrl?: string; // Profile picture URL
+  profileBackgroundUrl?: string; // Profile cover/header background image URL
   bio?: string; // Bio/description
   socialLinks?: {
     website?: string;
@@ -163,6 +164,7 @@ export type Story = {
   location?: string;
   venue?: string; // Venue / place name (metadata carousel on story view)
   views: number;
+  viewerHandles?: string[]; // Distinct viewer handles for owner insights
   hasViewed: boolean;
   reactions: StoryReaction[];
   replies: StoryReply[];
@@ -189,6 +191,7 @@ export type Story = {
       createdAt: number;
     }>; // Responses from viewers
   };
+  audience?: 'public' | 'close_friends' | 'only_me';
 };
 
 export type StoryGroup = {

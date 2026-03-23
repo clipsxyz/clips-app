@@ -95,6 +95,19 @@ export default function ViewProfilePage() {
     const [showProfileMenu, setShowProfileMenu] = React.useState(false);
     const [showQRCodeModal, setShowQRCodeModal] = React.useState(false);
     const [showShareProfileModal, setShowShareProfileModal] = React.useState(false);
+    const [contentTab, setContentTab] = React.useState<'all' | 'videos' | 'photos' | 'text'>('all');
+
+    const isOwnProfile = React.useMemo(() => {
+        if (!handle || !user?.handle) return false;
+        return decodeURIComponent(handle) === user.handle;
+    }, [handle, user?.handle]);
+
+    const filteredPosts = React.useMemo(() => {
+        if (contentTab === 'videos') return posts.filter((p) => p.mediaType === 'video');
+        if (contentTab === 'photos') return posts.filter((p) => !!p.mediaUrl && p.mediaType !== 'video');
+        if (contentTab === 'text') return posts.filter((p) => !p.mediaUrl);
+        return posts;
+    }, [posts, contentTab]);
 
     const handleFollow = async () => {
         if (!user?.id || !handle) {
@@ -485,7 +498,7 @@ export default function ViewProfilePage() {
                     // Fetch from tabs in parallel for better performance
                     const tabPromises = allTabs.map(async (tab) => {
                         try {
-                            const page = await fetchPostsPage(tab, null, 100, user?.id || 'me', user?.local || '', user?.regional || '', user?.national || '', undefined, null);
+                            const page = await fetchPostsPage(tab, null, 100, user?.id || 'me', user?.local || '', user?.regional || '', user?.national || '', '');
                             return page.items.filter(post => post.userHandle === decodedHandle);
                         } catch (error) {
                             return [];
@@ -515,10 +528,11 @@ export default function ViewProfilePage() {
                     avatarUrl = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=400&fit=crop';
                 }
 
-                // Get bio, social links, and placesTraveled if viewing own profile
+                // Get bio, social links, placesTraveled, and profile background if viewing own profile
                 let bio = decodedHandle === user?.handle ? user?.bio : undefined;
                 let socialLinks = decodedHandle === user?.handle ? user?.socialLinks : undefined;
                 let placesTraveled = decodedHandle === user?.handle ? user?.placesTraveled : undefined;
+                let profileBackgroundUrl = decodedHandle === user?.handle ? (user as any)?.profileBackgroundUrl : undefined;
                 
                 // Debug: Log placesTraveled from user
                 if (decodedHandle === user?.handle) {
@@ -544,6 +558,18 @@ export default function ViewProfilePage() {
                 if (decodedHandle === 'Bob@Ireland') {
                     bio = 'Based in Ireland. Love hiking and photography. Traveled to Cork, Galway, Belfast, London, Paris.';
                     placesTraveled = ['Cork', 'Galway', 'Belfast', 'London', 'Paris'];
+                }
+
+                if (decodedHandle === user?.handle && !profileBackgroundUrl) {
+                    try {
+                        const raw = localStorage.getItem('user');
+                        if (raw) {
+                            const parsed = JSON.parse(raw);
+                            if (parsed?.profileBackgroundUrl) {
+                                profileBackgroundUrl = parsed.profileBackgroundUrl;
+                            }
+                        }
+                    } catch (_) {}
                 }
 
                 // Calculate total likes and views from all posts
@@ -613,6 +639,7 @@ export default function ViewProfilePage() {
                     bio: bio || undefined,
                     socialLinks: socialLinks || undefined,
                     placesTraveled: placesTraveled || undefined,
+                    profileBackgroundUrl: profileBackgroundUrl || undefined,
                     stats: {
                         following: followingCount,
                         followers: followersCount,
@@ -747,32 +774,51 @@ export default function ViewProfilePage() {
     }
 
     return (
-        <div className="min-h-screen bg-gray-950 text-white">
-            {/* Passport Title - Instagram Style */}
-            <div className="w-full text-center pt-4 pb-6">
-                <h1 
-                    className="text-4xl font-normal tracking-tight"
-                    style={{ 
-                        fontFamily: '"Brush Script MT", "Lucida Handwriting", "Comic Sans MS", cursive',
-                        color: '#ffffff',
-                        fontWeight: 400,
-                        letterSpacing: '0.5px'
-                    }}
-                >
-                    Passport
-                </h1>
+        <div className="min-h-screen bg-gradient-to-b from-black via-gray-950 to-black text-white">
+            {/* Sticky profile top bar (TikTok/Instagram-style hierarchy) */}
+            <div className="sticky top-0 z-30 border-b border-white/10 bg-black/80 backdrop-blur-md">
+                <div className="flex items-center justify-between px-3 py-2.5">
+                    <button
+                        onClick={() => navigate(-1)}
+                        className="h-11 w-11 rounded-full border border-white/20 bg-black/70 text-white flex items-center justify-center hover:bg-white/10 transition-colors active:scale-95"
+                        aria-label="Go back"
+                    >
+                        <FiChevronLeft className="h-5 w-5" />
+                    </button>
+                    <div className="min-w-0 text-center px-2">
+                        <div className="text-sm font-semibold truncate">{profileUser?.name || 'Profile'}</div>
+                        <div className="text-[11px] text-gray-400 truncate">{profileUser?.handle || ''}</div>
+                    </div>
+                    <button
+                        onClick={() => setShowShareProfileModal(true)}
+                        className="h-11 w-11 rounded-full border border-white/20 bg-black/70 text-white flex items-center justify-center hover:bg-white/10 transition-colors active:scale-95"
+                        aria-label="Share profile"
+                    >
+                        <FiShare2 className="h-4.5 w-4.5" />
+                    </button>
+                </div>
+            </div>
+
+            {/* Passport Title */}
+            <div className="w-full text-center pt-4 pb-3">
+                <h1 className="text-[28px] font-semibold tracking-tight text-white">Passport</h1>
+                <p className="mt-1 text-xs text-gray-400 uppercase tracking-[0.2em]">Profile</p>
             </div>
 
             {/* Profile Info with World Map Background */}
-            <div className="relative w-full overflow-hidden">
+            <div className="relative w-full overflow-hidden px-3">
                 {/* World Map Background */}
-                <div className="relative w-full h-64 bg-gray-100 dark:bg-gray-800">
+                <div className="relative w-full h-64 bg-gray-100 dark:bg-gray-800 rounded-3xl overflow-hidden border border-white/10">
+                    {(() => {
+                        const coverSrc = profileUser?.profileBackgroundUrl || "/placeholders/world-map.jpg";
+                        const isCustomCover = !!profileUser?.profileBackgroundUrl;
+                        return (
                     <img
-                        src="/placeholders/world-map.jpg"
+                        src={coverSrc}
                         alt="World Map"
-                        className="w-full h-full object-cover opacity-30 dark:opacity-20"
+                        className={`w-full h-full object-cover ${isCustomCover ? 'opacity-95' : 'opacity-30 dark:opacity-20'}`}
                         style={{ 
-                            filter: 'grayscale(100%) brightness(1.2)',
+                            filter: isCustomCover ? 'none' : 'grayscale(100%) brightness(1.2)',
                         }}
                         onError={(e) => {
                             // Fallback to Wikimedia map
@@ -780,18 +826,29 @@ export default function ViewProfilePage() {
                             target.src = 'https://upload.wikimedia.org/wikipedia/commons/8/83/Equirectangular_projection_SW.jpg';
                         }}
                     />
+                        );
+                    })()}
+                    {isOwnProfile && (
+                        <button
+                            type="button"
+                            onClick={() => navigate('/profile/cover')}
+                            className="absolute top-3 right-3 z-20 px-3 py-1.5 rounded-full border border-white/40 bg-black/55 text-white text-xs font-semibold hover:bg-black/70 transition-colors"
+                        >
+                            Change cover
+                        </button>
+                    )}
                     {/* Overlay gradient for better text visibility */}
-                    <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-gray-950/50 dark:to-gray-950/70"></div>
+                    <div className="absolute inset-0 bg-gradient-to-b from-black/5 via-black/10 to-black/70"></div>
                     
                     {/* Profile Picture and Name Overlay */}
                     <div className="absolute inset-0 flex flex-col items-center justify-center z-10">
                         {/* Profile Picture */}
-                        <div className="mb-4">
+                        <div className="mb-3">
                             <Avatar
                                 src={profileUser.avatarUrl}
                                 name={profileUser.name}
                                 size="xl"
-                                className="!w-32 !h-32 border-4 border-white dark:border-gray-800 shadow-2xl cursor-pointer"
+                                className="!w-28 !h-28 border-4 border-white/90 shadow-2xl cursor-pointer"
                                 hasStory={hasStory}
                                 onClick={() => setShowProfileMenu(true)}
                             />
@@ -799,10 +856,10 @@ export default function ViewProfilePage() {
 
                         {/* Username */}
                         <div className="text-center">
-                            <h1 className="text-2xl font-bold mb-1 text-gray-900 dark:text-white uppercase tracking-wide drop-shadow-lg">
+                            <h1 className="text-2xl font-bold mb-1 text-white tracking-tight drop-shadow-lg">
                                 {profileUser.name}
                             </h1>
-                            <p className="text-sm text-gray-700 dark:text-gray-300 flex items-center justify-center gap-1">
+                            <p className="text-sm text-gray-200/90 flex items-center justify-center gap-1">
                                 <span>{profileUser.handle}</span>
                                 <Flag
                                     value={profileUser.handle === user?.handle ? (user?.countryFlag || '') : (getFlagForHandle(profileUser.handle) || '')}
@@ -815,25 +872,25 @@ export default function ViewProfilePage() {
             </div>
 
             {/* Profile Info Section (below world map) */}
-            <div className="px-4 py-6">
+            <div className="px-4 py-5">
 
                 {/* Statistics */}
-                <div className="flex justify-around mb-6">
-                    <div className="text-center">
-                        <div className="text-lg font-bold">{stats.following}</div>
-                        <div className="text-xs text-gray-400">Following</div>
+                <div className="grid grid-cols-4 gap-2 mb-5 rounded-2xl border border-white/10 bg-white/[0.03] p-2">
+                    <div className="text-center rounded-xl bg-black/40 py-2">
+                        <div className="text-base font-semibold">{stats.following}</div>
+                        <div className="text-[11px] text-gray-400">Following</div>
                     </div>
-                    <div className="text-center">
-                        <div className="text-lg font-bold">{stats.followers > 1000 ? `${(stats.followers / 1000).toFixed(1)}K` : stats.followers}</div>
-                        <div className="text-xs text-gray-400">Followers</div>
+                    <div className="text-center rounded-xl bg-black/40 py-2">
+                        <div className="text-base font-semibold">{stats.followers > 1000 ? `${(stats.followers / 1000).toFixed(1)}K` : stats.followers}</div>
+                        <div className="text-[11px] text-gray-400">Followers</div>
                     </div>
-                    <div className="text-center">
-                        <div className="text-lg font-bold">{stats.views > 1000 ? `${(stats.views / 1000).toFixed(1)}K` : stats.views}</div>
-                        <div className="text-xs text-gray-400">Views</div>
+                    <div className="text-center rounded-xl bg-black/40 py-2">
+                        <div className="text-base font-semibold">{stats.views > 1000 ? `${(stats.views / 1000).toFixed(1)}K` : stats.views}</div>
+                        <div className="text-[11px] text-gray-400">Views</div>
                     </div>
-                    <div className="text-center">
-                        <div className="text-lg font-bold">{stats.likes > 1000 ? `${(stats.likes / 1000).toFixed(1)}K` : stats.likes}</div>
-                        <div className="text-xs text-gray-400">Likes</div>
+                    <div className="text-center rounded-xl bg-black/40 py-2">
+                        <div className="text-base font-semibold">{stats.likes > 1000 ? `${(stats.likes / 1000).toFixed(1)}K` : stats.likes}</div>
+                        <div className="text-[11px] text-gray-400">Likes</div>
                     </div>
                 </div>
 
@@ -846,7 +903,7 @@ export default function ViewProfilePage() {
                             e.stopPropagation();
                             handleFollow();
                         }}
-                        className="flex-1 py-2 rounded-lg font-semibold transition-colors bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="flex-1 py-2.5 rounded-xl font-semibold transition-colors bg-white text-black hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
                         disabled={!user?.id || !handle}
                     >
                         {hasPendingRequest ? 'Requested' : isFollowing ? 'Following' : 'Follow'}
@@ -869,11 +926,15 @@ export default function ViewProfilePage() {
                                 navigate(`/messages/${decodedHandle}`);
                             }
                         }}
-                        className="flex-1 py-2 rounded-lg bg-gray-800 text-white font-semibold hover:bg-gray-700 transition-colors relative z-20"
+                        className="flex-1 py-2.5 rounded-xl bg-black text-white border border-white/30 font-semibold hover:bg-white/10 transition-colors relative z-20"
                     >
                         Message
                     </button>
                     )}
+                </div>
+
+                {/* Secondary quick action row */}
+                <div className="flex gap-2 mb-4">
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
@@ -892,33 +953,41 @@ export default function ViewProfilePage() {
                                 setShowTraveledModal(true);
                             }
                         }}
-                        className="px-4 py-2 rounded-lg bg-gray-800 text-white font-semibold hover:bg-gray-700 transition-colors relative z-20 flex items-center justify-center gap-2"
+                        className="flex-1 py-2.5 rounded-xl bg-black text-white border border-white/30 font-semibold hover:bg-white/10 transition-colors flex items-center justify-center gap-2"
                         title="Places Traveled"
                     >
-                        <FiMapPin className="w-5 h-5" />
+                        <FiMapPin className="w-4.5 h-4.5" />
+                        Places
+                    </button>
+                    <button
+                        onClick={() => setShowShareProfileModal(true)}
+                        className="flex-1 py-2.5 rounded-xl bg-black text-white border border-white/30 font-semibold hover:bg-white/10 transition-colors flex items-center justify-center gap-2"
+                    >
+                        <FiShare2 className="w-4.5 h-4.5" />
+                        Share
                     </button>
                 </div>
 
                 {/* Bio */}
                 {profileUser.bio ? (
-                    <div className="mb-4 text-sm">
-                        <p className="text-gray-300">{profileUser.bio}</p>
+                    <div className="mb-4 text-sm rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
+                        <p className="text-gray-200">{profileUser.bio}</p>
                     </div>
                 ) : (
-                    <div className="mb-4 text-sm text-gray-500">
+                    <div className="mb-4 text-sm text-gray-500 rounded-2xl border border-white/10 bg-white/[0.02] px-3 py-2.5">
                         <p>No bio yet</p>
                     </div>
                 )}
 
                 {/* Social Links */}
                 {profileUser.socialLinks && (profileUser.socialLinks.website || profileUser.socialLinks.x || profileUser.socialLinks.instagram || profileUser.socialLinks.tiktok) && (
-                    <div className="mb-6 flex flex-wrap gap-3">
+                    <div className="mb-6 flex flex-wrap gap-2.5">
                         {profileUser.socialLinks.website && (
                             <a
                                 href={profileUser.socialLinks.website.startsWith('http') ? profileUser.socialLinks.website : `https://${profileUser.socialLinks.website}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center gap-2 text-sm"
+                                className="px-4 py-2 bg-black text-white rounded-xl border border-white/20 hover:bg-white/10 transition-colors flex items-center gap-2 text-sm"
                             >
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l3-3a4 4 0 00-5.656-5.656l-1.1 1.1" />
@@ -931,7 +1000,7 @@ export default function ViewProfilePage() {
                                 href={`https://twitter.com/${profileUser.socialLinks.x.replace('@', '')}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="w-10 h-10 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center justify-center"
+                                className="w-11 h-11 bg-black text-white rounded-xl border border-white/20 hover:bg-white/10 transition-colors active:scale-95 flex items-center justify-center"
                                 title={profileUser.socialLinks.x}
                             >
                                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
@@ -944,7 +1013,7 @@ export default function ViewProfilePage() {
                                 href={`https://instagram.com/${profileUser.socialLinks.instagram.replace('@', '')}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="w-10 h-10 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center justify-center"
+                                className="w-11 h-11 bg-black text-white rounded-xl border border-white/20 hover:bg-white/10 transition-colors active:scale-95 flex items-center justify-center"
                                 title={profileUser.socialLinks.instagram}
                             >
                                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
@@ -957,7 +1026,7 @@ export default function ViewProfilePage() {
                                 href={`https://tiktok.com/@${profileUser.socialLinks.tiktok.replace('@', '')}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="w-10 h-10 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors flex items-center justify-center"
+                                className="w-11 h-11 bg-black rounded-xl border border-white/20 hover:bg-white/10 transition-colors active:scale-95 flex items-center justify-center"
                                 title={profileUser.socialLinks.tiktok}
                             >
                                 <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 text-white">
@@ -970,14 +1039,40 @@ export default function ViewProfilePage() {
 
             </div>
 
-            {/* Posts Grid */}
+            {/* Content tabs + posts grid */}
             <div className="px-2">
+                <div className="sticky top-[58px] z-20 mb-2 px-1 py-1.5 bg-black/75 backdrop-blur-md border-y border-white/10">
+                    <div className="grid grid-cols-4 gap-1.5">
+                        {([
+                            { id: 'all', label: 'All' },
+                            { id: 'videos', label: 'Videos' },
+                            { id: 'photos', label: 'Photos' },
+                            { id: 'text', label: 'Text' },
+                        ] as const).map((tab) => {
+                            const active = contentTab === tab.id;
+                            return (
+                                <button
+                                    key={tab.id}
+                                    type="button"
+                                    onClick={() => setContentTab(tab.id)}
+                                    className={`py-2.5 min-h-[44px] text-xs font-semibold rounded-lg transition-colors active:scale-[0.98] ${
+                                        active
+                                            ? 'bg-white text-black'
+                                            : 'bg-black text-white border border-white/20 hover:bg-white/10'
+                                    }`}
+                                >
+                                    {tab.label}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
                 <div className="grid grid-cols-3 gap-1">
-                    {posts.length > 0 ? (
-                        posts.map((post) => (
+                    {filteredPosts.length > 0 ? (
+                        filteredPosts.map((post) => (
                             <div
                                 key={post.id}
-                                className="aspect-square relative group cursor-pointer bg-gray-900"
+                                className="aspect-square relative group cursor-pointer bg-gray-900 rounded-lg overflow-hidden border border-white/10"
                                 onClick={() => setSelectedPost(post)}
                             >
                                 {post.mediaUrl ? (
@@ -993,14 +1088,14 @@ export default function ViewProfilePage() {
                                             />
                                             {/* Play button overlay */}
                                             <div className="absolute inset-0 flex items-center justify-center">
-                                                <div className="w-16 h-16 bg-black bg-opacity-60 rounded-full flex items-center justify-center hover:bg-opacity-80 transition-opacity">
+                                                <div className="w-14 h-14 bg-black/60 rounded-full border border-white/25 flex items-center justify-center hover:bg-black/75 transition-colors">
                                                     <svg className="w-8 h-8 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
                                                         <path d="M8 5v14l11-7z" />
                                                     </svg>
                                                 </div>
                                             </div>
                                             {/* Video indicator badge */}
-                                            <div className="absolute bottom-2 right-2 px-2 py-0.5 bg-black bg-opacity-70 rounded flex items-center gap-1">
+                                            <div className="absolute bottom-2 right-2 px-2 py-0.5 bg-black/70 border border-white/25 rounded-md flex items-center gap-1">
                                                 <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
                                                     <path d="M6.5 4.5a.5.5 0 01.09.09L11 7.5a.5.5 0 110 .92l-4.41 2.91a.5.5 0 11-.59-.81l4.41-2.91L6.91 4.5A.5.5 0 016.5 4.5zm3 0a.5.5 0 01.09.09l5 5a.5.5 0 110 .92l-5 5a.5.5 0 11-.59-.81L13.5 10l-4.41-2.91A.5.5 0 019.5 4.5zm-6 0a.5.5 0 01.09.09l5 5a.5.5 0 11-.59.81L3 5.5l4.41 2.91a.5.5 0 11-.59-.81l-5-5A.5.5 0 010 4.5z" />
                                                 </svg>
@@ -1008,12 +1103,12 @@ export default function ViewProfilePage() {
                                             </div>
                                             {/* Location badge */}
                                             {post.locationLabel && (
-                                                <div className="absolute top-2 left-2 px-2 py-0.5 bg-black bg-opacity-70 rounded flex items-center gap-1">
+                                                <div className="absolute top-2 left-2 max-w-[85%] px-2 py-0.5 bg-black/70 border border-white/25 rounded-md flex items-center gap-1">
                                                     <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                                                     </svg>
-                                                    <span className="text-xs text-white font-medium">{post.locationLabel}</span>
+                                                    <span className="text-xs text-white font-medium truncate">{post.locationLabel}</span>
                                                 </div>
                                             )}
                                         </div>
@@ -1026,12 +1121,12 @@ export default function ViewProfilePage() {
                                             />
                                             {/* Location badge for images */}
                                             {post.locationLabel && (
-                                                <div className="absolute top-2 left-2 px-2 py-0.5 bg-black bg-opacity-70 rounded flex items-center gap-1">
+                                                <div className="absolute top-2 left-2 max-w-[85%] px-2 py-0.5 bg-black/70 border border-white/25 rounded-md flex items-center gap-1">
                                                     <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                                                     </svg>
-                                                    <span className="text-xs text-white font-medium">{post.locationLabel}</span>
+                                                    <span className="text-xs text-white font-medium truncate">{post.locationLabel}</span>
                                                 </div>
                                             )}
                                         </>
@@ -1052,23 +1147,31 @@ export default function ViewProfilePage() {
                                         </p>
                                         {/* Location badge for text-only posts */}
                                         {post.locationLabel && (
-                                            <div className="absolute top-2 left-2 px-2 py-0.5 bg-black bg-opacity-70 rounded flex items-center gap-1">
+                                            <div className="absolute top-2 left-2 max-w-[85%] px-2 py-0.5 bg-black/70 border border-white/25 rounded-md flex items-center gap-1">
                                                 <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                                                 </svg>
-                                                <span className="text-xs text-white font-medium">{post.locationLabel}</span>
+                                                <span className="text-xs text-white font-medium truncate">{post.locationLabel}</span>
                                             </div>
                                         )}
                                     </div>
                                 )}
-                                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-opacity" />
+                                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
                             </div>
                         ))
                     ) : (
                         <div className="col-span-3 text-center py-12 text-gray-500">
-                            <p className="text-lg mb-2">No posts yet</p>
-                            <p className="text-sm">When this user posts, you'll see them here.</p>
+                            <p className="text-lg mb-2">
+                                {contentTab === 'all'
+                                    ? 'No posts yet'
+                                    : `No ${contentTab} yet`}
+                            </p>
+                            <p className="text-sm">
+                                {contentTab === 'all'
+                                    ? "When this user posts, you'll see them here."
+                                    : `Switch tabs to view other content.`}
+                            </p>
                         </div>
                     )}
                 </div>

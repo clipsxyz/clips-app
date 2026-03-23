@@ -809,10 +809,10 @@ function BoostButton({ postId, onBoost, stretch, knownBoosted }: { postId: strin
       disabled={busy}
       aria-label="Boost post"
       title="Boost this post"
-      className={`rounded-xl p-[1px] bg-gradient-to-r from-blue-500 to-purple-600 disabled:opacity-60 transition-all duration-200 active:scale-[0.98] shadow-lg hover:shadow-xl ${stretchCls}`}
+      className={`rounded-xl p-[1px] bg-gradient-to-r from-sky-500 to-blue-600 disabled:opacity-60 transition-all duration-200 active:scale-[0.98] shadow-lg hover:shadow-xl ${stretchCls}`}
     >
       <div className="flex items-center justify-center gap-2 rounded-[11px] bg-black/75 px-4 py-2 min-h-[2.25rem]">
-        <FiZap className="w-4 h-4 flex-shrink-0 text-white/95" />
+        <FiZap className="w-4 h-4 flex-shrink-0 text-sky-300" />
         <span
           className="text-sm font-semibold truncate inline-block"
           style={{
@@ -1051,7 +1051,7 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
                     }
                   }
                 }}
-                className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-blue-500 hover:bg-blue-600 border-2 border-white dark:border-gray-900 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30"
+                className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-blue-500 hover:bg-blue-600 border-2 border-white dark:border-gray-900 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30"
                 style={{ 
                   touchAction: 'manipulation',
                   WebkitTapHighlightColor: 'transparent',
@@ -1059,7 +1059,7 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
                 }}
                 aria-label="Follow user"
               >
-                <FiPlus className="w-3 h-3 text-white" strokeWidth={2.5} />
+                <FiPlus className="w-3.5 h-3.5 text-white" strokeWidth={2.5} />
               </button>
             )}
             {/* DM icon only when mutual follow (both follow each other) */}
@@ -1071,7 +1071,7 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
                   e.preventDefault();
                   onOpenDM(post.userHandle);
                 }}
-                className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-white border-2 border-gray-200 dark:border-gray-700 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30 hover:bg-gray-50 dark:hover:bg-gray-100"
+                className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-white border-2 border-gray-200 dark:border-gray-700 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30 hover:bg-gray-50 dark:hover:bg-gray-100"
                 style={{ 
                   touchAction: 'manipulation',
                   WebkitTapHighlightColor: 'transparent',
@@ -1079,13 +1079,13 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
                 }}
                 aria-label="Message user"
               >
-                <VscLiveShare className="w-3 h-3 text-red-500" />
+                <VscLiveShare className="w-3.5 h-3.5 text-red-500" />
               </button>
             )}
             {/* Green tick when we follow them but they don't follow us */}
             {!isCurrentUser && onFollow && isFollowingThisUser && !isMutualFollow && (
-              <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-green-500 border-2 border-white dark:border-gray-900 flex items-center justify-center shadow-lg z-30">
-                <FiCheck className="w-3 h-3 text-white" strokeWidth={3} />
+              <div className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-green-500 border-2 border-white dark:border-gray-900 flex items-center justify-center shadow-lg z-30">
+                <FiCheck className="w-3.5 h-3.5 text-white" strokeWidth={3} />
               </div>
             )}
           </div>
@@ -1151,7 +1151,7 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
               }}
               onMouseDown={(e) => e.stopPropagation()}
               onTouchStart={(e) => e.stopPropagation()}
-              className={`p-1 transition-all active:scale-[.98] z-50 relative ${isOverlaid
+              className={`p-2 min-w-[40px] min-h-[40px] flex items-center justify-center transition-all active:scale-[.98] z-50 relative ${isOverlaid
                 ? 'text-white hover:opacity-70'
                 : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
               }`}
@@ -1673,6 +1673,8 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   const lastTap = React.useRef<number>(0);
   const touchHandled = React.useRef<boolean>(false);
   const singleTapTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchStartPointRef = React.useRef<{ x: number; y: number } | null>(null);
+  const touchMovedRef = React.useRef(false);
   /** Avoid opening Scenes twice when both touchend and click fire (mobile). */
   const openScenesCooldownRef = React.useRef(0);
   const isProcessingDoubleTap = React.useRef<boolean>(false);
@@ -2090,6 +2092,12 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   }
 
   function handleTouchEnd(e: React.TouchEvent) {
+    // If finger moved enough, treat as scroll/swipe (not tap).
+    if (touchMovedRef.current) {
+      touchMovedRef.current = false;
+      touchStartPointRef.current = null;
+      return;
+    }
     try {
       e.preventDefault(); // Can throw on mobile if listener is passive
     } catch (_) {
@@ -2104,6 +2112,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     setTimeout(() => {
       touchHandled.current = false;
     }, 400);
+    touchStartPointRef.current = null;
   }
 
   function handleClick(e: React.MouseEvent) {
@@ -2285,11 +2294,23 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
           if (e.touches.length === 2) {
             return;
           }
+          const t = e.touches[0];
+          touchStartPointRef.current = { x: t.clientX, y: t.clientY };
+          touchMovedRef.current = false;
         }}
         onTouchMove={(e) => {
           // Don't handle touch move if it's a pinch gesture (2 touches) - let zoom component handle it
           if (e.touches.length === 2) {
             return;
+          }
+          const start = touchStartPointRef.current;
+          const t = e.touches[0];
+          if (!start || !t) return;
+          const dx = Math.abs(t.clientX - start.x);
+          const dy = Math.abs(t.clientY - start.y);
+          // Small buffer avoids false positives from micro-jitter.
+          if (dx > 10 || dy > 10) {
+            touchMovedRef.current = true;
           }
         }}
         onTouchEnd={(e) => {
@@ -3277,7 +3298,7 @@ function EngagementBar({
           {/* Like */}
           <button
             ref={likeButtonRef}
-            className={`flex items-center ${iconGap} transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0`}
+            className={`flex items-center ${iconGap} min-h-[44px] px-1.5 -mx-1 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0`}
             onClick={likeClick}
             aria-pressed={liked}
             aria-label={liked ? 'Unlike' : 'Like'}
@@ -3302,7 +3323,7 @@ function EngagementBar({
 
           {/* Comments */}
           <button
-            className={`flex items-center ${iconGap} transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0`}
+            className={`flex items-center ${iconGap} min-h-[44px] px-1.5 -mx-1 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0`}
             onClick={onOpenComments}
             aria-label="Comments"
             title="Comments"
@@ -3313,7 +3334,7 @@ function EngagementBar({
 
           {/* Share to Stories – Gazetteer stories icon (SiFigshare) */}
           <button
-            className={`flex items-center ${iconGap} transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0`}
+            className={`flex items-center ${iconGap} min-h-[44px] px-1.5 -mx-1 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0`}
             onClick={shareClick}
             aria-label="Share post to stories"
             title="Share post to stories"
@@ -3324,7 +3345,7 @@ function EngagementBar({
 
           {/* Reclip */}
           <button
-            className={`flex items-center ${iconGap} transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0 ${
+            className={`flex items-center ${iconGap} min-h-[44px] px-1.5 -mx-1 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0 ${
               post.userHandle === currentUserHandle ? 'opacity-30 cursor-not-allowed' : ''
             }`}
             onClick={reclipClick}
@@ -3353,12 +3374,12 @@ function EngagementBar({
         <div className={`flex items-center flex-shrink-0 ${rowGap}`}>
           {/* Share – VS Code Live Share style icon (VscLiveShare) */}
           <button
-            className={`flex items-center justify-center ${iconSize} transition-opacity hover:opacity-70 active:opacity-50`}
+            className={`flex items-center justify-center w-11 h-11 rounded-full transition-opacity hover:opacity-70 active:opacity-50`}
             onClick={() => _onShare?.()}
             aria-label="Share post"
             title="Share post"
           >
-            <VscLiveShare className={`${iconSize} text-white`} />
+            <VscLiveShare className="w-6 h-6 text-white" />
           </button>
 
           {showBoostButton && onBoost && (
@@ -3367,12 +3388,12 @@ function EngagementBar({
 
           {showMetricsIcon && onToggleMetrics && (
             <button
-              className={`flex items-center justify-center ${iconSize} transition-opacity hover:opacity-70 active:opacity-50`}
+              className={`flex items-center justify-center w-11 h-11 rounded-full transition-opacity hover:opacity-70 active:opacity-50`}
               onClick={onToggleMetrics}
               aria-label="Toggle metrics"
               title="View metrics"
             >
-              <FiBarChart2 className={`${iconSize} ${isMetricsOpen ? 'text-brand-400' : 'text-white'}`} />
+              <FiBarChart2 className={`w-6 h-6 ${isMetricsOpen ? 'text-brand-400' : 'text-white'}`} />
             </button>
           )}
         </div>
@@ -4318,6 +4339,10 @@ function FeedPageWrapper() {
 
   // Per-location "notify me when this feed wakes up" preferences (stored by lowercase name)
   const [notifyLocations, setNotifyLocations] = React.useState<string[]>([]);
+  const feedScrollRef = React.useRef<HTMLDivElement | null>(null);
+  const pullStartYRef = React.useRef<number | null>(null);
+  const pullDistanceRef = React.useRef(0);
+  const pullEligibleRef = React.useRef(false);
   React.useEffect(() => {
     try {
       const raw = localStorage.getItem('locationNotifyOptIn');
@@ -4362,9 +4387,45 @@ function FeedPageWrapper() {
     });
   }, [customLocation]);
 
-
   // Internal state for Following feed (separate from tabs)
   const [showFollowingFeed, setShowFollowingFeed] = React.useState(false);
+
+  const handleFeedPullStart = React.useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    // Keep native behavior for non-main feeds; this fallback is for main newsfeed only.
+    if (customLocation || showFollowingFeed) return;
+    const rail = feedScrollRef.current;
+    if (!rail || rail.scrollTop > 0) {
+      pullEligibleRef.current = false;
+      pullStartYRef.current = null;
+      pullDistanceRef.current = 0;
+      return;
+    }
+    pullEligibleRef.current = true;
+    pullStartYRef.current = e.touches[0]?.clientY ?? null;
+    pullDistanceRef.current = 0;
+  }, [customLocation, showFollowingFeed]);
+
+  const handleFeedPullMove = React.useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    if (!pullEligibleRef.current || pullStartYRef.current == null) return;
+    const currentY = e.touches[0]?.clientY ?? pullStartYRef.current;
+    pullDistanceRef.current = currentY - pullStartYRef.current;
+  }, []);
+
+  const handleFeedPullEnd = React.useCallback(() => {
+    const shouldRefresh =
+      pullEligibleRef.current &&
+      pullDistanceRef.current > 72 &&
+      !customLocation &&
+      !showFollowingFeed;
+
+    pullEligibleRef.current = false;
+    pullStartYRef.current = null;
+    pullDistanceRef.current = 0;
+
+    if (shouldRefresh) {
+      window.location.reload();
+    }
+  }, [customLocation, showFollowingFeed]);
 
   // Listen for setFollowingTab event from TopBar
   React.useEffect(() => {
@@ -5190,15 +5251,11 @@ function FeedPageWrapper() {
               className="relative px-3 py-1.5 text-sm font-medium text-white rounded-lg"
               onClick={() => setCustomLocation(null)}
             >
-              {/* Gradient border: venue = green; landmark = orange only; location = blue/purple */}
+              {/* Monochrome gradient border for all search feed chips */}
               <div
                 className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
                 style={{
-                  background: customFilterType === 'venue'
-                    ? 'linear-gradient(90deg, #16a34a 0%, #4ade80 50%, #22c55e 100%)'
-                    : customFilterType === 'landmark'
-                      ? 'linear-gradient(90deg, #f97316 0%, #fb923c 45%, #ea580c 100%)'
-                      : 'linear-gradient(90deg, #3b82f6 0%, #a855f7 50%, #3b82f6 100%)',
+                  background: 'linear-gradient(90deg, rgba(255,255,255,0.45) 0%, rgba(255,255,255,1) 50%, rgba(255,255,255,0.45) 100%)',
                 }}
               >
                 {/* Overlay that covers border initially, then rotates to reveal it */}
@@ -5262,8 +5319,13 @@ function FeedPageWrapper() {
       </div>
 
       <div
-        className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain pb-2"
+        ref={feedScrollRef}
+        className="flex-1 min-h-0 overflow-y-auto overscroll-y-auto pb-2"
         style={{ WebkitOverflowScrolling: 'touch' }}
+        onTouchStart={handleFeedPullStart}
+        onTouchMove={handleFeedPullMove}
+        onTouchEnd={handleFeedPullEnd}
+        onTouchCancel={handleFeedPullEnd}
       >
       {(() => {
         // Stories 24: show once after the first post card (not above the feed). Custom/search feeds omit entirely.
@@ -5948,13 +6010,16 @@ function FeedPageWrapper() {
             setBoostModalOpen(false);
             setSelectedPostForBoost(null);
           }}
-          onSelect={(feedType, price) => {
+          onSelect={(feedType, price, meta) => {
             // Navigate to payment page with full post (same as Boost page) so PaymentPage can boost
             navigate('/payment', {
               state: {
                 post: selectedPostForBoost,
                 feedType,
-                price
+                price,
+                goal: meta?.goal,
+                durationHours: meta?.durationHours,
+                estimatedReach: meta?.estimatedReach,
               }
             });
             setBoostModalOpen(false);
@@ -6210,6 +6275,8 @@ function BoostPageWrapper() {
   const [recentlyBoostedFeedType, setRecentlyBoostedFeedType] = React.useState<'local' | 'regional' | 'national' | null>(null);
   const [unreadCount, setUnreadCount] = React.useState(0);
   const [hasInbox, setHasInbox] = React.useState(false);
+  const [boostFilter, setBoostFilter] = React.useState<'all' | 'ready' | 'active' | 'ended'>('all');
+  const [boostSort, setBoostSort] = React.useState<'best' | 'recent'>('best');
 
   // Load only the current user's posts (no mock users)
   React.useEffect(() => {
@@ -6314,6 +6381,74 @@ function BoostPageWrapper() {
     }));
   }
 
+  const classifyBoostStatus = React.useCallback((p: Post): 'ready' | 'active' | 'ended' => {
+    if (p.isBoosted) return 'active';
+    if (p.boostFeedType && !p.isBoosted) return 'ended';
+    return 'ready';
+  }, []);
+
+  const filteredBoostPosts = React.useMemo(() => {
+    if (boostFilter === 'all') return posts;
+    return posts.filter((p) => classifyBoostStatus(p) === boostFilter);
+  }, [posts, boostFilter, classifyBoostStatus]);
+
+  const qualityScore = React.useCallback((p: Post): number => {
+    const views = Math.max(1, p.stats.views || 1);
+    const engagement = (p.stats.likes + p.stats.comments + p.stats.shares) / views;
+    const recencyBoost = Math.max(0, 1 - ((Date.now() - (p.createdAt || 0)) / (1000 * 60 * 60 * 24 * 14)));
+    return engagement * 100 + recencyBoost * 10 + Math.log10(views + 10);
+  }, []);
+
+  const sortedBoostPosts = React.useMemo(() => {
+    const next = [...filteredBoostPosts];
+    if (boostSort === 'recent') {
+      next.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      return next;
+    }
+    next.sort((a, b) => qualityScore(b) - qualityScore(a));
+    return next;
+  }, [filteredBoostPosts, boostSort, qualityScore]);
+
+  const boostSummary = React.useMemo(() => {
+    const active = posts.filter((p) => classifyBoostStatus(p) === 'active').length;
+    const ready = posts.filter((p) => classifyBoostStatus(p) === 'ready').length;
+    const ended = posts.filter((p) => classifyBoostStatus(p) === 'ended').length;
+    return { active, ready, ended, total: posts.length };
+  }, [posts, classifyBoostStatus]);
+
+  const getQualityLabel = React.useCallback((p: Post): { label: string; tone: string } => {
+    const engagement = (p.stats.likes + p.stats.comments + p.stats.shares) / Math.max(1, p.stats.views || 1);
+    if (engagement >= 0.07 && (p.stats.views || 0) >= 250) return { label: 'Best candidate', tone: 'text-emerald-300 border-emerald-400/40 bg-emerald-500/10' };
+    if (engagement >= 0.035) return { label: 'Good candidate', tone: 'text-sky-300 border-sky-400/40 bg-sky-500/10' };
+    return { label: 'Needs stronger post', tone: 'text-amber-300 border-amber-400/40 bg-amber-500/10' };
+  }, []);
+
+  const getQualityReason = React.useCallback((p: Post): string => {
+    const views = Math.max(1, p.stats.views || 1);
+    const engagement = (p.stats.likes + p.stats.comments + p.stats.shares) / views;
+    const postAgeDays = (Date.now() - (p.createdAt || 0)) / (1000 * 60 * 60 * 24);
+    if (engagement >= 0.07 && views >= 250) {
+      return 'High engagement and strong recent performance.';
+    }
+    if (engagement >= 0.035) {
+      return postAgeDays <= 7
+        ? 'Solid engagement with fresh recency signal.'
+        : 'Solid engagement; likely to perform with broader reach.';
+    }
+    return views < 120
+      ? 'Try growing organic engagement first before boosting.'
+      : 'Consider improving hook/caption for better conversion.';
+  }, []);
+
+  const estimateReachTeaser = React.useCallback((p: Post): string => {
+    const engagement = (p.stats.likes + p.stats.comments + p.stats.shares) / Math.max(1, p.stats.views || 1);
+    const base = Math.max(800, Math.round((p.stats.views || 0) * 2.2 + (engagement * 1000)));
+    const low = Math.round(base * 0.78);
+    const high = Math.round(base * 1.32);
+    const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
+    return `Estimated reach ${fmt(low)}-${fmt(high)}`;
+  }, []);
+
   // Not logged in
   if (!user) {
     return (
@@ -6348,127 +6483,206 @@ function BoostPageWrapper() {
       <div className="sticky top-0 z-30 isolate shrink-0 px-3 py-3 bg-[#030712] border-b border-gray-800/50 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.3)]">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Your Posts</h2>
         <p className="text-sm text-gray-600 dark:text-gray-400">Boost your posts to reach more people.</p>
+        <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
+          <div className="flex items-center justify-between text-xs text-gray-400">
+            <span>Active boosts: <span className="text-white font-semibold">{boostSummary.active}</span></span>
+            <span>Ready: <span className="text-white font-semibold">{boostSummary.ready}</span></span>
+            <span>Ended: <span className="text-white font-semibold">{boostSummary.ended}</span></span>
+          </div>
+        </div>
+        <div className="mt-2 flex items-center gap-2 overflow-x-auto scrollbar-hide pb-1">
+          {([
+            { id: 'all' as const, label: `All (${boostSummary.total})` },
+            { id: 'ready' as const, label: `Ready (${boostSummary.ready})` },
+            { id: 'active' as const, label: `Active (${boostSummary.active})` },
+            { id: 'ended' as const, label: `Ended (${boostSummary.ended})` },
+          ]).map((chip) => {
+            const active = boostFilter === chip.id;
+            return (
+              <button
+                key={chip.id}
+                type="button"
+                onClick={() => setBoostFilter(chip.id)}
+                className={`shrink-0 min-h-[36px] px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                  active
+                    ? 'bg-white text-black border-white'
+                    : 'bg-black/40 text-gray-300 border-white/20 hover:bg-white/10'
+                }`}
+              >
+                {chip.label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <span className="text-[11px] uppercase tracking-[0.12em] text-gray-500 font-semibold">Sort</span>
+          {([
+            { id: 'best' as const, label: 'Best candidates' },
+            { id: 'recent' as const, label: 'Most recent' },
+          ]).map((opt) => {
+            const active = boostSort === opt.id;
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setBoostSort(opt.id)}
+                className={`min-h-[32px] px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
+                  active
+                    ? 'bg-white text-black border-white'
+                    : 'bg-black/40 text-gray-300 border-white/20 hover:bg-white/10'
+                }`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div className="relative z-0">
-      {posts.length === 0 ? (
+      {filteredBoostPosts.length === 0 ? (
         <div className="p-6 text-center">
-          <p className="text-gray-600 dark:text-gray-400">You haven&apos;t created any posts yet.</p>
+          <p className="text-gray-600 dark:text-gray-400">
+            {posts.length === 0 ? "You haven't created any posts yet." : 'No posts in this filter yet.'}
+          </p>
         </div>
       ) : (
-        posts.map(p => (
-          <FeedCard
-            key={p.id}
-            post={p}
-            showBoostIcon={true}
-            engagementVariant="boost"
-            knownBoosted={recentlyBoostedPostId === p.id || !!p.isBoosted}
-            onBoost={async () => {
-              const existing = await getActiveBoost(p.id);
-              if (existing?.isActive) {
-                Swal.fire(bottomSheet({
-                  title: 'Already boosted',
-                  message: 'This post is already boosted. It will expire in 6 hours.',
-                  icon: 'alert',
-                }));
-                return;
-              }
-              setSelectedPostForBoost(p);
-              setBoostModalOpen(true);
-            }}
-            onLike={async () => {
-              if (!online) {
-                updateOne(p.id, post => ({ ...post, userLiked: !post.userLiked }));
-                await enqueue({ type: 'like', postId: p.id, userId });
-                return;
-              }
-              const nextLiked = !p.userLiked;
-              const nextLikes = Math.max(0, p.stats.likes + (nextLiked ? 1 : -1));
-              updateOne(p.id, post => ({
-                ...post,
-                userLiked: nextLiked,
-                stats: { ...post.stats, likes: nextLikes }
-              }));
-              window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
-                detail: { liked: nextLiked, likes: nextLikes }
-              }));
-              try {
-                const updated = await toggleLike(userId, p.id, p);
-                updateOne(p.id, _post => ({ ...updated }));
-                window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
-                  detail: { liked: updated.userLiked, likes: updated.stats.likes }
-                }));
-              } catch (err) {
-                console.warn('Like failed, reverting:', err);
-                updateOne(p.id, post => ({
-                  ...post,
-                  userLiked: p.userLiked,
-                  stats: { ...post.stats, likes: p.stats.likes }
-                }));
-                window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
-                  detail: { liked: p.userLiked, likes: p.stats.likes }
-                }));
-              }
-            }}
-            onShare={async () => {
-              setSelectedPostForShare(p);
-              setShareModalOpen(true);
-            }}
-            onOpenComments={() => handleOpenComments(p.id)}
-            onView={async () => {
-              if (!p?.id) return;
-              if (p.id.startsWith('mock-scenes-')) return;
-              if (!online) {
-                await enqueue({ type: 'view', postId: p.id, userId });
-                return;
-              }
-              try {
-                const updated = await incrementViews(userId, p.id);
-                if (updated.userHandle === 'Unknown') return;
-                updateOne(p.id, post => ({
-                  ...post,
-                  stats: updated.stats && typeof updated.stats.views === 'number'
-                    ? { ...post.stats, views: updated.stats.views }
-                    : post.stats
-                }));
-                window.dispatchEvent(new CustomEvent(`viewAdded-${p.id}`));
-              } catch (err) {
-                console.warn('incrementViews error:', err);
-              }
-            }}
-            onReclip={async () => {
-              // Users can't reclip their own posts
-              console.log('Cannot reclip your own post');
-            }}
-            onOpenScenes={() => {
-              setSelectedPostForScenes(p);
-              setScenesOpen(true);
-            }}
-            onDelete={async () => {
-              const result = await Swal.fire(bottomSheet({
-                title: 'Delete post?',
-                message: "This can't be undone.",
-                icon: 'alert',
-                showCancelButton: true,
-                confirmButtonText: 'Delete',
-                cancelButtonText: 'Cancel',
-              }));
-              if (!result.isConfirmed) return;
-              try {
-                await deletePost(userId, p.id, user?.handle);
-                setPosts(cur => cur.filter(x => x.id !== p.id));
-              } catch (err) {
-                console.error('Delete post failed:', err);
-                await Swal.fire(bottomSheet({
-                  title: 'Could not delete post',
-                  message: err instanceof Error ? err.message : 'Please try again.',
-                  icon: 'alert',
-                }));
-              }
-            }}
-            onShareSuccess={(postId) => updateOne(postId, p => ({ ...p, stats: { ...p.stats, shares: p.stats.shares + 1 } }))}
-          />
-        ))
+        sortedBoostPosts.map(p => {
+          const status = classifyBoostStatus(p);
+          const quality = getQualityLabel(p);
+          const qualityReason = getQualityReason(p);
+          return (
+            <div key={p.id}>
+              <div className="mx-4 mt-4 mb-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${quality.tone}`}>
+                    {quality.label}
+                  </span>
+                  <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                    status === 'active'
+                      ? 'text-emerald-300 border-emerald-400/40 bg-emerald-500/10'
+                      : status === 'ended'
+                        ? 'text-gray-300 border-gray-400/30 bg-gray-500/10'
+                        : 'text-sky-300 border-sky-400/40 bg-sky-500/10'
+                  }`}>
+                    {status === 'active' ? 'Active boost' : status === 'ended' ? 'Ended boost' : 'Ready to boost'}
+                  </span>
+                </div>
+                <p className="mt-1 text-[11px] text-gray-500">{qualityReason}</p>
+                <p className="mt-1 text-xs text-gray-400">{estimateReachTeaser(p)} from base €4.99</p>
+              </div>
+              <FeedCard
+                post={p}
+                showBoostIcon={true}
+                engagementVariant="boost"
+                knownBoosted={recentlyBoostedPostId === p.id || !!p.isBoosted}
+                onBoost={async () => {
+                  const existing = await getActiveBoost(p.id);
+                  if (existing?.isActive) {
+                    Swal.fire(bottomSheet({
+                      title: 'Already boosted',
+                      message: 'This post is already boosted. It will expire in 6 hours.',
+                      icon: 'alert',
+                    }));
+                    return;
+                  }
+                  setSelectedPostForBoost(p);
+                  setBoostModalOpen(true);
+                }}
+                onLike={async () => {
+                  if (!online) {
+                    updateOne(p.id, post => ({ ...post, userLiked: !post.userLiked }));
+                    await enqueue({ type: 'like', postId: p.id, userId });
+                    return;
+                  }
+                  const nextLiked = !p.userLiked;
+                  const nextLikes = Math.max(0, p.stats.likes + (nextLiked ? 1 : -1));
+                  updateOne(p.id, post => ({
+                    ...post,
+                    userLiked: nextLiked,
+                    stats: { ...post.stats, likes: nextLikes }
+                  }));
+                  window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
+                    detail: { liked: nextLiked, likes: nextLikes }
+                  }));
+                  try {
+                    const updated = await toggleLike(userId, p.id, p);
+                    updateOne(p.id, _post => ({ ...updated }));
+                    window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
+                      detail: { liked: updated.userLiked, likes: updated.stats.likes }
+                    }));
+                  } catch (err) {
+                    console.warn('Like failed, reverting:', err);
+                    updateOne(p.id, post => ({
+                      ...post,
+                      userLiked: p.userLiked,
+                      stats: { ...post.stats, likes: p.stats.likes }
+                    }));
+                    window.dispatchEvent(new CustomEvent(`likeToggled-${p.id}`, {
+                      detail: { liked: p.userLiked, likes: p.stats.likes }
+                    }));
+                  }
+                }}
+                onShare={async () => {
+                  setSelectedPostForShare(p);
+                  setShareModalOpen(true);
+                }}
+                onOpenComments={() => handleOpenComments(p.id)}
+                onView={async () => {
+                  if (!p?.id) return;
+                  if (p.id.startsWith('mock-scenes-')) return;
+                  if (!online) {
+                    await enqueue({ type: 'view', postId: p.id, userId });
+                    return;
+                  }
+                  try {
+                    const updated = await incrementViews(userId, p.id);
+                    if (updated.userHandle === 'Unknown') return;
+                    updateOne(p.id, post => ({
+                      ...post,
+                      stats: updated.stats && typeof updated.stats.views === 'number'
+                        ? { ...post.stats, views: updated.stats.views }
+                        : post.stats
+                    }));
+                    window.dispatchEvent(new CustomEvent(`viewAdded-${p.id}`));
+                  } catch (err) {
+                    console.warn('incrementViews error:', err);
+                  }
+                }}
+                onReclip={async () => {
+                  console.log('Cannot reclip your own post');
+                }}
+                onOpenScenes={() => {
+                  setSelectedPostForScenes(p);
+                  setScenesOpen(true);
+                }}
+                onDelete={async () => {
+                  const result = await Swal.fire(bottomSheet({
+                    title: 'Delete post?',
+                    message: "This can't be undone.",
+                    icon: 'alert',
+                    showCancelButton: true,
+                    confirmButtonText: 'Delete',
+                    cancelButtonText: 'Cancel',
+                  }));
+                  if (!result.isConfirmed) return;
+                  try {
+                    await deletePost(userId, p.id, user?.handle);
+                    setPosts(cur => cur.filter(x => x.id !== p.id));
+                  } catch (err) {
+                    console.error('Delete post failed:', err);
+                    await Swal.fire(bottomSheet({
+                      title: 'Could not delete post',
+                      message: err instanceof Error ? err.message : 'Please try again.',
+                      icon: 'alert',
+                    }));
+                  }
+                }}
+                onShareSuccess={(postId) => updateOne(postId, p => ({ ...p, stats: { ...p.stats, shares: p.stats.shares + 1 } }))}
+              />
+            </div>
+          );
+        })
       )}
       </div>
 
@@ -6555,14 +6769,17 @@ function BoostPageWrapper() {
             setBoostModalOpen(false);
             setSelectedPostForBoost(null);
           }}
-          onSelect={(feedType, price) => {
+          onSelect={(feedType, price, meta) => {
             setBoostModalOpen(false);
             // Navigate to payment page with post and boost details
             navigate('/payment', {
               state: {
                 post: selectedPostForBoost,
                 feedType,
-                price
+                price,
+                goal: meta?.goal,
+                durationHours: meta?.durationHours,
+                estimatedReach: meta?.estimatedReach,
               }
             });
           }}

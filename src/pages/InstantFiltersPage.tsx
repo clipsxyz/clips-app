@@ -33,7 +33,6 @@ export default function InstantFiltersPage() {
         filterInfo: state?.filterInfo || {},
         filtered: state?.filtered,
         mediaType: state?.mediaType || 'video',
-        musicTrackId: state?.musicTrackId
       }
     });
   };

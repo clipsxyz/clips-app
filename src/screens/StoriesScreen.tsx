@@ -87,7 +87,8 @@ export default function StoriesScreen({ route, navigation }: any) {
     const startViewingStories = async (group: StoryGroup) => {
         if (!group || !user?.id || !group.stories || group.stories.length === 0) return;
 
-        const stories = await fetchUserStories(user.id, group.userId);
+        const followedUserHandles = await getFollowedUsers(user.id);
+        const stories = await fetchUserStories(user.id, group.userId, followedUserHandles || []);
         if (!stories || stories.length === 0) return;
 
         const groupIndex = storyGroups.findIndex(g => g.userId === group.userId);
@@ -216,7 +217,7 @@ export default function StoriesScreen({ route, navigation }: any) {
         const currentStory = currentGroup?.stories[currentStoryIndex];
         if (!currentStory || !user?.id || !viewingStories) return;
 
-        markStoryViewed(currentStory.id, user.id).catch(console.error);
+        markStoryViewed(currentStory.id, user.id, user.handle).catch(console.error);
         incrementStoryViews(currentStory.id).catch(console.error);
     }, [currentGroupIndex, currentStoryIndex, viewingStories]);
 
@@ -244,6 +245,16 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     const currentGroup = storyGroups[currentGroupIndex];
     const currentStory = currentGroup?.stories[currentStoryIndex];
+    const currentStoryAudienceLabel = currentStory?.audience === 'close_friends'
+        ? 'Followers'
+        : currentStory?.audience === 'only_me'
+            ? 'Only me'
+            : 'Public';
+    const currentStoryAudienceStyles = currentStory?.audience === 'close_friends'
+        ? { borderColor: 'rgba(110, 231, 183, 0.8)', backgroundColor: 'rgba(16, 185, 129, 0.28)', textColor: '#d1fae5' }
+        : currentStory?.audience === 'only_me'
+            ? { borderColor: 'rgba(226, 232, 240, 0.65)', backgroundColor: 'rgba(100, 116, 139, 0.28)', textColor: '#f1f5f9' }
+            : { borderColor: 'rgba(255, 255, 255, 0.35)', backgroundColor: 'rgba(0, 0, 0, 0.45)', textColor: '#FFFFFF' };
 
     if (!viewingStories) {
         // Story list view
@@ -267,7 +278,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                             <Avatar
                                 src={group.avatarUrl}
                                 name={group.userHandle.split('@')[0]}
-                                size={60}
+                                size="xl"
                                 hasStory={true}
                             />
                             <Text style={styles.storyUserName}>{group.userHandle}</Text>
@@ -305,9 +316,12 @@ export default function StoriesScreen({ route, navigation }: any) {
                             <Avatar
                                 src={currentGroup.avatarUrl}
                                 name={currentGroup.userHandle.split('@')[0]}
-                                size={32}
+                                size="sm"
                             />
                             <Text style={styles.storyHeaderName}>{currentGroup.userHandle}</Text>
+                            <View style={[styles.audienceBadge, { borderColor: currentStoryAudienceStyles.borderColor, backgroundColor: currentStoryAudienceStyles.backgroundColor }]}>
+                                <Text style={[styles.audienceBadgeText, { color: currentStoryAudienceStyles.textColor }]}>{currentStoryAudienceLabel}</Text>
+                            </View>
                             <Text style={styles.storyHeaderTime}>2h</Text>
                         </View>
                         <TouchableOpacity onPress={closeStories}>
@@ -476,6 +490,19 @@ const styles = StyleSheet.create({
     storyHeaderTime: {
         fontSize: 14,
         color: '#D1D5DB',
+    },
+    audienceBadge: {
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.35)',
+        backgroundColor: 'rgba(0, 0, 0, 0.45)',
+        borderRadius: 999,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+    },
+    audienceBadgeText: {
+        fontSize: 10,
+        fontWeight: '700',
+        color: '#FFFFFF',
     },
     storyTextOverlay: {
         position: 'absolute',
