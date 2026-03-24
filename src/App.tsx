@@ -2,7 +2,7 @@ import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { FiHome, FiUser, FiUserPlus, FiUserX, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX, FiClock } from 'react-icons/fi';
 import { GiGreekTemple } from 'react-icons/gi';
-import { IoMdTrendingUp } from 'react-icons/io';
+import { LuFlame, LuPlus } from 'react-icons/lu';
 import { VscLiveShare } from 'react-icons/vsc';
 import { SiFigshare } from 'react-icons/si';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from './constants';
@@ -333,6 +333,42 @@ export default function App() {
   );
 }
 
+/** Promote-style badge (flame + bottom-center plus) — tab size or hero for modals */
+function BoostPromoteBadge({ size = 'sm', active }: { size?: 'sm' | 'lg'; active?: boolean }) {
+  const isLg = size === 'lg';
+  return (
+    <span
+      className={`relative inline-flex flex-col items-center ${
+        isLg ? '' : `${active ? 'scale-[1.05]' : ''} transition-transform duration-200`
+      }`}
+      aria-hidden
+    >
+      <span
+        className={`relative z-[1] flex shrink-0 items-center justify-center rounded-full border-2 border-white bg-[#FE2C55] ${
+          isLg
+            ? 'h-[4.5rem] w-[4.5rem] shadow-[0_8px_36px_rgba(254,44,85,0.55)]'
+            : 'h-7 w-7 shadow-[0_2px_8px_rgba(254,44,85,0.45)]'
+        }`}
+      >
+        <LuFlame className="text-white" size={isLg ? 34 : 16} strokeWidth={isLg ? 2.2 : 2.4} aria-hidden />
+      </span>
+      <span
+        className={`relative z-[2] flex shrink-0 items-center justify-center rounded-full border-2 border-white bg-[#FE2C55] ${
+          isLg
+            ? '-mt-4 h-10 w-10 shadow-[0_4px_20px_rgba(254,44,85,0.45)]'
+            : '-mt-2 h-4 w-4'
+        }`}
+      >
+        <LuPlus className="text-white" size={isLg ? 20 : 10} strokeWidth={3} aria-hidden />
+      </span>
+    </span>
+  );
+}
+
+function FeedBoostTabBadge({ active }: { active?: boolean }) {
+  return <BoostPromoteBadge size="sm" active={active} />;
+}
+
 function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCustom?: () => void; userLocal?: string; userRegional?: string; userNational?: string; clipsCount?: number }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -470,7 +506,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
   }, [runBorderRevealAnimation]);
 
   return (
-    <div role="tablist" aria-label="Locations" className="z-30 bg-[#030712] py-2 relative">
+    <div role="tablist" aria-label="Locations" className="z-30 bg-[#030712] py-1 relative">
       {/* Not sticky: /feed uses an inner scroll container so this chrome stays pinned */}
       {/* Scrim effect */}
       <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/50 to-transparent pointer-events-none z-0" />
@@ -521,10 +557,11 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                 role="tab"
                 aria-selected={active}
                 aria-controls={panelId}
+                aria-label={isBoostTab ? 'Boost' : undefined}
                 tabIndex={active ? 0 : -1}
                 onClick={handleClick}
-                className={`relative rounded-lg py-1.5 text-white text-xs sm:text-sm font-medium transition-transform active:scale-[.98] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 flex items-center justify-center gap-1 ${
-                  (isBoostTab || isNotificationsTab) ? 'w-10 px-0 justify-self-end' : 'w-full px-2'
+                className={`relative rounded-lg py-1 text-white text-xs sm:text-sm font-medium leading-tight transition-transform active:scale-[.98] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 flex items-center justify-center gap-1 ${
+                  (isBoostTab || isNotificationsTab) ? 'w-10 px-0 justify-self-end overflow-visible' : 'w-full px-2'
                 }`}
                 style={{
                   outline: 'none',
@@ -563,7 +600,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                       )}
                     </span>
                   ) : isBoostTab ? (
-                    <IoMdTrendingUp className="w-5 h-5 text-white" />
+                    <FeedBoostTabBadge active />
                   ) : shouldShimmer ? (
                     <span
                       className="truncate"
@@ -595,11 +632,12 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               role="tab"
               aria-selected={active}
               aria-controls={panelId}
+              aria-label={isBoostTab ? 'Boost' : undefined}
               tabIndex={active ? 0 : -1}
               onClick={handleClick}
-              className={`rounded-lg py-1.5 bg-black text-xs sm:text-sm font-medium transition-transform active:scale-[.98] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${
+              className={`rounded-lg py-1 bg-black text-xs sm:text-sm font-medium leading-tight transition-transform active:scale-[.98] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${
                 isBoostTab
-                  ? 'w-10 px-0 justify-self-end text-white opacity-100 hover:text-white'
+                  ? 'w-10 px-0 justify-self-end overflow-visible text-white opacity-100 hover:text-white'
                   : isNotificationsTab
                     ? 'w-10 px-0 justify-self-end text-white opacity-100 hover:text-white'
                   : 'w-full px-2 text-gray-600 dark:text-gray-500 hover:text-gray-400 opacity-60'
@@ -623,7 +661,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                     )}
                   </span>
                 ) : isBoostTab ? (
-                  <IoMdTrendingUp className="w-5 h-5 text-white" />
+                  <FeedBoostTabBadge />
                 ) : (
                   tabLabel
                 )}
@@ -636,44 +674,63 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
 
       {showBoostPrompt && (
         <div
-          className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-[1px] flex items-center justify-center px-4"
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/75 backdrop-blur-sm px-4"
+          role="presentation"
           onClick={() => setShowBoostPrompt(false)}
         >
           <div
-            className="w-full max-w-sm rounded-2xl border border-white/15 bg-[#0b1220] shadow-[0_20px_55px_rgba(0,0,0,0.6)] p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="boost-prompt-title"
+            className="relative w-full max-w-sm overflow-hidden rounded-2xl border border-white/20 bg-[#0a0f18] shadow-[0_24px_64px_rgba(0,0,0,0.75)]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="inline-flex items-center gap-2 rounded-full border border-cyan-400/40 bg-cyan-500/10 px-3 py-1 text-cyan-200 text-xs font-semibold">
-              <FiZap className="w-3.5 h-3.5" />
-              <span>Boost</span>
-            </div>
-            <p className="mt-3 text-white text-sm font-semibold leading-snug">
-              Boost your posts for as little as EUR 4.99.
-            </p>
-            <p className="mt-2 text-xs text-gray-300 leading-relaxed">
-              Reach more people, increase views faster, and give your stories a better chance to trend in the feed.
-            </p>
+            <div
+              className="pointer-events-none absolute -top-24 left-1/2 h-48 w-48 -translate-x-1/2 rounded-full bg-[#FE2C55]/25 blur-3xl"
+              aria-hidden
+            />
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/[0.06] to-transparent" aria-hidden />
 
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowBoostPrompt(false);
-                  navigate('/boost');
-                }}
-                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-sm px-3 py-2 transition-colors"
-              >
-                <FiCheck className="w-4 h-4" />
-                <span>Proceed</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowBoostPrompt(false)}
-                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-white/20 bg-white/5 hover:bg-white/10 text-white font-semibold text-sm px-3 py-2 transition-colors"
-              >
-                <FiX className="w-4 h-4" />
-                <span>Cancel</span>
-              </button>
+            <div className="relative px-5 pb-5 pt-8 text-center">
+              <div className="relative mx-auto mb-5 flex w-full justify-center">
+                <div
+                  className="pointer-events-none absolute left-1/2 top-1/2 h-32 w-32 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#FE2C55]/20 blur-2xl"
+                  aria-hidden
+                />
+                <BoostPromoteBadge size="lg" />
+              </div>
+
+              <h2 id="boost-prompt-title" className="text-lg font-bold tracking-tight text-white">
+                Boost your posts
+              </h2>
+              <p className="mt-2 text-sm leading-relaxed text-white/70">
+                Promote to reach more people in the feed — from{' '}
+                <span className="font-semibold text-white">EUR 4.99</span>.
+              </p>
+              <p className="mt-1.5 text-xs leading-relaxed text-white/50">
+                More views, faster discovery, and a stronger chance to trend with your audience.
+              </p>
+
+              <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowBoostPrompt(false);
+                    navigate('/boost');
+                  }}
+                  className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#FE2C55] px-4 py-3 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(254,44,85,0.35)] transition-colors hover:bg-[#e62850] active:scale-[0.99]"
+                >
+                  <FiZap className="h-4 w-4 opacity-95" aria-hidden />
+                  <span>Open Boost</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowBoostPrompt(false)}
+                  className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-white/25 bg-white/5 px-4 py-3 text-sm font-semibold text-white/90 transition-colors hover:bg-white/10"
+                >
+                  <span>Not now</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
