@@ -1993,6 +1993,77 @@ export async function createPost(
       }
     }
 
+    // Create a lightweight thumbnail data URL from a video blob.
+    // This avoids keeping the full video blob around (which expires after refresh),
+    // while still letting the UI render an image tile reliably.
+    async function extractVideoBlobToThumbnailDataUrl(blobUrl: string): Promise<string | null> {
+      if (!blobUrl.startsWith('blob:')) return blobUrl;
+      if (typeof document === 'undefined') return null;
+
+      return new Promise<string | null>((resolve) => {
+        const video = document.createElement('video');
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = 'metadata';
+        video.src = blobUrl;
+
+        const cleanup = () => {
+          video.pause();
+          // Remove listeners
+          video.onloadedmetadata = null;
+          video.onerror = null;
+          video.onseeked = null;
+        };
+
+        const finish = (dataUrl: string | null) => {
+          cleanup();
+          resolve(dataUrl);
+        };
+
+        video.onerror = () => finish(null);
+
+        video.onloadedmetadata = () => {
+          try {
+            const duration = Number(video.duration);
+            if (!Number.isFinite(duration) || duration <= 0) {
+              return finish(null);
+            }
+            // Grab an early frame to avoid blank thumbnails.
+            const targetTime = Math.min(0.2, Math.max(0, duration - 0.05));
+            video.currentTime = targetTime;
+
+            video.onseeked = () => {
+              try {
+                const vw = video.videoWidth;
+                const vh = video.videoHeight;
+                if (!vw || !vh) return finish(null);
+
+                // Keep the thumbnail reasonably small for memory.
+                const maxDim = 720;
+                const scale = Math.min(1, maxDim / Math.max(vw, vh));
+                const w = Math.max(1, Math.round(vw * scale));
+                const h = Math.max(1, Math.round(vh * scale));
+
+                const canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return finish(null);
+
+                ctx.drawImage(video, 0, 0, w, h);
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+                finish(dataUrl);
+              } catch {
+                finish(null);
+              }
+            };
+          } catch {
+            finish(null);
+          }
+        };
+      });
+    }
+
     // Get location from user data if provided, otherwise infer from handle
     const locationData = userLocal && userRegional && userNational
       ? { userLocal, userRegional, userNational }
@@ -2004,12 +2075,25 @@ export async function createPost(
     // Only convert if we have a valid blob URL (not empty/undefined)
     // For videos, keep blob URLs as-is (like stories) to avoid memory issues on mobile
     let persistentImageUrl = imageUrl;
+    let effectiveMediaType: 'image' | 'video' | undefined = mediaType;
     if (imageUrl && imageUrl.trim() !== '' && imageUrl.startsWith('blob:')) {
       // For videos, skip conversion to avoid memory issues on mobile
-      // Videos can be stored as blob URLs and will work fine
       if (mediaType === 'video') {
-        console.log('Keeping video as blob URL (skipping conversion for mobile compatibility)');
-        persistentImageUrl = imageUrl; // Keep blob URL for videos
+        // Convert video blob -> thumbnail image so the tile grid renders reliably.
+        try {
+          const thumb = await extractVideoBlobToThumbnailDataUrl(imageUrl);
+          if (thumb) {
+            persistentImageUrl = thumb;
+            effectiveMediaType = 'image';
+          } else {
+            // If thumbnail extraction fails, keep blob (may break after refresh).
+            persistentImageUrl = imageUrl;
+            effectiveMediaType = 'video';
+          }
+        } catch {
+          persistentImageUrl = imageUrl;
+          effectiveMediaType = 'video';
+        }
       } else {
         // For images, convert to data URL
         try {
@@ -2028,10 +2112,17 @@ export async function createPost(
       persistentMediaItems = await Promise.all(
         mediaItems.map(async (item) => {
           if (item.url && item.url.trim() !== '' && item.url.startsWith('blob:')) {
-            // For videos, skip conversion to avoid memory issues on mobile
+            // For videos in mock mode: replace with thumbnail image for stable rendering.
             if (item.type === 'video') {
-              console.log('Keeping video in mediaItems as blob URL (skipping conversion for mobile compatibility)');
-              return item; // Keep blob URL for videos
+              try {
+                const thumb = await extractVideoBlobToThumbnailDataUrl(item.url);
+                if (thumb) {
+                  return { ...item, url: thumb, type: 'image' as const };
+                }
+              } catch {
+                // ignore, fall back to original below
+              }
+              return item; // If thumbnail fails, fall back to original blob.
             } else {
               // For images and text, convert to data URL
               try {
@@ -2053,7 +2144,7 @@ export async function createPost(
     const finalMediaItems = persistentMediaItems && persistentMediaItems.length > 0
       ? persistentMediaItems
       : persistentImageUrl && persistentImageUrl.trim() !== ''
-        ? [{ url: persistentImageUrl, type: mediaType || 'image' }]
+        ? [{ url: persistentImageUrl, type: effectiveMediaType || 'image' }]
         : undefined;
 
     const newPost: Post = {
@@ -2066,7 +2157,7 @@ export async function createPost(
       // Only set mediaUrl if we have actual media (not empty string for text-only posts)
       mediaUrl: persistentImageUrl && persistentImageUrl.trim() !== '' ? persistentImageUrl : undefined,
       finalVideoUrl: undefined, // Will be set when render job completes
-      mediaType: mediaType || undefined, // Keep for backward compatibility
+      mediaType: effectiveMediaType || undefined, // thumbnail-friendly type in mock mode
       mediaItems: finalMediaItems, // New: support multiple media items (with persistent URLs)
       text: text || undefined, // Store the text content
       imageText: imageText || undefined, // Store the image text overlay

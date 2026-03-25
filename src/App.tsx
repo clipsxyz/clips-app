@@ -1597,6 +1597,87 @@ function TextCard({ text, onDoubleLike, textStyle, stickers }: { text: string; o
   );
 }
 
+// Compact text tile for Boost "Instagram tile grid" mode (no speech bubble stripes).
+function TileTextCard({
+  text,
+  onDoubleLike,
+  textStyle,
+}: {
+  text: string;
+  onDoubleLike: () => Promise<void>;
+  textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string; fontFamily?: string };
+}) {
+  const [isBurst, setIsBurst] = React.useState(false);
+  const lastTap = React.useRef<number>(0);
+
+  const backgrounds = [
+    '#1e3a8a',
+    '#1e40af',
+    '#1d4ed8',
+    '#2563eb',
+    '#3b82f6',
+    '#1e293b',
+    '#0f172a',
+    '#1a202c',
+  ];
+  const selectedBackground = textStyle?.background || backgrounds[Math.abs(text.length) % backgrounds.length];
+  const textColor = textStyle?.color || 'white';
+  const fontFamily = textStyle?.fontFamily || 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+
+  const shouldTruncate = text.length > 120;
+  const displayText = shouldTruncate ? text.substring(0, 120) + '...' : text;
+
+  const triggerBurst = () => {
+    setIsBurst(true);
+    window.setTimeout(() => setIsBurst(false), 280);
+  };
+
+  const handleTap = async (e?: React.MouseEvent | React.TouchEvent) => {
+    const now = Date.now();
+    if (now - lastTap.current < 300) {
+      triggerBurst();
+      onDoubleLike().catch(() => {});
+      e?.stopPropagation?.();
+    }
+    lastTap.current = now;
+  };
+
+  return (
+    <div
+      className="relative w-full h-full overflow-hidden rounded-xl"
+      style={{
+        background: selectedBackground,
+      }}
+      role="button"
+      tabIndex={0}
+      aria-label="Open post"
+      onClick={(e) => {
+        void handleTap(e);
+      }}
+      onTouchEnd={(e) => {
+        void handleTap(e);
+      }}
+    >
+      {isBurst && (
+        <div className="absolute inset-0 bg-white/10 animate-[pulse_280ms_ease-out]" aria-hidden />
+      )}
+
+      <div
+        className="absolute inset-0 p-3 flex"
+        style={{
+          fontFamily,
+          color: textColor,
+          alignItems: 'flex-start',
+        }}
+      >
+        <p className="text-[13px] font-semibold leading-snug line-clamp-4 drop-shadow-sm">
+          {displayText}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function CaptionText({ caption }: { caption: string }) {
   const [isExpanded, setIsExpanded] = React.useState(false);
   const maxLength = 100;
@@ -1711,7 +1792,7 @@ function ShortsLikeBurstLines() {
   );
 }
 
-function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onCarouselIndexChange, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled: _videoCaptionsEnabled, videoCaptionText: _videoCaptionText, subtitlesEnabled, subtitleText: _subtitleText, postUserHandle, postLocationLabel: _postLocationLabel, postCreatedAt, postId, priority = false }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onCarouselIndexChange?: (index: number) => void; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string; postId?: string; priority?: boolean }) {
+function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onCarouselIndexChange, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled: _videoCaptionsEnabled, videoCaptionText: _videoCaptionText, subtitlesEnabled, subtitleText: _subtitleText, postUserHandle, postLocationLabel: _postLocationLabel, postCreatedAt, postId, priority = false, tileMode = false }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onCarouselIndexChange?: (index: number) => void; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string; postId?: string; priority?: boolean; tileMode?: boolean }) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [burst, setBurst] = React.useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1748,7 +1829,9 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     const h = typeof window !== 'undefined' ? window.location.hostname : '';
     if (h === 'localhost' || h === '127.0.0.1') return u;
     // Blob URLs are origin-bound and won't work from phone when created on laptop
-    if (u.startsWith('blob:')) return '';
+    // Keep `blob:` URLs so media still renders when created on the same device/session.
+    // If the blob can't be resolved, the Media component will show its error/placeholder UI.
+    if (u.startsWith('blob:')) return u;
     return u
       .replace(/http:\/\/localhost:8000\//g, `http://${h}:8000/`)
       .replace(/https:\/\/localhost:8000\//g, `https://${h}:8000/`)
@@ -2297,6 +2380,18 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
 
   // Calculate container style with Instagram aspect ratio clamping
   const containerStyle: React.CSSProperties = React.useMemo(() => {
+    if (tileMode) {
+      return {
+        width: '100%',
+        height: '100%',
+        maxHeight: 'none',
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        boxSizing: 'border-box',
+      };
+    }
     // If we have aspect ratio, use Instagram clamping
     if (aspectRatio) {
       const dimensions = getInstagramImageDimensions(
@@ -2329,7 +2424,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   }, [aspectRatio]);
 
   return (
-    <div className="mx-0 my-0 select-none">
+    <div className={tileMode ? 'mx-0 my-0 select-none w-full h-full' : 'mx-0 my-0 select-none'}>
       <div
         ref={mediaContainerRef}
         role="button"
@@ -2376,7 +2471,11 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
             handleTouchEnd(e);
           }
         }}
-        className="relative aspect-[9/16] max-h-[55vh] rounded-2xl overflow-hidden bg-gray-900 mx-auto shadow-lg"
+        className={
+          tileMode
+            ? 'relative w-full h-full max-h-none rounded-xl overflow-hidden bg-gray-900 shadow-none'
+            : 'relative aspect-[9/16] max-h-[55vh] rounded-2xl overflow-hidden bg-gray-900 mx-auto shadow-lg'
+        }
         style={containerStyle}
       >
         {(() => {
@@ -3853,6 +3952,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   // Check if post has media
   const hasMedia = !!(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0));
   const isTextOnly = post.text && !post.mediaUrl && (!post.mediaItems || post.mediaItems.length === 0);
+  const isTileBoostMode = engagementVariant === 'boost';
 
   // If this is a text-only post with a templateId, derive style from TEXT_STORY_TEMPLATES
   const templateForText = post.templateId
@@ -3873,12 +3973,23 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   }
 
   return (
-    <article ref={articleRef} aria-labelledby={titleId} className="mx-0 mb-6 overflow-visible border-0 border-b border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out]" style={{ backgroundColor: '#030712' }}>
+    <article
+      ref={articleRef}
+      aria-labelledby={titleId}
+      className={`mx-0 border-0 border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out] relative ${
+        isTileBoostMode
+          ? 'w-full overflow-hidden aspect-square rounded-xl mb-0'
+          : 'overflow-visible border-b mb-6'
+      }`}
+      style={{ backgroundColor: '#030712' }}
+    >
       {/* overflow-visible: PostHeader quick-actions (absolute) must not be clipped by the card */}
       {/* Show PostHeader normally for text-only posts */}
-      {isTextOnly && <PostHeader post={post} onFollow={onFollow} onOpenDM={onOpenDM} isOverlaid={false} onMenuClick={() => setMenuOpen(true)} />}
-      <TagRow tags={post.tags} />
-      {post.isBoosted && (
+      {isTextOnly && !isTileBoostMode && (
+        <PostHeader post={post} onFollow={onFollow} onOpenDM={onOpenDM} isOverlaid={false} onMenuClick={() => setMenuOpen(true)} />
+      )}
+      {!isTileBoostMode && <TagRow tags={post.tags} />}
+      {!isTileBoostMode && post.isBoosted && (
         <div className="px-4 pt-2 pb-1.5 flex items-center gap-2">
           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-500/20 text-amber-400 border border-amber-500/40">
             Sponsored
@@ -3889,16 +4000,46 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         </div>
       )}
       {/* overflow-visible: menu from overlaid PostHeader extends below header; Media clips itself */}
-      <div className="relative w-full overflow-visible" style={{ maxWidth: '100%', boxSizing: 'border-box' }}>
-        {/* PostHeader overlaid on media for posts with media */}
-        {hasMedia && (
-          <div className="absolute top-0 left-0 right-0 z-20 pointer-events-none">
-            <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
-              <PostHeader post={post} onFollow={onFollow} onOpenDM={onOpenDM} isOverlaid={true} onMenuClick={() => setMenuOpen(true)} />
+      <div
+        className={isTileBoostMode ? 'relative w-full h-full overflow-hidden' : 'relative w-full overflow-visible'}
+        style={{ maxWidth: '100%', boxSizing: 'border-box' }}
+      >
+        {/* Boost icon corner (boost feed tile mode) */}
+        {showBoostIcon && isTileBoostMode && (
+          <div className="absolute top-3 right-3 z-30 pointer-events-none">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-white bg-[#FE2C55] shadow-[0_6px_18px_rgba(254,44,85,0.45)]">
+              <LuFlame className="text-white" size={22} strokeWidth={2.4} aria-hidden />
             </div>
           </div>
         )}
+
+        {/* In boost tile mode the whole tile is the action (so tapping it opens Boost modal). */}
+        {isTileBoostMode && onBoost && (
+          <button
+            type="button"
+            className="absolute inset-0 z-20 bg-transparent"
+            aria-label="Boost this post"
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              void onBoost();
+            }}
+          />
+        )}
+        {/* PostHeader overlaid on media for posts with media */}
+        {hasMedia && (
+          <div className="absolute top-0 left-0 right-0 z-20 pointer-events-none">
+            {!isTileBoostMode && (
+              <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+                <PostHeader post={post} onFollow={onFollow} onOpenDM={onOpenDM} isOverlaid={true} onMenuClick={() => setMenuOpen(true)} />
+              </div>
+            )}
+          </div>
+        )}
         {isTextOnly ? (
+        isTileBoostMode ? (
+          <TileTextCard text={post.text || ''} onDoubleLike={onLike} textStyle={effectiveTextStyle} />
+        ) : (
           <>
             <TextCard
               text={post.text || ''}
@@ -3910,19 +4051,20 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
               createdAt={post.createdAt?.toString()}
             />
             {/* Tagged users: first 3 profile pics + "X people tagged" for text-only posts */}
-            {post.taggedUsers && post.taggedUsers.length > 0 && (
+            {!isTileBoostMode && post.taggedUsers && post.taggedUsers.length > 0 && (
               <TaggedAvatars
                 taggedUserHandles={post.taggedUsers}
                 onShowTaggedUsers={() => setShowTaggedUsersModal(true)}
               />
             )}
           </>
+        )
         ) : (
           <Media
             url={post.mediaUrl}
             mediaType={post.mediaType}
-            text={post.text}
-            imageText={post.imageText}
+            text={isTileBoostMode ? undefined : post.text}
+            imageText={isTileBoostMode ? undefined : post.imageText}
             stickers={post.stickers}
             mediaItems={post.mediaItems}
             onDoubleLike={onLike}
@@ -3935,8 +4077,8 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
                 setHeartAnimation({ startX: clientX, startY: clientY });
               }, 50);
             }}
-            taggedUsers={post.taggedUsers ?? []}
-            onShowTaggedUsers={() => setShowTaggedUsersModal(true)}
+            taggedUsers={isTileBoostMode ? undefined : (post.taggedUsers ?? [])}
+            onShowTaggedUsers={isTileBoostMode ? undefined : () => setShowTaggedUsersModal(true)}
             templateId={post.templateId}
             videoCaptionsEnabled={post.videoCaptionsEnabled}
             videoCaptionText={post.videoCaptionText}
@@ -3946,11 +4088,12 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             postLocationLabel={post.locationLabel}
             postCreatedAt={post.createdAt?.toString()}
             priority={priority}
+          tileMode={isTileBoostMode}
           />
         )}
         {/* Carousel Indicator - Overlaid on media with scrim */}
         {/* Show row if: multiple media items exist */}
-        {post.mediaItems && post.mediaItems.length > 1 ? (
+        {!isTileBoostMode && post.mediaItems && post.mediaItems.length > 1 ? (
           <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none">
             {/* Scrim effect - gradient overlay for better readability */}
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/60 to-transparent pointer-events-none z-0" />
@@ -3982,36 +4125,40 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
           </div>
         ) : null}
       </div>
-      {/* Caption for image/video posts (timestamp is in header carousel) */}
-      {(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0)) && (
-        <div className="px-4 py-3">
-          {(post.caption || post.text) && (
-            <CaptionText caption={post.caption || post.text || ''} />
+      {/* Caption + engagement are intentionally hidden for tile-grid boost posts (phone Instagram style). */}
+      {!isTileBoostMode && (
+        <>
+          {(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0)) && (
+            <div className="px-4 py-3">
+              {(post.caption || post.text) && (
+                <CaptionText caption={post.caption || post.text || ''} />
+              )}
+            </div>
           )}
-        </div>
+          <EngagementBar
+            post={post}
+            onLike={onLike}
+            onShare={onShare}
+            onOpenComments={onOpenComments}
+            onReclip={onReclip}
+            currentUserHandle={user?.handle}
+            currentUserId={user?.id}
+            showMetricsIcon={showBoostIcon && isBoosted}
+            // Only show the blue Boost button where explicitly enabled (e.g. Boost page),
+            // not on normal news feed cards.
+            showBoostButton={false}
+            onBoost={onBoost}
+            onToggleMetrics={() => setIsMetricsOpen(!isMetricsOpen)}
+            isMetricsOpen={isMetricsOpen}
+            likeButtonRef={likeButtonRef}
+            variant={'default'}
+            knownBoosted={knownBoosted}
+            onShareSuccess={onShareSuccess}
+          />
+        </>
       )}
-      <EngagementBar
-        post={post}
-        onLike={onLike}
-        onShare={onShare}
-        onOpenComments={onOpenComments}
-        onReclip={onReclip}
-        currentUserHandle={user?.handle}
-        currentUserId={user?.id}
-        showMetricsIcon={engagementVariant === 'boost' ? false : (showBoostIcon && isBoosted)}
-        // Only show the blue Boost button where explicitly enabled (e.g. Boost page),
-        // not on normal news feed cards.
-        showBoostButton={engagementVariant === 'boost' && showBoostIcon}
-        onBoost={onBoost}
-        onToggleMetrics={() => setIsMetricsOpen(!isMetricsOpen)}
-        isMetricsOpen={isMetricsOpen}
-        likeButtonRef={likeButtonRef}
-        variant={engagementVariant === 'boost' ? 'boost' : 'default'}
-        knownBoosted={knownBoosted}
-        onShareSuccess={onShareSuccess}
-      />
       {/* Heart animation from tap to like button - rendered after EngagementBar so ref is set */}
-      {heartAnimation && (() => {
+      {!isTileBoostMode && heartAnimation && (() => {
         const el = likeButtonRef.current;
         return el ? (
           <HeartDropAnimation
@@ -4024,7 +4171,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         ) : null;
       })()}
       {/* News Ticker Banner */}
-      {post.bannerText && (
+      {!isTileBoostMode && post.bannerText && (
         <div className="h-7 bg-black dark:bg-black overflow-hidden border-t border-gray-700 dark:border-gray-700">
           <div className="news-ticker-container h-full flex items-center">
             <div className="news-ticker-text text-white dark:text-white font-semibold text-xs whitespace-nowrap">
@@ -4033,9 +4180,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
           </div>
         </div>
       )}
-      {engagementVariant === 'boost' ? (
-        <PostAnalyticsCard post={post} isOpen={isMetricsOpen} />
-      ) : (
+      {!isTileBoostMode && (
         showBoostIcon && <BoostMetrics post={post} isOpen={isMetricsOpen} />
       )}
       {user && (
@@ -6606,13 +6751,14 @@ function BoostPageWrapper() {
           </p>
         </div>
       ) : (
-        sortedBoostPosts.map(p => {
-          const status = classifyBoostStatus(p);
-          const quality = getQualityLabel(p);
-          const qualityReason = getQualityReason(p);
-          return (
-            <div key={p.id}>
-              <div className="mx-4 mt-4 mb-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
+        <div className="grid grid-cols-3 gap-[6px] px-2 pb-2 sm:grid-cols-3 md:grid-cols-4">
+          {sortedBoostPosts.map(p => {
+            const status = classifyBoostStatus(p);
+            const quality = getQualityLabel(p);
+            const qualityReason = getQualityReason(p);
+            return (
+              <div key={p.id}>
+                <div className="hidden sm:block mt-2 mb-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
                   <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${quality.tone}`}>
                     {quality.label}
@@ -6636,17 +6782,19 @@ function BoostPageWrapper() {
                 engagementVariant="boost"
                 knownBoosted={recentlyBoostedPostId === p.id || !!p.isBoosted}
                 onBoost={async () => {
+                  // Open immediately for snappy tile-tap UX, then validate in background.
+                  setSelectedPostForBoost(p);
+                  setBoostModalOpen(true);
                   const existing = await getActiveBoost(p.id);
                   if (existing?.isActive) {
+                    setBoostModalOpen(false);
+                    setSelectedPostForBoost(null);
                     Swal.fire(bottomSheet({
                       title: 'Already boosted',
                       message: 'This post is already boosted. It will expire in 6 hours.',
                       icon: 'alert',
                     }));
-                    return;
                   }
-                  setSelectedPostForBoost(p);
-                  setBoostModalOpen(true);
                 }}
                 onLike={async () => {
                   if (!online) {
@@ -6739,9 +6887,10 @@ function BoostPageWrapper() {
                 }}
                 onShareSuccess={(postId) => updateOne(postId, p => ({ ...p, stats: { ...p.stats, shares: p.stats.shares + 1 } }))}
               />
-            </div>
-          );
-        })
+              </div>
+            );
+          })}
+        </div>
       )}
       </div>
 
