@@ -42,6 +42,7 @@ export default function LoginPage() {
   const [mode, setMode] = React.useState<PageMode>('signup');
   const [loginError, setLoginError] = React.useState('');
   const [signupError, setSignupError] = React.useState('');
+  const [signupFieldErrors, setSignupFieldErrors] = React.useState<Record<string, string>>({});
   const [loginLoading, setLoginLoading] = React.useState(false);
   const [loginEmail, setLoginEmail] = React.useState('');
   const [loginPassword, setLoginPassword] = React.useState('');
@@ -217,39 +218,50 @@ export default function LoginPage() {
 
   function handleAccountSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const nextErrors: Record<string, string> = {};
     if (!email || !password || !confirmPassword) {
-      alert('Please fill in all required account fields');
-      return;
+      if (!email) nextErrors.email = 'Email is required.';
+      if (!password) nextErrors.password = 'Password is required.';
+      if (!confirmPassword) nextErrors.confirmPassword = 'Please confirm your password.';
     }
     if (password !== confirmPassword) {
-      alert('Passwords do not match');
+      nextErrors.confirmPassword = 'Passwords do not match.';
+    }
+    if (Object.keys(nextErrors).length > 0) {
+      setSignupFieldErrors(nextErrors);
+      setSignupError('Please fix the highlighted fields.');
       return;
     }
-    if (!birthMonth || !birthDay || !birthYear) {
-      alert('Please enter your date of birth');
-      return;
-    }
-    const age = getAgeFromBirthday();
-    if (age === null) {
-      alert('Please enter a valid date of birth');
-      return;
-    }
-    if (age < MIN_AGE) {
-      alert(`You must be at least ${MIN_AGE} years old to create an account`);
-      return;
-    }
+    setSignupFieldErrors({});
+    setSignupError('');
     updateStep(2);
   }
 
   function handleLocationSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const nextErrors: Record<string, string> = {};
     if (!name || !local || !regional || !national) {
-      alert('Please fill in all location fields');
+      if (!name) nextErrors.name = 'Full name is required.';
+      if (!national) nextErrors.national = 'Select your national area.';
+      if (!regional) nextErrors.regional = 'Select your regional area.';
+      if (!local) nextErrors.local = 'Select your local area.';
+    }
+    if (!birthMonth || !birthDay || !birthYear) {
+      nextErrors.birthdate = 'Please enter your date of birth.';
+    }
+    const age = getAgeFromBirthday();
+    if (age === null) {
+      nextErrors.birthdate = 'Please enter a valid date of birth.';
+    } else if (age < MIN_AGE) {
+      nextErrors.birthdate = `You must be at least ${MIN_AGE} years old to create an account.`;
+    }
+    if (Object.keys(nextErrors).length > 0) {
+      setSignupFieldErrors(nextErrors);
+      setSignupError('Please complete all required profile fields.');
       return;
     }
+    setSignupFieldErrors({});
     setSignupError('');
-
-    const age = getAgeFromBirthday();
     const consentTimestamp = new Date().toISOString();
 
     const userData = {
@@ -353,62 +365,6 @@ export default function LoginPage() {
         paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
       }}
     >
-      {/* Forgot password modal */}
-            {showForgotPassword && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-sm rounded-lg border border-gray-700 bg-gray-900 p-6">
-            <h3 className="text-lg font-medium text-white mb-2">Reset password</h3>
-            {forgotSent ? (
-              <>
-                <p className="text-sm text-gray-300 mb-4">
-                  If an account exists for that email, we&apos;ve sent a reset link. Check your inbox.
-                </p>
-                  <button
-                    type="button"
-                    onClick={() => { setShowForgotPassword(false); setForgotSent(false); setForgotEmail(''); }}
-                    className="w-full py-2 bg-gradient-to-r from-[#3b82f6] to-[#a855f7] text-white rounded-sm hover:brightness-110 text-sm font-medium"
-                  >
-                  Back to login
-                </button>
-              </>
-            ) : (
-              <>
-                <p className="text-sm text-gray-400 mb-4">Enter your email and we&apos;ll send you a link to reset your password.</p>
-                <input
-                  type="email"
-                  value={forgotEmail}
-                  onChange={e => setForgotEmail(e.target.value)}
-                  placeholder="Email"
-                  className="w-full rounded-sm border border-gray-600 bg-gray-800 px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-gray-500 mb-4"
-                  autoFocus
-                />
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => { setShowForgotPassword(false); setForgotEmail(''); }}
-                    className="flex-1 py-2 bg-gray-700 text-white rounded-sm hover:bg-gray-600 text-sm font-medium"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (forgotEmail.trim()) {
-                        setForgotSent(true);
-                        // TODO: Call API when backend supports it - apiRequest('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email: forgotEmail }) });
-                      }
-                    }}
-                    className="flex-1 py-2 bg-gradient-to-r from-[#3b82f6] to-[#a855f7] text-white rounded-sm hover:brightness-110 text-sm font-medium"
-                  >
-                    Send link
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
       <div className="w-full max-w-md flex-1 flex flex-col min-h-0">
         {/* Sign up / Log in toggle */}
         <div className="flex-shrink-0 flex justify-center gap-6 mb-3 sm:mb-4">
@@ -429,73 +385,129 @@ export default function LoginPage() {
         </div>
 
         {mode === 'login' ? (
-          <div className="max-w-md mx-auto rounded-2xl p-0.5 bg-[linear-gradient(90deg,#3b82f6,#a855f7)] shadow-lg">
-            <form
-              onSubmit={handleLoginSubmit}
-              className="rounded-2xl bg-black px-8 py-8 flex flex-col"
-            >
-            <div className="text-center mb-6">
-              <p className="text-xs text-gray-500 mb-2">No algorithms just places</p>
-              <h1 className="text-3xl font-light mb-2 tracking-tight text-white">Gazetteer</h1>
-              <p className="text-sm text-gray-400">Log in to your account</p>
-            </div>
-            <div className="space-y-3">
-              <input
-                type="email"
-                value={loginEmail}
-                onChange={e => setLoginEmail(e.target.value)}
-                placeholder="Email"
-                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
-                autoComplete="email"
-              />
-              <div className="relative">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={loginPassword}
-                  onChange={e => setLoginPassword(e.target.value)}
-                  placeholder="Password"
-                  className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
-                  autoComplete="current-password"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(p => !p)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                >
-                  {showPassword ? <FiEyeOff className="w-4 h-4" /> : <FiEye className="w-4 h-4" />}
-                </button>
+          <div className="max-w-md mx-auto rounded-2xl p-0.5 bg-[linear-gradient(90deg,#22d3ee,#06b6d4)] shadow-lg">
+            {showForgotPassword ? (
+              <div className="rounded-2xl bg-black px-8 py-8 flex flex-col">
+                <div className="text-center mb-6">
+                  <p className="text-xs text-gray-500 mb-2">Recovery</p>
+                  <h1 className="text-2xl font-light mb-2 tracking-tight text-white">Reset password</h1>
+                  <p className="text-sm text-gray-400">Recover your Gazetteer account</p>
+                </div>
+                {forgotSent ? (
+                  <div className="space-y-4">
+                    <p className="text-sm text-gray-300">
+                      If an account exists for that email, we&apos;ve sent a reset link. Check your inbox.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => { setShowForgotPassword(false); setForgotSent(false); setForgotEmail(''); }}
+                      className="w-full py-2 bg-gradient-to-r from-[#22d3ee] to-[#06b6d4] text-white rounded-sm hover:brightness-110 text-sm font-medium"
+                    >
+                      Back to login
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-sm text-gray-400">Enter your email and we&apos;ll send you a reset link.</p>
+                    <input
+                      type="email"
+                      value={forgotEmail}
+                      onChange={e => setForgotEmail(e.target.value)}
+                      placeholder="Email"
+                      className="w-full rounded-sm border border-gray-600 bg-gray-800 px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-gray-500"
+                      autoFocus
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { setShowForgotPassword(false); setForgotEmail(''); }}
+                        className="flex-1 py-2 bg-gray-700 text-white rounded-sm hover:bg-gray-600 text-sm font-medium"
+                      >
+                        Back
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (forgotEmail.trim()) {
+                            setForgotSent(true);
+                          }
+                        }}
+                        className="flex-1 py-2 bg-gradient-to-r from-[#22d3ee] to-[#06b6d4] text-white rounded-sm hover:brightness-110 text-sm font-medium"
+                      >
+                        Send link
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="text-right">
-                <button
-                  type="button"
-                  onClick={() => { setShowForgotPassword(true); setLoginError(''); }}
-                  className="text-xs text-blue-400 hover:underline"
-                >
-                  Forgot password?
-                </button>
-              </div>
-              {loginError && <p className="text-xs text-red-500">{loginError}</p>}
-            </div>
-            <div className="mt-6 space-y-3">
-              <button
-                type="submit"
-                disabled={loginLoading}
-                className="w-full px-4 py-2 bg-gradient-to-r from-[#3b82f6] to-[#a855f7] text-white rounded-sm hover:brightness-110 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+            ) : (
+              <form
+                onSubmit={handleLoginSubmit}
+                className="rounded-2xl bg-black px-8 py-8 flex flex-col"
               >
-                {loginLoading ? 'Logging in…' : 'Log in'}
-              </button>
-              <p className="text-xs text-center text-gray-400">
-                Don&apos;t have an account?{' '}
-                <button type="button" onClick={() => setMode('signup')} className="text-blue-500 hover:underline font-medium">
-                  Sign up
+              <div className="text-center mb-6">
+                <p className="text-xs text-gray-500 mb-2">No algorithms just places</p>
+                <h1 className="text-3xl font-light mb-2 tracking-tight text-white">Gazetteer</h1>
+                <p className="text-sm text-gray-400">Log in to your account</p>
+              </div>
+              <div className="space-y-3">
+                <input
+                  type="email"
+                  value={loginEmail}
+                  onChange={e => setLoginEmail(e.target.value)}
+                  placeholder="Email"
+                  className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                  autoComplete="email"
+                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={loginPassword}
+                    onChange={e => setLoginPassword(e.target.value)}
+                    placeholder="Password"
+                    className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(p => !p)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <FiEyeOff className="w-4 h-4" /> : <FiEye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <div className="text-right">
+                  <button
+                    type="button"
+                    onClick={() => { setShowForgotPassword(true); setLoginError(''); }}
+                    className="text-xs text-blue-400 hover:underline"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+                {loginError && <p className="text-xs text-red-500">{loginError}</p>}
+              </div>
+              <div className="mt-6 space-y-3">
+                <button
+                  type="submit"
+                  disabled={loginLoading}
+                  className="w-full px-4 py-2 bg-gradient-to-r from-[#22d3ee] to-[#06b6d4] text-white rounded-sm hover:brightness-110 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loginLoading ? 'Logging in…' : 'Log in'}
                 </button>
-              </p>
-            </div>
-            </form>
+                <p className="text-xs text-center text-gray-400">
+                  Don&apos;t have an account?{' '}
+                  <button type="button" onClick={() => setMode('signup')} className="text-blue-500 hover:underline font-medium">
+                    Sign up
+                  </button>
+                </p>
+              </div>
+              </form>
+            )}
           </div>
         ) : (
-        <div className="max-w-md mx-auto rounded-2xl p-[1.5px] bg-[linear-gradient(90deg,#3b82f6,#a855f7)] shadow-lg flex-shrink-0">
+        <div className="max-w-md mx-auto rounded-2xl p-[1.5px] bg-[linear-gradient(90deg,#22d3ee,#06b6d4)] shadow-lg flex-shrink-0">
         <form
           onSubmit={step === 1 ? handleAccountSubmit : handleLocationSubmit}
           className="rounded-2xl bg-black flex flex-col min-h-0"
@@ -527,23 +539,28 @@ export default function LoginPage() {
                 </span>
               </h1>
               <p className="text-xs sm:text-sm text-gray-400 mb-4 sm:mb-6 font-normal">
-                {step === 1 ? 'Create your account' : 'No algorithms just places'}
+                {step === 1 ? 'Step 1: Account security' : 'Step 2: Profile and location'}
               </p>
               
               {/* Step Indicators - two steps only */}
               <div className="flex justify-center items-center space-x-2 mb-4 sm:mb-6">
-                <div className={`h-1 rounded-full transition-all ${step >= 1 ? 'bg-gradient-to-r from-[#3b82f6] to-[#a855f7]' : 'bg-gray-300'}`} style={{ width: step >= 1 ? '80px' : '40px' }}></div>
-                <div className={`h-1 rounded-full transition-all ${step >= 2 ? 'bg-gradient-to-r from-[#3b82f6] to-[#a855f7]' : 'bg-gray-300'}`} style={{ width: step >= 2 ? '80px' : '40px' }}></div>
+                <div className={`h-1 rounded-full transition-all ${step >= 1 ? 'bg-gradient-to-r from-[#22d3ee] to-[#06b6d4]' : 'bg-gray-300'}`} style={{ width: step >= 1 ? '80px' : '40px' }}></div>
+                <div className={`h-1 rounded-full transition-all ${step >= 2 ? 'bg-gradient-to-r from-[#22d3ee] to-[#06b6d4]' : 'bg-gray-300'}`} style={{ width: step >= 2 ? '80px' : '40px' }}></div>
               </div>
             </div>
           </div>
 
           {/* Scrollable Content */}
           <div className="flex-1 min-h-0 overflow-y-auto px-6 sm:px-10 pb-8 space-y-2 sm:space-y-3">
+        {signupError && (
+          <div className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+            {signupError}
+          </div>
+        )}
 
         {step === 1 && (
           <>
-            {/* Step 1: Account Details - Gmail-style (email, password, birthday) */}
+            {/* Step 1: Account details (email + password) */}
             {/* Email */}
             <div>
               <input
@@ -555,6 +572,7 @@ export default function LoginPage() {
                 required
                 autoComplete="email"
               />
+              {signupFieldErrors.email && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.email}</p>}
             </div>
 
             {/* Password */}
@@ -579,6 +597,7 @@ export default function LoginPage() {
                   {showPassword ? <FiEyeOff className="w-4 h-4" /> : <FiEye className="w-4 h-4" />}
                 </button>
               </div>
+              {signupFieldErrors.password && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.password}</p>}
               {/* Password strength meter */}
               {password && (
                 <div className="mt-1.5 flex items-center gap-2">
@@ -630,9 +649,29 @@ export default function LoginPage() {
                   {password === confirmPassword ? 'Passwords match' : 'Passwords don\'t match'}
                 </p>
               )}
+              {signupFieldErrors.confirmPassword && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.confirmPassword}</p>}
             </div>
 
-            {/* Date of Birth - Google style (month dropdown, day, year) - required, 13+ */}
+          </>
+        )}
+
+        {step === 2 && (
+          <>
+            {/* Step 2: Location Selection */}
+            {/* Name Input */}
+            <div>
+              <input
+                value={name}
+                onChange={e => setName(e.target.value)}
+                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                placeholder="Full Name"
+                required
+                autoComplete="name"
+              />
+              {signupFieldErrors.name && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.name}</p>}
+            </div>
+
+            {/* Date of Birth - required, 13+ */}
             <div>
               <p className="text-xs text-gray-400 mb-2 px-1">Date of birth (you must be 13 or older)</p>
               <div className="grid grid-cols-12 gap-2">
@@ -675,23 +714,7 @@ export default function LoginPage() {
                   />
                 </div>
               </div>
-            </div>
-          </>
-        )}
-
-        {step === 2 && (
-          <>
-            {/* Step 2: Location Selection */}
-            {/* Name Input */}
-            <div>
-              <input
-                value={name}
-                onChange={e => setName(e.target.value)}
-                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
-                placeholder="Full Name"
-                required
-                autoComplete="name"
-              />
+              {signupFieldErrors.birthdate && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.birthdate}</p>}
             </div>
 
             {/* National Area */}
@@ -712,6 +735,7 @@ export default function LoginPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
               </div>
+              {signupFieldErrors.national && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.national}</p>}
             </div>
 
             {/* Regional Area */}
@@ -735,6 +759,7 @@ export default function LoginPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
               </div>
+              {signupFieldErrors.regional && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.regional}</p>}
             </div>
 
             {/* Local Area */}
@@ -769,6 +794,15 @@ export default function LoginPage() {
                   No local areas found for {regional}. Check browser console for details or add Google Maps API key.
                 </p>
               )}
+              {signupFieldErrors.local && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.local}</p>}
+            </div>
+
+            <div className="rounded-sm border border-white/10 bg-white/5 px-3 py-2">
+              <p className="text-[11px] text-gray-400">Your handle preview</p>
+              <p className="text-sm text-white font-medium">
+                @{(name.trim().split(/\s+/)[0] || 'yourname')}
+                {regional ? `@${regional}` : '@yourregion'}
+              </p>
             </div>
           </>
         )}
@@ -777,9 +811,9 @@ export default function LoginPage() {
             <div className="pt-6 mt-4 border-t border-gray-700 space-y-3">
               <button
                 type="submit"
-                className="w-full px-4 py-2 bg-gradient-to-r from-[#3b82f6] to-[#a855f7] text-white rounded-sm hover:brightness-110 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full px-4 py-2 bg-gradient-to-r from-[#22d3ee] to-[#06b6d4] text-white rounded-sm hover:brightness-110 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {step === 1 ? 'Create account' : 'Next'}
+                {step === 1 ? 'Continue' : 'Create account'}
               </button>
               
               {step === 2 && (

@@ -1762,7 +1762,7 @@ export default function InstantCreatePage() {
                                         previewVideoRef.current.currentTime = Math.max(0, Math.min(newTime, videoDuration));
                                     }}
                                 >
-                                    <div className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-100"
+                                    <div className="h-full bg-gradient-to-r from-cyan-400 to-cyan-600 transition-all duration-100"
                                         style={{ width: `${videoDuration > 0 ? (currentTime / videoDuration) * 100 : 0}%` }}
                                     />
                                 </div>
@@ -1934,7 +1934,7 @@ export default function InstantCreatePage() {
                                 const t2 = setTimeout(() => setCountdown(1), 2000);
                                 const t3 = setTimeout(() => { setCountdown(null); startRecording(); }, 3000);
                             }}
-                            className="w-20 h-20 rounded-full bg-gradient-to-br from-[#3b82f6] to-[#a855f7] border-4 border-white shadow-2xl flex items-center justify-center hover:scale-105 transition-all duration-300 active:scale-95"
+                            className="w-20 h-20 rounded-full bg-gradient-to-br from-[#22d3ee] to-[#06b6d4] border-4 border-white shadow-2xl flex items-center justify-center hover:scale-105 transition-all duration-300 active:scale-95"
                             aria-label={recordingMode === 'photo' ? 'Take photo' : 'Record video'}
                         >
                             <FiCircle className="w-10 h-10 text-white" fill="white" />

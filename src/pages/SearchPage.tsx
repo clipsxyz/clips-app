@@ -87,6 +87,34 @@ const MOCK_USERS_BY_COUNTRY = [
     { handle: 'SaoPauloNow', display_name: 'São Paulo Now', country: 'Brazil' },
 ];
 
+const RECENT_SEARCHES_KEY = 'searchRecentQueriesV1';
+const SAVED_SEARCHES_KEY = 'searchSavedQueriesV1';
+const MAX_RECENT_SEARCHES = 8;
+
+type SearchMode = 'locations' | 'venues' | 'landmarks' | 'users' | 'posts' | 'nearby';
+type SearchRefinement = 'all' | 'local' | 'regional';
+type RecentSearchItem = { q: string; mode: SearchMode; ts: number };
+
+function readSearchList(key: string): RecentSearchItem[] {
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+        return parsed.filter((x: any) => x && typeof x.q === 'string' && typeof x.mode === 'string');
+    } catch {
+        return [];
+    }
+}
+
+function writeSearchList(key: string, items: RecentSearchItem[]) {
+    try {
+        localStorage.setItem(key, JSON.stringify(items));
+    } catch {
+        // ignore storage errors
+    }
+}
+
 export default function SearchPage() {
     const nav = useNavigate();
     const { user } = useAuth();
@@ -98,11 +126,12 @@ export default function SearchPage() {
     const [suggestedUsers, setSuggestedUsers] = React.useState<Array<{ handle: string; display_name?: string }>>([]);
     const [followBusyHandle, setFollowBusyHandle] = React.useState<string | null>(null);
     const [localFollowState, setLocalFollowState] = React.useState<Record<string, boolean>>({});
+    const [recentSearches, setRecentSearches] = React.useState<RecentSearchItem[]>(() => readSearchList(RECENT_SEARCHES_KEY));
+    const [savedSearches, setSavedSearches] = React.useState<RecentSearchItem[]>(() => readSearchList(SAVED_SEARCHES_KEY));
+    const [refinement, setRefinement] = React.useState<SearchRefinement>('all');
 
     // High-level search mode chips: location / venue / users / posts / near me
-    type SearchMode = 'locations' | 'venues' | 'landmarks' | 'users' | 'posts' | 'nearby';
     const [searchMode, setSearchMode] = React.useState<SearchMode>('locations');
-    const [activeTab, setActiveTab] = React.useState<'locations' | 'users' | 'posts'>('locations');
 
     const modePlaceholder: Record<SearchMode, string> = {
         locations: 'Search by location',
@@ -127,8 +156,9 @@ export default function SearchPage() {
             switch (searchMode) {
                 case 'locations':
                 case 'venues':
-                case 'landmarks': // manual landmark text for now; reuse location suggestions as hints
-                    types = 'locations';
+                case 'landmarks':
+                    // Use blended result sources so a "Top" section can rank across entities.
+                    types = 'users,locations,posts';
                     break;
                 case 'nearby':
                 case 'users':
@@ -157,12 +187,36 @@ export default function SearchPage() {
     React.useEffect(() => {
         if (searchMode === 'nearby' && user?.local) {
             setShowSearchMode(true);
-            setActiveTab('users');
             setSearchQuery(user.local);
         }
     }, [searchMode, user?.local]);
 
+    const addRecentSearch = React.useCallback((q: string, mode: SearchMode) => {
+        const query = q.trim();
+        if (!query) return;
+        setRecentSearches((prev) => {
+            const next = [{ q: query, mode, ts: Date.now() }, ...prev.filter((x) => !(x.q.toLowerCase() === query.toLowerCase() && x.mode === mode))]
+                .slice(0, MAX_RECENT_SEARCHES);
+            writeSearchList(RECENT_SEARCHES_KEY, next);
+            return next;
+        });
+    }, []);
+
+    const toggleSaveSearch = React.useCallback((q: string, mode: SearchMode) => {
+        const query = q.trim();
+        if (!query) return;
+        setSavedSearches((prev) => {
+            const exists = prev.some((x) => x.q.toLowerCase() === query.toLowerCase() && x.mode === mode);
+            const next = exists
+                ? prev.filter((x) => !(x.q.toLowerCase() === query.toLowerCase() && x.mode === mode))
+                : [{ q: query, mode, ts: Date.now() }, ...prev].slice(0, MAX_RECENT_SEARCHES);
+            writeSearchList(SAVED_SEARCHES_KEY, next);
+            return next;
+        });
+    }, []);
+
     const goToLocation = (loc: string) => {
+        addRecentSearch(loc, searchMode);
         sessionStorage.setItem('pendingFilterType', 'location');
         sessionStorage.setItem('pendingLocation', loc);
         window.dispatchEvent(new CustomEvent('locationChange', { detail: { location: loc, filterType: 'location' } }));
@@ -170,6 +224,7 @@ export default function SearchPage() {
     };
 
     const goToVenue = (venue: string) => {
+        addRecentSearch(venue, searchMode);
         // Reuse feed routing with custom filter key set to the venue name.
         sessionStorage.setItem('pendingFilterType', 'venue');
         sessionStorage.setItem('pendingLocation', venue);
@@ -178,6 +233,7 @@ export default function SearchPage() {
     };
 
     const goToLandmark = (name: string) => {
+        addRecentSearch(name, searchMode);
         sessionStorage.setItem('pendingFilterType', 'landmark');
         sessionStorage.setItem('pendingLocation', name);
         window.dispatchEvent(new CustomEvent('locationChange', { detail: { location: name, filterType: 'landmark' } }));
@@ -185,8 +241,91 @@ export default function SearchPage() {
     };
 
     const goToUser = (handle: string) => {
+        addRecentSearch(handle, searchMode);
         nav('/user/' + encodeURIComponent(handle));
     };
+
+    const query = searchQuery.trim();
+    const isSearching = showSearchMode && !!query;
+    const isCurrentQuerySaved = savedSearches.some((x) => x.q.toLowerCase() === query.toLowerCase() && x.mode === searchMode);
+
+    const filteredLocations = React.useMemo(() => {
+        const items = sections.locations?.items || [];
+        if (refinement === 'all') return items;
+        const local = (user?.local || '').toLowerCase();
+        const regional = (user?.regional || '').toLowerCase();
+        return items.filter((loc: any) => {
+            const hay = `${loc?.name || ''} ${loc?.country || ''} ${loc?.type || ''}`.toLowerCase();
+            if (refinement === 'local') return !!local && hay.includes(local);
+            if (refinement === 'regional') return !!regional && hay.includes(regional);
+            return true;
+        });
+    }, [sections.locations?.items, refinement, user?.local, user?.regional]);
+
+    const filteredUsers = React.useMemo(() => {
+        const items = sections.users?.items || [];
+        if (refinement === 'all') return items;
+        const local = (user?.local || '').toLowerCase();
+        const regional = (user?.regional || '').toLowerCase();
+        return items.filter((u: any) => {
+            // unifiedSearch user payloads can vary; check multiple candidate fields.
+            const hay = [
+                u?.handle,
+                u?.display_name,
+                u?.local,
+                u?.regional,
+                u?.national,
+                u?.location_label,
+                u?.location,
+                u?.city,
+                u?.country,
+                u?.bio,
+            ]
+                .filter(Boolean)
+                .join(' ')
+                .toLowerCase();
+            if (refinement === 'local') return !!local && hay.includes(local);
+            if (refinement === 'regional') return !!regional && hay.includes(regional);
+            return true;
+        });
+    }, [sections.users?.items, refinement, user?.local, user?.regional]);
+
+    const topResults = React.useMemo(() => {
+        if (!isSearching) return [];
+        const rows: Array<{ id: string; kind: 'location' | 'venue' | 'landmark' | 'user' | 'post'; title: string; subtitle: string; onClick: () => void }> = [];
+        const addRow = (row: { id: string; kind: 'location' | 'venue' | 'landmark' | 'user' | 'post'; title: string; subtitle: string; onClick: () => void }) => {
+            if (!rows.some((r) => r.id === row.id)) rows.push(row);
+        };
+        (filteredLocations || []).slice(0, 4).forEach((loc: any) => {
+            const kind = searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
+            addRow({
+                id: `${kind}-${loc.name}-${loc.country || ''}`,
+                kind,
+                title: loc.name,
+                subtitle: `${loc.type || 'Place'}${loc.country ? ` • ${loc.country}` : ''}`,
+                onClick: () => (kind === 'venue' ? goToVenue(loc.name) : kind === 'landmark' ? goToLandmark(loc.name) : goToLocation(loc.name)),
+            });
+        });
+        (filteredUsers || []).slice(0, 3).forEach((u: any) => {
+            addRow({
+                id: `user-${u.handle}`,
+                kind: 'user',
+                title: u.handle,
+                subtitle: u.display_name || 'User',
+                onClick: () => goToUser(u.handle),
+            });
+        });
+        (sections.posts?.items || []).slice(0, 2).forEach((p: any) => {
+            addRow({
+                id: `post-${p.id}`,
+                kind: 'post',
+                title: p.text_content || p.caption || 'Post',
+                subtitle: p.location_label || 'Post result',
+                onClick: () => nav('/feed'),
+            });
+        });
+        return rows.slice(0, 8);
+    }, [isSearching, filteredLocations, filteredUsers, sections.posts?.items, searchMode, nav]);
 
     return (
         <div className="min-h-full bg-black">
@@ -275,7 +414,7 @@ export default function SearchPage() {
             </div>
 
             {/* Mode chips */}
-            <div className="flex gap-1.5 overflow-x-auto pt-1 pb-1 scrollbar-hide">
+            <div className="flex gap-2 overflow-x-auto pt-1 pb-1.5 scrollbar-hide">
                 {([
                     { id: 'locations' as const, label: 'Location', Icon: FiMapPin },
                     { id: 'venues' as const, label: 'Venue', Icon: TbBuilding },
@@ -305,12 +444,13 @@ export default function SearchPage() {
                                     setShowSearchMode(false);
                                 }
                             }}
-                            className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap border transition-colors ${
+                            className={`inline-flex min-h-[36px] items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-medium whitespace-nowrap border transition-colors ${
                                 active
                                     ? 'bg-white text-gray-900 border-white'
-                                    : 'bg-[#101010] text-gray-300 border-[#2a2a2a] hover:border-gray-600'
+                                    : 'bg-[#0d0d0f] text-gray-300 border-[#2a2a2a] hover:border-gray-500 hover:bg-[#141418]'
                             }`}
                         >
+                            <ChipIcon className="w-3.5 h-3.5" />
                             {chip.label}
                         </button>
                     );
@@ -319,6 +459,82 @@ export default function SearchPage() {
 
             {/* Outer card */}
             <div className="mt-1 rounded-3xl bg-[#050505] border border-[#181818] shadow-[0_18px_60px_rgba(0,0,0,0.85)] overflow-hidden">
+
+            {/* Empty query states: saved + recent searches */}
+            {!query && (
+                <div className="px-3 pt-3 pb-2 border-b border-[#181818] space-y-3">
+                    <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-[0.18em]">Saved searches</span>
+                        {savedSearches.length > 0 && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setSavedSearches([]);
+                                    writeSearchList(SAVED_SEARCHES_KEY, []);
+                                }}
+                                className="text-[11px] text-gray-500 hover:text-gray-300"
+                            >
+                                Clear
+                            </button>
+                        )}
+                    </div>
+                    {savedSearches.length === 0 ? (
+                        <div className="text-xs text-gray-500">No saved searches yet.</div>
+                    ) : (
+                        <div className="flex flex-wrap gap-2">
+                            {savedSearches.map((s) => (
+                                <button
+                                    key={`saved-${s.mode}-${s.q}`}
+                                    type="button"
+                                    onClick={() => {
+                                        setSearchMode(s.mode);
+                                        setShowSearchMode(true);
+                                        setSearchQuery(s.q);
+                                    }}
+                                    className="rounded-full border border-white/15 bg-black/60 px-3.5 py-2 text-xs text-gray-100 hover:border-white/35 min-h-[36px]"
+                                >
+                                    {s.q}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                    <div className="flex items-center justify-between pt-1">
+                        <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-[0.18em]">Recent searches</span>
+                        {recentSearches.length > 0 && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setRecentSearches([]);
+                                    writeSearchList(RECENT_SEARCHES_KEY, []);
+                                }}
+                                className="text-[11px] text-gray-500 hover:text-gray-300"
+                            >
+                                Clear
+                            </button>
+                        )}
+                    </div>
+                    {recentSearches.length === 0 ? (
+                        <div className="text-xs text-gray-500">Start searching to build recents.</div>
+                    ) : (
+                        <div className="flex flex-wrap gap-2">
+                            {recentSearches.map((s) => (
+                                <button
+                                    key={`recent-${s.mode}-${s.q}-${s.ts}`}
+                                    type="button"
+                                    onClick={() => {
+                                        setSearchMode(s.mode);
+                                        setShowSearchMode(true);
+                                        setSearchQuery(s.q);
+                                    }}
+                                    className="rounded-full border border-[#2a2a2a] bg-[#101010] px-3.5 py-2 text-xs text-gray-300 hover:border-gray-500 min-h-[36px]"
+                                >
+                                    {s.q}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* Popular landmarks when Landmark mode is active */}
             {searchMode === 'landmarks' && (
@@ -578,27 +794,92 @@ export default function SearchPage() {
                 </div>
             )}
 
-            {/* Manual search results – restricted to the active high-level tab */}
-            {showSearchMode && searchQuery.trim() && (
+            {/* Manual search results – top blended + mode-specific sections */}
+            {isSearching && (
                 <div className="space-y-4 px-3 pt-3 pb-2">
+                    <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-[0.18em]">Top results</span>
+                        <button
+                            type="button"
+                            onClick={() => toggleSaveSearch(query, searchMode)}
+                            className="text-[11px] text-gray-400 hover:text-white"
+                        >
+                            {isCurrentQuerySaved ? 'Saved' : 'Save search'}
+                        </button>
+                    </div>
+
+                    <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+                        {([
+                            { id: 'all' as const, label: 'All' },
+                            { id: 'local' as const, label: user?.local ? `In ${user.local}` : 'In local' },
+                            { id: 'regional' as const, label: user?.regional ? `In ${user.regional}` : 'In regional' },
+                        ]).map((chip) => (
+                            <button
+                                key={chip.id}
+                                type="button"
+                                onClick={() => setRefinement(chip.id)}
+                                className={`px-3.5 py-2 rounded-full text-[11px] font-medium border whitespace-nowrap min-h-[36px] ${
+                                    refinement === chip.id
+                                        ? 'bg-white text-gray-900 border-white'
+                                        : 'bg-[#101010] text-gray-300 border-[#2a2a2a] hover:border-gray-500'
+                                }`}
+                            >
+                                {chip.label}
+                            </button>
+                        ))}
+                    </div>
+
+                    {topResults.length > 0 ? (
+                        <div className="divide-y divide-white/10 rounded-xl border border-white/10 overflow-hidden bg-[#08080b]">
+                            {topResults.map((item) => (
+                                <button
+                                    key={item.id}
+                                    onClick={item.onClick}
+                                    className="w-full min-h-[52px] text-left flex items-center gap-3 p-3.5 hover:bg-white/5 transition-colors"
+                                >
+                                    <div className="h-8 w-8 rounded-full bg-white/10 border border-white/10 flex items-center justify-center">
+                                        {item.kind === 'user' ? <FiUsers className="text-white/90" /> :
+                                            item.kind === 'post' ? <FiPlayCircle className="text-white/90" /> :
+                                                item.kind === 'venue' ? <TbBuilding className="text-white/90" /> :
+                                                    item.kind === 'landmark' ? <LuLandmark className="text-white/90" /> :
+                                                        <FiMapPin className="text-white/90" />}
+                                    </div>
+                                    <div className="min-w-0">
+                                        <div className="font-medium text-gray-100 truncate">{item.title}</div>
+                                        <div className="text-xs text-gray-500 truncate">{item.subtitle}</div>
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="rounded-xl border border-dashed border-gray-700 px-3 py-4 text-sm text-gray-400">
+                            No top results for "{query}".
+                            <div className="mt-2 flex flex-wrap gap-2">
+                                <button type="button" onClick={() => setSearchMode('locations')} className="px-2.5 py-1 rounded-full border border-gray-600 text-xs hover:border-gray-400">Try Location</button>
+                                <button type="button" onClick={() => setSearchMode('venues')} className="px-2.5 py-1 rounded-full border border-gray-600 text-xs hover:border-gray-400">Try Venue</button>
+                                <button type="button" onClick={() => setSearchMode('users')} className="px-2.5 py-1 rounded-full border border-gray-600 text-xs hover:border-gray-400">Try Users</button>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Locations results when in Location tab */}
                     {searchMode === 'locations' && (
                         <div>
-                            {!(sections.locations?.items?.length) ? (
+                            {!(filteredLocations?.length) ? (
                                 <div className="text-sm text-gray-500 dark:text-gray-400">No matching locations</div>
                             ) : (
-                                <div className="divide-y divide-gray-200 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
-                                    {sections.locations!.items!.map((loc: any) => (
+                                <div className="divide-y divide-white/10 rounded-xl border border-white/10 overflow-hidden bg-[#08080b]">
+                                    {filteredLocations.map((loc: any) => (
                                         <button
                                             key={`${loc.name}-${loc.country || ''}`}
                                             onClick={() => goToLocation(loc.name)}
-                                            className="w-full text-left flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800"
+                                            className="w-full min-h-[52px] text-left flex items-center gap-3 p-3.5 hover:bg-white/5 transition-colors"
                                         >
-                                            <div className="h-8 w-8 rounded-full bg-brand-100 dark:bg-brand-900 flex items-center justify-center">
-                                                <FiMapPin className="text-brand-600 dark:text-brand-400" />
+                                            <div className="h-8 w-8 rounded-full bg-white/10 border border-white/10 flex items-center justify-center">
+                                                <FiMapPin className="text-white/90" />
                                             </div>
                                             <div>
-                                                <div className="font-medium text-gray-900 dark:text-gray-100">{loc.name}</div>
+                                                <div className="font-medium text-gray-100">{loc.name}</div>
                                                 <div className="text-xs text-gray-500">{loc.type}{loc.country ? ` • ${loc.country}` : ''}</div>
                                             </div>
                                         </button>
@@ -611,21 +892,21 @@ export default function SearchPage() {
                     {/* Venue tab: treat manual search as locations-only */}
                     {searchMode === 'venues' && (
                         <div>
-                            {!(sections.locations?.items?.length) ? (
+                            {!(filteredLocations?.length) ? (
                                 <div className="text-sm text-gray-500 dark:text-gray-400">No matching venues</div>
                             ) : (
-                                <div className="divide-y divide-gray-200 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
-                                    {sections.locations!.items!.map((loc: any) => (
+                                <div className="divide-y divide-white/10 rounded-xl border border-white/10 overflow-hidden bg-[#08080b]">
+                                    {filteredLocations.map((loc: any) => (
                                         <button
                                             key={`${loc.name}-${loc.country || ''}`}
                                             onClick={() => goToVenue(loc.name)}
-                                            className="w-full text-left flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800"
+                                            className="w-full min-h-[52px] text-left flex items-center gap-3 p-3.5 hover:bg-white/5 transition-colors"
                                         >
-                                            <div className="h-8 w-8 rounded-full bg-brand-100 dark:bg-brand-900 flex items-center justify-center">
-                                                <TbBuilding className="w-4 h-4 text-brand-600 dark:text-brand-400" aria-hidden />
+                                            <div className="h-8 w-8 rounded-full bg-white/10 border border-white/10 flex items-center justify-center">
+                                                <TbBuilding className="w-4 h-4 text-white/90" aria-hidden />
                                             </div>
                                             <div>
-                                                <div className="font-medium text-gray-900 dark:text-gray-100">{loc.name}</div>
+                                                <div className="font-medium text-gray-100">{loc.name}</div>
                                                 <div className="text-xs text-gray-500">{loc.type}{loc.country ? ` • ${loc.country}` : ''}</div>
                                             </div>
                                         </button>
@@ -638,21 +919,21 @@ export default function SearchPage() {
                     {/* Landmark tab: location API hints; open landmark feed with per-row icon */}
                     {searchMode === 'landmarks' && (
                         <div>
-                            {!(sections.locations?.items?.length) ? (
+                            {!(filteredLocations?.length) ? (
                                 <div className="text-sm text-gray-500 dark:text-gray-400">No matching landmarks</div>
                             ) : (
-                                <div className="divide-y divide-gray-200 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
-                                    {sections.locations!.items!.map((loc: any) => (
+                                <div className="divide-y divide-white/10 rounded-xl border border-white/10 overflow-hidden bg-[#08080b]">
+                                    {filteredLocations.map((loc: any) => (
                                         <button
                                             key={`landmark-${loc.name}-${loc.country || ''}`}
                                             onClick={() => goToLandmark(loc.name)}
-                                            className="w-full text-left flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800"
+                                            className="w-full min-h-[52px] text-left flex items-center gap-3 p-3.5 hover:bg-white/5 transition-colors"
                                         >
-                                            <div className="h-8 w-8 rounded-full bg-amber-500/15 dark:bg-amber-500/20 border border-amber-400/30 flex items-center justify-center">
+                                            <div className="h-8 w-8 rounded-full bg-amber-500/15 border border-amber-400/30 flex items-center justify-center">
                                                 {LandmarkIconForName(loc.name, 'w-4 h-4')}
                                             </div>
                                             <div>
-                                                <div className="font-medium text-gray-900 dark:text-gray-100">{loc.name}</div>
+                                                <div className="font-medium text-gray-100">{loc.name}</div>
                                                 <div className="text-xs text-gray-500">{loc.type}{loc.country ? ` • ${loc.country}` : ''}</div>
                                             </div>
                                         </button>
@@ -665,21 +946,21 @@ export default function SearchPage() {
                     {/* Users results when in Users tab */}
                     {searchMode === 'users' && (
                         <div>
-                            {!(sections.users?.items?.length) ? (
+                            {!(filteredUsers?.length) ? (
                                 <div className="text-sm text-gray-500 dark:text-gray-400">No users found</div>
                             ) : (
-                                <div className="divide-y divide-gray-200 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
-                                    {sections.users!.items!.map((u: any) => (
+                                <div className="divide-y divide-white/10 rounded-xl border border-white/10 overflow-hidden bg-[#08080b]">
+                                    {filteredUsers.map((u: any) => (
                                         <button
                                             key={u.handle}
                                             onClick={() => goToUser(u.handle)}
-                                            className="w-full text-left flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800"
+                                            className="w-full min-h-[52px] text-left flex items-center gap-3 p-3.5 hover:bg-white/5 transition-colors"
                                         >
-                                            <div className="h-8 w-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
-                                                <FiUsers className="text-gray-700 dark:text-gray-200" />
+                                            <div className="h-8 w-8 rounded-full bg-white/10 border border-white/10 flex items-center justify-center">
+                                                <FiUsers className="text-white/90" />
                                             </div>
                                             <div>
-                                                <div className="font-medium text-gray-900 dark:text-gray-100">{u.handle}</div>
+                                                <div className="font-medium text-gray-100">{u.handle}</div>
                                                 {u.display_name && <div className="text-xs text-gray-500">{u.display_name}</div>}
                                             </div>
                                         </button>
@@ -692,23 +973,23 @@ export default function SearchPage() {
                     {/* Nearby tab reuses users-search but with local empty-state text */}
                     {searchMode === 'nearby' && (
                         <div>
-                            {!(sections.users?.items?.length) ? (
+                            {!(filteredUsers?.length) ? (
                                 <div className="text-sm text-gray-500 dark:text-gray-400">
                                     {`No stories in ${user?.local || 'your area'} yet`}
                                 </div>
                             ) : (
-                                <div className="divide-y divide-gray-200 dark:divide-gray-800 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
-                                    {sections.users!.items!.map((u: any) => (
+                                <div className="divide-y divide-white/10 rounded-xl border border-white/10 overflow-hidden bg-[#08080b]">
+                                    {filteredUsers.map((u: any) => (
                                         <button
                                             key={u.handle}
                                             onClick={() => goToUser(u.handle)}
-                                            className="w-full text-left flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800"
+                                            className="w-full min-h-[52px] text-left flex items-center gap-3 p-3.5 hover:bg-white/5 transition-colors"
                                         >
-                                            <div className="h-8 w-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
-                                                <FiUsers className="text-gray-700 dark:text-gray-200" />
+                                            <div className="h-8 w-8 rounded-full bg-white/10 border border-white/10 flex items-center justify-center">
+                                                <FiUsers className="text-white/90" />
                                             </div>
                                             <div>
-                                                <div className="font-medium text-gray-900 dark:text-gray-100">{u.handle}</div>
+                                                <div className="font-medium text-gray-100">{u.handle}</div>
                                                 {u.display_name && <div className="text-xs text-gray-500">{u.display_name}</div>}
                                             </div>
                                         </button>

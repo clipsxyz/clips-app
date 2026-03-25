@@ -512,7 +512,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
       <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/50 to-transparent pointer-events-none z-0" />
 
       <div className="relative px-3 z-10">
-        <div className="absolute inset-x-1 -inset-y-2 rounded-2xl bg-gradient-to-r from-blue-500/40 via-purple-500/40 to-cyan-400/35 blur-xl pointer-events-none" />
+        <div className="absolute inset-x-1 -inset-y-2 rounded-2xl bg-gradient-to-r from-cyan-400/35 via-cyan-500/35 to-sky-400/30 blur-xl pointer-events-none" />
         <div className={`relative grid ${showNotificationsTab ? 'grid-cols-[1fr_1fr_1fr_auto_auto]' : 'grid-cols-[1fr_1fr_1fr_auto]'} gap-1.5`}>
           {tabs.map(t => {
           const isNotificationsTab = t === '__notifications__';
@@ -704,8 +704,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                 Boost your posts
               </h2>
               <p className="mt-2 text-sm leading-relaxed text-white/70">
-                Promote to reach more people in the feed — from{' '}
-                <span className="font-semibold text-white">EUR 4.99</span>.
+                Promote to reach more people in the feed.
               </p>
               <p className="mt-1.5 text-xs leading-relaxed text-white/50">
                 More views, faster discovery, and a stronger chance to trend with your audience.
@@ -3512,7 +3511,7 @@ function EngagementBar({
             {userReclipped ? (
               <div
                 className="p-[1.5px] rounded-full"
-                style={{ background: 'linear-gradient(135deg,#3b82f6,#a855f7)' }}
+                style={{ background: 'linear-gradient(135deg,#22d3ee,#06b6d4)' }}
               >
                 <div className="w-6 h-6 rounded-full bg-black flex items-center justify-center">
                   <FiRepeat className="w-3.5 h-3.5 text-white" />

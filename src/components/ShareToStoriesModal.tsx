@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import { createStory } from '../api/stories';
 import { incrementShares } from '../api/posts';
 import { showToast } from '../utils/toast';
+import { showUploadOverlay } from '../utils/uploadOverlay';
 import type { Post } from '../types';
 
 interface ShareToStoriesModalProps {
@@ -16,7 +16,6 @@ interface ShareToStoriesModalProps {
 
 const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClose, post, onShareSuccess }) => {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const [isSharing, setIsSharing] = useState(false);
 
   async function generateImageFromText(text: string): Promise<string> {
@@ -118,6 +117,17 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
         mediaType = 'image';
       }
 
+      // Mirror create-page story UX: close immediately and continue upload in mini overlay.
+      const overlay = showUploadOverlay({
+        thumbUrl: mediaUrl,
+        thumbType: mediaType === 'video' ? 'video' : 'image',
+        initialMessage: 'Sharing to Stories 24...',
+        uploadingTitle: 'Preparing story...',
+        successTitle: 'Story shared!',
+        errorTitle: 'Story share failed',
+      });
+      onClose();
+
       // Create the story (include venue and textStyle/template so shared text-only posts keep template on stories)
       await createStory(
         user.id,
@@ -156,13 +166,11 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
       }));
       window.dispatchEvent(new CustomEvent('storiesUpdated'));
 
-      // Close the modal and return to feed with success confirmation.
-      onClose();
+      overlay.success('Shared to Stories 24.');
       showToast?.('Successfully shared to Stories 24!');
-      navigate('/feed');
     } catch (e) {
       console.error('Failed to share to clips:', e);
-      alert('Failed to share to Clips 24. Please try again.');
+      showToast?.('Failed to share to Stories 24. Please try again.');
     } finally {
       setIsSharing(false);
     }

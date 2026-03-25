@@ -9,6 +9,7 @@ import { updateMetaTags, clearMetaTags } from '../utils/metaTags';
 import { getAvatarForHandle } from '../api/users';
 import { getFollowedUsers } from '../api/posts';
 import * as apiClient from '../api/client';
+import { showUploadOverlay } from '../utils/uploadOverlay';
 import Avatar from './Avatar';
 import type { Post } from '../types';
 
@@ -161,6 +162,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
             ? post.text.substring(0, maxLength) + '...'
             : post.text;
 
+        let overlay: ReturnType<typeof showUploadOverlay> | null = null;
         try {
             let mediaUrl = post.mediaUrl;
             let mediaType: 'image' | 'video' = (post.mediaType || 'image');
@@ -168,6 +170,15 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
                 mediaUrl = await generateImageFromText(truncatedText || '');
                 mediaType = 'image';
             }
+            overlay = showUploadOverlay({
+                thumbUrl: mediaUrl,
+                thumbType: mediaType === 'video' ? 'video' : 'image',
+                initialMessage: 'Sharing to Stories 24...',
+                uploadingTitle: 'Preparing story...',
+                successTitle: 'Story shared!',
+                errorTitle: 'Story share failed',
+            });
+            onClose();
             await createStory(
                 user.id,
                 user.handle || '',
@@ -180,12 +191,15 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
                 post.id,
                 post.userHandle
             );
-            onClose();
-            showToast?.('You shared this to Clips 24!');
-            navigate('/stories', { state: { openUserHandle: user.handle } });
+            overlay.success('Shared to Stories 24.');
+            showToast?.('You shared this to Stories 24!');
         } catch (e) {
             console.error('Failed to share to clips:', e);
-            alert('Failed to share to Clips 24. Please try again.');
+            if (overlay) {
+                overlay.error('Failed to share to Stories 24. Please try again.');
+            } else {
+                showToast?.('Failed to share to Stories 24. Please try again.');
+            }
         }
     };
 
