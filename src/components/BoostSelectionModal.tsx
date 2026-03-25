@@ -1,6 +1,8 @@
 import React from 'react';
 import { FiX, FiZap, FiMapPin, FiGlobe, FiTrendingUp } from 'react-icons/fi';
 import type { Post } from '../types';
+import { useAuth } from '../context/Auth';
+import { estimateBoostPriceApi } from '../api/client';
 
 export type BoostFeedType = 'local' | 'regional' | 'national';
 export type BoostGoal = 'views' | 'profile_visits' | 'messages';
@@ -27,6 +29,8 @@ interface BoostSelectionModalProps {
             goal: BoostGoal;
             durationHours: BoostDuration;
             estimatedReach: string;
+            radiusKm: number;
+            eligibleUsersCount: number;
         }
     ) => void;
 }
@@ -74,20 +78,6 @@ const durationOptions: Array<{ hours: BoostDuration; label: string; multiplier: 
     { hours: 72, label: '3d', multiplier: 6.2 },
 ];
 
-function estimateReach(feedType: BoostFeedType, durationHours: BoostDuration): string {
-    const baseByFeed: Record<BoostFeedType, number> = {
-        local: 1100,
-        regional: 2400,
-        national: 5200,
-    };
-    const duration = durationOptions.find((d) => d.hours === durationHours) ?? durationOptions[0];
-    const center = Math.round(baseByFeed[feedType] * duration.multiplier);
-    const low = Math.round(center * 0.78);
-    const high = Math.round(center * 1.32);
-    const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
-    return `${fmt(low)}-${fmt(high)} people`;
-}
-
 export default function BoostSelectionModal({
     isOpen,
     post,
@@ -99,32 +89,104 @@ export default function BoostSelectionModal({
     const [selectedDuration, setSelectedDuration] = React.useState<BoostDuration>(6);
     const [activeStep, setActiveStep] = React.useState<1 | 2 | 3>(1);
 
+    const { user } = useAuth();
+
     if (!isOpen || !post) return null;
+    const [radiusKm, setRadiusKm] = React.useState<number>(2);
+    const [eligibleUsersCount, setEligibleUsersCount] = React.useState<number | null>(null);
+    const [estimatedTotalPrice, setEstimatedTotalPrice] = React.useState<number | null>(null);
+    const [estimateLoading, setEstimateLoading] = React.useState(false);
+    const [estimateError, setEstimateError] = React.useState<string | null>(null);
+
+    const selectedBoostOption = selectedOption ? boostOptions.find((o) => o.type === selectedOption) : null;
+    const selectedDurationMeta = durationOptions.find((d) => d.hours === selectedDuration) ?? durationOptions[0];
+
+    const estimatedReach = eligibleUsersCount != null ? `${eligibleUsersCount.toLocaleString()} users` : '--';
+    const radiusOptions = [0.5, 1, 2, 3, 5, 10] as const;
+    const canContinue =
+        !!selectedOption &&
+        estimatedTotalPrice != null &&
+        estimatedTotalPrice > 0 &&
+        !estimateLoading;
+    const currentStep = activeStep;
 
     const handleSelect = (option: BoostOption) => {
         setSelectedOption(option.type);
     };
 
     const handleSubmit = () => {
-        if (selectedOption) {
-            const option = boostOptions.find(o => o.type === selectedOption);
-            const duration = durationOptions.find((d) => d.hours === selectedDuration) ?? durationOptions[0];
-            if (option) {
-                const computedPrice = Number((option.price * duration.multiplier).toFixed(2));
-                onSelect(selectedOption, computedPrice, {
-                    goal: selectedGoal,
-                    durationHours: selectedDuration,
-                    estimatedReach: estimateReach(selectedOption, selectedDuration),
-                });
-            }
-        }
+        if (!selectedOption || eligibleUsersCount == null || estimatedTotalPrice == null) return;
+        if (estimatedTotalPrice <= 0) return;
+
+        onSelect(selectedOption, estimatedTotalPrice, {
+            goal: selectedGoal,
+            durationHours: selectedDuration,
+            estimatedReach,
+            radiusKm,
+            eligibleUsersCount,
+        });
     };
 
-    const selectedBoostOption = selectedOption ? boostOptions.find((o) => o.type === selectedOption) : null;
-    const selectedDurationMeta = durationOptions.find((d) => d.hours === selectedDuration) ?? durationOptions[0];
-    const totalPrice = selectedBoostOption ? Number((selectedBoostOption.price * selectedDurationMeta.multiplier).toFixed(2)) : 0;
-    const estimatedReach = selectedOption ? estimateReach(selectedOption, selectedDuration) : '--';
-    const currentStep = selectedOption ? 3 : 2;
+    React.useEffect(() => {
+        let cancelled = false;
+
+        async function run() {
+            if (!selectedOption || !user?.id || !radiusKm || radiusKm <= 0) {
+                setEligibleUsersCount(null);
+                setEstimatedTotalPrice(null);
+                setEstimateError(null);
+                return;
+            }
+
+            setEstimateLoading(true);
+            setEstimateError(null);
+
+            const useLaravel = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+            try {
+                if (useLaravel) {
+                    const res = await estimateBoostPriceApi({
+                        feedType: selectedOption,
+                        userId: user.id,
+                        radiusKm,
+                        durationHours: selectedDuration,
+                    });
+
+                    if (cancelled) return;
+                    const ec = typeof res.eligibleUsersCount === 'number' ? res.eligibleUsersCount : null;
+                    const priceEur = typeof res.priceEur === 'number' ? res.priceEur : null;
+
+                    setEligibleUsersCount(ec);
+                    setEstimatedTotalPrice(priceEur);
+                    setEstimateLoading(false);
+                } else {
+                    // Mock: approximate based on feed tier + radius.
+                    const baseByFeed: Record<BoostFeedType, number> = {
+                        local: 1200,
+                        regional: 2600,
+                        national: 5400,
+                    };
+                    const multiplier = durationOptions.find((d) => d.hours === selectedDuration)?.multiplier ?? 1;
+                    const eligible = Math.max(0, Math.round(baseByFeed[selectedOption] * (radiusKm / 2)));
+                    const price = Number((eligible * 0.05 * multiplier).toFixed(2));
+                    if (cancelled) return;
+                    setEligibleUsersCount(eligible);
+                    setEstimatedTotalPrice(price);
+                    setEstimateLoading(false);
+                }
+            } catch (e: any) {
+                if (cancelled) return;
+                setEstimateLoading(false);
+                setEstimateError(e?.message ?? 'Could not estimate boost');
+                setEligibleUsersCount(null);
+                setEstimatedTotalPrice(null);
+            }
+        }
+
+        void run();
+        return () => {
+            cancelled = true;
+        };
+    }, [selectedOption, user?.id, radiusKm, selectedDuration]);
 
     React.useEffect(() => {
         if (!selectedOption && activeStep === 3) {
@@ -241,7 +303,10 @@ export default function BoostSelectionModal({
                     <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/70 dark:bg-gray-900/60 overflow-hidden">
                         <button
                             type="button"
-                            onClick={() => setActiveStep((prev) => (prev === 2 ? 3 : 2))}
+                            onClick={() => {
+                                if (!selectedOption) return;
+                                setActiveStep((prev) => (prev === 2 ? 3 : 2));
+                            }}
                             className="w-full px-3 py-2.5 flex items-center justify-between"
                         >
                             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">Step 2 - Audience</p>
@@ -258,7 +323,6 @@ export default function BoostSelectionModal({
                                             key={option.type}
                                             onClick={() => {
                                                 handleSelect(option);
-                                                setActiveStep(3);
                                             }}
                                             className={`w-full p-4 rounded-xl border-2 transition-all duration-200 text-left ${isSelected
                                                     ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20 shadow-lg scale-[1.02]'
@@ -280,8 +344,8 @@ export default function BoostSelectionModal({
                                                             {option.label}
                                                         </h3>
                                                         <div className="flex items-baseline gap-1">
-                                                            <span className="text-2xl font-bold text-brand-600 dark:text-brand-400">
-                                                                €{option.price.toFixed(2)}
+                                                            <span className="text-sm font-semibold text-brand-600 dark:text-brand-400">
+                                                                €0.05/user
                                                             </span>
                                                         </div>
                                                     </div>
@@ -294,7 +358,7 @@ export default function BoostSelectionModal({
                                                         </span>
                                                         <span className="text-xs text-gray-400">•</span>
                                                         <span className="text-xs text-gray-500 dark:text-gray-400">
-                                                            base 6h rate
+                                                            priced by radius
                                                         </span>
                                                     </div>
                                                 </div>
@@ -321,13 +385,60 @@ export default function BoostSelectionModal({
                                 })}
                             </div>
                         )}
+                        {activeStep === 2 && selectedOption && (
+                            <div className="px-3 pb-3 pt-0">
+                                <div className="mt-2 rounded-xl border border-gray-200 dark:border-gray-800 bg-white/10 dark:bg-gray-900/40 p-3">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">
+                                            Radius
+                                        </p>
+                                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{radiusKm} km</p>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        {radiusOptions.map((km) => {
+                                            const active = radiusKm === km;
+                                            return (
+                                                <button
+                                                    key={km}
+                                                    type="button"
+                                                    onClick={() => setRadiusKm(km)}
+                                                    className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${
+                                                        active
+                                                            ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-900/20 dark:text-brand-300'
+                                                            : 'border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800'
+                                                    }`}
+                                                >
+                                                    {km}km
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    {estimateLoading && (
+                                        <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                                            Calculating audience…
+                                        </p>
+                                    )}
+                                    {estimateError && (
+                                        <p className="mt-3 text-xs text-red-600 dark:text-red-400">
+                                            {estimateError}
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/70 dark:bg-gray-900/60 overflow-hidden">
                         <button
                             type="button"
-                            onClick={() => setActiveStep(3)}
-                            className="w-full px-3 py-2.5 flex items-center justify-between"
+                            onClick={() => {
+                                if (!selectedOption) return;
+                                setActiveStep(3);
+                            }}
+                            disabled={!selectedOption}
+                            className={`w-full px-3 py-2.5 flex items-center justify-between ${
+                                !selectedOption ? 'opacity-60 cursor-not-allowed' : ''
+                            }`}
                         >
                             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">Step 3 - Duration</p>
                             <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">{selectedDurationMeta.label}</span>
@@ -370,9 +481,9 @@ export default function BoostSelectionModal({
                     </div>
                     <button
                         onClick={handleSubmit}
-                        disabled={!selectedOption}
-                        style={selectedOption ? { background: 'linear-gradient(135deg, #3b82f6, #a855f7)' } : undefined}
-                        className={`w-full py-3 px-6 rounded-xl font-semibold text-white transition-all duration-200 ${selectedOption
+                        disabled={!canContinue}
+                        style={canContinue ? { background: 'linear-gradient(135deg, #3b82f6, #a855f7)' } : undefined}
+                        className={`w-full py-3 px-6 rounded-xl font-semibold text-white transition-all duration-200 ${canContinue
                                 ? 'hover:opacity-95 shadow-lg hover:shadow-xl active:scale-[0.98]'
                                 : 'bg-gray-300 dark:bg-gray-700 cursor-not-allowed'
                             }`}
@@ -380,9 +491,17 @@ export default function BoostSelectionModal({
                         Continue to Payment
                     </button>
                     <p className="text-xs text-center text-gray-500 dark:text-gray-400 mt-3">
-                        {selectedOption
-                            ? `Step 3 complete • Total today: €${totalPrice.toFixed(2)} • Payment is secure and encrypted`
-                            : 'Select an audience to continue to payment'}
+                        {selectedOption ? (
+                            estimateLoading ? (
+                                'Calculating audience…'
+                            ) : estimatedTotalPrice != null && estimatedTotalPrice > 0 ? (
+                                `Total today: €${estimatedTotalPrice.toFixed(2)} • Payment is secure and encrypted`
+                            ) : (
+                                'No eligible audience found for this radius'
+                            )
+                        ) : (
+                            'Select an audience to continue to payment'
+                        )}
                     </p>
                 </div>
             </div>

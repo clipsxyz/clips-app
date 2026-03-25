@@ -21,16 +21,16 @@ export interface BoostedPost {
     userId: string;
     feedType: BoostFeedType;
     price: number;
+    radiusKm?: number;
     activatedAt: number; // Epoch timestamp when boost was activated
-    expiresAt: number; // Epoch timestamp when boost expires (activatedAt + 6 hours)
+    expiresAt: number; // Epoch timestamp when boost expires
     isActive: boolean;
 }
 
 // Mock boosted posts storage (fallback when backend unavailable)
 let boostedPosts: BoostedPost[] = [];
 
-// 6 hours in milliseconds
-const BOOST_DURATION_MS = 6 * 60 * 60 * 1000;
+// (legacy) boost duration handled dynamically based on selected duration.
 
 /**
  * Activate boost for a post.
@@ -48,28 +48,43 @@ export async function activateBoost(
     userId: string,
     feedType: BoostFeedType,
     price: number,
-    paymentIntentId?: string
+    paymentIntentId?: string,
+    meta?: {
+        radiusKm?: number;
+        eligibleUsersCount?: number;
+        durationHours?: 6 | 12 | 24 | 72;
+        centerLocal?: string;
+    }
 ): Promise<BoostedPost> {
     if (paymentIntentId) {
         try {
-            await apiClient.activateBoostApi({
+            const res = await apiClient.activateBoostApi({
                 paymentIntentId,
                 postId,
                 feedType,
                 userId,
                 price,
+                radiusKm: meta?.radiusKm,
+                eligibleUsersCount: meta?.eligibleUsersCount,
+                durationHours: meta?.durationHours,
+                centerLocal: meta?.centerLocal,
             });
             if (typeof window !== 'undefined') {
                 window.dispatchEvent(new CustomEvent('boostActivated', { detail: { postId } }));
             }
             const now = Date.now();
+            const expiresAt =
+                res?.boost?.expiresAt
+                    ? new Date(res.boost.expiresAt).getTime()
+                    : now + (meta?.durationHours ?? 6) * 60 * 60 * 1000;
             return {
                 postId,
                 userId,
                 feedType,
                 price,
+                radiusKm: meta?.radiusKm,
                 activatedAt: now,
-                expiresAt: now + BOOST_DURATION_MS,
+                expiresAt,
                 isActive: true,
             };
         } catch (err) {
@@ -79,7 +94,8 @@ export async function activateBoost(
 
     // Mock flow: in-memory only
     const now = Date.now();
-    const expiresAt = now + BOOST_DURATION_MS;
+    const durationHours = meta?.durationHours ?? 6;
+    const expiresAt = now + durationHours * 60 * 60 * 1000;
     const existingBoost = boostedPosts.find((bp) => bp.postId === postId && bp.isActive);
 
     if (existingBoost) {
@@ -96,6 +112,7 @@ export async function activateBoost(
         userId,
         feedType,
         price,
+        radiusKm: meta?.radiusKm,
         activatedAt: now,
         expiresAt,
         isActive: true,

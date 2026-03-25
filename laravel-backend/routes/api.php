@@ -93,6 +93,9 @@ Route::get('/boost/prices', function () {
 // Create Stripe PaymentIntent for boost (no auth required for demo; add auth middleware in production)
 Route::post('/boost/create-payment-intent', [BoostController::class, 'createPaymentIntent']);
 
+// Estimate audience-based boost price (no auth required for demo)
+Route::post('/boost/estimate', [BoostController::class, 'estimate']);
+
 // Activate boost after Stripe payment (verifies PaymentIntent with Stripe)
 Route::post('/boost/activate', [BoostController::class, 'activate']);
 

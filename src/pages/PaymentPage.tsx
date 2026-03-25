@@ -22,6 +22,8 @@ interface PaymentPageLocationState {
     goal?: BoostGoal;
     durationHours?: BoostDuration;
     estimatedReach?: string;
+    radiusKm?: number;
+    eligibleUsersCount?: number;
 }
 
 function getFeedTypeLabel(type: BoostFeedType): string {
@@ -48,6 +50,9 @@ function StripePaymentForm({
     price,
     canBoostThisPost,
     userId,
+    radiusKm,
+    durationHours,
+    eligibleUsersCount,
     onSuccess,
 }: {
     post: Post;
@@ -55,6 +60,9 @@ function StripePaymentForm({
     price: number;
     canBoostThisPost: boolean;
     userId: string | undefined;
+    radiusKm?: number;
+    durationHours?: BoostDuration;
+    eligibleUsersCount?: number;
     onSuccess: () => void;
 }) {
     const stripe = useStripe();
@@ -73,7 +81,10 @@ function StripePaymentForm({
                 postId: post.id,
                 feedType,
                 price,
-                userId: post.userHandle === 'Bob@Ireland' ? 'bob-mock-user' : (userId ?? 'bob-mock-user'),
+                userId: userId ?? 'bob-mock-user',
+                radiusKm,
+                eligibleUsersCount,
+                durationHours,
             }));
             const { error } = await stripe.confirmPayment({
                 elements,
@@ -87,8 +98,12 @@ function StripePaymentForm({
                 setIsProcessing(false);
                 return;
             }
-            const boostUserId = post.userHandle === 'Bob@Ireland' ? 'bob-mock-user' : (userId ?? 'bob-mock-user');
-            await activateBoost(post.id, boostUserId, feedType, price);
+            const boostUserId = userId ?? 'bob-mock-user';
+            await activateBoost(post.id, boostUserId, feedType, price, undefined, {
+                radiusKm,
+                eligibleUsersCount,
+                durationHours,
+            });
             sessionStorage.removeItem('boostPaymentPending');
             onSuccess();
         } catch (err: any) {
@@ -157,11 +172,19 @@ export default function PaymentPage() {
 
     const fetchPaymentIntent = React.useCallback(() => {
         if (!state || !stripePromise) return;
+        if (!user?.id) return;
+
         setStripeError(null);
-        createBoostPaymentIntent(state.post.id, state.feedType)
+        createBoostPaymentIntent({
+            postId: state.post.id,
+            feedType: state.feedType,
+            userId: user.id,
+            radiusKm: state.radiusKm ?? 2,
+            durationHours: state.durationHours ?? 6,
+        })
             .then(({ clientSecret: secret }) => setClientSecret(secret))
             .catch((err) => setStripeError(err?.message ?? 'Could not start payment'));
-    }, [state?.post?.id, state?.feedType]);
+    }, [state?.post?.id, state?.feedType, state?.radiusKm, state?.durationHours, user?.id, stripePromise]);
 
     React.useEffect(() => {
         if (!state || !stripePromise) return;
@@ -217,7 +240,13 @@ export default function PaymentPage() {
         try {
             await new Promise((r) => setTimeout(r, 2000));
             const boostUserId = post.userHandle === 'Bob@Ireland' ? (user?.id ?? 'bob-mock-user') : user?.id;
-            if (boostUserId) await activateBoost(post.id, boostUserId, feedType, price);
+            if (boostUserId) {
+                await activateBoost(post.id, boostUserId, feedType, price, undefined, {
+                    radiusKm: state.radiusKm ?? undefined,
+                    eligibleUsersCount: state.eligibleUsersCount ?? undefined,
+                    durationHours: state.durationHours ?? undefined,
+                });
+            }
             setIsProcessing(false);
             await showSuccessAndNavigate();
         } catch (error) {
@@ -282,6 +311,9 @@ export default function PaymentPage() {
                                 price={price}
                                 canBoostThisPost={!!canBoostThisPost}
                                 userId={user?.id}
+                                radiusKm={state.radiusKm}
+                                durationHours={durationHours}
+                                eligibleUsersCount={state.eligibleUsersCount}
                                 onSuccess={showSuccessAndNavigate}
                             />
                         </Elements>

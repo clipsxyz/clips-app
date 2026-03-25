@@ -323,11 +323,47 @@ export async function markConversationRead(otherHandle: string) {
     });
 }
 
+export async function estimateBoostPriceApi(params: {
+    feedType: 'local' | 'regional' | 'national';
+    userId: string;
+    radiusKm: number;
+    durationHours: 6 | 12 | 24 | 72;
+}) {
+    const data = await apiRequest('/boost/estimate', {
+        method: 'POST',
+        body: JSON.stringify({
+            feedType: params.feedType,
+            userId: params.userId,
+            radiusKm: params.radiusKm,
+            durationHours: params.durationHours,
+        }),
+    }) as {
+        eligibleUsersCount?: number;
+        priceEur?: number;
+        priceCents?: number;
+        error?: string;
+    };
+    if ((data as any).error) throw new Error((data as any).error);
+    return data;
+}
+
 /** Create a Stripe PaymentIntent for boost. Returns { clientSecret }. */
-export async function createBoostPaymentIntent(postId: string, feedType: 'local' | 'regional' | 'national') {
+export async function createBoostPaymentIntent(params: {
+    postId: string;
+    feedType: 'local' | 'regional' | 'national';
+    userId: string;
+    radiusKm: number;
+    durationHours: 6 | 12 | 24 | 72;
+}) {
     const data = await apiRequest('/boost/create-payment-intent', {
         method: 'POST',
-        body: JSON.stringify({ postId, feedType }),
+        body: JSON.stringify({
+            postId: params.postId,
+            feedType: params.feedType,
+            userId: params.userId,
+            radiusKm: params.radiusKm,
+            durationHours: params.durationHours,
+        }),
     }) as { clientSecret?: string; client_secret?: string; error?: string };
     if (data.error) throw new Error(data.error);
     const clientSecret = data.clientSecret ?? data.client_secret;
@@ -342,6 +378,10 @@ export async function activateBoostApi(params: {
     feedType: 'local' | 'regional' | 'national';
     userId: string;
     price: number;
+    radiusKm?: number;
+    eligibleUsersCount?: number;
+    durationHours?: 6 | 12 | 24 | 72;
+    centerLocal?: string;
 }) {
     return apiRequest('/boost/activate', {
         method: 'POST',
@@ -351,6 +391,10 @@ export async function activateBoostApi(params: {
             feedType: params.feedType,
             userId: params.userId,
             price: params.price,
+            radiusKm: params.radiusKm,
+            eligibleUsersCount: params.eligibleUsersCount,
+            durationHours: params.durationHours,
+            centerLocal: params.centerLocal,
         }),
     }) as Promise<{ boost: { id: number; postId: string; feedType: string; activatedAt: string; expiresAt: string } }>;
 }

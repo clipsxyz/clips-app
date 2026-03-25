@@ -6077,6 +6077,8 @@ function FeedPageWrapper() {
                 goal: meta?.goal,
                 durationHours: meta?.durationHours,
                 estimatedReach: meta?.estimatedReach,
+                radiusKm: meta?.radiusKm,
+                eligibleUsersCount: meta?.eligibleUsersCount,
               }
             });
             setBoostModalOpen(false);
@@ -6837,6 +6839,8 @@ function BoostPageWrapper() {
                 goal: meta?.goal,
                 durationHours: meta?.durationHours,
                 estimatedReach: meta?.estimatedReach,
+                radiusKm: meta?.radiusKm,
+                eligibleUsersCount: meta?.eligibleUsersCount,
               }
             });
           }}

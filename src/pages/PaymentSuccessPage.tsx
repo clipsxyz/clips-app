@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { activateBoost } from '../api/boost';
-import type { BoostFeedType } from '../components/BoostSelectionModal';
+import type { BoostFeedType, BoostDuration } from '../components/BoostSelectionModal';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 
@@ -23,7 +23,7 @@ export default function PaymentSuccessPage() {
             navigate('/boost');
             return;
         }
-        let data: { postId: string; feedType: BoostFeedType; price: number; userId: string };
+        let data: { postId: string; feedType: BoostFeedType; price: number; userId: string; radiusKm?: number; eligibleUsersCount?: number; durationHours?: BoostDuration; centerLocal?: string };
         try {
             data = JSON.parse(raw);
         } catch {
@@ -44,7 +44,12 @@ export default function PaymentSuccessPage() {
         }
 
         setHandled(true);
-        activateBoost(data.postId, data.userId, data.feedType, data.price, paymentIntentId)
+        activateBoost(data.postId, data.userId, data.feedType, data.price, paymentIntentId, {
+            radiusKm: data.radiusKm,
+            eligibleUsersCount: data.eligibleUsersCount,
+            durationHours: data.durationHours,
+            centerLocal: data.centerLocal,
+        })
             .then(() => {
                 const label = data.feedType === 'local' ? 'Local' : data.feedType === 'regional' ? 'Regional' : 'National';
                 return Swal.fire(bottomSheet({
