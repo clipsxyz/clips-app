@@ -1,12 +1,12 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile, FiUserPlus, FiX, FiPlus, FiCheck } from 'react-icons/fi';
+import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile, FiUserPlus, FiX, FiPlus, FiCheck, FiMoreHorizontal, FiBellOff, FiTrash2 } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { getAvatarForHandle } from '../api/users';
 import { getNotifications, type Notification, type NotificationType, markNotificationRead, markAllNotificationsRead, getUnreadNotificationCount, deleteNotification } from '../api/notifications';
 import { getStoryInsightsForUser, type StoryInsight, fetchFollowedUsersStoryGroups } from '../api/stories';
-import { listConversations, seedMockDMs, type ConversationSummary, pinConversation, unpinConversation, acceptMessageRequest } from '../api/messages';
+import { listConversations, seedMockDMs, type ConversationSummary, pinConversation, unpinConversation, acceptMessageRequest, muteConversation, unmuteConversation, deleteConversation, markConversationRead, markConversationUnread } from '../api/messages';
 import { timeAgo } from '../utils/timeAgo';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
@@ -25,7 +25,14 @@ function ConversationItem({
     onAcceptRequest,
     navigate,
     currentUserHandle,
-    onFollow
+    onFollow,
+    onToggleMute,
+    onDeleteConversation,
+    onMarkRead,
+    onMarkUnread,
+    isSwipeOpen,
+    onSwipeOpenChange,
+    compactPhone,
 }: { 
     conv: ConversationSummary; 
     onPin?: () => void;
@@ -33,11 +40,31 @@ function ConversationItem({
     navigate: any;
     currentUserHandle?: string;
     onFollow?: (handle: string) => Promise<void>;
+    onToggleMute?: () => void;
+    onDeleteConversation?: () => void;
+    onMarkRead?: () => void;
+    onMarkUnread?: () => void;
+    isSwipeOpen?: boolean;
+    onSwipeOpenChange?: (handle: string | null) => void;
+    compactPhone?: boolean;
 }) {
+    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 390;
+    const SWIPE_ACTION_WIDTH = viewportWidth < 360 ? 188 : viewportWidth < 430 ? 208 : 224;
+    const SWIPE_OPEN_THRESHOLD_RATIO = viewportWidth < 360 ? 0.26 : viewportWidth < 430 ? 0.3 : 0.35;
     const isCurrentUser = currentUserHandle === conv.otherHandle;
     const hasStory = conv.hasUnviewedStories || false;
     const isFollowing = conv.isFollowing || false;
     const [showFollowCheck, setShowFollowCheck] = React.useState(isFollowing);
+    const [showActions, setShowActions] = React.useState(false);
+    const [swipeOffset, setSwipeOffset] = React.useState(0);
+    const [pulseOpen, setPulseOpen] = React.useState(false);
+    const touchStartXRef = React.useRef<number | null>(null);
+    const touchStartYRef = React.useRef<number | null>(null);
+    const touchLastXRef = React.useRef<number | null>(null);
+    const touchLastTsRef = React.useRef<number | null>(null);
+    const touchStartTsRef = React.useRef<number | null>(null);
+    const swipeStartOffsetRef = React.useRef(0);
+    const isSwipingRef = React.useRef(false);
 
     // Show follow checkmark briefly after following
     React.useEffect(() => {
@@ -47,6 +74,14 @@ function ConversationItem({
             setShowFollowCheck(false);
         }
     }, [isFollowing]);
+
+    React.useEffect(() => {
+        if (isSwipeOpen) {
+            setSwipeOffset(SWIPE_ACTION_WIDTH);
+        } else if (!isSwipingRef.current && swipeOffset !== 0) {
+            setSwipeOffset(0);
+        }
+    }, [isSwipeOpen, SWIPE_ACTION_WIDTH, swipeOffset]);
 
     const handleAvatarClick = (e?: React.MouseEvent) => {
         if (e) {
@@ -69,11 +104,176 @@ function ConversationItem({
     };
 
     const handleConversationClick = () => {
+        if (swipeOffset > 0) {
+            setSwipeOffset(0);
+            onSwipeOpenChange?.(null);
+            return;
+        }
         navigate(`/messages/${encodeURIComponent(conv.otherHandle)}`);
     };
 
+    const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+        if (e.touches.length !== 1) return;
+        const t = e.touches[0];
+        touchStartXRef.current = t.clientX;
+        touchStartYRef.current = t.clientY;
+        touchLastXRef.current = t.clientX;
+        touchLastTsRef.current = Date.now();
+        touchStartTsRef.current = Date.now();
+        swipeStartOffsetRef.current = swipeOffset;
+        isSwipingRef.current = false;
+    };
+
+    const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+        if (touchStartXRef.current === null || touchStartYRef.current === null || e.touches.length !== 1) return;
+        const t = e.touches[0];
+        const dx = t.clientX - touchStartXRef.current;
+        const dy = t.clientY - touchStartYRef.current;
+        if (!isSwipingRef.current) {
+            if (Math.abs(dx) < 8) return;
+            if (Math.abs(dy) > Math.abs(dx)) return;
+            isSwipingRef.current = true;
+        }
+        const next = Math.max(0, Math.min(SWIPE_ACTION_WIDTH, swipeStartOffsetRef.current - dx));
+        setSwipeOffset(next);
+        touchLastXRef.current = t.clientX;
+        touchLastTsRef.current = Date.now();
+        if (Math.abs(dx) > 6) e.preventDefault();
+    };
+
+    const handleTouchEnd = () => {
+        if (!isSwipingRef.current) {
+            touchStartXRef.current = null;
+            touchStartYRef.current = null;
+            return;
+        }
+        const now = Date.now();
+        const lastX = touchLastXRef.current ?? touchStartXRef.current;
+        const lastTs = touchLastTsRef.current ?? now;
+        const startTs = touchStartTsRef.current ?? lastTs;
+        const startX = touchStartXRef.current ?? lastX ?? 0;
+        const dt = Math.max(1, lastTs - startTs);
+        const vx = ((lastX ?? 0) - startX) / dt; // px/ms; negative means left fling
+        const isQuickLeftFling = vx < -0.45;
+        const shouldOpen = isQuickLeftFling || swipeOffset > SWIPE_ACTION_WIDTH * SWIPE_OPEN_THRESHOLD_RATIO;
+        setSwipeOffset(shouldOpen ? SWIPE_ACTION_WIDTH : 0);
+        if (shouldOpen) {
+            setPulseOpen(true);
+            window.setTimeout(() => setPulseOpen(false), 140);
+        }
+        onSwipeOpenChange?.(shouldOpen ? conv.otherHandle : null);
+        touchStartXRef.current = null;
+        touchStartYRef.current = null;
+        touchLastXRef.current = null;
+        touchLastTsRef.current = null;
+        touchStartTsRef.current = null;
+        isSwipingRef.current = false;
+    };
+
+    const closeSwipeActions = () => {
+        setSwipeOffset(0);
+        onSwipeOpenChange?.(null);
+    };
+    const revealProgress = Math.max(0, Math.min(1, swipeOffset / SWIPE_ACTION_WIDTH));
+    const rowScale = 1 - revealProgress * 0.012;
+    const rowShadow = revealProgress > 0 ? '0 8px 24px rgba(6, 182, 212, 0.16)' : 'none';
+
     return (
-        <div className="flex items-center gap-3 py-3 px-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors group">
+        <div className="relative overflow-hidden rounded-lg" data-conversation-row="true">
+            <div
+                className="pointer-events-none absolute inset-0 rounded-lg"
+                style={{
+                    opacity: revealProgress * 0.9,
+                    background: 'linear-gradient(90deg, rgba(8,12,18,0) 0%, rgba(8,12,18,0.14) 45%, rgba(8,12,18,0.34) 100%)',
+                    transition: isSwipingRef.current ? 'none' : 'opacity 180ms ease',
+                }}
+            />
+            <div
+                className="absolute inset-y-0 right-0 flex items-stretch z-0"
+                style={{
+                    opacity: revealProgress > 0.02 ? 1 : 0,
+                    pointerEvents: revealProgress > 0.02 ? 'auto' : 'none',
+                    transition: isSwipingRef.current ? 'none' : 'opacity 140ms ease',
+                }}
+            >
+                {onPin && (
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onPin();
+                            closeSwipeActions();
+                        }}
+                        className="w-14 sm:w-16 bg-cyan-600/90 hover:bg-cyan-500 active:brightness-110 active:scale-[0.98] transition-all text-white text-[11px] font-semibold"
+                        title={conv.isPinned ? 'Unpin conversation' : 'Pin conversation'}
+                    >
+                        {conv.isPinned ? 'Unpin' : 'Pin'}
+                    </button>
+                )}
+                {(onMarkRead || onMarkUnread) && (
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            if (conv.unread > 0) onMarkRead?.();
+                            else onMarkUnread?.();
+                            closeSwipeActions();
+                        }}
+                        className="w-14 sm:w-16 bg-sky-500/90 hover:bg-sky-400 active:brightness-110 active:scale-[0.98] transition-all text-white text-[11px] font-semibold"
+                        title={conv.unread > 0 ? 'Mark as read' : 'Mark as unread'}
+                    >
+                        {conv.unread > 0 ? 'Read' : 'Unread'}
+                    </button>
+                )}
+                {onToggleMute && (
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleMute();
+                            closeSwipeActions();
+                        }}
+                        className="w-14 sm:w-16 bg-cyan-800/90 hover:bg-cyan-700 active:brightness-110 active:scale-[0.98] transition-all text-white text-[11px] font-semibold"
+                        title={conv.isMuted ? 'Unmute conversation' : 'Mute conversation'}
+                    >
+                        {conv.isMuted ? 'Unmute' : 'Mute'}
+                    </button>
+                )}
+                {onDeleteConversation && (
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onDeleteConversation();
+                            closeSwipeActions();
+                        }}
+                        className="w-14 sm:w-16 bg-red-600/90 hover:bg-red-500 active:brightness-110 active:scale-[0.98] transition-all text-white text-[11px] font-semibold"
+                        title="Delete conversation"
+                    >
+                        Delete
+                    </button>
+                )}
+            </div>
+
+            <div
+                className={`relative z-10 flex items-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors group bg-white dark:bg-[#070a12] ${
+                    compactPhone ? 'gap-2.5 py-2.5 px-1.5' : 'gap-3 py-3 px-2'
+                }`}
+                style={{
+                    transform: `translateX(-${swipeOffset}px) scale(${rowScale})`,
+                    transformOrigin: 'right center',
+                    boxShadow: pulseOpen ? '0 0 0 2px rgba(34, 211, 238, 0.42), 0 10px 24px rgba(6, 182, 212, 0.24)' : rowShadow,
+                    transition: isSwipingRef.current ? 'none' : 'transform 180ms ease, box-shadow 180ms ease',
+                }}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                onTouchCancel={handleTouchEnd}
+            >
+            <div
+                className="pointer-events-none absolute inset-0 rounded-lg"
+                style={{
+                    opacity: pulseOpen ? 0.22 : 0,
+                    background: 'linear-gradient(90deg, rgba(34,211,238,0.05) 0%, rgba(34,211,238,0.22) 100%)',
+                    transition: 'opacity 140ms ease',
+                }}
+            />
             {/* Avatar with story/follow - separate from conversation button */}
             <div className="relative overflow-visible flex-shrink-0">
                 <Avatar
@@ -87,7 +287,7 @@ function ConversationItem({
                 {!isCurrentUser && onFollow && (isFollowing === false || isFollowing === undefined) && (
                     <button
                         onClick={handleFollowClick}
-                        className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-blue-500 hover:bg-blue-600 border-2 border-white dark:border-gray-900 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30"
+                        className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-cyan-500 hover:bg-cyan-600 border-2 border-white dark:border-gray-900 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30"
                         aria-label="Follow user"
                     >
                         <FiPlus className="w-3 h-3 text-white" strokeWidth={2.5} />
@@ -103,16 +303,16 @@ function ConversationItem({
             {/* Conversation content - clickable to open DM */}
             <button
                 onClick={handleConversationClick}
-                className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                className={`flex items-center flex-1 min-w-0 text-left ${compactPhone ? 'gap-2.5' : 'gap-3'}`}
             >
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                        <span className="font-medium truncate">{conv.otherHandle}</span>
+                        <span className={`font-medium truncate ${compactPhone ? 'text-[13px]' : ''}`}>{conv.otherHandle}</span>
                         {conv.isPinned && (
-                            <FiBookmark className="w-3 h-3 text-blue-500 fill-blue-500 flex-shrink-0" />
+                            <FiBookmark className="w-3 h-3 text-cyan-400 fill-cyan-400 flex-shrink-0" />
                         )}
                     </div>
-                    <div className="text-xs text-gray-500 truncate">
+                    <div className={`text-gray-500 truncate ${compactPhone ? 'text-[11px]' : 'text-xs'}`}>
                         {conv.lastMessage?.text || 'Photo'}
                     </div>
                 </div>
@@ -121,41 +321,106 @@ function ConversationItem({
                         {conv.lastMessage ? timeAgo(conv.lastMessage.timestamp) : ''}
                     </div>
                     {conv.unread > 0 && (
-                        <span className="px-1.5 py-0.5 bg-blue-500 text-white text-[10px] rounded-full min-w-[18px] text-center">
+                        <span className="px-1.5 py-0.5 bg-cyan-500 text-white text-[10px] rounded-full min-w-[18px] text-center">
                             {conv.unread > 9 ? '9+' : conv.unread}
                         </span>
                     )}
                 </div>
             </button>
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                {conv.isRequest && onAcceptRequest && (
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onAcceptRequest();
-                        }}
-                        className="p-2 hover:bg-gray-700 rounded-full transition-colors"
-                        title="Accept"
-                    >
-                        <span className="text-lg">✓</span>
-                    </button>
-                )}
-                {onPin && (
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onPin();
-                        }}
-                        className={`p-2 rounded-full transition-colors ${
-                            conv.isPinned 
-                                ? 'text-blue-500 hover:bg-gray-700' 
-                                : 'text-gray-400 hover:bg-gray-700 opacity-0 group-hover:opacity-100'
-                        }`}
-                        title={conv.isPinned ? 'Unpin' : 'Pin conversation'}
-                    >
-                        <FiBookmark className={`w-4 h-4 ${conv.isPinned ? 'fill-current' : ''}`} />
-                    </button>
-                )}
+            <div className={`flex items-center gap-1 transition-opacity ${compactPhone ? 'pr-0.5' : ''}`}>
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        closeSwipeActions();
+                        setShowActions((prev) => !prev);
+                    }}
+                    className={`rounded-full text-gray-400 hover:bg-gray-700 hover:text-gray-200 transition-colors ${
+                        compactPhone ? 'p-1.5' : 'p-2'
+                    }`}
+                    title="More actions"
+                >
+                    <FiMoreHorizontal className="w-4 h-4" />
+                </button>
+            </div>
+            {showActions && (
+                <div className="absolute right-2 top-[52px] z-40 rounded-xl border border-white/15 bg-[#0c1119] shadow-2xl p-1 min-w-[170px]">
+                    {conv.isRequest && onAcceptRequest && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onAcceptRequest();
+                                setShowActions(false);
+                            }}
+                            className="w-full px-3 py-2 text-left text-xs rounded-lg hover:bg-white/10 text-white"
+                        >
+                            Accept request
+                        </button>
+                    )}
+                    {onMarkRead && conv.unread > 0 && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onMarkRead();
+                                setShowActions(false);
+                            }}
+                            className="w-full px-3 py-2 text-left text-xs rounded-lg hover:bg-white/10 text-white"
+                        >
+                            Mark as read
+                        </button>
+                    )}
+                    {onMarkUnread && conv.unread === 0 && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onMarkUnread();
+                                setShowActions(false);
+                            }}
+                            className="w-full px-3 py-2 text-left text-xs rounded-lg hover:bg-white/10 text-white"
+                        >
+                            Mark as unread
+                        </button>
+                    )}
+                    {onPin && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onPin();
+                                setShowActions(false);
+                            }}
+                            className="w-full px-3 py-2 text-left text-xs rounded-lg hover:bg-white/10 text-white flex items-center gap-2"
+                        >
+                            <FiBookmark className={`w-3.5 h-3.5 ${conv.isPinned ? 'fill-current text-cyan-400' : 'text-gray-300'}`} />
+                            {conv.isPinned ? 'Unpin conversation' : 'Pin conversation'}
+                        </button>
+                    )}
+                    {onToggleMute && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onToggleMute();
+                                setShowActions(false);
+                            }}
+                            className="w-full px-3 py-2 text-left text-xs rounded-lg hover:bg-white/10 text-white flex items-center gap-2"
+                        >
+                            <FiBellOff className="w-3.5 h-3.5 text-cyan-300" />
+                            {conv.isMuted ? 'Unmute conversation' : 'Mute conversation'}
+                        </button>
+                    )}
+                    {onDeleteConversation && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteConversation();
+                                setShowActions(false);
+                            }}
+                            className="w-full px-3 py-2 text-left text-xs rounded-lg hover:bg-red-500/15 text-red-300 flex items-center gap-2"
+                        >
+                            <FiTrash2 className="w-3.5 h-3.5" />
+                            Delete conversation
+                        </button>
+                    )}
+                </div>
+            )}
             </div>
         </div>
     );
@@ -170,8 +435,22 @@ export default function InboxPage() {
     const [storyGroups, setStoryGroups] = React.useState<StoryGroup[]>([]);
     const [items, setItems] = React.useState<ConversationSummary[]>([]);
     const [loading, setLoading] = React.useState(true);
-    const [activeTab, setActiveTab] = React.useState<'insights' | 'notifications' | 'messages'>('notifications');
+    const [activeTab, setActiveTab] = React.useState<'insights' | 'notifications' | 'messages'>('messages');
+    const [messageFilter, setMessageFilter] = React.useState<'all' | 'unread' | 'requests' | 'pinned'>('all');
+    const [conversationQuery, setConversationQuery] = React.useState('');
     const [selectedQuestionInsight, setSelectedQuestionInsight] = React.useState<StoryInsight | null>(null);
+    const [openSwipeHandle, setOpenSwipeHandle] = React.useState<string | null>(null);
+    const [compactPhone, setCompactPhone] = React.useState<boolean>(() => (typeof window !== 'undefined' ? window.innerWidth <= 390 : false));
+
+    React.useEffect(() => {
+        setOpenSwipeHandle(null);
+    }, [activeTab, messageFilter, conversationQuery]);
+
+    React.useEffect(() => {
+        const onResize = () => setCompactPhone(typeof window !== 'undefined' ? window.innerWidth <= 390 : false);
+        window.addEventListener('resize', onResize);
+        return () => window.removeEventListener('resize', onResize);
+    }, []);
 
     const loadData = React.useCallback(async () => {
         if (!user?.handle) return;
@@ -423,11 +702,81 @@ export default function InboxPage() {
         }
     }, [user, loadData]);
 
+    const handleToggleMuteConversation = React.useCallback(async (conv: ConversationSummary) => {
+        if (!user?.handle) return;
+        try {
+            if (conv.isMuted) {
+                await unmuteConversation(user.handle, conv.otherHandle);
+                showToast?.(`Unmuted ${conv.otherHandle}`);
+            } else {
+                await muteConversation(user.handle, conv.otherHandle);
+                showToast?.(`Muted ${conv.otherHandle}`);
+            }
+            await loadData();
+        } catch (error) {
+            console.error('Error toggling mute:', error);
+            Swal.fire(bottomSheet({ title: 'Error', message: 'Failed to update mute setting', icon: 'alert' }));
+        }
+    }, [user?.handle, loadData]);
+
+    const handleDeleteConversation = React.useCallback(async (conv: ConversationSummary) => {
+        if (!user?.handle) return;
+        const result = await Swal.fire(bottomSheet({
+            title: 'Delete conversation?',
+            message: `This will remove your chat with ${conv.otherHandle}.`,
+            icon: 'alert',
+            showCancelButton: true,
+            confirmButtonText: 'Delete',
+            cancelButtonText: 'Cancel',
+        }));
+        if (!result.isConfirmed) return;
+        try {
+            await deleteConversation(user.handle, conv.otherHandle);
+            await loadData();
+            showToast?.('Conversation deleted');
+        } catch (error) {
+            console.error('Error deleting conversation:', error);
+            Swal.fire(bottomSheet({ title: 'Error', message: 'Failed to delete conversation', icon: 'alert' }));
+        }
+    }, [user?.handle, loadData]);
+
+    const handleMarkConversationRead = React.useCallback(async (conv: ConversationSummary) => {
+        if (!user?.handle) return;
+        try {
+            await markConversationRead(user.handle, conv.otherHandle);
+            await loadData();
+        } catch (error) {
+            console.error('Error marking conversation read:', error);
+        }
+    }, [user?.handle, loadData]);
+
+    const handleMarkConversationUnread = React.useCallback(async (conv: ConversationSummary) => {
+        if (!user?.handle) return;
+        try {
+            await markConversationUnread(user.handle, conv.otherHandle);
+            await loadData();
+        } catch (error) {
+            console.error('Error marking conversation unread:', error);
+        }
+    }, [user?.handle, loadData]);
+
     if (!user) {
         return <div className="p-6">Please sign in to view notifications.</div>;
     }
 
     const unreadNotifications = notifications.filter(n => !n.read).length;
+    const unreadMessagesTotal = items.reduce((sum, c) => sum + c.unread, 0);
+    const normalizedQuery = conversationQuery.trim().toLowerCase();
+    const queriedItems = normalizedQuery
+        ? items.filter((c) => {
+            const hay = `${c.otherHandle} ${c.lastMessage?.text || ''}`.toLowerCase();
+            return hay.includes(normalizedQuery);
+        })
+        : items;
+    const pinnedItems = queriedItems.filter(c => c.isPinned);
+    const requestItems = queriedItems.filter(c => c.isRequest);
+    const regularItems = queriedItems.filter(c => !c.isPinned && !c.isRequest);
+    const unreadItems = queriedItems.filter(c => c.unread > 0);
 
     const handleNotificationClick = async (notif: Notification) => {
         if (!notif.read && user?.handle) {
@@ -571,7 +920,7 @@ export default function InboxPage() {
     };
 
     return (
-        <div className="p-4">
+        <div className={compactPhone ? 'p-3' : 'p-4'}>
             <div className="flex items-center gap-2 mb-4">
                 <button
                     onClick={() => navigate('/feed')}
@@ -651,15 +1000,29 @@ export default function InboxPage() {
             {/* Tabs */}
             <div className="flex mb-4 border-b border-gray-800">
                 <button
+                    onClick={() => setActiveTab('messages')}
+                    className={`flex-1 py-1.5 text-xs font-medium transition-colors relative whitespace-nowrap flex items-center justify-center gap-1 ${activeTab === 'messages'
+                            ? 'text-cyan-400 border-b-2 border-cyan-400'
+                            : 'text-gray-500 hover:text-gray-300'
+                        }`}
+                >
+                    <span>Messages</span>
+                    {unreadMessagesTotal > 0 && (
+                        <span className="px-1 py-0.5 bg-cyan-500 text-white text-[9px] rounded-full min-w-[16px] text-center leading-none">
+                            {unreadMessagesTotal > 9 ? '9+' : unreadMessagesTotal}
+                        </span>
+                    )}
+                </button>
+                <button
                     onClick={() => setActiveTab('notifications')}
                     className={`flex-1 py-1.5 text-xs font-medium transition-colors relative whitespace-nowrap flex items-center justify-center gap-1 ${activeTab === 'notifications'
-                            ? 'text-green-500 border-b-2 border-green-500'
+                            ? 'text-cyan-400 border-b-2 border-cyan-400'
                             : 'text-gray-500 hover:text-gray-300'
                         }`}
                 >
                     <span>Notifs</span>
                     {unreadNotifications > 0 && (
-                        <span className="px-1 py-0.5 bg-green-500 text-white text-[9px] rounded-full min-w-[16px] text-center leading-none">
+                        <span className="px-1 py-0.5 bg-cyan-500 text-white text-[9px] rounded-full min-w-[16px] text-center leading-none">
                             {unreadNotifications > 9 ? '9+' : unreadNotifications}
                         </span>
                     )}
@@ -667,28 +1030,14 @@ export default function InboxPage() {
                 <button
                     onClick={() => setActiveTab('insights')}
                     className={`flex-1 py-1.5 text-xs font-medium transition-colors relative whitespace-nowrap flex items-center justify-center gap-1 ${activeTab === 'insights'
-                            ? 'text-purple-500 border-b-2 border-purple-500'
+                            ? 'text-cyan-400 border-b-2 border-cyan-400'
                             : 'text-gray-500 hover:text-gray-300'
                         }`}
                 >
                     <span>Insights</span>
                     {insights && insights.length > 0 && (
-                        <span className="px-1 py-0.5 bg-purple-500 text-white text-[9px] rounded-full min-w-[16px] text-center leading-none">
+                        <span className="px-1 py-0.5 bg-cyan-500 text-white text-[9px] rounded-full min-w-[16px] text-center leading-none">
                             {insights.length > 9 ? '9+' : insights.length}
-                        </span>
-                    )}
-                </button>
-                <button
-                    onClick={() => setActiveTab('messages')}
-                    className={`flex-1 py-1.5 text-xs font-medium transition-colors relative whitespace-nowrap flex items-center justify-center gap-1 ${activeTab === 'messages'
-                            ? 'text-blue-500 border-b-2 border-blue-500'
-                            : 'text-gray-500 hover:text-gray-300'
-                        }`}
-                >
-                    <span>Messages</span>
-                    {items && items.filter(c => c.unread > 0).length > 0 && (
-                        <span className="px-1 py-0.5 bg-blue-500 text-white text-[9px] rounded-full min-w-[16px] text-center leading-none">
-                            {items.filter(c => c.unread > 0).reduce((sum, c) => sum + c.unread, 0) > 9 ? '9+' : items.filter(c => c.unread > 0).reduce((sum, c) => sum + c.unread, 0)}
                         </span>
                     )}
                 </button>
@@ -696,15 +1045,75 @@ export default function InboxPage() {
             {loading ? (
                 <div className="text-gray-500">Loading…</div>
             ) : activeTab === 'messages' ? (
-                items.length === 0 ? (
-                    <div className="text-gray-500 text-center py-8">No messages yet.</div>
+                queriedItems.length === 0 ? (
+                    <div className="text-gray-500 text-center py-8">
+                        {conversationQuery.trim() ? 'No conversations match your search.' : 'No messages yet.'}
+                    </div>
                 ) : (
-                    <div className="space-y-1">
+                    <div
+                        className={compactPhone ? 'space-y-2.5' : 'space-y-3'}
+                        onClickCapture={(e) => {
+                            if (!openSwipeHandle) return;
+                            const target = e.target as HTMLElement | null;
+                            if (target?.closest('[data-conversation-row="true"]')) return;
+                            setOpenSwipeHandle(null);
+                        }}
+                        onTouchStartCapture={(e) => {
+                            if (!openSwipeHandle) return;
+                            const target = e.target as HTMLElement | null;
+                            if (target?.closest('[data-conversation-row="true"]')) return;
+                            setOpenSwipeHandle(null);
+                        }}
+                    >
+                        <div className={`flex items-center gap-2 rounded-xl border border-white/10 bg-[#09090d] ${compactPhone ? 'px-2.5 py-2' : 'px-3 py-2'}`}>
+                            <FiMessageCircle className="w-4 h-4 text-cyan-300" />
+                            <input
+                                value={conversationQuery}
+                                onChange={(e) => setConversationQuery(e.target.value)}
+                                placeholder="Search conversations"
+                                className={`flex-1 bg-transparent text-white placeholder:text-gray-500 focus:outline-none ${compactPhone ? 'text-[13px]' : 'text-sm'}`}
+                            />
+                            {conversationQuery && (
+                                <button
+                                    type="button"
+                                    onClick={() => setConversationQuery('')}
+                                    className="p-1 text-gray-400 hover:text-gray-200"
+                                    aria-label="Clear search"
+                                >
+                                    <FiX className="w-4 h-4" />
+                                </button>
+                            )}
+                        </div>
+
+                        <div className={`flex overflow-x-auto scrollbar-hide pb-1 ${compactPhone ? 'gap-1.5' : 'gap-2'}`}>
+                            {([
+                                { id: 'all' as const, label: `All (${queriedItems.length})` },
+                                { id: 'unread' as const, label: `Unread (${unreadItems.length})` },
+                                { id: 'requests' as const, label: `Requests (${requestItems.length})` },
+                                { id: 'pinned' as const, label: `Pinned (${pinnedItems.length})` },
+                            ]).map((chip) => (
+                                <button
+                                    key={chip.id}
+                                    type="button"
+                                    onClick={() => setMessageFilter(chip.id)}
+                                    className={`${compactPhone ? 'px-2.5 py-1.5 text-[10px] min-h-[32px]' : 'px-3 py-1.5 text-[11px]'} rounded-full font-medium whitespace-nowrap border transition-colors ${
+                                        messageFilter === chip.id
+                                            ? 'bg-cyan-500 text-white border-cyan-400'
+                                            : 'bg-black/40 text-gray-300 border-white/15 hover:border-cyan-400/60'
+                                    }`}
+                                >
+                                    {chip.label}
+                                </button>
+                            ))}
+                        </div>
+
+                        {messageFilter === 'all' && (
+                            <div className="space-y-1">
                         {/* Pinned Conversations */}
-                        {items.filter(c => c.isPinned).length > 0 && (
+                        {pinnedItems.length > 0 && (
                             <div className="mb-4">
                                 <div className="text-xs text-gray-400 uppercase tracking-wide mb-2 px-2">Pinned</div>
-                                {items.filter(c => c.isPinned).map(conv => (
+                                {pinnedItems.map(conv => (
                                     <ConversationItem
                                         key={conv.otherHandle}
                                         conv={conv}
@@ -723,16 +1132,23 @@ export default function InboxPage() {
                                         navigate={navigate}
                                         currentUserHandle={user?.handle}
                                         onFollow={handleFollow}
+                                        onToggleMute={() => handleToggleMuteConversation(conv)}
+                                        onDeleteConversation={() => handleDeleteConversation(conv)}
+                                        onMarkRead={() => handleMarkConversationRead(conv)}
+                                        onMarkUnread={() => handleMarkConversationUnread(conv)}
+                                        isSwipeOpen={openSwipeHandle === conv.otherHandle}
+                                        onSwipeOpenChange={setOpenSwipeHandle}
+                                        compactPhone={compactPhone}
                                     />
                                 ))}
                             </div>
                         )}
                         
                         {/* Message Requests */}
-                        {items.filter(c => c.isRequest).length > 0 && (
+                        {requestItems.length > 0 && (
                             <div className="mb-4">
                                 <div className="text-xs text-gray-400 uppercase tracking-wide mb-2 px-2">Message Requests</div>
-                                {items.filter(c => c.isRequest).map(conv => (
+                                {requestItems.map(conv => (
                                     <ConversationItem
                                         key={conv.otherHandle}
                                         conv={conv}
@@ -745,13 +1161,20 @@ export default function InboxPage() {
                                         navigate={navigate}
                                         currentUserHandle={user?.handle}
                                         onFollow={handleFollow}
+                                        onToggleMute={() => handleToggleMuteConversation(conv)}
+                                        onDeleteConversation={() => handleDeleteConversation(conv)}
+                                        onMarkRead={() => handleMarkConversationRead(conv)}
+                                        onMarkUnread={() => handleMarkConversationUnread(conv)}
+                                        isSwipeOpen={openSwipeHandle === conv.otherHandle}
+                                        onSwipeOpenChange={setOpenSwipeHandle}
+                                        compactPhone={compactPhone}
                                     />
                                 ))}
                             </div>
                         )}
                         
                         {/* Regular Conversations */}
-                        {items.filter(c => !c.isPinned && !c.isRequest).map(conv => (
+                        {regularItems.map(conv => (
                             <ConversationItem
                                 key={conv.otherHandle}
                                 conv={conv}
@@ -764,8 +1187,116 @@ export default function InboxPage() {
                                 navigate={navigate}
                                 currentUserHandle={user?.handle}
                                 onFollow={handleFollow}
+                                onToggleMute={() => handleToggleMuteConversation(conv)}
+                                onDeleteConversation={() => handleDeleteConversation(conv)}
+                                onMarkRead={() => handleMarkConversationRead(conv)}
+                                onMarkUnread={() => handleMarkConversationUnread(conv)}
+                                isSwipeOpen={openSwipeHandle === conv.otherHandle}
+                                onSwipeOpenChange={setOpenSwipeHandle}
+                                compactPhone={compactPhone}
                             />
                         ))}
+                    </div>
+                        )}
+
+                        {messageFilter === 'unread' && (
+                            unreadItems.length > 0 ? (
+                                <div className="space-y-1">
+                                    {unreadItems.map(conv => (
+                                        <ConversationItem
+                                            key={conv.otherHandle}
+                                            conv={conv}
+                                            onPin={() => {
+                                                if (user?.handle) {
+                                                    pinConversation(user.handle, conv.otherHandle);
+                                                    loadData();
+                                                }
+                                            }}
+                                            navigate={navigate}
+                                            currentUserHandle={user?.handle}
+                                            onFollow={handleFollow}
+                                            onToggleMute={() => handleToggleMuteConversation(conv)}
+                                            onDeleteConversation={() => handleDeleteConversation(conv)}
+                                            onMarkRead={() => handleMarkConversationRead(conv)}
+                                            onMarkUnread={() => handleMarkConversationUnread(conv)}
+                                            isSwipeOpen={openSwipeHandle === conv.otherHandle}
+                                            onSwipeOpenChange={setOpenSwipeHandle}
+                                            compactPhone={compactPhone}
+                                        />
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-5 text-center text-sm text-gray-400">
+                                    You&apos;re all caught up.
+                                </div>
+                            )
+                        )}
+
+                        {messageFilter === 'requests' && (
+                            requestItems.length > 0 ? (
+                                <div className="space-y-1">
+                                    {requestItems.map(conv => (
+                                        <ConversationItem
+                                            key={conv.otherHandle}
+                                            conv={conv}
+                                            onAcceptRequest={() => {
+                                                if (user?.handle) {
+                                                    acceptMessageRequest(user.handle, conv.otherHandle);
+                                                    loadData();
+                                                }
+                                            }}
+                                            navigate={navigate}
+                                            currentUserHandle={user?.handle}
+                                            onFollow={handleFollow}
+                                            onToggleMute={() => handleToggleMuteConversation(conv)}
+                                            onDeleteConversation={() => handleDeleteConversation(conv)}
+                                            onMarkRead={() => handleMarkConversationRead(conv)}
+                                            onMarkUnread={() => handleMarkConversationUnread(conv)}
+                                            isSwipeOpen={openSwipeHandle === conv.otherHandle}
+                                            onSwipeOpenChange={setOpenSwipeHandle}
+                                            compactPhone={compactPhone}
+                                        />
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-5 text-center text-sm text-gray-400">
+                                    No message requests.
+                                </div>
+                            )
+                        )}
+
+                        {messageFilter === 'pinned' && (
+                            pinnedItems.length > 0 ? (
+                                <div className="space-y-1">
+                                    {pinnedItems.map(conv => (
+                                        <ConversationItem
+                                            key={conv.otherHandle}
+                                            conv={conv}
+                                            onPin={() => {
+                                                if (user?.handle) {
+                                                    unpinConversation(user.handle, conv.otherHandle);
+                                                    loadData();
+                                                }
+                                            }}
+                                            navigate={navigate}
+                                            currentUserHandle={user?.handle}
+                                            onFollow={handleFollow}
+                                            onToggleMute={() => handleToggleMuteConversation(conv)}
+                                            onDeleteConversation={() => handleDeleteConversation(conv)}
+                                            onMarkRead={() => handleMarkConversationRead(conv)}
+                                            onMarkUnread={() => handleMarkConversationUnread(conv)}
+                                            isSwipeOpen={openSwipeHandle === conv.otherHandle}
+                                            onSwipeOpenChange={setOpenSwipeHandle}
+                                            compactPhone={compactPhone}
+                                        />
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-5 text-center text-sm text-gray-400">
+                                    No pinned conversations.
+                                </div>
+                            )
+                        )}
                     </div>
                 )
             ) : activeTab === 'notifications' ? (
@@ -782,7 +1313,7 @@ export default function InboxPage() {
                                             await loadData();
                                         }
                                     }}
-                                    className="text-xs text-green-500 hover:text-green-400"
+                                    className="text-xs text-cyan-400 hover:text-cyan-300"
                                 >
                                     Mark all as read
                                 </button>
@@ -793,7 +1324,7 @@ export default function InboxPage() {
                                 key={notif.id}
                                 className={`w-full text-left flex items-center gap-3 py-3 px-2 rounded-lg transition-colors ${notif.read
                                         ? 'hover:bg-gray-100 dark:hover:bg-gray-800'
-                                        : 'bg-green-900/20 hover:bg-green-900/30 border-l-4 border-green-500'
+                                        : 'bg-cyan-900/20 hover:bg-cyan-900/30 border-l-4 border-cyan-500'
                                     }`}
                             >
                                 <button
@@ -819,7 +1350,7 @@ export default function InboxPage() {
                                             {new Date(notif.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                         </div>
                                         {!notif.read && (
-                                            <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                                            <span className="w-2 h-2 bg-cyan-500 rounded-full"></span>
                                         )}
                                     </div>
                                 </button>

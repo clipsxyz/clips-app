@@ -427,19 +427,15 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
     const interval = setInterval(updateCounts, 10000);
 
     // Listen for notification updates
-    const handleNotificationUpdate = (event: CustomEvent) => {
-      const handle = event.detail?.handle;
-      if (handle === user.handle) {
-        updateCounts();
-      }
+    const handleNotificationUpdate = (_event: CustomEvent) => {
+      // Some emitters may provide handle casing/format inconsistently.
+      // Always refresh counts when notifications update.
+      updateCounts();
     };
 
     // Listen for new notifications being created
-    const handleNotificationCreated = (event: CustomEvent) => {
-      const notif = event.detail as { toHandle?: string };
-      if (notif?.toHandle === user.handle) {
-        updateCounts();
-      }
+    const handleNotificationCreated = (_event: CustomEvent) => {
+      updateCounts();
     };
 
     window.addEventListener('notificationsUpdated', handleNotificationUpdate as EventListener);
@@ -674,7 +670,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
 
       {showBoostPrompt && (
         <div
-          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/75 backdrop-blur-sm px-4"
+          className="fixed inset-0 z-[220] flex items-center justify-center bg-black/75 backdrop-blur-sm px-4"
           role="presentation"
           onClick={() => setShowBoostPrompt(false)}
         >
@@ -2655,7 +2651,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
 
               {/* Scenes: icon — touchend must stopPropagation: outer media div's touchend+preventDefault blocks synthetic click on phones */}
               {!isLoading && !hasError && (currentItem.type === 'video' || currentItem.type === 'image') && onOpenScenes && (
-                <div className="absolute bottom-4 right-4 z-[60] pointer-events-auto" style={{ touchAction: 'manipulation' }}>
+                <div className="absolute bottom-4 right-4 z-20 pointer-events-auto" style={{ touchAction: 'manipulation' }}>
                   <button
                     type="button"
                     onClick={(e) => {
@@ -4383,6 +4379,54 @@ function Stories24FeedRail({
   stories24Items: Stories24RailItem[];
   navigate: ReturnType<typeof useNavigate>;
 }) {
+  const [expandingStory, setExpandingStory] = React.useState<{
+    item: Stories24RailItem;
+    railHandles: string[];
+    rect: { top: number; left: number; width: number; height: number };
+    phase: 'start' | 'expand';
+  } | null>(null);
+
+  const openStoryFromRail = React.useCallback((storyItem: Stories24RailItem, railHandles: string[]) => {
+    navigate('/stories', {
+      state: {
+        openUserHandle: storyItem.handle,
+        railHandles,
+      },
+    });
+  }, [navigate]);
+
+  const handleStoryCardTap = React.useCallback((e: React.MouseEvent<HTMLButtonElement>, storyItem: Stories24RailItem) => {
+    if (expandingStory) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const railHandles = stories24Items
+      .map((item) => item.handle)
+      .filter((handle) => handle && handle !== '__add_yours__');
+    setExpandingStory({
+      item: storyItem,
+      railHandles,
+      rect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
+      phase: 'start',
+    });
+  }, [expandingStory, stories24Items]);
+
+  React.useEffect(() => {
+    if (!expandingStory) return;
+    let frame = 0;
+    if (expandingStory.phase === 'start') {
+      frame = window.requestAnimationFrame(() => {
+        setExpandingStory((prev) => prev ? { ...prev, phase: 'expand' } : null);
+      });
+    }
+    const timer = window.setTimeout(() => {
+      openStoryFromRail(expandingStory.item, expandingStory.railHandles);
+      setExpandingStory(null);
+    }, 520);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [expandingStory, openStoryFromRail]);
+
   if (stories24Items.length === 0) return null;
   return (
     <div className="mx-3 my-3 rounded-2xl border border-slate-700/60 bg-[#0a1323] p-3 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
@@ -4421,14 +4465,7 @@ function Stories24FeedRail({
             <button
               key={`stories24-${storyItem.handle}`}
               type="button"
-              onClick={() => navigate('/stories', {
-                state: {
-                  openUserHandle: storyItem.handle,
-                  railHandles: stories24Items
-                    .map((item) => item.handle)
-                    .filter((handle) => handle && handle !== '__add_yours__'),
-                },
-              })}
+              onClick={(e) => handleStoryCardTap(e, storyItem)}
               className="relative w-[112px] h-[156px] shrink-0 rounded-2xl border border-white/10 overflow-hidden bg-[#101b2f] text-left"
             >
               <div className="absolute inset-0 bg-gradient-to-br from-slate-500/25 via-sky-500/20 to-indigo-500/25" />
@@ -4466,6 +4503,40 @@ function Stories24FeedRail({
           )
         ))}
       </div>
+      {expandingStory && (
+        <div className="fixed inset-0 z-[140] pointer-events-none">
+          <div
+            className="absolute overflow-hidden bg-[#101b2f] shadow-2xl transition-all duration-[520ms] ease-[cubic-bezier(0.16,1,0.3,1)]"
+            style={{
+              top: expandingStory.phase === 'start' ? expandingStory.rect.top : 0,
+              left: expandingStory.phase === 'start' ? expandingStory.rect.left : 0,
+              width: expandingStory.phase === 'start' ? expandingStory.rect.width : window.innerWidth,
+              height: expandingStory.phase === 'start' ? expandingStory.rect.height : window.innerHeight,
+              borderRadius: expandingStory.phase === 'start' ? 16 : 0,
+            }}
+          >
+            <div className="absolute inset-0 bg-gradient-to-br from-slate-500/25 via-sky-500/20 to-indigo-500/25" />
+            {expandingStory.item.previewVideoUrl ? (
+              <video
+                src={expandingStory.item.previewVideoUrl}
+                className="absolute inset-0 w-full h-full object-cover"
+                muted
+                playsInline
+                autoPlay
+                loop
+                preload="metadata"
+              />
+            ) : expandingStory.item.thumb ? (
+              <img
+                src={expandingStory.item.thumb}
+                alt={`${expandingStory.item.handle} story`}
+                className="absolute inset-0 w-full h-full object-cover"
+              />
+            ) : null}
+            <div className="absolute inset-0 bg-black/10" />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

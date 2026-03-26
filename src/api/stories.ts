@@ -938,7 +938,7 @@ export interface StoryInsight {
     text?: string;
     createdAt: number;
     likes: number;
-    likers: string[]; // user handles who reacted with a heart
+    likers: string[]; // user handles who reacted (heart/thumbs-up)
     question?: {
         prompt: string;
         responseCount: number;
@@ -960,8 +960,9 @@ export async function getStoryInsightsForUser(userHandle: string): Promise<Story
 
     return ownStories
         .map<StoryInsight>(story => {
-            const heartReactions = (story.reactions || []).filter(r => r.emoji === '❤️');
-            const likers = Array.from(new Set(heartReactions.map(r => r.userHandle)));
+            // Count common positive reactions as likes in insights (heart + thumbs-up).
+            const likeReactions = (story.reactions || []).filter(r => r.emoji === '❤️' || r.emoji === '👍');
+            const likers = Array.from(new Set(likeReactions.map(r => r.userHandle)));
             return {
                 storyId: story.id,
                 mediaUrl: story.mediaUrl,

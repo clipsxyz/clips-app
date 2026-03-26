@@ -35,6 +35,8 @@ function laravelMsgToChatMessage(m: { id: string; sender_handle: string; text?: 
 const conversations = new Map<ConversationId, ChatMessage[]>();
 // Track unread counts by recipient handle
 const unreadByHandle = new Map<string, number>();
+// UI-level unread overrides per thread: `${user}::${other}` => forced unread count
+const unreadOverrideByThread = new Map<string, number>();
 // Track per-thread last read timestamps per user: `${user}::${other}` => timestamp
 const lastReadByThread = new Map<string, number>();
 // Track pinned conversations per user: userHandle => Set<otherHandle>
@@ -95,6 +97,8 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
     };
     list.push(msg);
     conversations.set(id, list);
+    // New incoming message should clear any manual unread override for receiver's thread.
+    unreadOverrideByThread.delete(`${to}::${from}`);
     // Recompute unread for receiver across all threads
     unreadByHandle.set(to, await computeUnreadTotal(to));
 
@@ -185,6 +189,7 @@ export async function getUnreadTotal(handle: string): Promise<number> {
 }
 
 export async function markConversationRead(selfHandle: string, otherHandle: string): Promise<void> {
+    unreadOverrideByThread.set(`${selfHandle}::${otherHandle}`, 0);
     if (useLaravelAPI && hasAuthToken()) {
         try {
             const apiClient = await import('./client');
@@ -203,6 +208,25 @@ export async function markConversationRead(selfHandle: string, otherHandle: stri
     window.dispatchEvent(new CustomEvent('inboxUnreadChanged', { detail: { handle: selfHandle, unread: unreadByHandle.get(selfHandle) || 0 } }));
 }
 
+export async function markConversationUnread(selfHandle: string, otherHandle: string): Promise<void> {
+    // Laravel currently has no unread endpoint, so we keep this as a local/UI state override.
+    const id = getConversationId(selfHandle, otherHandle);
+    const list = conversations.get(id) || [];
+    const latestIncoming = list
+        .filter((m) => m.senderHandle === otherHandle && !m.isSystemMessage)
+        .sort((a, b) => b.timestamp - a.timestamp)[0];
+    if (latestIncoming) {
+        // Set last-read just before latest incoming to force at least one unread.
+        lastReadByThread.set(`${selfHandle}::${otherHandle}`, latestIncoming.timestamp - 1);
+    }
+    unreadOverrideByThread.set(`${selfHandle}::${otherHandle}`, 1);
+    unreadByHandle.set(selfHandle, await computeUnreadTotal(selfHandle));
+    const { emitInboxUnreadChanged } = await import('../services/socketio');
+    emitInboxUnreadChanged(selfHandle, unreadByHandle.get(selfHandle) || 0);
+    window.dispatchEvent(new CustomEvent('conversationUpdated'));
+    window.dispatchEvent(new CustomEvent('inboxUnreadChanged', { detail: { handle: selfHandle, unread: unreadByHandle.get(selfHandle) || 0 } }));
+}
+
 export interface ConversationSummary {
     otherHandle: string;
     lastMessage?: ChatMessage;
@@ -211,6 +235,7 @@ export interface ConversationSummary {
     isRequest?: boolean; // True if this is a message request from a non-follower
     hasUnviewedStories?: boolean; // True if the other user has unviewed stories
     isFollowing?: boolean; // True if current user is following the other user
+    isMuted?: boolean;
 }
 
 export async function listConversations(forHandle: string): Promise<ConversationSummary[]> {
@@ -229,10 +254,11 @@ export async function listConversations(forHandle: string): Promise<Conversation
                     return {
                         otherHandle,
                         lastMessage,
-                        unread,
+                        unread: unreadOverrideByThread.get(`${forHandle}::${otherHandle}`) ?? unread,
                         isPinned: false,
                         isRequest: false,
                         hasUnviewedStories,
+                        isMuted: mutedConversations.get(forHandle)?.has(otherHandle) ?? false,
                     };
                 })
             );
@@ -272,10 +298,11 @@ export async function listConversations(forHandle: string): Promise<Conversation
             return {
                 otherHandle,
                 lastMessage: v.last,
-                unread: v.unread,
+                unread: unreadOverrideByThread.get(`${forHandle}::${otherHandle}`) ?? v.unread,
                 isPinned: pinned.has(otherHandle),
                 isRequest: v.isRequest || false,
-                hasUnviewedStories
+                hasUnviewedStories,
+                isMuted: mutedConversations.get(forHandle)?.has(otherHandle) ?? false,
             };
         })
     );
@@ -407,6 +434,8 @@ export async function isUserBlocked(userHandle: string, otherHandle: string): Pr
 export async function deleteConversation(userHandle: string, otherHandle: string): Promise<void> {
     const id = getConversationId(userHandle, otherHandle);
     conversations.delete(id);
+    unreadOverrideByThread.delete(`${userHandle}::${otherHandle}`);
+    unreadOverrideByThread.delete(`${otherHandle}::${userHandle}`);
     
     // Remove from pinned if pinned
     const pinned = pinnedConversations.get(userHandle);

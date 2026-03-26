@@ -607,6 +607,14 @@ export default function MessagesPage() {
     // Scenes modal: tap shared post in DM to open fullscreen, close returns to DM
     const [scenesOpen, setScenesOpen] = useState(false);
     const [selectedPostForScenes, setSelectedPostForScenes] = useState<Post | null>(null);
+    const [compactPhone, setCompactPhone] = useState<boolean>(() => (typeof window !== 'undefined' ? window.innerWidth <= 390 : false));
+    const threadCardMaxWidth = compactPhone ? '86vw' : '448px';
+
+    useEffect(() => {
+        const onResize = () => setCompactPhone(typeof window !== 'undefined' ? window.innerWidth <= 390 : false);
+        window.addEventListener('resize', onResize);
+        return () => window.removeEventListener('resize', onResize);
+    }, []);
 
     const openScenesForPost = (post: Post) => {
         setSelectedPostForScenes(post);
@@ -1948,12 +1956,12 @@ export default function MessagesPage() {
         <div className="min-h-screen bg-black text-white flex flex-col">
             {/* Header */}
             <div className="sticky top-0 bg-black border-b border-gray-800 z-10">
-                <div className="flex items-center px-4 py-3">
+                <div className={`flex items-center ${compactPhone ? 'px-2.5 py-2.5' : 'px-4 py-3'}`}>
                     <button
                         onClick={() => navigate(-1)}
-                        className="p-2 hover:bg-gray-900 rounded-full transition-colors"
+                        className={`${compactPhone ? 'p-1.5' : 'p-2'} hover:bg-gray-900 rounded-full transition-colors`}
                     >
-                        <FiChevronLeft className="w-6 h-6" />
+                        <FiChevronLeft className={compactPhone ? 'w-5 h-5' : 'w-6 h-6'} />
                     </button>
                     {handle && (
                         <div className="flex items-center ml-3 flex-1">
@@ -2036,7 +2044,7 @@ export default function MessagesPage() {
                                             }
                                         }}
                                         disabled={isFollowLoading}
-                                        className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-blue-500 hover:bg-blue-600 border-2 border-white dark:border-gray-900 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30"
+                                        className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-cyan-500 hover:bg-cyan-600 border-2 border-white dark:border-gray-900 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30"
                                         aria-label="Follow user"
                                     >
                                         <FiPlus className="w-3 h-3 text-white" strokeWidth={2.5} />
@@ -2064,11 +2072,11 @@ export default function MessagesPage() {
                             </div>
                         </div>
                     )}
-                    <div className="flex items-center gap-2">
+                    <div className={`flex items-center ${compactPhone ? 'gap-1' : 'gap-2'}`}>
                         {/* Location Icon Button */}
                         {handle && (
                             <button
-                                className="p-2 hover:bg-gray-900 rounded-full transition-colors"
+                                className={`${compactPhone ? 'p-1.5' : 'p-2'} hover:bg-gray-900 rounded-full transition-colors`}
                                 onClick={() => {
                                     // If no places traveled, show the "No Places Traveled" card
                                     if (!otherUserPlacesTraveled || otherUserPlacesTraveled.length === 0) {
@@ -2092,21 +2100,21 @@ export default function MessagesPage() {
                                 }}
                                 title="View places traveled"
                             >
-                                <FiMapPin className="w-6 h-6" />
+                                <FiMapPin className={compactPhone ? 'w-5 h-5' : 'w-6 h-6'} />
                             </button>
                         )}
                         <button
-                            className="p-2 hover:bg-gray-900 rounded-full transition-colors"
+                            className={`${compactPhone ? 'p-1.5' : 'p-2'} hover:bg-gray-900 rounded-full transition-colors`}
                             onClick={() => setShowChatInfo(true)}
                         >
-                            <FiMoreHorizontal className="w-6 h-6" />
+                            <FiMoreHorizontal className={compactPhone ? 'w-5 h-5' : 'w-6 h-6'} />
                         </button>
                     </div>
                 </div>
             </div>
 
             {/* Messages */}
-            <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-4 pb-40" style={{ minHeight: 0, maxHeight: 'calc(100vh - 120px)' }}>
+            <div ref={listRef} className={`flex-1 overflow-y-auto ${compactPhone ? 'px-2.5 py-3 pb-36' : 'px-4 py-4 pb-40'}`} style={{ minHeight: 0, maxHeight: 'calc(100vh - 120px)' }}>
                 <div className="space-y-1">
                     {messages.map((msg, idx) => {
                         const showTimestamp = idx === 0 ||
@@ -2129,7 +2137,7 @@ export default function MessagesPage() {
                                     <div
                                         ref={isLastMessage ? lastMessageRef : null}
                                         data-message-id={msg.id}
-                                        className={`flex ${msg.isFromMe ? 'justify-end' : 'justify-start'} ${showTimestamp ? 'mt-4' : ''}`}
+                                        className={`flex ${msg.isFromMe ? 'justify-end' : 'justify-start'} ${showTimestamp ? (compactPhone ? 'mt-3' : 'mt-4') : ''}`}
                                     >
                                         {msg.isFromMe ? (
                                             (() => {
@@ -2151,7 +2159,7 @@ export default function MessagesPage() {
                                                         <div className="w-full flex justify-end mb-2" style={{ maxWidth: '100%' }}>
                                                             <div
                                                                 className="relative"
-                                                                style={{ maxWidth: '448px', width: '100%' }}
+                                                                style={{ maxWidth: threadCardMaxWidth, width: '100%' }}
                                                                 onContextMenu={(e) => { e.preventDefault(); handleMessageContextMenu(msg, e); }}
                                                                 onTouchStart={(e) => handleTouchStart(msg, e)}
                                                                 onTouchMove={handleTouchMove}
@@ -2184,7 +2192,7 @@ export default function MessagesPage() {
                                                             <div
                                                                 data-message-bubble-id={msg.id}
                                                                 className="relative"
-                                                                style={{ maxWidth: '448px', width: '100%' }}
+                                                                style={{ maxWidth: threadCardMaxWidth, width: '100%' }}
                                                                 onContextMenu={(e) => { e.preventDefault(); handleMessageContextMenu(msg, e); }}
                                                                 onTouchStart={(e) => handleTouchStart(msg, e)}
                                                                 onTouchMove={handleTouchMove}
@@ -2233,7 +2241,7 @@ export default function MessagesPage() {
                                                         if (sharedPosts[extractedPostId]) {
                                                             return (
                                                                 <div className="w-full flex justify-end mb-2" style={{ maxWidth: '100%' }}>
-                                                                    <div data-message-bubble-id={msg.id} className="relative" style={{ maxWidth: '448px', width: '100%' }} onContextMenu={(e) => { e.preventDefault(); handleMessageContextMenu(msg, e); }} onTouchStart={(e) => handleTouchStart(msg, e)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}>
+                                                                    <div data-message-bubble-id={msg.id} className="relative" style={{ maxWidth: threadCardMaxWidth, width: '100%' }} onContextMenu={(e) => { e.preventDefault(); handleMessageContextMenu(msg, e); }} onTouchStart={(e) => handleTouchStart(msg, e)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}>
                                                                         <SharedPostCard post={sharedPosts[extractedPostId]} onTap={openScenesForPost} />
                                                                         {messageReactions[msg.id]?.length > 0 && (
                                                                             <div className="absolute bottom-2 right-2 flex items-center gap-0.5">
@@ -2257,7 +2265,7 @@ export default function MessagesPage() {
                                                         }
                                                         return (
                                                             <div className="w-full flex justify-end mb-2" style={{ maxWidth: '100%' }}>
-                                                                <div data-message-bubble-id={msg.id} className="relative" style={{ maxWidth: '448px', width: '100%' }} onContextMenu={(e) => { e.preventDefault(); handleMessageContextMenu(msg, e); }} onTouchStart={(e) => handleTouchStart(msg, e)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}>
+                                                                <div data-message-bubble-id={msg.id} className="relative" style={{ maxWidth: threadCardMaxWidth, width: '100%' }} onContextMenu={(e) => { e.preventDefault(); handleMessageContextMenu(msg, e); }} onTouchStart={(e) => handleTouchStart(msg, e)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}>
                                                                     <SharedPostPreviewCard postId={extractedPostId} onTap={() => openScenesForPostId(extractedPostId)} userId={user?.id} />
                                                                     {messageReactions[msg.id]?.length > 0 && (
                                                                         <div className="absolute bottom-2 right-2 flex items-center gap-0.5">
@@ -2279,7 +2287,7 @@ export default function MessagesPage() {
                                                 }
                                                 
                                                 return (
-                                                    <div className="flex items-start gap-2 max-w-[75%] ml-auto">
+                                                    <div className={`flex items-start gap-2 ml-auto ${compactPhone ? 'max-w-[82%]' : 'max-w-[75%]'}`}>
                                                         {msg.senderAvatar && (
                                                             <Avatar
                                                                 src={msg.senderAvatar}
@@ -2296,7 +2304,7 @@ export default function MessagesPage() {
                                                         <div className="flex flex-col items-end gap-1 flex-1 min-w-0 order-1">
                                                             <div
                                                                 data-message-bubble-id={msg.id}
-                                                                className="bg-[#0095f6] rounded-2xl rounded-tr-sm px-4 py-2.5 break-words cursor-pointer select-none shadow-sm relative"
+                                                                className={`bg-cyan-500 rounded-2xl rounded-tr-sm break-words cursor-pointer select-none shadow-sm relative ${compactPhone ? 'px-3 py-2' : 'px-4 py-2.5'}`}
                                                             style={{
                                                                 maxWidth: '100%',
                                                                 wordBreak: 'break-word',
@@ -2426,12 +2434,12 @@ export default function MessagesPage() {
                                                             )}
                                                             </div>
                                                             {/* Read receipt and timestamp */}
-                                                            <div className="flex items-center gap-1.5 px-1">
-                                                                <span className="text-[10px] text-gray-400">
+                                                            <div className={`flex items-center gap-1.5 px-1 ${compactPhone ? 'pt-0.5' : ''}`}>
+                                                                <span className={`text-gray-400 ${compactPhone ? 'text-[9px]' : 'text-[10px]'}`}>
                                                                     {formatTimestamp(msg.timestamp)}
                                                                 </span>
                                                                 {msg.edited && (
-                                                                    <span className="text-[10px] text-gray-500 italic">edited</span>
+                                                                    <span className={`${compactPhone ? 'text-[9px]' : 'text-[10px]'} text-gray-500 italic`}>edited</span>
                                                                 )}
                                                                 {/* Read receipt - double checkmark (sent), filled (delivered), blue (read) */}
                                                                 <div className="flex items-center">
@@ -2476,7 +2484,7 @@ export default function MessagesPage() {
                                                                     size="sm"
                                                                 />
                                                             )}
-                                                            <div className="flex-1 min-w-0" style={{ maxWidth: '448px' }}>
+                                                            <div className="flex-1 min-w-0" style={{ maxWidth: threadCardMaxWidth }}>
                                                                 <CommentCard 
                                                                     post={commentPost} 
                                                                     commentText={commentText}
@@ -2498,7 +2506,7 @@ export default function MessagesPage() {
                                                                     size="sm"
                                                                 />
                                                             )}
-                                                            <div className="flex-1 min-w-0" style={{ maxWidth: '448px' }}>
+                                                            <div className="flex-1 min-w-0" style={{ maxWidth: threadCardMaxWidth }}>
                                                                 <div className="w-full max-w-md rounded-2xl overflow-hidden bg-gray-800 border border-gray-700 shadow-lg p-4">
                                                                     <div className="flex items-center justify-center py-8">
                                                                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
@@ -2532,7 +2540,7 @@ export default function MessagesPage() {
                                                                     size="sm"
                                                                 />
                                                             )}
-                                                            <div data-message-bubble-id={msg.id} className="relative flex-1 min-w-0" style={{ maxWidth: '448px' }} onContextMenu={(e) => { e.preventDefault(); handleMessageContextMenu(msg, e); }} onTouchStart={(e) => handleTouchStart(msg, e)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}>
+                                                            <div data-message-bubble-id={msg.id} className="relative flex-1 min-w-0" style={{ maxWidth: threadCardMaxWidth }} onContextMenu={(e) => { e.preventDefault(); handleMessageContextMenu(msg, e); }} onTouchStart={(e) => handleTouchStart(msg, e)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}>
                                                                 <SharedPostCard post={sharedPost} onTap={openScenesForPost} />
                                                                 {messageReactions[msg.id]?.length > 0 && (
                                                                     <div className="absolute bottom-2 right-2 flex items-center gap-0.5">
@@ -2563,7 +2571,7 @@ export default function MessagesPage() {
                                                                     size="sm"
                                                                 />
                                                             )}
-                                                            <div data-message-bubble-id={msg.id} className="relative flex-1 min-w-0" style={{ maxWidth: '448px' }} onContextMenu={(e) => { e.preventDefault(); handleMessageContextMenu(msg, e); }} onTouchStart={(e) => handleTouchStart(msg, e)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}>
+                                                            <div data-message-bubble-id={msg.id} className="relative flex-1 min-w-0" style={{ maxWidth: threadCardMaxWidth }} onContextMenu={(e) => { e.preventDefault(); handleMessageContextMenu(msg, e); }} onTouchStart={(e) => handleTouchStart(msg, e)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}>
                                                                 <SharedPostPreviewCard postId={postId} onTap={() => openScenesForPostId(postId)} userId={user?.id} />
                                                                 {messageReactions[msg.id]?.length > 0 && (
                                                                     <div className="absolute bottom-2 right-2 flex items-center gap-0.5">
@@ -2597,7 +2605,7 @@ export default function MessagesPage() {
                                                                     size="sm"
                                                                 />
                                                             )}
-                                                            <div className="flex-1 min-w-0" style={{ maxWidth: '448px' }}>
+                                                            <div className="flex-1 min-w-0" style={{ maxWidth: threadCardMaxWidth }}>
                                                                 <div className="bg-gray-800 rounded-2xl p-4 border border-purple-500/50">
                                                                     <div className="mb-3">
                                                                         <p className="text-xs text-gray-400 mb-1 font-semibold">Question:</p>
@@ -2661,7 +2669,7 @@ export default function MessagesPage() {
                                                                     {msg.senderAvatar && (
                                                                         <Avatar src={msg.senderAvatar} name={msg.senderHandle} size="sm" />
                                                                     )}
-                                                                    <div data-message-bubble-id={msg.id} className="relative flex-1 min-w-0" style={{ maxWidth: '448px' }} onContextMenu={(e) => { e.preventDefault(); handleMessageContextMenu(msg, e); }} onTouchStart={(e) => handleTouchStart(msg, e)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}>
+                                                                    <div data-message-bubble-id={msg.id} className="relative flex-1 min-w-0" style={{ maxWidth: threadCardMaxWidth }} onContextMenu={(e) => { e.preventDefault(); handleMessageContextMenu(msg, e); }} onTouchStart={(e) => handleTouchStart(msg, e)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}>
                                                                         <SharedPostCard post={sharedPosts[extractedPostId]} onTap={openScenesForPost} />
                                                                         {messageReactions[msg.id]?.length > 0 && (
                                                                             <div className="absolute bottom-2 right-2 flex items-center gap-0.5">
@@ -2688,7 +2696,7 @@ export default function MessagesPage() {
                                                                 {msg.senderAvatar && (
                                                                     <Avatar src={msg.senderAvatar} name={msg.senderHandle} size="sm" />
                                                                 )}
-                                                                <div data-message-bubble-id={msg.id} className="relative flex-1 min-w-0" style={{ maxWidth: '448px' }} onContextMenu={(e) => { e.preventDefault(); handleMessageContextMenu(msg, e); }} onTouchStart={(e) => handleTouchStart(msg, e)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}>
+                                                                <div data-message-bubble-id={msg.id} className="relative flex-1 min-w-0" style={{ maxWidth: threadCardMaxWidth }} onContextMenu={(e) => { e.preventDefault(); handleMessageContextMenu(msg, e); }} onTouchStart={(e) => handleTouchStart(msg, e)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}>
                                                                     <SharedPostPreviewCard postId={extractedPostId} onTap={() => openScenesForPostId(extractedPostId)} userId={user?.id} />
                                                                     {messageReactions[msg.id]?.length > 0 && (
                                                                         <div className="absolute bottom-2 right-2 flex items-center gap-0.5">
@@ -2710,7 +2718,7 @@ export default function MessagesPage() {
                                                 }
                                                 
                                                 return (
-                                                    <div className="flex items-start gap-2 max-w-[75%]">
+                                                    <div className={`flex items-start gap-2 ${compactPhone ? 'max-w-[82%]' : 'max-w-[75%]'}`}>
                                                         {msg.senderAvatar && (
                                                             <Avatar
                                                                 src={msg.senderAvatar}
@@ -2722,7 +2730,7 @@ export default function MessagesPage() {
                                                         <div className="flex flex-col gap-1.5 flex-1 min-w-0">
                                                             <div
                                                                 data-message-bubble-id={msg.id}
-                                                                className="bg-gray-800 rounded-2xl rounded-tl-sm px-4 py-2.5 break-words cursor-pointer select-none shadow-sm relative"
+                                                                className={`bg-gray-800 rounded-2xl rounded-tl-sm break-words cursor-pointer select-none shadow-sm relative ${compactPhone ? 'px-3 py-2' : 'px-4 py-2.5'}`}
                                                                 style={{
                                                                     maxWidth: '100%',
                                                                     wordBreak: 'break-word',
@@ -2852,12 +2860,12 @@ export default function MessagesPage() {
                                                                 )}
                                                                 </div>
                                                             {/* Timestamp */}
-                                                            <div className="flex items-center gap-1.5 px-1">
-                                                                <span className="text-[10px] text-gray-400">
+                                                            <div className={`flex items-center gap-1.5 px-1 ${compactPhone ? 'pt-0.5' : ''}`}>
+                                                                <span className={`text-gray-400 ${compactPhone ? 'text-[9px]' : 'text-[10px]'}`}>
                                                                     {formatTimestamp(msg.timestamp)}
                                                                 </span>
                                                                 {msg.edited && (
-                                                                    <span className="text-[10px] text-gray-500 italic">edited</span>
+                                                                    <span className={`${compactPhone ? 'text-[9px]' : 'text-[10px]'} text-gray-500 italic`}>edited</span>
                                                                 )}
                                                             </div>
                                                         </div>
@@ -2873,7 +2881,7 @@ export default function MessagesPage() {
                     
                     {/* Typing Indicator */}
                     {isTyping && (
-                        <div className="flex items-start gap-2 max-w-[75%]">
+                        <div className={`flex items-start gap-2 ${compactPhone ? 'max-w-[82%]' : 'max-w-[75%]'}`}>
                             <Avatar
                                 src={otherUserAvatar}
                                 name={handle || ''}
@@ -2893,7 +2901,7 @@ export default function MessagesPage() {
             </div>
 
             {/* Input Bar */}
-            <div className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 z-20">
+            <div className={`fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 z-20 ${compactPhone ? 'pb-[max(2px,env(safe-area-inset-bottom))]' : ''}`}>
                 {/* Reply Preview - show screenshot/thumbnail when replying to shared post (MP4 or image) */}
                 {replyingTo && (() => {
                     const replyPostId = replyingTo.postId || extractPostId(replyingTo.text || '');
@@ -2901,10 +2909,10 @@ export default function MessagesPage() {
                     const replyThumbUrl = replyingTo.imageUrl || replyPost?.mediaUrl;
                     const isVideoReply = replyPost?.mediaType === 'video';
                     return (
-                        <div className="px-4 pt-3 pb-2 border-b border-gray-800 bg-gray-800/50">
+                        <div className={`${compactPhone ? 'px-2.5 pt-2.5 pb-2' : 'px-4 pt-3 pb-2'} border-b border-gray-800 bg-gray-800/50`}>
                             <div className="flex items-center justify-between gap-3">
                                 <div className="flex items-center gap-3 flex-1 min-w-0">
-                                    <div className="w-0.5 h-12 bg-[#0095f6] rounded-full flex-shrink-0" />
+                                    <div className="w-0.5 h-12 bg-cyan-500 rounded-full flex-shrink-0" />
                                     {replyThumbUrl && (
                                         <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 border border-gray-700 bg-black">
                                             {isVideoReply ? (
@@ -2933,7 +2941,7 @@ export default function MessagesPage() {
                 })()}
                 {/* Edit Preview */}
                 {editingMessage && (
-                    <div className="px-4 pt-3 pb-2 border-b border-gray-800 bg-gray-800/50">
+                    <div className={`${compactPhone ? 'px-2.5 pt-2.5 pb-2' : 'px-4 pt-3 pb-2'} border-b border-gray-800 bg-gray-800/50`}>
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2 flex-1 min-w-0">
                                 <span className="text-xs text-gray-400">Editing message</span>
@@ -2949,7 +2957,7 @@ export default function MessagesPage() {
                 )}
                 {/* Image compose: preview + caption before sending */}
                 {imageCompose && (
-                    <div className="px-3 py-2 sm:px-4 border-b border-gray-800 bg-gray-800/50">
+                    <div className={`${compactPhone ? 'px-2.5 py-2' : 'px-3 py-2 sm:px-4'} border-b border-gray-800 bg-gray-800/50`}>
                         <div className="flex items-center gap-3">
                             <div className="flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden bg-gray-700">
                                 <img src={imageCompose.imageUrl} alt="Preview" className="w-full h-full object-cover" />
@@ -2960,13 +2968,13 @@ export default function MessagesPage() {
                                     value={imageCompose.caption}
                                     onChange={(e) => setImageCompose(prev => prev ? { ...prev, caption: e.target.value } : null)}
                                     placeholder="Add a caption..."
-                                    className="w-full bg-gray-700 text-white placeholder-gray-400 px-3 py-2 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-white"
+                                    className="w-full bg-gray-700 text-white placeholder-gray-400 px-3 py-2 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400"
                                     autoFocus
                                 />
                                 <div className="flex items-center gap-2">
                                     <button
                                         onClick={handleSendImageWithCaption}
-                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#0095f6] text-white text-sm font-medium hover:bg-[#0084d4] transition-colors"
+                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-cyan-500 text-white text-sm font-medium hover:bg-cyan-600 transition-colors"
                                     >
                                         <FiSend className="w-4 h-4" />
                                         Send
@@ -2983,11 +2991,11 @@ export default function MessagesPage() {
                         </div>
                     </div>
                 )}
-                <div className="flex items-center gap-2 px-3 py-3 sm:gap-3 sm:px-4">
+                <div className={`flex items-center ${compactPhone ? 'gap-1.5 px-2.5 py-2.5' : 'gap-2 px-3 py-3 sm:gap-3 sm:px-4'}`}>
                     {!messageText.trim() && (
                         <button
                             onClick={handleImageClick}
-                            className="p-2 hover:bg-gray-800 rounded-full transition-colors flex-shrink-0"
+                            className={`${compactPhone ? 'p-1.5' : 'p-2'} hover:bg-gray-800 rounded-full transition-colors flex-shrink-0`}
                         >
                             <IoMdPhotos className="w-5 h-5 sm:w-6 sm:h-6 text-gray-400" />
                         </button>
@@ -3007,12 +3015,14 @@ export default function MessagesPage() {
                                 }
                             }}
                             placeholder={editingMessage ? "Edit message..." : replyingTo ? "Message..." : "Message..."}
-                            className="flex-1 bg-gray-800 text-white placeholder-gray-500 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full focus:outline-none focus:ring-2 focus:ring-white text-sm sm:text-base min-w-0"
+                            className={`flex-1 bg-gray-800 text-white placeholder-gray-500 rounded-full focus:outline-none focus:ring-2 focus:ring-cyan-400 min-w-0 ${
+                                compactPhone ? 'px-2.5 py-2 text-[13px]' : 'px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base'
+                            }`}
                         />
                         {messageText.trim() && (
                             <button
                                 onClick={handleSend}
-                                className="text-[#0095f6] hover:text-[#0084d4] transition-colors flex-shrink-0"
+                                className="text-cyan-400 hover:text-cyan-300 transition-colors flex-shrink-0"
                             >
                                 <FiSend className="w-5 h-5 sm:w-6 sm:h-6" />
                             </button>

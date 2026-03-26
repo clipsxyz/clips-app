@@ -111,6 +111,7 @@ export default function StoriesPage() {
     }, [currentStoryIndex]);
     const [loading, setLoading] = React.useState(true);
     const [viewingStories, setViewingStories] = React.useState(false);
+    const [autoOpeningStory, setAutoOpeningStory] = React.useState<boolean>(!!openUserHandle);
     const [progress, setProgress] = React.useState(0);
     const [paused, setPaused] = React.useState(false);
     const [isMuted, setIsMuted] = React.useState(true);
@@ -133,6 +134,7 @@ export default function StoriesPage() {
     const [isFollowingStoryUser, setIsFollowingStoryUser] = React.useState<boolean>(false);
     const [isFollowLoading, setIsFollowLoading] = React.useState<boolean>(false);
     const [optimisticVote, setOptimisticVote] = React.useState<'option1' | 'option2' | 'option3' | null>(null);
+    const [showStoryProfileCard, setShowStoryProfileCard] = React.useState(false);
 
     // Metadata carousel for story viewer: location → venue → timestamp (same as newsfeed cards)
     // For shared posts, use originalPost's location/venue so carousel matches the newsfeed card
@@ -163,6 +165,16 @@ export default function StoriesPage() {
     const [showQuestionAnswerModal, setShowQuestionAnswerModal] = React.useState(false);
     const [questionAnswer, setQuestionAnswer] = React.useState('');
     const [selectedResponse, setSelectedResponse] = React.useState<{ id: string; userHandle: string; text: string; createdAt: number } | null>(null);
+    const [localReactionByStoryId, setLocalReactionByStoryId] = React.useState<Record<string, string>>({});
+    const [deliveryFx, setDeliveryFx] = React.useState<{
+        kind: 'message' | 'like';
+        toHandle: string;
+        startX: number;
+        startY: number;
+        targetX: number;
+        targetY: number;
+        phase: 'start' | 'fly';
+    } | null>(null);
     const videoRef = React.useRef<HTMLVideoElement | null>(null);
     const elapsedTimeRef = React.useRef<number>(0);
     const pausedRef = React.useRef<boolean>(false);
@@ -170,6 +182,9 @@ export default function StoriesPage() {
     const nextStoryTimeoutRef = React.useRef<number | null>(null);
     const voteStartTimeRef = React.useRef<number | null>(null); // Track when voting started
     const lastStoryIdRef = React.useRef<string | null>(null); // Track last story ID to preserve timer
+    const hasEnteredStoryViewerRef = React.useRef(false);
+    const lastMuteToggleAtRef = React.useRef<number>(0);
+    const lastLikeTapAtRef = React.useRef<number>(0);
 
     // Swipe gesture tracking for story navigation
     const swipeStartXRef = React.useRef<number | null>(null);
@@ -184,6 +199,35 @@ export default function StoriesPage() {
     React.useEffect(() => {
         pausedRef.current = paused;
     }, [paused]);
+
+    // Pause playback while message composer is active.
+    React.useEffect(() => {
+        if (!viewingStories) return;
+        if (showReplyComposer) {
+            setPaused(true);
+            pausedRef.current = true;
+        } else {
+            setPaused(false);
+            pausedRef.current = false;
+        }
+    }, [showReplyComposer, viewingStories]);
+
+    React.useEffect(() => {
+        if (viewingStories) {
+            hasEnteredStoryViewerRef.current = true;
+        }
+    }, [viewingStories]);
+
+    React.useEffect(() => {
+        if (!openUserHandle) return;
+        if (!hasEnteredStoryViewerRef.current) return;
+        if (viewingStories) return;
+        navigate('/feed', { replace: true });
+    }, [openUserHandle, viewingStories, navigate]);
+
+    React.useEffect(() => {
+        setShowStoryProfileCard(false);
+    }, [currentGroupIndex, currentStoryIndex]);
 
     React.useEffect(() => () => {
         if (holdPauseTimerRef.current != null) {
@@ -323,10 +367,17 @@ export default function StoriesPage() {
             const targetGroup = storyGroups.find(g => (g.userHandle || '').trim().toLowerCase() === target);
             if (targetGroup) {
                 startViewingStories(targetGroup);
+                return;
             }
+            // If handle is missing, allow fallback to story list UI.
+            setAutoOpeningStory(false);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [openUserHandle, storyGroups.length]);
+    }, [openUserHandle, storyGroups]);
+
+    React.useEffect(() => {
+        setAutoOpeningStory(!!openUserHandle);
+    }, [openUserHandle]);
 
     // Handle starting to view stories for a specific user
     async function startViewingStories(group: StoryGroup) {
@@ -344,6 +395,24 @@ export default function StoriesPage() {
             setCurrentStoryIndex(0);
             currentStoryIndexRef.current = 0;
             setViewingStories(true);
+            setAutoOpeningStory(false);
+            setProgress(0);
+            setPaused(false);
+            setIsMuted(true);
+            elapsedTimeRef.current = 0;
+            return;
+        }
+
+        // Fast path: if stories are already loaded in this group, open immediately.
+        if (group.stories && group.stories.length > 0) {
+            const existingIdx = storyGroups.findIndex(g => g.userId === group.userId || g.userHandle === group.userHandle);
+            const groupIndex = existingIdx >= 0 ? existingIdx : 0;
+            setCurrentGroupIndex(groupIndex);
+            currentGroupIndexRef.current = groupIndex;
+            setCurrentStoryIndex(0);
+            currentStoryIndexRef.current = 0;
+            setViewingStories(true);
+            setAutoOpeningStory(false);
             setProgress(0);
             setPaused(false);
             setIsMuted(true);
@@ -371,6 +440,7 @@ export default function StoriesPage() {
                     setCurrentStoryIndex(0);
                     currentStoryIndexRef.current = 0;
                     setViewingStories(true);
+                    setAutoOpeningStory(false);
                     setProgress(0);
                     setPaused(false);
                     setIsMuted(true);
@@ -389,6 +459,7 @@ export default function StoriesPage() {
                 setCurrentStoryIndex(0);
                 currentStoryIndexRef.current = 0;
                 setViewingStories(true);
+                setAutoOpeningStory(false);
                 setProgress(0);
                 setPaused(false);
                 setIsMuted(true);
@@ -568,7 +639,9 @@ export default function StoriesPage() {
         swipeStartedOnPollRef.current = false;
     }
 
-    function handleHoldPauseStart() {
+    function handleHoldPauseStart(e?: React.PointerEvent) {
+        const target = e?.target as HTMLElement | null;
+        if (target?.closest('[data-story-interactive]')) return;
         if (holdPauseTimerRef.current != null) window.clearTimeout(holdPauseTimerRef.current);
         holdPauseTimerRef.current = window.setTimeout(() => {
             holdPauseActiveRef.current = true;
@@ -577,7 +650,9 @@ export default function StoriesPage() {
         }, 180);
     }
 
-    function handleHoldPauseEnd() {
+    function handleHoldPauseEnd(e?: React.PointerEvent) {
+        const target = e?.target as HTMLElement | null;
+        if (target?.closest('[data-story-interactive]')) return;
         if (holdPauseTimerRef.current != null) {
             window.clearTimeout(holdPauseTimerRef.current);
             holdPauseTimerRef.current = null;
@@ -587,6 +662,109 @@ export default function StoriesPage() {
             setPaused(false);
             pausedRef.current = false;
         }
+    }
+
+    function stopStoryControlPropagation(e: React.SyntheticEvent) {
+        e.stopPropagation();
+    }
+
+    function triggerLikeAction() {
+        const now = Date.now();
+        if (now - lastLikeTapAtRef.current < 260) return;
+        lastLikeTapAtRef.current = now;
+        startDeliveryFx('like', currentGroup?.userHandle || 'story');
+        handleReaction('👍');
+    }
+
+    function triggerMuteAction() {
+        const now = Date.now();
+        // Guard against accidental chained mute event right after tapping Like on mobile.
+        if (now - lastLikeTapAtRef.current < 420) return;
+        if (now - lastMuteToggleAtRef.current < 260) return;
+        lastMuteToggleAtRef.current = now;
+        setIsMuted((prev) => !prev);
+    }
+
+    function resumeStoryIfAllowed() {
+        if (!showReplyComposer && !deliveryFx && !showStoryProfileCard) {
+            setPaused(false);
+            pausedRef.current = false;
+        }
+    }
+
+    function handleStoryAvatarTap(e: React.SyntheticEvent) {
+        e.stopPropagation();
+        const nextOpen = !showStoryProfileCard;
+        setShowStoryProfileCard(nextOpen);
+        if (nextOpen) {
+            setPaused(true);
+            pausedRef.current = true;
+        } else {
+            resumeStoryIfAllowed();
+        }
+    }
+
+    async function handleStoryFollowQuickToggle() {
+        if (!currentGroup?.userHandle || !user?.id || isFollowLoading) return;
+        const handle = currentGroup.userHandle;
+        setIsFollowLoading(true);
+        try {
+            const result = await toggleFollow(handle);
+            const resolvedFollowing =
+                typeof result?.following === 'boolean'
+                    ? result.following
+                    : result?.status === 'accepted'
+                        ? true
+                        : result?.status === 'unfollowed'
+                            ? false
+                            : !isFollowingStoryUser;
+            setIsFollowingStoryUser(resolvedFollowing);
+            setFollowState(user.id, handle, resolvedFollowing);
+            showToast?.(resolvedFollowing ? 'Following' : 'Unfollowed');
+        } catch (error) {
+            console.warn('Follow toggle fallback in story card:', error);
+            const fallback = !isFollowingStoryUser;
+            setIsFollowingStoryUser(fallback);
+            setFollowState(user.id, handle, fallback);
+            showToast?.(fallback ? 'Following' : 'Unfollowed');
+        } finally {
+            setIsFollowLoading(false);
+        }
+    }
+
+    function startDeliveryFx(kind: 'message' | 'like', toHandle: string) {
+        const avatarEl = document.querySelector('[data-story-header-avatar="true"]') as HTMLElement | null;
+        const avatarRect = avatarEl?.getBoundingClientRect();
+        const startX = window.innerWidth / 2;
+        const startY = window.innerHeight - 112;
+        const targetX = avatarRect ? avatarRect.left + avatarRect.width / 2 : 40;
+        const targetY = avatarRect ? avatarRect.top + avatarRect.height / 2 : 42;
+
+        // Hold story playback while confirmation travels to avatar.
+        setPaused(true);
+        pausedRef.current = true;
+
+        setDeliveryFx({
+            kind,
+            toHandle,
+            startX,
+            startY,
+            targetX,
+            targetY,
+            phase: 'start',
+        });
+
+        window.setTimeout(() => {
+            setDeliveryFx((prev) => (prev ? { ...prev, phase: 'fly' } : null));
+        }, 14);
+        window.setTimeout(() => {
+            setDeliveryFx(null);
+            // Resume only after animation fully completes and composer isn't open.
+            if (!showReplyComposer) {
+                setPaused(false);
+                pausedRef.current = false;
+            }
+        }, 4300);
     }
 
     // Navigate to previous story (within same user)
@@ -649,97 +827,117 @@ export default function StoriesPage() {
         }
     }
 
-    // Handle reaction (like/emoji) without breaking the current viewer position
+    // Handle reaction (like/emoji) with local optimistic update.
+    // Avoid full story-group reload here because it can cause mobile interaction side effects.
     async function handleReaction(emoji: string) {
         if (!currentStory || !user?.id || !user?.handle) return;
+        const storyId = currentStory.id;
+        const keepMuted = isMuted;
+        // Optimistic local UI update to avoid remounting media/video tree.
+        setLocalReactionByStoryId((prev) => ({ ...prev, [storyId]: emoji }));
         try {
-            // Preserve current position before refreshing
-            const currentUserId = currentGroup?.userId;
-            const currentUserHandle = currentGroup?.userHandle;
-            const currentStoryIdx = currentStoryIndex;
-            
-            // Apply reaction to underlying data
-            await addStoryReaction(currentStory.id, user.id, user.handle, emoji);
+            await addStoryReaction(storyId, user.id, user.handle, emoji);
             setShowEmojiPicker(false);
-            
-            // Refresh story data but preserve current position
-            // Use the same function that loaded initial stories (followed users)
-            const followedUserHandles = await getFollowedUsers(user.id);
-            let groups = await fetchFollowedUsersStoryGroups(user.id, followedUserHandles);
-
-            // If current user's group (e.g. Sarah when opened from feed) is not in the list,
-            // fetch it separately by handle – same behaviour as initial load with openUserHandle
-            if (currentUserHandle) {
-                const existingIndex = groups.findIndex(g => g.userHandle === currentUserHandle);
-                if (existingIndex === -1) {
-                    try {
-                        const extraGroup = await fetchStoryGroupByHandle(currentUserHandle);
-                        if (extraGroup) {
-                            groups.push(extraGroup);
-                        }
-                    } catch (error) {
-                        console.warn('Failed to fetch extra story group after reaction for handle', currentUserHandle, error);
-                    }
-                }
-            }
-            
-            // Load avatars for refreshed groups (same as loadStories)
-            groups = await Promise.all(groups.map(async (group) => {
-                if (group.userId === user.id && user.avatarUrl) {
-                    return { ...group, avatarUrl: user.avatarUrl };
-                }
-                let avatarUrl = getAvatarForHandle(group.userHandle);
-                if (!avatarUrl) {
-                    try {
-                        const { fetchUserProfile } = await import('../api/client');
-                        const profile = await fetchUserProfile(group.userHandle, user.id);
-                        if (profile && (profile.avatar_url || profile.avatarUrl)) {
-                            avatarUrl = profile.avatar_url || profile.avatarUrl;
-                        }
-                    } catch (error) {
-                        console.warn(`Failed to fetch avatar for ${group.userHandle}:`, error);
-                    }
-                }
-                return { ...group, avatarUrl };
-            }));
-            
-            // Find the same user's group to maintain position
-            // Try by userId first, then by userHandle as fallback
-            let sameUserGroupIndex = groups.findIndex(g => g.userId === currentUserId);
-            if (sameUserGroupIndex === -1 && currentUserHandle) {
-                sameUserGroupIndex = groups.findIndex(g => g.userHandle === currentUserHandle);
-            }
-
-            if (sameUserGroupIndex !== -1) {
-                const sameUserGroup = groups[sameUserGroupIndex];
-                // Make sure we don't go beyond the available stories
-                const safeStoryIndex = Math.min(currentStoryIdx, sameUserGroup.stories.length - 1);
-                
-                // Update story groups and restore position
-                setStoryGroups(groups);
-                setCurrentGroupIndex(sameUserGroupIndex);
-                currentGroupIndexRef.current = sameUserGroupIndex;
-                setCurrentStoryIndex(safeStoryIndex);
-                currentStoryIndexRef.current = safeStoryIndex;
-            } else {
-                // If user not found, try to keep current position if still valid
-                if (currentGroupIndex < groups.length && groups[currentGroupIndex]?.stories?.length > 0) {
-                    setStoryGroups(groups);
-                    const safeStoryIndex = Math.min(currentStoryIdx, groups[currentGroupIndex].stories.length - 1);
-                    setCurrentStoryIndex(safeStoryIndex);
-                    currentStoryIndexRef.current = safeStoryIndex;
-                } else {
-                    // As a last resort, close the viewer instead of leaving it in a broken state
-                    console.warn('User group not found after reaction, closing viewer');
-                    setViewingStories(false);
-                }
-            }
+            setIsMuted(keepMuted);
         } catch (error) {
             console.error('Error adding reaction:', error);
+            // Revert optimistic reaction on failure.
+            setLocalReactionByStoryId((prev) => {
+                const next = { ...prev };
+                delete next[storyId];
+                return next;
+            });
         }
     }
 
     // Handle reply
+    async function generateStoryReplyThumbnail(): Promise<string | undefined> {
+        try {
+            const group = storyGroups[currentGroupIndex];
+            const story = group?.stories?.[currentStoryIndex];
+            if (!story) return undefined;
+
+            const mediaUrl = story.mediaUrl;
+            if (!mediaUrl) return undefined;
+            const looksLikeVideoUrl = /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(mediaUrl);
+            const isVideoStory = story.mediaType === 'video' || looksLikeVideoUrl;
+
+            // Video stories must send an image frame thumbnail, never raw video URL.
+            if (isVideoStory) {
+                // Prefer capturing from active player.
+                if (videoRef.current && videoRef.current.videoWidth > 0 && videoRef.current.videoHeight > 0) {
+                    const v = videoRef.current;
+                    const canvas = document.createElement('canvas');
+                    canvas.width = Math.min(720, v.videoWidth);
+                    canvas.height = Math.round((canvas.width / v.videoWidth) * v.videoHeight);
+                    const ctx = canvas.getContext('2d');
+                    if (!ctx) return undefined;
+                    ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+                    return canvas.toDataURL('image/jpeg', 0.82);
+                }
+
+                // Fallback: load video off-DOM and capture an early frame.
+                const v = document.createElement('video');
+                v.src = mediaUrl;
+                v.muted = true;
+                v.playsInline = true;
+                v.preload = 'metadata';
+                await new Promise<void>((resolve, reject) => {
+                    const onLoaded = () => resolve();
+                    const onError = () => reject(new Error('VIDEO_LOAD_FAILED'));
+                    v.addEventListener('loadeddata', onLoaded, { once: true });
+                    v.addEventListener('error', onError, { once: true });
+                });
+                try {
+                    v.currentTime = Math.min(0.1, Math.max(0, (v.duration || 0) / 10));
+                } catch (_) {
+                    // Ignore seek errors and capture current frame.
+                }
+                await new Promise<void>((resolve) => {
+                    const onSeeked = () => resolve();
+                    v.addEventListener('seeked', onSeeked, { once: true });
+                    window.setTimeout(resolve, 120);
+                });
+                if (v.videoWidth > 0 && v.videoHeight > 0) {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = Math.min(720, v.videoWidth);
+                    canvas.height = Math.round((canvas.width / v.videoWidth) * v.videoHeight);
+                    const ctx = canvas.getContext('2d');
+                    if (!ctx) return undefined;
+                    ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+                    return canvas.toDataURL('image/jpeg', 0.82);
+                }
+                return undefined;
+            }
+
+            // For non-blob image URLs (https/data), use directly.
+            if (!mediaUrl.startsWith('blob:')) {
+                return mediaUrl;
+            }
+
+            // Fallback for image blobs.
+            if (!isVideoStory) {
+                const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+                    const el = new Image();
+                    el.onload = () => resolve(el);
+                    el.onerror = () => reject(new Error('IMAGE_LOAD_FAILED'));
+                    el.src = mediaUrl;
+                });
+                if (!img.width || !img.height) return undefined;
+                const canvas = document.createElement('canvas');
+                canvas.width = Math.min(720, img.width);
+                canvas.height = Math.round((canvas.width / img.width) * img.height);
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return undefined;
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                return canvas.toDataURL('image/jpeg', 0.82);
+            }
+        } catch (error) {
+            console.warn('Failed to generate story reply thumbnail:', error);
+        }
+        return undefined;
+    }
+
     async function handleReply() {
         if (!currentStory || !user?.id || !user?.handle || !replyText.trim()) return;
         try {
@@ -747,13 +945,20 @@ export default function StoriesPage() {
             // Also append to chat between replier and story owner
             const toHandle = currentGroup?.userHandle;
             if (toHandle) {
-                await appendMessage(user.handle, toHandle, { text: replyText, imageUrl: currentStory.mediaUrl });
+                // Attach a stable thumbnail so DM shows which story was replied to.
+                const storyThumb = await generateStoryReplyThumbnail();
+                await appendMessage(user.handle, toHandle, {
+                    text: replyText,
+                    imageUrl: storyThumb,
+                });
                 // Optional: system echo for owner (kept same conversation id)
                 await appendMessage(toHandle, user.handle, { text: `You replied to their story`, isSystemMessage: true });
-                showToast?.('Reply sent');
+                startDeliveryFx('message', toHandle);
             }
             setReplyText('');
             setShowReplyComposer(false);
+            setPaused(false);
+            pausedRef.current = false;
         } catch (error) {
             console.error('Error adding reply:', error);
         }
@@ -1161,6 +1366,17 @@ export default function StoriesPage() {
         };
         loadViewerFollowState();
     }, [showInsightsSheet, insightsTab, user?.id, user?.handle, currentStoryForMeta?.id, (currentStoryForMeta?.viewerHandles || []).join('|')]);
+
+    if (loading && openUserHandle) {
+        return (
+            <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
+                <div className="text-center">
+                    <div className="w-10 h-10 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+                    <p className="text-sm text-gray-300">Opening story...</p>
+                </div>
+            </div>
+        );
+    }
 
     if (loading) {
         return (
@@ -2767,21 +2983,21 @@ export default function StoriesPage() {
                             <div className="flex items-center gap-3 flex-1">
                                 <div 
                                     className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity flex-1"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (currentGroup?.userHandle) {
-                                            setViewingStories(false);
-                                            setTimeout(() => {
-                                                navigate(`/user/${encodeURIComponent(currentGroup.userHandle)}`);
-                                            }, 100);
-                                        }
-                                    }}
+                                    data-story-header-avatar="true"
+                                    onClick={handleStoryAvatarTap}
                                 >
-                                    <Avatar
-                                        src={currentGroup?.avatarUrl}
-                                        name={currentGroup?.name || 'User'}
-                                        size="sm"
-                                    />
+                                    <div className="relative">
+                                        <Avatar
+                                            src={currentGroup?.avatarUrl}
+                                            name={currentGroup?.name || 'User'}
+                                            size="sm"
+                                        />
+                                        {currentGroup?.userHandle && user?.handle && currentGroup.userHandle !== user.handle && !isFollowingStoryUser && (
+                                            <span className="absolute -bottom-0.5 -right-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-cyan-500 border border-black/50">
+                                                <FiPlus className="w-2.5 h-2.5 text-white" />
+                                            </span>
+                                        )}
+                                    </div>
                                     <div className="flex flex-col gap-0.5 min-w-0">
                                         <div className="flex items-center gap-1.5 min-w-0">
                                             <p className="text-white font-semibold text-sm truncate">{currentGroup?.userHandle}</p>
@@ -2834,7 +3050,7 @@ export default function StoriesPage() {
                                 </div>
                                 
                                 {/* Follow/Following button */}
-                                {currentGroup?.userHandle && user?.handle && currentGroup.userHandle !== user.handle && (
+                                {false && currentGroup?.userHandle && user?.handle && currentGroup.userHandle !== user?.handle && (
                                     <button
                                         onClick={async (e) => {
                                             e.stopPropagation();
@@ -2844,7 +3060,7 @@ export default function StoriesPage() {
                                             const wasFollowing = isFollowingStoryUser;
                                             // Optimistic update: show new state immediately
                                             setIsFollowingStoryUser(!wasFollowing);
-                                            setFollowState(user.id, handle, !wasFollowing);
+                                            setFollowState(user?.id || '', handle, !wasFollowing);
                                             setIsFollowLoading(true);
                                             
                                             const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
@@ -2987,14 +3203,83 @@ export default function StoriesPage() {
                                     </button>
                                 )}
                             </div>
-                                <button
-                                    onClick={closeStories}
-                                className="pointer-events-auto p-2"
-                                >
-                                <FiX className="w-6 h-6 text-white" />
-                                </button>
+                                <div className="flex items-center gap-1.5">
+                                    <button
+                                        type="button"
+                                        onPointerDown={(e) => e.stopPropagation()}
+                                        onPointerUp={(e) => {
+                                            e.stopPropagation();
+                                            e.preventDefault();
+                                            triggerMuteAction();
+                                        }}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            e.preventDefault();
+                                        }}
+                                        className="pointer-events-auto p-2 rounded-full bg-black/45 border border-white/20"
+                                        aria-label={isMuted ? 'Unmute story' : 'Mute story'}
+                                    >
+                                        {isMuted ? (
+                                            <FiVolumeX className="w-5 h-5 text-white" />
+                                        ) : (
+                                            <FiVolume2 className="w-5 h-5 text-white" />
+                                        )}
+                                    </button>
+                                    <button
+                                        onClick={closeStories}
+                                        className="pointer-events-auto p-2"
+                                    >
+                                        <FiX className="w-6 h-6 text-white" />
+                                    </button>
+                                </div>
                         </div>
                     </div>
+
+                    {showStoryProfileCard && (
+                        <div className="absolute top-16 left-4 z-[70]" data-story-interactive>
+                            <div className="w-[220px] rounded-2xl border border-white/20 bg-black/70 backdrop-blur-md p-2 shadow-2xl">
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (currentGroup?.userHandle) {
+                                            setViewingStories(false);
+                                            setTimeout(() => {
+                                                navigate(`/user/${encodeURIComponent(currentGroup.userHandle)}`);
+                                            }, 100);
+                                        }
+                                    }}
+                                    className="w-full text-left px-3 py-2.5 rounded-xl text-sm text-white hover:bg-white/10 transition-colors"
+                                >
+                                    View profile
+                                </button>
+                                {currentGroup?.userHandle && user?.handle && currentGroup.userHandle !== user.handle && (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleStoryFollowQuickToggle();
+                                        }}
+                                        disabled={isFollowLoading}
+                                        className="w-full text-left px-3 py-2.5 rounded-xl text-sm text-cyan-200 hover:bg-white/10 transition-colors disabled:opacity-50"
+                                    >
+                                        {isFollowingStoryUser ? 'Unfollow' : 'Follow'}
+                                    </button>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setShowStoryProfileCard(false);
+                                        resumeStoryIfAllowed();
+                                    }}
+                                    className="w-full text-left px-3 py-2.5 rounded-xl text-sm text-white/80 hover:bg-white/10 transition-colors"
+                                >
+                                    Close
+                                </button>
+                            </div>
+                        </div>
+                    )}
 
                     {isViewingOwnStory && (
                         <div className="absolute top-16 left-0 right-0 px-4 z-50" data-story-interactive>
@@ -3145,7 +3430,11 @@ export default function StoriesPage() {
 
                     {/* Bottom Action Bar - Instagram Style */}
                     <div className="absolute bottom-0 left-0 right-0 z-[60] px-2 pb-4" data-story-interactive>
-                        <div className="flex items-center gap-1.5 max-w-md mx-auto" style={{ flexWrap: 'nowrap' }}>
+                        <div
+                            className="flex items-center gap-1.5 max-w-md mx-auto"
+                            style={{ flexWrap: 'nowrap' }}
+                            onClickCapture={stopStoryControlPropagation}
+                        >
                             {/* Send Message Input */}
                             {showReplyComposer ? (
                                 <div className="flex-1 flex items-center gap-1.5">
@@ -3163,6 +3452,11 @@ export default function StoriesPage() {
                                             e.stopPropagation();
                                             handleReply();
                                         }}
+                                        onTouchEnd={(e) => {
+                                            e.stopPropagation();
+                                            e.preventDefault();
+                                            handleReply();
+                                        }}
                                         disabled={!replyText.trim()}
                                         className="px-2.5 py-2 rounded-full bg-white text-black text-xs font-semibold disabled:opacity-50"
                                     >
@@ -3173,6 +3467,16 @@ export default function StoriesPage() {
                                             e.stopPropagation();
                                             setShowReplyComposer(false);
                                             setReplyText('');
+                                            setPaused(false);
+                                            pausedRef.current = false;
+                                        }}
+                                        onTouchEnd={(e) => {
+                                            e.stopPropagation();
+                                            e.preventDefault();
+                                            setShowReplyComposer(false);
+                                            setReplyText('');
+                                            setPaused(false);
+                                            pausedRef.current = false;
                                         }}
                                         className="px-2.5 py-2 rounded-full bg-white/10 text-white text-xs font-semibold"
                                     >
@@ -3181,9 +3485,20 @@ export default function StoriesPage() {
                                 </div>
                             ) : (
                                 <button
+                                    type="button"
+                                    onPointerUp={(e) => {
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                        setShowReplyComposer(true);
+                                    }}
+                                    onTouchEnd={(e) => {
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                        setShowReplyComposer(true);
+                                    }}
                                     onClick={(e) => {
                                         e.stopPropagation();
-                                        setShowReplyComposer(true);
+                                        e.preventDefault();
                                     }}
                                     className="flex-1 bg-white/10 rounded-full px-3 py-2 text-left text-white/60 text-xs min-w-0"
                                 >
@@ -3193,122 +3508,110 @@ export default function StoriesPage() {
                             
                             {/* Like Button */}
                             <button
+                                type="button"
+                                onPointerUp={(e) => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    triggerLikeAction();
+                                }}
+                                onTouchEnd={(e) => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    triggerLikeAction();
+                                }}
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     e.preventDefault();
-                                    handleReaction('👍');
                                 }}
                                 className="p-1.5 flex-shrink-0"
                             >
-                                <FiThumbsUp className={`w-5 h-5 ${currentStory?.userReaction ? 'text-blue-400' : 'text-white'}`} />
+                                <FiThumbsUp className={`w-5 h-5 ${(localReactionByStoryId[currentStory?.id || ''] || currentStory?.userReaction) ? 'text-cyan-400' : 'text-white'}`} />
                             </button>
 
                             {/* Share Button */}
                             <button
-                                onClick={(e) => {
+                                type="button"
+                                onPointerUp={(e) => {
                                     e.stopPropagation();
                                     e.preventDefault();
                                     setShowStoryShareModal(true);
+                                }}
+                                onTouchEnd={(e) => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    setShowStoryShareModal(true);
+                                }}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
                                 }}
                                 className="p-1.5 flex-shrink-0"
                             >
                                 <FiSend className="w-5 h-5 text-white" />
                             </button>
 
-                            {/* Mute/Unmute Button - ALWAYS VISIBLE */}
-                            <button
-                                onClick={async (e) => {
-                                    e.stopPropagation();
-                                    e.preventDefault();
-                                    
-                                    console.log('Mute button clicked, current isMuted:', isMuted);
-                                    console.log('videoRef.current:', videoRef.current);
-                                    
-                                    // Find video element if ref is not set
-                                    let video = videoRef.current;
-                                    if (!video || video.tagName !== 'VIDEO') {
-                                        // Try to find video in the DOM
-                                        const videoElement = document.querySelector('video');
-                                        if (videoElement) {
-                                            video = videoElement as HTMLVideoElement;
-                                            videoRef.current = video;
-                                            setHasVideo(true);
-                                        } else {
-                                            console.log('No video element found');
-                                            return;
-                                        }
-                                    }
-                                    
-                                    const newMuted = !isMuted;
-                                    console.log('Setting muted to:', newMuted);
-                                    
-                                    // Update state first
-                                    setIsMuted(newMuted);
-                                    
-                                    // Force update video muted state immediately
-                                    video.muted = newMuted;
-                                    console.log('Video muted property set to:', video.muted);
-                                    
-                                    // If unmuting, ensure video plays and audio is enabled
-                                    if (!newMuted) {
-                                        try {
-                                            // Aggressively set muted to false multiple times
-                                            video.muted = false;
-                                            console.log('Force unmuted, video.muted is now:', video.muted);
-                                            
-                                            // Ensure video is playing
-                                            if (video.paused) {
-                                                console.log('Video was paused, playing now');
-                                                await video.play();
-                                            }
-                                            
-                                            // Triple-check muted state after play
-                                            video.muted = false;
-                                            console.log('After play, video.muted is:', video.muted);
-                                            
-                                            // Use multiple timeouts to ensure the muted state is applied
-                                            setTimeout(() => {
-                                                if (videoRef.current) {
-                                                    videoRef.current.muted = false;
-                                                    console.log('Timeout 1: video.muted set to false');
-                                                }
-                                            }, 50);
-                                            
-                                            setTimeout(() => {
-                                                if (videoRef.current) {
-                                                    videoRef.current.muted = false;
-                                                    if (videoRef.current.paused) {
-                                                        videoRef.current.play().catch(console.error);
-                                                    }
-                                                    console.log('Timeout 2: video.muted set to false');
-                                                }
-                                            }, 150);
-                                        } catch (error) {
-                                            console.error('Error unmuting video:', error);
-                                        }
-                                    }
-                                }}
-                                className="p-1.5 flex-shrink-0 bg-purple-600/80 rounded-full hover:bg-purple-600 transition-colors border border-white/50 shadow-lg"
-                                style={{ 
-                                    minWidth: '32px',
-                                    minHeight: '32px',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center'
-                                }}
-                                aria-label={isMuted ? 'Unmute video' : 'Mute video'}
-                            >
-                                {isMuted ? (
-                                    <FiVolumeX className="w-5 h-5 text-white" />
-                                ) : (
-                                    <FiVolume2 className="w-5 h-5 text-white" />
-                                )}
-                            </button>
                         </div>
                     </div>
 
                     {/* Swipe navigation is handled on the main media container - no tap zones to avoid conflicts with polls */}
                 </div>
+
+                {deliveryFx && (
+                    <>
+                        <style dangerouslySetInnerHTML={{ __html: `
+                            @keyframes story-delivery-drop {
+                                0% {
+                                    transform: translate(-50%, -50%) scale(1);
+                                    opacity: 1;
+                                }
+                                22% {
+                                    transform: translate(-50%, -62%) scale(1.08);
+                                    opacity: 1;
+                                }
+                                74% {
+                                    transform: translate(calc(-50% + var(--dx) * 0.82), calc(-50% + var(--dy) * 0.82 - 10px)) scale(0.66);
+                                    opacity: 0.9;
+                                }
+                                100% {
+                                    transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(0.3);
+                                    opacity: 0.06;
+                                }
+                            }
+                        `}} />
+                        <div className="fixed inset-0 pointer-events-none z-[95]">
+                            <div
+                                className="absolute rounded-2xl border border-cyan-300/40 bg-black/70 backdrop-blur-md px-3 py-2 shadow-[0_10px_30px_rgba(6,182,212,0.25)]"
+                                style={{
+                                    left: deliveryFx.startX,
+                                    top: deliveryFx.startY,
+                                    transform: 'translate(-50%, -50%) scale(1)',
+                                    opacity: 1,
+                                    ['--dx' as string]: `${deliveryFx.targetX - deliveryFx.startX}px`,
+                                    ['--dy' as string]: `${deliveryFx.targetY - deliveryFx.startY}px`,
+                                    animation: deliveryFx.phase === 'fly'
+                                        ? 'story-delivery-drop 3.8s cubic-bezier(0.16,1,0.3,1) forwards'
+                                        : 'none',
+                                }}
+                            >
+                                <div className="flex items-center gap-2">
+                                    <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-cyan-500/90 text-white">
+                                        {deliveryFx.kind === 'message' ? (
+                                            <FiSend className="w-3.5 h-3.5" />
+                                        ) : (
+                                            <FiThumbsUp className="w-3.5 h-3.5" />
+                                        )}
+                                    </span>
+                                    <div className="min-w-0">
+                                        <p className="text-[11px] font-semibold text-white">
+                                            {deliveryFx.kind === 'message' ? 'Message sent' : 'Like sent'}
+                                        </p>
+                                        <p className="text-[10px] text-cyan-100/90 truncate">@{deliveryFx.toHandle}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </>
+                )}
 
                 
 
@@ -3775,6 +4078,17 @@ export default function StoriesPage() {
                     </div>
                 )}
             </>
+        );
+    }
+
+    if (openUserHandle && (autoOpeningStory || !viewingStories)) {
+        return (
+            <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
+                <div className="text-center">
+                    <div className="w-10 h-10 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+                    <p className="text-sm text-gray-300">{autoOpeningStory ? 'Opening story...' : 'Closing story...'}</p>
+                </div>
+            </div>
         );
     }
 
