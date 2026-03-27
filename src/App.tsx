@@ -6341,24 +6341,24 @@ function FeedPageWrapper() {
             aria-hidden="true"
           />
           <div
-            className="relative z-10 mx-auto w-full max-w-lg rounded-t-[1.25rem] border border-white/10 border-b-0 bg-gradient-to-b from-[#0b1220] via-[#080d18] to-[#05080f] shadow-[0_-12px_48px_rgba(0,0,0,0.55)] flex flex-col max-h-[78vh]"
+            className="relative z-10 mx-auto w-full max-w-lg rounded-t-[1.25rem] border border-white/15 border-b-0 bg-black shadow-[0_-12px_48px_rgba(0,0,0,0.65)] flex flex-col max-h-[78vh]"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex flex-col items-center pt-2 pb-1">
-              <div className="h-1 w-10 rounded-full bg-white/20" aria-hidden />
+              <div className="h-1 w-10 rounded-full bg-white/25" aria-hidden />
             </div>
             <div className="flex items-center gap-3 px-4 pb-3 pt-1 border-b border-white/10">
               <Avatar
                 src={getAvatarForHandle(dmSheetRecipientHandle)}
                 name={dmSheetRecipientHandle.split('@')[0] || dmSheetRecipientHandle}
                 size="sm"
-                className="!ring-2 !ring-cyan-400/35"
+                className="!ring-2 !ring-white/20"
               />
               <div className="min-w-0 flex-1">
                 <p className="text-[15px] font-semibold text-white truncate tracking-tight">
                   {dmSheetRecipientHandle.split('@')[0] || 'User'}
                 </p>
-                <p className="text-xs text-cyan-200/80 truncate">{dmSheetRecipientHandle}</p>
+                <p className="text-xs text-neutral-400 truncate">{dmSheetRecipientHandle}</p>
               </div>
               <button
                 type="button"
@@ -6374,7 +6374,7 @@ function FeedPageWrapper() {
                 <FiX className="w-5 h-5" />
               </button>
             </div>
-            <div className="px-4 pt-3 pb-[max(14px,env(safe-area-inset-bottom))] flex flex-col gap-2">
+            <div className="px-4 pt-3 pb-[max(14px,env(safe-area-inset-bottom))] flex flex-col gap-2 bg-black">
               <label className="sr-only" htmlFor="dm-sheet-input">
                 Message
               </label>
@@ -6389,7 +6389,7 @@ function FeedPageWrapper() {
                   }}
                   placeholder="Message…"
                   rows={1}
-                  className="flex-1 min-h-[44px] max-h-40 rounded-2xl bg-black/35 border border-white/12 px-4 py-2.5 text-[15px] leading-snug text-white placeholder:text-gray-500 resize-none overflow-y-auto shadow-inner shadow-black/20 focus:outline-none focus:ring-2 focus:ring-cyan-500/45 focus:border-cyan-500/35"
+                  className="flex-1 min-h-[44px] max-h-40 rounded-2xl bg-neutral-950 border border-white px-4 py-2.5 text-[15px] leading-snug text-white placeholder:text-neutral-500 resize-none overflow-y-auto focus:outline-none focus:ring-0 focus:border-white"
                   style={{ height: `${DM_SHEET_TEXTAREA_MIN_PX}px` }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
@@ -6402,14 +6402,14 @@ function FeedPageWrapper() {
                   type="button"
                   onClick={sendDmFromSheet}
                   disabled={!dmSheetMessage.trim()}
-                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-cyan-500 text-black shadow-[0_0_0_1px_rgba(34,211,238,0.35)] hover:bg-cyan-400 disabled:opacity-50 disabled:pointer-events-none disabled:shadow-none transition-colors"
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-black border border-white/90 hover:bg-neutral-200 disabled:opacity-40 disabled:pointer-events-none transition-colors"
                   aria-label="Send message"
                 >
                   <FiSend className="w-5 h-5" aria-hidden />
                 </button>
               </div>
-              <p className="text-[11px] text-gray-500 px-1">
-                <span className="text-gray-400">Enter</span> to send · <span className="text-gray-400">Shift+Enter</span> new line
+              <p className="text-[11px] text-neutral-500 px-1">
+                <span className="text-neutral-400">Enter</span> to send · <span className="text-neutral-400">Shift+Enter</span> new line
               </p>
             </div>
           </div>
