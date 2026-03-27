@@ -35,6 +35,9 @@ import type { BoostFeedType } from '../components/BoostSelectionModal';
  * - userLocal/userRegional/userNational -> stored in User model, not in posts
  */
 
+/** Tall portrait for Ava feed demo — exercises 4:5 clamp (must be above init block that maps posts). */
+const AVA_DEMO_TALL_MEDIA_URL = 'https://images.unsplash.com/photo-1514996937319-344454492b37?w=1200';
+
 // Helper function to get user location data from handle
 function getUserLocationFromHandle(userHandle: string): { local: string; regional: string; national: string } {
   const handleLower = userHandle.toLowerCase();
@@ -360,13 +363,14 @@ if (!postsInitialized) {
     userNational: 'Ireland',
   } as Post;
 
-  // Normal (non-sponsored) mock post from Ava@galway
+  // Normal (non-sponsored) mock post from Ava@galway – use a tall portrait image so feed can demonstrate 4:5 clamping
   const avaNormalPost: Post = {
     id: `ava-normal-${artaneNow - 3600000}-galway`,
     userHandle: 'Ava@galway',
     locationLabel: 'Galway City, Ireland',
     tags: [],
-    mediaUrl: 'https://images.unsplash.com/photo-1519689680058-324335c77eba?w=800',
+    // Very tall portrait photo to exercise Instagram-style aspect clamping in the feed
+    mediaUrl: 'https://images.unsplash.com/photo-1514996937319-344454492b37?w=1200',
     mediaType: 'image',
     caption: 'Morning walk around Galway — love this city! ☕️',
     createdAt: artaneNow - 3600000, // 1 hour ago
@@ -388,6 +392,18 @@ if (!postsInitialized) {
     if (seenIds.has(id)) return false;
     seenIds.add(id);
     return true;
+  });
+
+  // Ensure Ava's non-sponsored demo post always uses a tall portrait image (same URL as getAvaNormalPost)
+  posts = posts.map((p) => {
+    if (p.userHandle === 'Ava@galway' && !p.isBoosted) {
+      return {
+        ...p,
+        mediaUrl: AVA_DEMO_TALL_MEDIA_URL,
+        mediaType: 'image',
+      };
+    }
+    return p;
   });
   console.log('Posts initialized:', posts.length, 'unique posts');
 
@@ -771,14 +787,14 @@ function getMockScenesVideoPosts(): Post[] {
 }
 
 /** Ava's normal (non-sponsored) mock post for Ireland feed. Stable id for dedupe. */
-function getAvaNormalPost(): Post {
+export function getAvaNormalPost(): Post {
   const ts = Date.now() - 3600000;
   return {
     id: 'ava-normal-ireland-demo',
     userHandle: 'Ava@galway',
     locationLabel: 'Galway City, Ireland',
     tags: [],
-    mediaUrl: 'https://images.unsplash.com/photo-1519689680058-324335c77eba?w=800',
+    mediaUrl: AVA_DEMO_TALL_MEDIA_URL,
     mediaType: 'image',
     caption: 'Morning walk around Galway — love this city! ☕️',
     createdAt: ts,
@@ -984,10 +1000,9 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       let items = [...dedupedUserCreated, ...dedupedMock, ...transformedItems];
       const itemIds = new Set(items.map(p => p.id));
 
-      // Inject Ava on first page for location tabs; for discover only if user follows Ava
-      const injectAvaTabs = ['ireland', 'dublin', 'finglas'];
-      const injectAvaDiscover = t === 'discover' && isFirstPage && !itemIds.has('ava-normal-ireland-demo') && getFollowState(getState(userId || 'me').follows || {}, 'Ava@galway');
-      if (isFirstPage && (injectAvaTabs.includes(t) || injectAvaDiscover) && !itemIds.has('ava-normal-ireland-demo')) {
+      // Dev/test: always inject Ava's normal post on first page of feed so sizing changes are visible immediately.
+      // (Keeps boosted/sponsored logic separate.)
+      if (isFirstPage && !itemIds.has('ava-normal-ireland-demo')) {
         const avaNormal = getAvaNormalPost();
         const stateUserId = userId || 'me';
         const decorated = decorateForUser(stateUserId, { ...avaNormal, isBoosted: false, boostFeedType: undefined });
@@ -1274,8 +1289,8 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
           : p
       );
     }
-    // Guarantee Ava's normal post appears in Ireland feed first page (mock path)
-    if (t === 'ireland' && isFirstPage) {
+    // Dev/test: always inject Ava's normal post on first page (mock path) so sizing changes are easy to verify.
+    if (isFirstPage) {
       const hasAvaNormalInItems = items.some(p => p.id.startsWith('ava-normal-') && p.userHandle === 'Ava@galway');
       if (!hasAvaNormalInItems) {
         const avaNormal = getAvaNormalPost();

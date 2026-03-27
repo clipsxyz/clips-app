@@ -2521,6 +2521,7 @@ export default function ScenesModal({
                     isMuted={false}
                     isBlocked={false}
                     hasNotifications={false}
+                    onOpenSave={() => setSaveModalOpen(true)}
                 />
             )}
         </>

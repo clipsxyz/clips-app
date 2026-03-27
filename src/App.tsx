@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { FiHome, FiUser, FiUserPlus, FiUserX, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX, FiClock, FiSend } from 'react-icons/fi';
 import { GiGreekTemple } from 'react-icons/gi';
@@ -22,7 +23,7 @@ import { useOnline } from './hooks/useOnline';
 import { getUnreadTotal, appendMessage } from './api/messages';
 import { getUnreadNotificationCount } from './api/notifications';
 import { getStoryInsightsForUser } from './api/stories';
-import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost } from './api/posts';
+import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost, getAvaNormalPost } from './api/posts';
 import { updatePost, checkFollowsMe } from './api/client';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory, fetchFollowedUsersStoryGroups } from './api/stories';
 import { enqueue, drain } from './utils/mutationQueue';
@@ -2409,7 +2410,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
         boxSizing: 'border-box',
       };
     }
-    // If we have aspect ratio, use Instagram clamping
+    // If we have aspect ratio, use Instagram clamping (matches Instagram 1.91:1–4:5 window)
     if (aspectRatio) {
       const dimensions = getInstagramImageDimensions(
         window.innerWidth,
@@ -2427,10 +2428,11 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       };
     }
 
-    // Default aspect ratio while loading
+    // Default aspect ratio while loading (no dimensions yet):
+    // use a 4:5 frame like Instagram feed posts so cards don't feel like Reels.
     return {
-      aspectRatio: '9/16',
-      maxHeight: '55vh',
+      aspectRatio: '4/5',
+      maxHeight: '80vh',
       width: '100%',
       position: 'relative',
       display: 'flex',
@@ -3996,7 +3998,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
       className={`mx-0 border-0 border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out] relative ${
         isTileBoostMode
           ? 'w-full overflow-hidden aspect-square rounded-xl mb-0'
-          : 'overflow-visible border-b mb-6'
+          : 'overflow-visible border-b mb-4'
       }`}
       style={{ backgroundColor: '#030712' }}
     >
@@ -4255,6 +4257,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             isMuted={false} // TODO: Check if muted
             isBlocked={false} // TODO: Check if blocked
             hasNotifications={false} // TODO: Check notifications
+            onOpenSave={() => setSaveModalOpen(true)}
           />
           <SavePostModal
             post={post}
@@ -4351,7 +4354,7 @@ const AdCard = React.memo(function AdCard({ ad, onImpression, onClick }: {
   };
 
   return (
-    <article ref={articleRef} aria-labelledby={titleId} className="mx-4 mb-6 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out]" style={{ backgroundColor: '#030712' }}>
+    <article ref={articleRef} aria-labelledby={titleId} className="mx-0 mb-4 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out]" style={{ backgroundColor: '#030712' }}>
       {/* Ad Header */}
       <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -4393,13 +4396,235 @@ const AdCard = React.memo(function AdCard({ ad, onImpression, onClick }: {
 
 type Stories24RailItem = { handle: string; title: string; thumb?: string; previewVideoUrl?: string };
 
+const STORIES24_RAIL_RETURN_KEY = 'clips:stories24RailReturn';
+/** Persisted handle when opening /stories from feed rail — survives `location.state` loss on some mobile browsers. Keep in sync with StoriesPage. */
+const STORIES24_FROM_RAIL_HANDLE_KEY = 'clips:stories24OpenedFromRailHandle';
+const STORIES24_FEED_SCROLL_Y_KEY = 'clips:stories24FeedScrollY';
+const STORIES24_RESTORE_FEED_SCROLL_FLAG = 'clips:stories24RestoreFeedScroll';
+/** Expand: confident ease-out (streaming-style). Collapse: slight overshoot so the card “drops” back. */
+const STORIES24_EXPAND_MS = 560;
+const STORIES24_COLLAPSE_MS = 720;
+const STORIES24_COLLAPSE_EASING = 'cubic-bezier(0.34, 1.28, 0.32, 1)';
+
+/**
+ * Imperative DOM + useLayoutEffect only: avoids React async state so the shrink actually runs on Android WebView.
+ * rAF retry until the rail card exists (no reliance on feedPostCount / React memo timing).
+ */
+function Stories24RailCollapseOverlay() {
+  const location = useLocation();
+
+  React.useLayoutEffect(() => {
+    if (location.pathname !== '/feed') return;
+
+    let cancelled = false;
+    let rafId = 0;
+    let safetyId = 0;
+    let outerNode: HTMLDivElement | null = null;
+    const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
+
+    const cleanupDom = () => {
+      if (outerNode?.parentNode) outerNode.remove();
+      outerNode = null;
+    };
+
+    const tryRun = () => {
+      if (cancelled) return;
+
+      let raw: string | null = null;
+      try {
+        raw = sessionStorage.getItem(STORIES24_RAIL_RETURN_KEY);
+      } catch {
+        return;
+      }
+      if (!raw) return;
+
+      if (typeof performance !== 'undefined' && performance.now() - t0 > 3200) {
+        return;
+      }
+
+      let handle = '';
+      let previewVideoUrl: string | undefined;
+      let previewThumb: string | undefined;
+      try {
+        const parsed = JSON.parse(raw) as {
+          handle?: string;
+          previewVideoUrl?: string;
+          previewThumb?: string;
+        };
+        handle = parsed.handle || '';
+        previewVideoUrl = parsed.previewVideoUrl;
+        previewThumb = parsed.previewThumb;
+      } catch {
+        try {
+          sessionStorage.removeItem(STORIES24_RAIL_RETURN_KEY);
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      if (!handle) return;
+
+      const sel = `[data-stories24-card="${encodeURIComponent(handle)}"]`;
+      const cardEl = document.querySelector(sel) as HTMLElement | null;
+      if (!cardEl) {
+        rafId = window.requestAnimationFrame(tryRun);
+        return;
+      }
+
+      cardEl.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+      const cr = cardEl.getBoundingClientRect();
+      const rect = { top: cr.top, left: cr.left, width: cr.width, height: cr.height };
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      if (rect.width < 8 || rect.height < 8) {
+        rafId = window.requestAnimationFrame(tryRun);
+        return;
+      }
+
+      try {
+        sessionStorage.removeItem(STORIES24_RAIL_RETURN_KEY);
+      } catch {
+        /* ignore */
+      }
+
+      const outer = document.createElement('div');
+      outerNode = outer;
+      outer.setAttribute('data-stories24-collapse-root', '1');
+      outer.setAttribute('aria-hidden', 'true');
+      outer.style.cssText = [
+        'position:fixed',
+        'inset:0',
+        'z-index:2147483647',
+        'pointer-events:none',
+        'background:rgba(0,0,0,0.28)',
+        'transform:translateZ(0)',
+        '-webkit-transform:translateZ(0)',
+      ].join(';');
+
+      const shell = document.createElement('div');
+      const durMs = STORIES24_COLLAPSE_MS;
+      const ease = STORIES24_COLLAPSE_EASING;
+      shell.style.cssText = [
+        'position:absolute',
+        'left:0',
+        'top:0',
+        `width:${vw}px`,
+        `height:${vh}px`,
+        'overflow:hidden',
+        'box-sizing:border-box',
+        'transform-origin:0 0',
+        '-webkit-transform-origin:0 0',
+        'will-change:transform',
+        '-webkit-will-change:transform',
+        '-webkit-transform:translate(0,0) scale(1,1)',
+        'transform:translate(0,0) scale(1,1)',
+        'backface-visibility:hidden',
+        '-webkit-backface-visibility:hidden',
+        'background:#101b2f',
+        'box-shadow:0 24px 72px rgba(0,0,0,0.55)',
+      ].join(';');
+
+      const tint = document.createElement('div');
+      tint.style.cssText =
+        'position:absolute;inset:0;pointer-events:none;background:linear-gradient(135deg,rgba(100,116,139,0.25),rgba(56,189,248,0.2),rgba(99,102,241,0.25))';
+      shell.appendChild(tint);
+
+      if (previewVideoUrl) {
+        const v = document.createElement('video');
+        v.src = previewVideoUrl;
+        v.muted = true;
+        v.playsInline = true;
+        v.setAttribute('playsinline', '');
+        v.setAttribute('webkit-playsinline', 'true');
+        v.autoplay = true;
+        v.loop = true;
+        v.preload = 'metadata';
+        v.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover';
+        shell.appendChild(v);
+        void v.play();
+      } else if (previewThumb) {
+        const img = document.createElement('img');
+        img.src = previewThumb;
+        img.alt = '';
+        img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover';
+        shell.appendChild(img);
+      }
+
+      const veil = document.createElement('div');
+      veil.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,0.12);pointer-events:none';
+      shell.appendChild(veil);
+
+      outer.appendChild(shell);
+      document.body.appendChild(outer);
+
+      const tx = rect.left;
+      const ty = rect.top;
+      const sx = rect.width / vw;
+      const sy = rect.height / vh;
+      const endTransform = `translate(${tx}px,${ty}px) scale(${sx},${sy})`;
+
+      const reducedMotion =
+        typeof window.matchMedia === 'function' &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      let removed = false;
+      function onEnd(ev: TransitionEvent) {
+        if (ev.target !== shell) return;
+        if (ev.propertyName !== 'transform' && ev.propertyName !== '-webkit-transform') return;
+        remove();
+      }
+      function remove() {
+        if (removed) return;
+        removed = true;
+        shell.removeEventListener('transitionend', onEnd);
+        outer.remove();
+        outerNode = null;
+      }
+
+      const applyEnd = () => {
+        shell.style.transition = `transform ${durMs}ms ${ease},-webkit-transform ${durMs}ms ${ease}`;
+        shell.style.webkitTransition = `-webkit-transform ${durMs}ms ${ease}`;
+        void shell.offsetHeight;
+        shell.style.webkitTransform = endTransform;
+        shell.style.transform = endTransform;
+      };
+
+      shell.addEventListener('transitionend', onEnd);
+
+      if (reducedMotion) {
+        applyEnd();
+        safetyId = window.setTimeout(remove, 100);
+      } else {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(applyEnd);
+        });
+        safetyId = window.setTimeout(remove, durMs + 280);
+      }
+    };
+
+    tryRun();
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(rafId);
+      window.clearTimeout(safetyId);
+      cleanupDom();
+    };
+  }, [location.pathname, location.key]);
+
+  return null;
+}
+
 /** Horizontal Stories 24 strip (map pin + title + cards). */
 function Stories24FeedRail({
   stories24Items,
   navigate,
+  onBeforeOpenStoryFromRail,
 }: {
   stories24Items: Stories24RailItem[];
   navigate: ReturnType<typeof useNavigate>;
+  /** Snapshot main feed scroll so /feed can restore after remount (route switch unmounts the feed). */
+  onBeforeOpenStoryFromRail?: () => void;
 }) {
   const [expandingStory, setExpandingStory] = React.useState<{
     item: Stories24RailItem;
@@ -4407,15 +4632,23 @@ function Stories24FeedRail({
     rect: { top: number; left: number; width: number; height: number };
     phase: 'start' | 'expand';
   } | null>(null);
-
   const openStoryFromRail = React.useCallback((storyItem: Stories24RailItem, railHandles: string[]) => {
+    onBeforeOpenStoryFromRail?.();
+    try {
+      sessionStorage.setItem(STORIES24_FROM_RAIL_HANDLE_KEY, storyItem.handle);
+    } catch {
+      /* ignore */
+    }
     navigate('/stories', {
       state: {
         openUserHandle: storyItem.handle,
         railHandles,
+        fromStories24Rail: true,
+        previewVideoUrl: storyItem.previewVideoUrl,
+        previewThumb: storyItem.thumb,
       },
     });
-  }, [navigate]);
+  }, [navigate, onBeforeOpenStoryFromRail]);
 
   const handleStoryCardTap = React.useCallback((e: React.MouseEvent<HTMLButtonElement>, storyItem: Stories24RailItem) => {
     if (expandingStory) return;
@@ -4442,7 +4675,7 @@ function Stories24FeedRail({
     const timer = window.setTimeout(() => {
       openStoryFromRail(expandingStory.item, expandingStory.railHandles);
       setExpandingStory(null);
-    }, 520);
+    }, STORIES24_EXPAND_MS);
     return () => {
       window.cancelAnimationFrame(frame);
       window.clearTimeout(timer);
@@ -4487,6 +4720,7 @@ function Stories24FeedRail({
             <button
               key={`stories24-${storyItem.handle}`}
               type="button"
+              data-stories24-card={encodeURIComponent(storyItem.handle)}
               onClick={(e) => handleStoryCardTap(e, storyItem)}
               className="relative w-[112px] h-[156px] shrink-0 rounded-2xl border border-white/10 overflow-hidden bg-[#101b2f] text-left"
             >
@@ -4525,40 +4759,50 @@ function Stories24FeedRail({
           )
         ))}
       </div>
-      {expandingStory && (
-        <div className="fixed inset-0 z-[140] pointer-events-none">
-          <div
-            className="absolute overflow-hidden bg-[#101b2f] shadow-2xl transition-all duration-[520ms] ease-[cubic-bezier(0.16,1,0.3,1)]"
-            style={{
-              top: expandingStory.phase === 'start' ? expandingStory.rect.top : 0,
-              left: expandingStory.phase === 'start' ? expandingStory.rect.left : 0,
-              width: expandingStory.phase === 'start' ? expandingStory.rect.width : window.innerWidth,
-              height: expandingStory.phase === 'start' ? expandingStory.rect.height : window.innerHeight,
-              borderRadius: expandingStory.phase === 'start' ? 16 : 0,
-            }}
-          >
-            <div className="absolute inset-0 bg-gradient-to-br from-slate-500/25 via-sky-500/20 to-indigo-500/25" />
-            {expandingStory.item.previewVideoUrl ? (
-              <video
-                src={expandingStory.item.previewVideoUrl}
-                className="absolute inset-0 w-full h-full object-cover"
-                muted
-                playsInline
-                autoPlay
-                loop
-                preload="metadata"
-              />
-            ) : expandingStory.item.thumb ? (
-              <img
-                src={expandingStory.item.thumb}
-                alt={`${expandingStory.item.handle} story`}
-                className="absolute inset-0 w-full h-full object-cover"
-              />
-            ) : null}
-            <div className="absolute inset-0 bg-black/10" />
-          </div>
-        </div>
-      )}
+      {expandingStory &&
+        createPortal(
+          <div className="fixed inset-0 z-[140] pointer-events-none">
+            <div
+              className="absolute overflow-hidden bg-[#101b2f] shadow-[0_20px_60px_rgba(0,0,0,0.45)] transition-[top,left,width,height,border-radius,box-shadow] ease-[cubic-bezier(0.16,1,0.3,1)] will-change-[top,left,width,height,border-radius]"
+              style={{
+                transitionDuration: `${STORIES24_EXPAND_MS}ms`,
+                top: expandingStory.phase === 'start' ? expandingStory.rect.top : 0,
+                left: expandingStory.phase === 'start' ? expandingStory.rect.left : 0,
+                width: expandingStory.phase === 'start' ? expandingStory.rect.width : window.innerWidth,
+                height: expandingStory.phase === 'start' ? expandingStory.rect.height : window.innerHeight,
+                borderRadius: expandingStory.phase === 'start' ? 16 : 0,
+              }}
+            >
+              <div className="absolute inset-0 bg-gradient-to-br from-slate-500/25 via-sky-500/20 to-indigo-500/25" />
+              {expandingStory.item.previewVideoUrl ? (
+                <video
+                  src={expandingStory.item.previewVideoUrl}
+                  className="absolute inset-0 w-full h-full object-cover"
+                  muted
+                  playsInline
+                  autoPlay
+                  loop
+                  preload="metadata"
+                />
+              ) : expandingStory.item.thumb ? (
+                <img
+                  src={expandingStory.item.thumb}
+                  alt={`${expandingStory.item.handle} story`}
+                  className="absolute inset-0 w-full h-full object-cover"
+                />
+              ) : null}
+              <div className="absolute inset-0 bg-black/10" />
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none px-4">
+                <p className="text-center text-2xl sm:text-3xl font-bold tracking-tight text-white/95 [text-shadow:0_2px_28px_rgba(0,0,0,0.55)]">
+                  <span className="bg-gradient-to-r from-cyan-200 via-white to-sky-300 bg-clip-text text-transparent">Gazetter</span>
+                  <span className="text-white/95"> 24</span>
+                </p>
+                <p className="mt-2 text-[11px] uppercase tracking-[0.22em] text-cyan-200/75">Stories</p>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
@@ -4756,6 +5000,15 @@ function FeedPageWrapper() {
   // Per-location "notify me when this feed wakes up" preferences (stored by lowercase name)
   const [notifyLocations, setNotifyLocations] = React.useState<string[]>([]);
   const feedScrollRef = React.useRef<HTMLDivElement | null>(null);
+  const snapshotStories24FeedScrollForRail = React.useCallback(() => {
+    try {
+      const y = feedScrollRef.current?.scrollTop ?? 0;
+      sessionStorage.setItem(STORIES24_FEED_SCROLL_Y_KEY, String(y));
+      sessionStorage.setItem(STORIES24_RESTORE_FEED_SCROLL_FLAG, '1');
+    } catch {
+      /* ignore */
+    }
+  }, []);
   const pullStartYRef = React.useRef<number | null>(null);
   const pullDistanceRef = React.useRef(0);
   const pullEligibleRef = React.useRef(false);
@@ -5398,16 +5651,26 @@ function FeedPageWrapper() {
     if (pagesLoadedForFilterRef.current !== currentFilter) return [];
     const flattened = pages.flat();
 
+    // Dev / explicit flag: show Ava's tall demo post in the feed UI even when Laravel + IndexedDB cache
+    // never inject it (e.g. Following tab, or cached first page). Bypasses API/follow rules for layout QA.
+    const showAvaFeedDemo =
+      import.meta.env.DEV || import.meta.env.VITE_FEED_DEMO_AVA === 'true';
+    const avaDemoId = 'ava-normal-ireland-demo';
+    const withAvaDemo =
+      showAvaFeedDemo && !flattened.some((p) => String(p.id) === avaDemoId)
+        ? [getAvaNormalPost(), ...flattened]
+        : flattened;
+
     // Dedupe by id (normalize to string so 123 and "123" are the same). Prefer the copy with isBoosted so "Sponsored" shows.
     const idKey = (p: Post) => String(p.id);
     const bestByKey = new Map<string, Post>();
-    for (const p of flattened) {
+    for (const p of withAvaDemo) {
       const key = idKey(p);
       const existing = bestByKey.get(key);
       if (!existing || (p.isBoosted && !existing.isBoosted)) bestByKey.set(key, p);
     }
     const seen = new Set<string>();
-    const uniquePosts = flattened.filter((p) => {
+    const uniquePosts = withAvaDemo.filter((p) => {
       const key = idKey(p);
       if (seen.has(key)) return false;
       seen.add(key);
@@ -5615,6 +5878,40 @@ function FeedPageWrapper() {
     return currentFilter ? String(currentFilter).charAt(0).toUpperCase() + String(currentFilter).slice(1) : '';
   }, [currentFilter]);
 
+  // Route /feed → /stories unmounts this page; on return, restore inner scroll so the shrink-back lands on the same place (not scroll 0).
+  React.useLayoutEffect(() => {
+    if (!user || routerLocation.pathname !== '/feed') return;
+    let pending = false;
+    try {
+      pending = sessionStorage.getItem(STORIES24_RESTORE_FEED_SCROLL_FLAG) === '1';
+    } catch {
+      return;
+    }
+    if (!pending) return;
+    if (flat.length === 0) return;
+
+    const raw = sessionStorage.getItem(STORIES24_FEED_SCROLL_Y_KEY);
+    const top = raw != null ? parseInt(raw, 10) : 0;
+    if (!Number.isFinite(top) || top < 0) {
+      try {
+        sessionStorage.removeItem(STORIES24_RESTORE_FEED_SCROLL_FLAG);
+        sessionStorage.removeItem(STORIES24_FEED_SCROLL_Y_KEY);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    const rail = feedScrollRef.current;
+    if (!rail) return;
+    rail.scrollTop = top;
+    try {
+      sessionStorage.removeItem(STORIES24_RESTORE_FEED_SCROLL_FLAG);
+      sessionStorage.removeItem(STORIES24_FEED_SCROLL_Y_KEY);
+    } catch {
+      /* ignore */
+    }
+  }, [user, routerLocation.pathname, routerLocation.key, flat.length]);
+
   // Not logged in
   if (!user) {
     return (
@@ -5632,6 +5929,7 @@ function FeedPageWrapper() {
       aria-labelledby={`tab-${active}`}
       className="flex flex-col h-full min-h-0"
     >
+      <Stories24RailCollapseOverlay />
       {/* Pinned chrome: only the list below scrolls (stable header + footer on mobile) */}
       <div className="shrink-0 pt-[env(safe-area-inset-top)]">
       <div className="h-4" />
@@ -6203,7 +6501,11 @@ function FeedPageWrapper() {
                 onShareSuccess={(postId) => updateOne(postId, p => ({ ...p, stats: { ...p.stats, shares: p.stats.shares + 1 } }))}
               />
               {showStories24AfterThisPost && (
-                <Stories24FeedRail stories24Items={stories24Items} navigate={navigate} />
+                <Stories24FeedRail
+                  stories24Items={stories24Items}
+                  navigate={navigate}
+                  onBeforeOpenStoryFromRail={snapshotStories24FeedScrollForRail}
+                />
               )}
             </React.Fragment>
           );

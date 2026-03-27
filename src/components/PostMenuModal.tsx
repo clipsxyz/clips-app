@@ -44,6 +44,8 @@ interface PostMenuModalProps {
     onReclip?: () => Promise<void>;
     onTurnOnNotifications?: () => void;
     onTurnOffNotifications?: () => void;
+    /** When set, Save opens this (e.g. parent SavePostModal). Required so Save works after menu closes — internal state was lost on unmount. */
+    onOpenSave?: () => void;
     isCurrentUser?: boolean;
     isFollowing?: boolean;
     isSaved?: boolean;
@@ -72,6 +74,7 @@ export default function PostMenuModal({
     onReclip,
     onTurnOnNotifications,
     onTurnOffNotifications,
+    onOpenSave,
     isCurrentUser = false,
     isFollowing = false,
     isSaved = false,
@@ -86,7 +89,12 @@ export default function PostMenuModal({
     if (!isOpen) return null;
 
     const handleSave = () => {
-        setShowSaveModal(true);
+        if (onOpenSave) {
+            onOpenSave();
+            onClose();
+        } else {
+            setShowSaveModal(true);
+        }
     };
 
     const handleCopyLink = async () => {
@@ -145,16 +153,31 @@ export default function PostMenuModal({
         ];
 
     // Build full list for Threads-style sheet: label left, icon right, full-width rows. Insert dividers by group.
+    const isSaveRow = (label: string) => label === 'Save' || label === 'Unsave';
+
     const renderRow = (item: MenuItem, index: number) => {
         const Icon = item.icon;
         const isDanger = item.danger;
         const isHighlight = item.highlight;
-        const textClass = isDanger ? 'text-red-400' : isHighlight ? 'text-amber-400' : 'text-white';
-        const iconClass = isDanger ? 'text-red-400' : isHighlight ? 'text-amber-400' : 'text-white/60';
+        const textClass = isDanger ? 'text-neutral-300' : isHighlight ? 'text-white' : 'text-white';
+        const iconClass = isDanger ? 'text-neutral-500' : isHighlight ? 'text-neutral-400' : 'text-neutral-400';
         return (
             <button
                 key={index}
-                onClick={() => item.action && handleAction(item.action)}
+                onClick={() => {
+                    if (!item.action) return;
+                    // Save/Unsave: must not use handleAction — that called onClose() and unmounted before Save UI could show
+                    if (isSaveRow(item.label)) {
+                        handleSave();
+                        return;
+                    }
+                    // QR opens a higher z-index modal; closing the menu first would drop internal state
+                    if (item.label === 'QR code') {
+                        item.action();
+                        return;
+                    }
+                    handleAction(item.action);
+                }}
                 disabled={isProcessing}
                 className="flex w-full items-center justify-between py-3.5 px-4 active:bg-white/10 transition-colors disabled:opacity-50"
             >
@@ -169,15 +192,13 @@ export default function PostMenuModal({
             <div className="fixed inset-0 z-[200] flex items-end justify-center">
                 {/* Backdrop – same as new Swal */}
                 <div
-                    className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                    className="absolute inset-0 bg-black/65 backdrop-blur-[2px]"
                     onClick={onClose}
                 />
 
-                {/* Bottom sheet: same style as new Swal (#1a1a1a, rounded-t-24px, max-width) */}
-                <div className="relative w-full max-w-[min(400px,calc(100vw-32px))] bg-[#1a1a1a] rounded-t-[24px] shadow-2xl max-h-[85vh] overflow-hidden flex flex-col animate-in slide-in-from-bottom duration-300">
-                    {/* Drag handle */}
+                <div className="relative w-full max-w-[min(400px,calc(100vw-32px))] bg-black border border-white/15 border-b-0 rounded-t-[24px] shadow-[0_-8px_40px_rgba(0,0,0,0.5)] max-h-[85vh] overflow-hidden flex flex-col animate-in slide-in-from-bottom duration-300">
                     <div className="flex justify-center pt-2.5 pb-2">
-                        <div className="w-10 h-0.5 bg-white/30 rounded-full" />
+                        <div className="w-10 h-0.5 bg-white/25 rounded-full" />
                     </div>
 
                     <div className="flex-1 overflow-y-auto pb-6 px-0">
@@ -196,7 +217,7 @@ export default function PostMenuModal({
                                         </React.Fragment>
                                     ))}
                                 </div>
-                                <div className="mx-4 border-t border-white/10" />
+                                <div className="mx-4 border-t border-white/15" />
                                 <div className="py-1">
                                     {menuItems.filter(m => m.label !== 'Copy Link').map((item, index) => renderRow(item, index))}
                                 </div>
@@ -216,14 +237,14 @@ export default function PostMenuModal({
                                         </React.Fragment>
                                     ))}
                                 </div>
-                                <div className="mx-4 border-t border-white/10" />
+                                <div className="mx-4 border-t border-white/15" />
                                 <div className="py-1">
                                     {(() => {
                                         const rest = menuItems.filter(m => m.label !== 'Copy Link');
                                         return rest.map((item, index) => (
                                             <React.Fragment key={`${item.label}-${index}`}>
                                                 {index > 0 && !rest[index - 1].danger && item.danger ? (
-                                                    <div className="mx-4 border-t border-white/10" />
+                                                    <div className="mx-4 border-t border-white/15" />
                                                 ) : null}
                                                 {renderRow(item, index)}
                                             </React.Fragment>
@@ -236,8 +257,8 @@ export default function PostMenuModal({
                 </div>
             </div>
 
-            {/* Save Post Modal */}
-            {showSaveModal && (
+            {/* Save Post Modal — only when parent does not supply onOpenSave */}
+            {!onOpenSave && showSaveModal && (
                 <SavePostModal
                     post={post}
                     userId={userId}

@@ -20,6 +20,9 @@ import { toggleFollow } from '../api/client';
 import { FiUserPlus, FiUserCheck } from 'react-icons/fi';
 import type { Story, StoryGroup, Post } from '../types';
 
+/** Must match App.tsx `STORIES24_FROM_RAIL_HANDLE_KEY` — rail return + /feed navigation if `location.state` is dropped. */
+const STORIES24_FROM_RAIL_HANDLE_KEY = 'clips:stories24OpenedFromRailHandle';
+
 // Special Gazetteer world highlights configuration (mock stories only for now)
 const GAZETTEER_WORLD_USER_ID = 'gazetteer-world';
 const GAZETTEER_WORLD_HANDLE = 'Gazetteer@world highlights';
@@ -91,10 +94,54 @@ export default function StoriesPage() {
     const navigate = useNavigate();
     const location = useLocation();
     const openUserHandle = location.state?.openUserHandle;
+    const fromStories24Rail = location.state?.fromStories24Rail === true;
     const railHandles = Array.isArray(location.state?.railHandles)
         ? (location.state.railHandles as string[])
         : [];
     const railHandlesKey = railHandles.join('|');
+
+    /** True if we opened from Stories 24 rail (state or session handle match — avoids navigate(-1) → Inbox on mobile). */
+    const stories24OpenFromFeedRail =
+        fromStories24Rail ||
+        (typeof openUserHandle === 'string' &&
+            (() => {
+                try {
+                    const stored = sessionStorage.getItem(STORIES24_FROM_RAIL_HANDLE_KEY);
+                    if (!stored) return false;
+                    return stored.trim().toLowerCase() === openUserHandle.trim().toLowerCase();
+                } catch {
+                    return false;
+                }
+            })());
+
+    /** Signals feed rail to run the “drop back” shrink into the card (must match App.tsx `STORIES24_RAIL_RETURN_KEY`). */
+    const queueStories24RailReturnAnimation = React.useCallback(() => {
+        if (!openUserHandle || !stories24OpenFromFeedRail) return;
+        try {
+            const st = location.state as
+                | { previewVideoUrl?: string; previewThumb?: string }
+                | undefined;
+            sessionStorage.setItem(
+                'clips:stories24RailReturn',
+                JSON.stringify({
+                    handle: openUserHandle,
+                    previewVideoUrl: st?.previewVideoUrl,
+                    previewThumb: st?.previewThumb,
+                })
+            );
+        } catch {
+            /* ignore */
+        }
+    }, [stories24OpenFromFeedRail, openUserHandle, location.state]);
+
+    function clearStories24RailSessionHandle() {
+        try {
+            sessionStorage.removeItem(STORIES24_FROM_RAIL_HANDLE_KEY);
+        } catch {
+            /* ignore */
+        }
+    }
+
     const [storyGroups, setStoryGroups] = React.useState<StoryGroup[]>([]);
     const [currentGroupIndex, setCurrentGroupIndex] = React.useState(0);
     const [currentStoryIndex, setCurrentStoryIndex] = React.useState(0);
@@ -222,8 +269,12 @@ export default function StoriesPage() {
         if (!openUserHandle) return;
         if (!hasEnteredStoryViewerRef.current) return;
         if (viewingStories) return;
+        // Only force /feed for feed-rail opens; otherwise this races closeStories() → navigate(-1) (e.g. Inbox).
+        if (!stories24OpenFromFeedRail) return;
+        queueStories24RailReturnAnimation();
+        clearStories24RailSessionHandle();
         navigate('/feed', { replace: true });
-    }, [openUserHandle, viewingStories, navigate]);
+    }, [openUserHandle, viewingStories, navigate, queueStories24RailReturnAnimation, stories24OpenFromFeedRail]);
 
     React.useEffect(() => {
         setShowStoryProfileCard(false);
@@ -242,14 +293,7 @@ export default function StoriesPage() {
             return;
         }
         try {
-            // Get followed users
-            const followedUserHandles = await getFollowedUsers(user.id);
-
-            // Fetch only followed users' stories (including current user's stories)
-            let groups = await fetchFollowedUsersStoryGroups(user.id, followedUserHandles);
-
-            // If opening from feed rail, load all handles in that rail order.
-            // This keeps autoplay moving through the next users instead of closing after first group.
+            // If opening from feed rail (or deep link with handles), merge these — fetch in parallel with main feed so playback starts sooner.
             const requestedHandles = Array.from(
                 new Set(
                     [
@@ -260,9 +304,19 @@ export default function StoriesPage() {
                         .filter(Boolean)
                 )
             );
+
+            const followedUserHandles = await getFollowedUsers(user.id);
+
+            const [mainGroups, requestedGroupsResults] = await Promise.all([
+                fetchFollowedUsersStoryGroups(user.id, followedUserHandles),
+                requestedHandles.length > 0
+                    ? Promise.all(requestedHandles.map((handle) => fetchStoryGroupByHandle(handle)))
+                    : Promise.resolve([] as (StoryGroup | null)[]),
+            ]);
+
+            let groups = mainGroups;
             if (requestedHandles.length > 0) {
-                const requestedGroups = await Promise.all(requestedHandles.map((handle) => fetchStoryGroupByHandle(handle)));
-                for (const storyGroup of requestedGroups) {
+                for (const storyGroup of requestedGroupsResults) {
                     if (!storyGroup) continue;
                     const existingGroupIndex = groups.findIndex(g => g.userHandle === storyGroup.userHandle);
                     if (existingGroupIndex === -1) {
@@ -482,11 +536,18 @@ export default function StoriesPage() {
         // If we came from feed (via avatar click), use navigate(-1)
         // Otherwise, navigate to /feed
         if (openUserHandle) {
+            queueStories24RailReturnAnimation();
             // Dispatch event to refresh story indicators
             window.dispatchEvent(new CustomEvent('storiesViewed', {
                 detail: { userHandle: openUserHandle }
             }));
-            navigate(-1);
+            // Feed rail: always /feed (session handle matches if `location.state` was dropped on mobile).
+            if (stories24OpenFromFeedRail) {
+                clearStories24RailSessionHandle();
+                navigate('/feed', { replace: true });
+            } else {
+                navigate(-1);
+            }
         } else {
             // Navigate to feed if we came from sharing a post or other source
             navigate('/feed');
@@ -1367,7 +1428,44 @@ export default function StoriesPage() {
         loadViewerFollowState();
     }, [showInsightsSheet, insightsTab, user?.id, user?.handle, currentStoryForMeta?.id, (currentStoryForMeta?.viewerHandles || []).join('|')]);
 
-    if (loading && openUserHandle) {
+    // Guard: don't render if no user
+    if (!user) {
+        return (
+            <div className="flex items-center justify-center min-h-screen">
+                <div className="text-center">
+                    <p className="text-gray-600 dark:text-gray-400">Please sign in to view stories.</p>
+                    <button
+                        onClick={() => navigate('/login')}
+                        className="mt-4 px-4 py-2 rounded-full bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 text-white font-medium hover:opacity-90 transition-opacity"
+                    >
+                        Sign In
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    // Feed rail → Stories: branded hold screen while data/viewer spin up (matches expanding card on feed).
+    if (stories24OpenFromFeedRail && openUserHandle && (loading || !viewingStories)) {
+        return (
+            <div
+                className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center px-6"
+                role="status"
+                aria-live="polite"
+            >
+                <div className="text-center max-w-sm">
+                    <p className="text-3xl sm:text-4xl font-bold tracking-tight [text-shadow:0_2px_32px_rgba(0,0,0,0.45)]">
+                        <span className="bg-gradient-to-r from-cyan-300 via-white to-sky-400 bg-clip-text text-transparent">Gazetter</span>
+                        <span className="text-white"> 24</span>
+                    </p>
+                    <p className="mt-5 text-sm text-white/45 font-medium">Opening stories…</p>
+                    <div className="mt-8 mx-auto h-0.5 w-24 rounded-full bg-gradient-to-r from-transparent via-cyan-400/50 to-transparent animate-pulse" />
+                </div>
+            </div>
+        );
+    }
+
+    if (loading && openUserHandle && !stories24OpenFromFeedRail) {
         return (
             <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
                 <div className="text-center">
@@ -1384,23 +1482,6 @@ export default function StoriesPage() {
                 <div className="text-center">
                     <div className="w-12 h-12 border-4 border-green-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
                     <p className="text-gray-600 dark:text-gray-400">Loading clips...</p>
-                </div>
-            </div>
-        );
-    }
-
-    // Guard: don't render if no user
-    if (!user) {
-        return (
-            <div className="flex items-center justify-center min-h-screen">
-                <div className="text-center">
-                    <p className="text-gray-600 dark:text-gray-400">Please sign in to view stories.</p>
-                    <button
-                        onClick={() => navigate('/login')}
-                        className="mt-4 px-4 py-2 rounded-full bg-gradient-to-tr from-green-500 via-blue-500 to-blue-600 text-white font-medium hover:opacity-90 transition-opacity"
-                    >
-                        Sign In
-                    </button>
                 </div>
             </div>
         );
@@ -4081,7 +4162,8 @@ export default function StoriesPage() {
         );
     }
 
-    if (openUserHandle && (autoOpeningStory || !viewingStories)) {
+    {/* Non–feed-rail opens: show spinner while auto-open / closing. Feed rail uses plain black above (no second loader). */}
+    if (openUserHandle && (autoOpeningStory || !viewingStories) && !stories24OpenFromFeedRail) {
         return (
             <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
                 <div className="text-center">
@@ -4100,7 +4182,11 @@ export default function StoriesPage() {
                 <div className="flex items-center justify-between">
                     <h1 className="text-lg font-semibold text-white">Clips 24</h1>
                     <button
-                        onClick={() => navigate('/feed')}
+                        onClick={() => {
+                            queueStories24RailReturnAnimation();
+                            clearStories24RailSessionHandle();
+                            navigate('/feed', { replace: true });
+                        }}
                         className="p-1.5 rounded-full hover:bg-gray-800 transition-colors"
                     >
                         <FiX className="w-5 h-5 text-gray-400" />
