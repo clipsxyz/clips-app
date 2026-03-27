@@ -1,13 +1,14 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { FiChevronLeft, FiBell, FiShare2, FiMessageSquare, FiMoreHorizontal, FiX, FiLock, FiMapPin, FiEye, FiUserPlus, FiMaximize, FiPlay } from 'react-icons/fi';
+import { FiChevronLeft, FiBell, FiShare2, FiMessageSquare, FiMoreHorizontal, FiX, FiLock, FiMapPin, FiEye, FiUserPlus, FiMaximize, FiPlay, FiSearch } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
-import { getFlagForHandle } from '../api/users';
+import { getAvatarForHandle, getFlagForHandle } from '../api/users';
+import { MOCK_FOLLOWING_GRAPH } from '../api/mockFollowGraph';
 import Flag from '../components/Flag';
 import { useAuth } from '../context/Auth';
-import { fetchPostsPage, toggleFollowForPost, getFollowedUsers, setFollowState, posts as allPosts } from '../api/posts';
+import { fetchPostsPage, toggleFollowForPost, getFollowedUsers, getFollowState, setFollowState, posts as allPosts } from '../api/posts';
 import { userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/stories';
-import { fetchUserProfile, toggleFollow } from '../api/client';
+import { fetchFollowers, fetchFollowing, fetchUserProfile, toggleFollow } from '../api/client';
 import type { Post } from '../types';
 import { 
   isProfilePrivate, 
@@ -76,6 +77,35 @@ function getEffectivePlacesWithStorageFallback(profileUser: any, authUser: any):
     return [];
 }
 
+function normalizeHandleKeyForMockGraph(value: string): string {
+    return value.replace(/^@/, '').trim().toLowerCase();
+}
+
+/** Same logic as mock connection lists — used so header stats match the modal after refresh (loadProfile overwrites earlier effects). */
+function computeMockGraphFollowCounts(
+    decodedHandle: string,
+    viewerHandle: string | undefined,
+    viewerFollows: string[],
+): { followers: number; following: number } {
+    const normalizedTarget = normalizeHandleKeyForMockGraph(decodedHandle);
+    const viewerFollowedSet = new Set(viewerFollows.map((h) => normalizeHandleKeyForMockGraph(h)));
+    const followersSet = new Set<string>();
+    Object.entries(MOCK_FOLLOWING_GRAPH).forEach(([followerHandle, followingList]) => {
+        const followsTarget = (followingList || []).some((entry) => normalizeHandleKeyForMockGraph(entry) === normalizedTarget);
+        if (followsTarget) followersSet.add(normalizeHandleKeyForMockGraph(followerHandle));
+    });
+    if (viewerHandle && viewerFollowedSet.has(normalizedTarget)) {
+        followersSet.add(normalizeHandleKeyForMockGraph(viewerHandle));
+    }
+    const followingSet = new Set<string>(
+        (MOCK_FOLLOWING_GRAPH[normalizedTarget] || []).map((entry) => normalizeHandleKeyForMockGraph(entry)),
+    );
+    if (viewerHandle && normalizeHandleKeyForMockGraph(viewerHandle) === normalizedTarget) {
+        viewerFollows.forEach((entry) => followingSet.add(normalizeHandleKeyForMockGraph(String(entry))));
+    }
+    return { followers: followersSet.size, following: followingSet.size };
+}
+
 export default function ViewProfilePage() {
     const navigate = useNavigate();
     const { handle } = useParams<{ handle: string }>();
@@ -96,6 +126,34 @@ export default function ViewProfilePage() {
     const [showQRCodeModal, setShowQRCodeModal] = React.useState(false);
     const [showShareProfileModal, setShowShareProfileModal] = React.useState(false);
     const [contentTab, setContentTab] = React.useState<'all' | 'videos' | 'photos' | 'text'>('all');
+    const [showConnectionsModal, setShowConnectionsModal] = React.useState(false);
+    const [connectionsScope, setConnectionsScope] = React.useState<'mutual' | 'followers' | 'following' | 'suggested'>('followers');
+    const [followersList, setFollowersList] = React.useState<any[]>([]);
+    const [followingList, setFollowingList] = React.useState<any[]>([]);
+    const [connectionsSearch, setConnectionsSearch] = React.useState('');
+    const [connectionsLoading, setConnectionsLoading] = React.useState(false);
+    const [connectionsLoadingMore, setConnectionsLoadingMore] = React.useState(false);
+    const [connectionsError, setConnectionsError] = React.useState<string | null>(null);
+    const [connectionFollowMap, setConnectionFollowMap] = React.useState<Record<string, boolean>>({});
+    const [connectionRequestMap, setConnectionRequestMap] = React.useState<Record<string, boolean>>({});
+    const [connectionActionLoadingMap, setConnectionActionLoadingMap] = React.useState<Record<string, boolean>>({});
+    const [connectionActionSuccessMap, setConnectionActionSuccessMap] = React.useState<Record<string, boolean>>({});
+    const [followersCursor, setFollowersCursor] = React.useState(0);
+    const [followingCursor, setFollowingCursor] = React.useState(0);
+    const [followersHasMore, setFollowersHasMore] = React.useState(true);
+    const [followingHasMore, setFollowingHasMore] = React.useState(true);
+    const [viewerFollowedSet, setViewerFollowedSet] = React.useState<Set<string>>(new Set());
+    const [compactConnectionsPhone, setCompactConnectionsPhone] = React.useState(false);
+    const [debouncedConnectionsSearch, setDebouncedConnectionsSearch] = React.useState('');
+    const [dismissedSuggestedMap, setDismissedSuggestedMap] = React.useState<Record<string, boolean>>({});
+    const [dismissUndo, setDismissUndo] = React.useState<{ handleNoAt: string; expiresAt: number } | null>(null);
+
+    const flashConnectionActionSuccess = React.useCallback((key: string) => {
+        setConnectionActionSuccessMap((prev) => ({ ...prev, [key]: true }));
+        window.setTimeout(() => {
+            setConnectionActionSuccessMap((prev) => ({ ...prev, [key]: false }));
+        }, 320);
+    }, []);
 
     const isOwnProfile = React.useMemo(() => {
         if (!handle || !user?.handle) return false;
@@ -108,6 +166,491 @@ export default function ViewProfilePage() {
         if (contentTab === 'text') return posts.filter((p) => !p.mediaUrl);
         return posts;
     }, [posts, contentTab]);
+
+    const normalizeHandleKey = React.useCallback((value: string) => value.replace(/^@/, '').trim().toLowerCase(), []);
+    const getHandleCluster = React.useCallback((value: string) => {
+        const normalized = normalizeHandleKey(value);
+        const afterAt = normalized.split('@')[1] || '';
+        return afterAt || normalized;
+    }, [normalizeHandleKey]);
+    const suggestedDismissStorageKey = React.useMemo(() => {
+        const viewerKey = user?.id != null ? String(user.id) : (user?.handle || 'anon');
+        return `clips_suggested_dismissed_${viewerKey}`;
+    }, [user?.id, user?.handle]);
+
+    React.useEffect(() => {
+        try {
+            const raw = localStorage.getItem(suggestedDismissStorageKey);
+            setDismissedSuggestedMap(raw ? JSON.parse(raw) : {});
+        } catch (_) {
+            setDismissedSuggestedMap({});
+        }
+    }, [suggestedDismissStorageKey]);
+
+    React.useEffect(() => {
+        try {
+            localStorage.setItem(suggestedDismissStorageKey, JSON.stringify(dismissedSuggestedMap));
+        } catch (_) {}
+    }, [dismissedSuggestedMap, suggestedDismissStorageKey]);
+
+    const mapConnectionItem = React.useCallback((item: any, followedSet: Set<string>) => {
+        const rawHandle = String(item?.handle || item?.username || '');
+        const handleNoAt = rawHandle.replace(/^@/, '');
+        const normalized = normalizeHandleKey(rawHandle);
+        const isRequested = !!(user?.handle && hasPendingFollowRequest(user.handle, handleNoAt));
+        return {
+            id: String(item?.id || rawHandle),
+            handle: handleNoAt ? `@${handleNoAt}` : '@unknown',
+            handleNoAt,
+            name: item?.display_name || item?.name || rawHandle || 'Unknown',
+            bio: typeof item?.bio === 'string' ? item.bio : '',
+            avatarUrl: item?.avatar_url || item?.avatarUrl || '',
+            isPrivate: !!item?.is_private || isProfilePrivate(handleNoAt),
+            isFollowing: followedSet.has(normalized),
+            isRequested,
+        };
+    }, [normalizeHandleKey, user?.handle]);
+
+    const buildMockConnectionsForTab = React.useCallback(async (tab: 'followers' | 'following', targetHandle: string, followedSet: Set<string>) => {
+        const viewerId = user?.id != null ? String(user.id) : getStableUserId(user);
+        const viewerFollows = await getFollowedUsers(viewerId);
+        const viewerFollowsSet = new Set((Array.isArray(viewerFollows) ? viewerFollows : []).map((entry) => normalizeHandleKey(String(entry))));
+        const normalizedTarget = normalizeHandleKey(targetHandle);
+        const out: any[] = [];
+        const pushRow = (rawHandle: string, rawName?: string, avatarUrl?: string) => {
+            const handleNoAt = String(rawHandle || '').replace(/^@/, '');
+            if (!handleNoAt) return;
+            const normalized = normalizeHandleKey(handleNoAt);
+            if (out.some((row) => normalizeHandleKey(row.handleNoAt) === normalized)) return;
+            out.push({
+                id: `mock-${tab}-${normalized}`,
+                handle: `@${handleNoAt}`,
+                handleNoAt,
+                name: rawName || handleNoAt,
+                bio: '',
+                avatarUrl: avatarUrl || '',
+                isPrivate: isProfilePrivate(handleNoAt),
+                isFollowing: followedSet.has(normalized),
+                isRequested: !!(user?.handle && hasPendingFollowRequest(user.handle, handleNoAt)),
+            });
+        };
+
+        if (tab === 'followers') {
+            // Populate followers by reversing the mock following graph.
+            Object.entries(MOCK_FOLLOWING_GRAPH).forEach(([followerHandle, followingList]) => {
+                const followsTarget = (followingList || []).some((entry) => normalizeHandleKey(entry) === normalizedTarget);
+                if (!followsTarget) return;
+                const profilePost = allPosts.find((p) => normalizeHandleKey(p.userHandle || '') === normalizeHandleKey(followerHandle));
+                pushRow(
+                    followerHandle,
+                    profilePost?.userHandle || followerHandle,
+                    getAvatarForHandle(followerHandle) || '',
+                );
+            });
+            // Minimal reliable fallback: if viewer follows target, viewer appears in target's followers.
+            if (user?.handle && viewerFollowsSet.has(normalizedTarget)) {
+                pushRow(user.handle, user.name || user.handle, user.avatarUrl || '');
+            }
+        } else {
+            const mockFollowing = MOCK_FOLLOWING_GRAPH[normalizedTarget] || [];
+            mockFollowing.forEach((h) => {
+                const handleNoAt = String(h || '').replace(/^@/, '');
+                const profilePost = allPosts.find((p) => normalizeHandleKey(p.userHandle || '') === normalizeHandleKey(handleNoAt));
+                pushRow(handleNoAt, profilePost?.userHandle || handleNoAt, getAvatarForHandle(handleNoAt) || '');
+            });
+            // For own profile in mock mode, show who the viewer follows.
+            if (user?.handle && normalizeHandleKey(user.handle) === normalizedTarget) {
+                viewerFollows.forEach((h) => {
+                    const handleNoAt = String(h || '').replace(/^@/, '');
+                    const profilePost = allPosts.find((p) => normalizeHandleKey(p.userHandle || '') === normalizeHandleKey(handleNoAt));
+                    pushRow(handleNoAt, handleNoAt, getAvatarForHandle(handleNoAt) || '');
+                    if (profilePost) {
+                        // Improve display name if we have a post author handle variant
+                        const existing = out.find((row) => normalizeHandleKey(row.handleNoAt) === normalizeHandleKey(handleNoAt));
+                        if (existing) existing.name = profilePost.userHandle || existing.name;
+                    }
+                });
+            }
+        }
+        return out;
+    }, [normalizeHandleKey, user]);
+
+    const loadConnections = React.useCallback(async (tab: 'followers' | 'following', opts?: { reset?: boolean }) => {
+        if (!handle) return;
+        const reset = !!opts?.reset;
+        const decodedHandle = decodeURIComponent(handle);
+        if (reset) {
+            setConnectionsLoading(true);
+            setConnectionsError(null);
+        } else {
+            setConnectionsLoadingMore(true);
+        }
+        try {
+            const viewerId = user?.id != null ? String(user.id) : getStableUserId(user);
+            const followedUsers = await getFollowedUsers(viewerId);
+            const followedSet = new Set((Array.isArray(followedUsers) ? followedUsers : []).map((entry) => normalizeHandleKey(String(entry))));
+            setViewerFollowedSet(followedSet);
+            const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+            if (!useLaravelApi) {
+                const normalized = await buildMockConnectionsForTab(tab, decodedHandle, followedSet);
+                const followMapPatch: Record<string, boolean> = {};
+                const requestMapPatch: Record<string, boolean> = {};
+                normalized.forEach((row: any) => {
+                    followMapPatch[row.handleNoAt] = row.isFollowing;
+                    requestMapPatch[row.handleNoAt] = row.isRequested;
+                });
+                setConnectionFollowMap((prev) => ({ ...prev, ...followMapPatch }));
+                setConnectionRequestMap((prev) => ({ ...prev, ...requestMapPatch }));
+                if (tab === 'followers') {
+                    setFollowersList(normalized);
+                    setFollowersHasMore(false);
+                    setFollowersCursor(0);
+                    setStats((prev) => ({ ...prev, followers: normalized.length }));
+                } else {
+                    setFollowingList(normalized);
+                    setFollowingHasMore(false);
+                    setFollowingCursor(0);
+                    setStats((prev) => ({ ...prev, following: normalized.length }));
+                }
+                return;
+            }
+            const cursor = tab === 'followers'
+                ? (reset ? 0 : followersCursor)
+                : (reset ? 0 : followingCursor);
+            const response = tab === 'followers'
+                ? await fetchFollowers(decodedHandle, cursor, 40)
+                : await fetchFollowing(decodedHandle, cursor, 40);
+            const items = Array.isArray(response?.items) ? response.items : [];
+            const normalized = items.map((item: any) => mapConnectionItem(item, followedSet));
+            const followMapPatch: Record<string, boolean> = {};
+            const requestMapPatch: Record<string, boolean> = {};
+            normalized.forEach((row: any) => {
+                followMapPatch[row.handleNoAt] = row.isFollowing;
+                requestMapPatch[row.handleNoAt] = row.isRequested;
+            });
+            setConnectionFollowMap((prev) => ({ ...prev, ...followMapPatch }));
+            setConnectionRequestMap((prev) => ({ ...prev, ...requestMapPatch }));
+            const hasMore = !!response?.hasMore || response?.nextCursor != null;
+            const nextCursor = typeof response?.nextCursor === 'number' ? response.nextCursor : (cursor + (hasMore ? 1 : 0));
+            if (tab === 'followers') {
+                setFollowersList((prev) => {
+                    if (reset) return normalized;
+                    const merged = [...prev, ...normalized];
+                    const dedup = new Map<string, any>();
+                    merged.forEach((row: any) => dedup.set(row.handleNoAt.toLowerCase(), row));
+                    return Array.from(dedup.values());
+                });
+                setFollowersHasMore(hasMore);
+                setFollowersCursor(nextCursor);
+            } else {
+                setFollowingList((prev) => {
+                    if (reset) return normalized;
+                    const merged = [...prev, ...normalized];
+                    const dedup = new Map<string, any>();
+                    merged.forEach((row: any) => dedup.set(row.handleNoAt.toLowerCase(), row));
+                    return Array.from(dedup.values());
+                });
+                setFollowingHasMore(hasMore);
+                setFollowingCursor(nextCursor);
+            }
+        } catch (error) {
+            console.error('Failed to load profile connections', error);
+            const message = String((error as any)?.message || '');
+            const isConnectionError = message === 'CONNECTION_REFUSED'
+                || (error as any)?.name === 'ConnectionRefused'
+                || message.includes('ERR_CONNECTION_REFUSED')
+                || message.includes('Failed to fetch')
+                || message.includes('NetworkError');
+            if (isConnectionError) {
+                try {
+                    const viewerId = user?.id != null ? String(user.id) : getStableUserId(user);
+                    const followedUsers = await getFollowedUsers(viewerId);
+                    const followedSet = new Set((Array.isArray(followedUsers) ? followedUsers : []).map((entry) => normalizeHandleKey(String(entry))));
+                    const normalized = await buildMockConnectionsForTab(tab, decodedHandle, followedSet);
+                    if (tab === 'followers') {
+                        setFollowersList(normalized);
+                        setFollowersHasMore(false);
+                        setFollowersCursor(0);
+                        setStats((prev) => ({ ...prev, followers: normalized.length }));
+                    } else {
+                        setFollowingList(normalized);
+                        setFollowingHasMore(false);
+                        setFollowingCursor(0);
+                        setStats((prev) => ({ ...prev, following: normalized.length }));
+                    }
+                    setConnectionsError(null);
+                } catch (_) {
+                    setConnectionsError('Could not load this list right now.');
+                }
+            } else {
+                setConnectionsError('Could not load this list right now.');
+                if (reset) {
+                    if (tab === 'followers') setFollowersList([]);
+                    else setFollowingList([]);
+                }
+            }
+        } finally {
+            if (reset) setConnectionsLoading(false);
+            else setConnectionsLoadingMore(false);
+        }
+    }, [followersCursor, followingCursor, handle, mapConnectionItem, normalizeHandleKey, user]);
+
+    const openConnections = React.useCallback((tab: 'followers' | 'following') => {
+        setFollowersCursor(0);
+        setFollowingCursor(0);
+        setFollowersHasMore(true);
+        setFollowingHasMore(true);
+        setConnectionsScope(tab);
+        setConnectionsSearch('');
+        setShowConnectionsModal(true);
+    }, []);
+
+    React.useEffect(() => {
+        if (!showConnectionsModal) return;
+        if (connectionsScope === 'followers') {
+            void loadConnections('followers', { reset: true });
+            return;
+        }
+        if (connectionsScope === 'following') {
+            void loadConnections('following', { reset: true });
+            return;
+        }
+        if (connectionsScope === 'mutual') {
+            void Promise.all([loadConnections('followers', { reset: true }), loadConnections('following', { reset: true })]);
+        }
+    }, [showConnectionsModal, connectionsScope, loadConnections]);
+
+    React.useEffect(() => {
+        if (!showConnectionsModal) return;
+        const hydrateViewerFollows = async () => {
+            try {
+                const viewerId = user?.id != null ? String(user.id) : getStableUserId(user);
+                const followedUsers = await getFollowedUsers(viewerId);
+                setViewerFollowedSet(new Set((Array.isArray(followedUsers) ? followedUsers : []).map((entry) => normalizeHandleKey(String(entry)))));
+            } catch (_) {}
+        };
+        void hydrateViewerFollows();
+    }, [showConnectionsModal, user?.id, user?.handle, normalizeHandleKey]);
+
+    React.useEffect(() => {
+        const checkViewport = () => setCompactConnectionsPhone(window.innerWidth <= 390);
+        checkViewport();
+        window.addEventListener('resize', checkViewport);
+        return () => window.removeEventListener('resize', checkViewport);
+    }, []);
+
+    React.useEffect(() => {
+        const timer = window.setTimeout(() => {
+            setDebouncedConnectionsSearch(connectionsSearch);
+        }, 160);
+        return () => window.clearTimeout(timer);
+    }, [connectionsSearch]);
+
+    const visibleConnections = React.useMemo(() => {
+        const followerMap = new Map(followersList.map((row) => [row.handleNoAt.toLowerCase(), row]));
+        const followingMap = new Map(followingList.map((row) => [row.handleNoAt.toLowerCase(), row]));
+        let source: any[] = [];
+        if (connectionsScope === 'followers') {
+            source = followersList;
+        } else if (connectionsScope === 'following') {
+            source = followingList;
+        } else if (connectionsScope === 'mutual') {
+            // Instagram-style mutuals: users both viewer and profile user follow.
+            source = followingList.filter((row) => viewerFollowedSet.has(normalizeHandleKey(row.handleNoAt)));
+        } else {
+            const excluded = new Set<string>([
+                (user?.handle || '').replace(/^@/, '').toLowerCase(),
+                (profileUser?.handle || '').replace(/^@/, '').toLowerCase(),
+                ...Object.keys(dismissedSuggestedMap).filter((key) => dismissedSuggestedMap[key]).map((key) => normalizeHandleKey(key)),
+                ...Array.from(viewerFollowedSet),
+            ]);
+            const profileHandleLabel = profileUser?.handle ? `@${String(profileUser.handle).replace(/^@/, '')}` : 'this profile';
+            const nowTs = Date.now();
+            const postCountByHandle = new Map<string, number>();
+            const recencyScoreByHandle = new Map<string, number>();
+            allPosts.forEach((post) => {
+                const key = String(post.userHandle || '').replace(/^@/, '').toLowerCase();
+                if (!key) return;
+                postCountByHandle.set(key, (postCountByHandle.get(key) || 0) + 1);
+                const createdAt = Number(post.createdAt || 0);
+                const ageHours = createdAt > 0 ? Math.max(0, (nowTs - createdAt) / 3600000) : 168;
+                // Fresher posts contribute more, tapering over a week.
+                const weight = Math.max(0.2, 1 - (ageHours / 168));
+                recencyScoreByHandle.set(key, (recencyScoreByHandle.get(key) || 0) + weight);
+            });
+            const suggestedMap = new Map<string, any>();
+            const resolveSuggestedAvatar = (handleNoAt: string): string => {
+                const normalized = normalizeHandleKey(handleNoAt);
+                const followerMatch = followersList.find((row) => normalizeHandleKey(row.handleNoAt) === normalized);
+                if (followerMatch?.avatarUrl) return followerMatch.avatarUrl;
+                const followingMatch = followingList.find((row) => normalizeHandleKey(row.handleNoAt) === normalized);
+                if (followingMatch?.avatarUrl) return followingMatch.avatarUrl;
+                return getAvatarForHandle(handleNoAt) || '';
+            };
+            const addSuggested = (rawHandle: string, rawName?: string) => {
+                const key = rawHandle.replace(/^@/, '').trim();
+                if (!key) return;
+                const normalized = key.toLowerCase();
+                if (excluded.has(normalized) || suggestedMap.has(normalized)) return;
+                const inFollowers = followerMap.has(normalized);
+                const inFollowing = followingMap.has(normalized);
+                const mutualCount = (inFollowers ? 1 : 0) + (inFollowing ? 1 : 0);
+                const clipCount = postCountByHandle.get(normalized) || 0;
+                const recencyScore = recencyScoreByHandle.get(normalized) || 0;
+                const mutualPreview = [
+                    followerMap.get(normalized),
+                    followingMap.get(normalized),
+                ]
+                    .filter(Boolean)
+                    .map((entry: any) => ({
+                        id: String(entry.id || entry.handleNoAt || ''),
+                        handle: String(entry.handle || ''),
+                        avatarUrl: String(entry.avatarUrl || ''),
+                    }))
+                    .filter((entry, index, arr) => arr.findIndex((x) => x.id === entry.id) === index)
+                    .slice(0, 3);
+                const suggestionReason = mutualCount === 2
+                    ? `Mutual connection with ${profileHandleLabel}`
+                    : inFollowing
+                        ? `Followed by ${profileHandleLabel}`
+                        : inFollowers
+                            ? `Follows ${profileHandleLabel}`
+                            : clipCount > 1
+                                ? `${clipCount} recent clips`
+                                : 'Suggested for you';
+                const suggestionScore = (mutualCount * 100) + (recencyScore * 18) + (clipCount * 2);
+                suggestedMap.set(normalized, {
+                    id: `suggested-${normalized}`,
+                    handle: `@${key}`,
+                    handleNoAt: key,
+                    name: rawName || key,
+                    bio: suggestionReason,
+                    avatarUrl: resolveSuggestedAvatar(key),
+                    suggestionReason,
+                    mutualCount,
+                    mutualPreview,
+                    suggestionScore,
+                    isFollowing: viewerFollowedSet.has(normalized),
+                    cluster: getHandleCluster(key),
+                });
+            };
+            allPosts.forEach((post) => addSuggested(post.userHandle || '', post.userHandle || ''));
+            const sorted = Array.from(suggestedMap.values()).sort((a, b) => b.suggestionScore - a.suggestionScore);
+            const clusterCount = new Map<string, number>();
+            const balanced: any[] = [];
+            for (const item of sorted) {
+                const cluster = String(item.cluster || 'other');
+                const used = clusterCount.get(cluster) || 0;
+                // Keep diversity so one local cluster does not flood suggestions.
+                if (used >= 3 && balanced.length < 50) continue;
+                balanced.push(item);
+                clusterCount.set(cluster, used + 1);
+                if (balanced.length >= 80) break;
+            }
+            source = balanced;
+        }
+        const query = debouncedConnectionsSearch.trim().toLowerCase();
+        if (!query) return source;
+        return source.filter((row) =>
+            row.name.toLowerCase().includes(query) ||
+            row.handle.toLowerCase().includes(query) ||
+            row.bio.toLowerCase().includes(query),
+        );
+    }, [connectionsScope, followersList, followingList, debouncedConnectionsSearch, user?.handle, profileUser?.handle, dismissedSuggestedMap, normalizeHandleKey, getHandleCluster, viewerFollowedSet]);
+
+    const dismissSuggestedRow = React.useCallback((handleNoAt: string) => {
+        const key = normalizeHandleKey(handleNoAt);
+        if (!key) return;
+        setDismissedSuggestedMap((prev) => ({ ...prev, [key]: true }));
+        setDismissUndo({ handleNoAt, expiresAt: Date.now() + 4200 });
+    }, [normalizeHandleKey]);
+
+    React.useEffect(() => {
+        if (!dismissUndo) return;
+        const remaining = Math.max(0, dismissUndo.expiresAt - Date.now());
+        const timer = window.setTimeout(() => setDismissUndo(null), remaining);
+        return () => window.clearTimeout(timer);
+    }, [dismissUndo]);
+
+    const handleUndoDismissSuggestion = React.useCallback(() => {
+        if (!dismissUndo?.handleNoAt) return;
+        const key = normalizeHandleKey(dismissUndo.handleNoAt);
+        setDismissedSuggestedMap((prev) => ({ ...prev, [key]: false }));
+        setDismissUndo(null);
+    }, [dismissUndo, normalizeHandleKey]);
+
+    const handleConnectionFollowToggle = React.useCallback(async (row: any) => {
+        if (!row?.handleNoAt) return;
+        const key = row.handleNoAt;
+        if (connectionActionLoadingMap[key]) return;
+        setConnectionActionLoadingMap((prev) => ({ ...prev, [key]: true }));
+        const rowPrivate = !!row?.isPrivate;
+        const current = connectionFollowMap[key] ?? !!row.isFollowing;
+        const requested = connectionRequestMap[key] ?? !!row.isRequested;
+        if (!current && rowPrivate && requested) {
+            if (user?.handle) {
+                removeFollowRequest(user.handle, key);
+            }
+            setConnectionRequestMap((prev) => ({ ...prev, [key]: false }));
+            setFollowersList((prev) => prev.map((item) => item.handleNoAt === key ? { ...item, isRequested: false } : item));
+            setFollowingList((prev) => prev.map((item) => item.handleNoAt === key ? { ...item, isRequested: false } : item));
+            flashConnectionActionSuccess(key);
+            setConnectionActionLoadingMap((prev) => ({ ...prev, [key]: false }));
+            return;
+        }
+        if (!current && rowPrivate) {
+            if (user?.handle) {
+                createFollowRequest(user.handle, key);
+            }
+            setConnectionRequestMap((prev) => ({ ...prev, [key]: true }));
+            setFollowersList((prev) => prev.map((item) => item.handleNoAt === key ? { ...item, isRequested: true } : item));
+            setFollowingList((prev) => prev.map((item) => item.handleNoAt === key ? { ...item, isRequested: true } : item));
+            flashConnectionActionSuccess(key);
+            setConnectionActionLoadingMap((prev) => ({ ...prev, [key]: false }));
+            return;
+        }
+        setConnectionFollowMap((prev) => ({ ...prev, [key]: !current }));
+        setConnectionRequestMap((prev) => ({ ...prev, [key]: false }));
+        setFollowersList((prev) => prev.map((item) => item.handleNoAt === key ? { ...item, isFollowing: !current, isRequested: false } : item));
+        setFollowingList((prev) => prev.map((item) => item.handleNoAt === key ? { ...item, isFollowing: !current, isRequested: false } : item));
+        try {
+            await toggleFollow(row.handleNoAt);
+            if (user?.id != null) {
+                await setFollowState(String(user.id), row.handleNoAt, !current);
+            }
+            flashConnectionActionSuccess(key);
+        } catch (error) {
+            console.error('Failed to toggle follow from connections list', error);
+            setConnectionFollowMap((prev) => ({ ...prev, [key]: current }));
+            setConnectionRequestMap((prev) => ({ ...prev, [key]: requested }));
+            setFollowersList((prev) => prev.map((item) => item.handleNoAt === key ? { ...item, isFollowing: current } : item));
+            setFollowingList((prev) => prev.map((item) => item.handleNoAt === key ? { ...item, isFollowing: current } : item));
+        } finally {
+            setConnectionActionLoadingMap((prev) => ({ ...prev, [key]: false }));
+        }
+    }, [connectionActionLoadingMap, connectionFollowMap, connectionRequestMap, flashConnectionActionSuccess, user?.handle, user?.id]);
+
+    const handleConnectionsScroll = React.useCallback((e: React.UIEvent<HTMLDivElement>) => {
+        if (connectionsLoading || connectionsLoadingMore || debouncedConnectionsSearch.trim()) return;
+        const container = e.currentTarget;
+        const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+        if (distanceFromBottom > 140) return;
+        if (connectionsScope === 'followers' && followersHasMore) {
+            void loadConnections('followers');
+            return;
+        }
+        if (connectionsScope === 'following' && followingHasMore) {
+            void loadConnections('following');
+        }
+    }, [
+        connectionsLoading,
+        connectionsLoadingMore,
+        connectionsScope,
+        debouncedConnectionsSearch,
+        followersHasMore,
+        followingHasMore,
+        loadConnections,
+    ]);
 
     const handleFollow = async () => {
         if (!user?.id || !handle) {
@@ -624,6 +1167,16 @@ export default function ViewProfilePage() {
                     } catch (_) {}
                 }
 
+                // Mock mode: header counts must match modal lists (loadProfile runs after other effects and was overwriting with stale 1 follower).
+                if (!useLaravelApi) {
+                    try {
+                        const followedList = await getFollowedUsers(user?.id != null ? String(user.id) : getStableUserId(user));
+                        const mockCounts = computeMockGraphFollowCounts(decodedHandle, user?.handle, followedList);
+                        followersCount = Math.max(followersCount, mockCounts.followers);
+                        followingCount = Math.max(followingCount, mockCounts.following);
+                    } catch (_) {}
+                }
+
                 // If no dedicated "Places traveled" list, derive places from bio (e.g. "Paris, London, Tokyo" or "I've been to Dublin and Cork")
                 if ((!placesTraveled || placesTraveled.length === 0) && bio) {
                     const fromBio = parsePlacesFromBio(bio);
@@ -876,14 +1429,22 @@ export default function ViewProfilePage() {
 
                 {/* Statistics */}
                 <div className="grid grid-cols-4 gap-2 mb-5 rounded-2xl border border-white/10 bg-white/[0.03] p-2">
-                    <div className="text-center rounded-xl bg-black/40 py-2">
+                    <button
+                        type="button"
+                        onClick={() => openConnections('following')}
+                        className="text-center rounded-xl bg-black/40 py-2 hover:bg-white/10 active:scale-[0.99] transition-all"
+                    >
                         <div className="text-base font-semibold">{stats.following}</div>
                         <div className="text-[11px] text-gray-400">Following</div>
-                    </div>
-                    <div className="text-center rounded-xl bg-black/40 py-2">
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => openConnections('followers')}
+                        className="text-center rounded-xl bg-black/40 py-2 hover:bg-white/10 active:scale-[0.99] transition-all"
+                    >
                         <div className="text-base font-semibold">{stats.followers > 1000 ? `${(stats.followers / 1000).toFixed(1)}K` : stats.followers}</div>
                         <div className="text-[11px] text-gray-400">Followers</div>
-                    </div>
+                    </button>
                     <div className="text-center rounded-xl bg-black/40 py-2">
                         <div className="text-base font-semibold">{stats.views > 1000 ? `${(stats.views / 1000).toFixed(1)}K` : stats.views}</div>
                         <div className="text-[11px] text-gray-400">Views</div>
@@ -1241,6 +1802,227 @@ export default function ViewProfilePage() {
                 </div>
                 );
             })()}
+
+            {/* Followers / Following Modal */}
+            {showConnectionsModal && (
+                <div className="fixed inset-0 z-[70] bg-black/95 text-white">
+                    <div className="h-full w-full max-w-2xl mx-auto flex flex-col">
+                        <div className={`sticky top-0 z-10 border-b border-white/10 bg-black/90 backdrop-blur ${compactConnectionsPhone ? 'px-3 pt-[max(8px,env(safe-area-inset-top))] pb-2.5' : 'px-4 pt-[max(10px,env(safe-area-inset-top))] pb-3'}`}>
+                            <div className="flex items-center justify-between gap-3">
+                                <h2 className={`${compactConnectionsPhone ? 'text-base' : 'text-lg'} font-semibold`}>
+                                    {connectionsScope === 'mutual'
+                                        ? 'Mutual'
+                                        : connectionsScope === 'suggested'
+                                            ? 'Suggested'
+                                            : connectionsScope === 'followers'
+                                                ? 'Followers'
+                                                : 'Following'}
+                                </h2>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowConnectionsModal(false)}
+                                    className={`${compactConnectionsPhone ? 'p-1.5' : 'p-2'} rounded-full bg-white/10 hover:bg-white/20 transition-colors`}
+                                    aria-label="Close connections"
+                                >
+                                    <FiX className={`${compactConnectionsPhone ? 'w-4 h-4' : 'w-5 h-5'}`} />
+                                </button>
+                            </div>
+                            <div className={`${compactConnectionsPhone ? 'mt-2.5' : 'mt-3'} relative`}>
+                                <div className="grid grid-cols-4 items-center">
+                                <button
+                                    type="button"
+                                    onClick={() => setConnectionsScope('mutual')}
+                                    className={`${compactConnectionsPhone ? 'pb-1 text-[13px]' : 'pb-1.5 text-[15px]'} text-center font-semibold transition-[color,transform,font-size] duration-200 ${connectionsScope === 'mutual' ? `${compactConnectionsPhone ? 'text-[15px]' : 'text-[17px]'} text-white scale-[1.04]` : 'text-white/65 hover:text-white'}`}
+                                >
+                                    Mutual
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setConnectionsScope('followers')}
+                                    className={`${compactConnectionsPhone ? 'pb-1 text-[13px]' : 'pb-1.5 text-[15px]'} text-center font-semibold transition-[color,transform,font-size] duration-200 ${connectionsScope === 'followers' ? `${compactConnectionsPhone ? 'text-[15px]' : 'text-[17px]'} text-white scale-[1.04]` : 'text-white/65 hover:text-white'}`}
+                                >
+                                    Followers
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setConnectionsScope('following')}
+                                    className={`${compactConnectionsPhone ? 'pb-1 text-[13px]' : 'pb-1.5 text-[15px]'} text-center font-semibold transition-[color,transform,font-size] duration-200 ${connectionsScope === 'following' ? `${compactConnectionsPhone ? 'text-[15px]' : 'text-[17px]'} text-white scale-[1.04]` : 'text-white/65 hover:text-white'}`}
+                                >
+                                    Following
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setConnectionsScope('suggested')}
+                                    className={`${compactConnectionsPhone ? 'pb-1 text-[13px]' : 'pb-1.5 text-[15px]'} text-center font-semibold transition-[color,transform,font-size] duration-200 ${connectionsScope === 'suggested' ? `${compactConnectionsPhone ? 'text-[15px]' : 'text-[17px]'} text-white scale-[1.04]` : 'text-white/65 hover:text-white'}`}
+                                >
+                                    Suggested
+                                </button>
+                                </div>
+                                <div
+                                    className="pointer-events-none absolute bottom-0 left-0 h-[3px] w-1/4 transition-transform duration-300"
+                                    style={{
+                                        transitionTimingFunction: 'cubic-bezier(0.22, 1.15, 0.32, 1)',
+                                        transform: `translateX(${
+                                            connectionsScope === 'mutual'
+                                                ? '0%'
+                                                : connectionsScope === 'followers'
+                                                    ? '100%'
+                                                    : connectionsScope === 'following'
+                                                        ? '200%'
+                                                        : '300%'
+                                        })`,
+                                    }}
+                                >
+                                    <span className="block h-full w-full rounded-full bg-white" />
+                                </div>
+                            </div>
+                            <div className={`${compactConnectionsPhone ? 'mt-2.5 px-2.5 py-1.5' : 'mt-3 px-3 py-2'} flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04]`}>
+                                <FiSearch className={`${compactConnectionsPhone ? 'w-3.5 h-3.5' : 'w-4 h-4'} text-gray-400`} />
+                                <input
+                                    value={connectionsSearch}
+                                    onChange={(e) => setConnectionsSearch(e.target.value)}
+                                    placeholder={`Search ${connectionsScope}`}
+                                    className={`w-full bg-transparent ${compactConnectionsPhone ? 'text-xs' : 'text-sm'} text-white placeholder:text-gray-500 outline-none`}
+                                />
+                            </div>
+                        </div>
+                        <div
+                            onScroll={handleConnectionsScroll}
+                            className={`flex-1 overflow-y-auto ${compactConnectionsPhone ? 'px-2.5 pt-2.5' : 'px-3 pt-3'} pb-[max(16px,env(safe-area-inset-bottom))]`}
+                        >
+                            {connectionsLoading ? (
+                                <div className="space-y-2 py-1">
+                                    {Array.from({ length: compactConnectionsPhone ? 6 : 7 }).map((_, idx) => (
+                                        <div
+                                            key={`connections-skeleton-${idx}`}
+                                            className={`animate-pulse flex items-center ${compactConnectionsPhone ? 'gap-2.5 px-2.5 py-2 rounded-lg' : 'gap-3 px-3 py-2.5 rounded-xl'} border border-white/10 bg-white/[0.03]`}
+                                        >
+                                            <div className={`${compactConnectionsPhone ? 'h-8 w-8' : 'h-9 w-9'} rounded-full bg-white/12`} />
+                                            <div className="min-w-0 flex-1 space-y-1.5">
+                                                <div className={`${compactConnectionsPhone ? 'h-3 w-24' : 'h-3.5 w-28'} rounded bg-white/12`} />
+                                                <div className={`${compactConnectionsPhone ? 'h-2.5 w-20' : 'h-3 w-24'} rounded bg-white/10`} />
+                                            </div>
+                                            <div className={`${compactConnectionsPhone ? 'h-6 w-[74px]' : 'h-7 w-[84px]'} rounded-full bg-white/12`} />
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : connectionsError ? (
+                                <div className="py-16 text-center text-sm text-red-300">{connectionsError}</div>
+                            ) : visibleConnections.length === 0 ? (
+                                <div className="py-16 text-center text-sm text-gray-500">
+                                    {connectionsSearch.trim() ? 'No people match your search.' : `No ${connectionsScope} yet.`}
+                                </div>
+                            ) : (
+                                <div key={connectionsScope} className="vp-connections-fade-in space-y-2">
+                                    {visibleConnections.map((row) => {
+                                        const isOwnRow = !!user?.handle && row.handleNoAt.toLowerCase() === user.handle.toLowerCase().replace(/^@/, '');
+                                        const rowFollowing = connectionFollowMap[row.handleNoAt] ?? row.isFollowing;
+                                        const rowRequested = connectionRequestMap[row.handleNoAt] ?? row.isRequested;
+                                        const rowActionLoading = connectionActionLoadingMap[row.handleNoAt] ?? false;
+                                        const rowActionSuccess = connectionActionSuccessMap[row.handleNoAt] ?? false;
+                                        return (
+                                            <div
+                                                key={row.id}
+                                                className={`flex items-center ${compactConnectionsPhone ? 'gap-2.5 px-2.5 py-2 rounded-lg' : 'gap-3 px-3 py-2.5 rounded-xl'} border border-white/10 bg-white/[0.03]`}
+                                            >
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setShowConnectionsModal(false);
+                                                        navigate(`/user/${encodeURIComponent(row.handleNoAt)}`);
+                                                    }}
+                                                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                                                >
+                                                    <Avatar src={row.avatarUrl} name={row.name} size="md" />
+                                                    <div className="min-w-0">
+                                                        <p className={`truncate ${compactConnectionsPhone ? 'text-[13px]' : 'text-sm'} font-semibold text-white`}>{row.name}</p>
+                                                        <p className={`truncate ${compactConnectionsPhone ? 'text-[11px]' : 'text-xs'} text-gray-400`}>{row.handle}</p>
+                                                        {connectionsScope === 'suggested' && (row.mutualCount || 0) > 0 ? (
+                                                            <div className="mt-0.5 flex items-center gap-1.5">
+                                                                <div className={`flex ${compactConnectionsPhone ? '-space-x-1.5' : '-space-x-1.5'}`}>
+                                                                    {(Array.isArray(row.mutualPreview) ? row.mutualPreview : []).map((mutual: any, index: number) => (
+                                                                        <div
+                                                                            key={`${mutual.id}-${index}`}
+                                                                            className={`${compactConnectionsPhone ? 'h-3.5 w-3.5' : 'h-4 w-4'} overflow-hidden rounded-full border border-black/70 bg-gray-700`}
+                                                                            title={mutual.handle || 'Mutual'}
+                                                                        >
+                                                                            {mutual.avatarUrl ? (
+                                                                                <img src={mutual.avatarUrl} alt="" className="h-full w-full object-cover" />
+                                                                            ) : null}
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                                <p className={`inline-flex items-center rounded-full border border-cyan-400/40 bg-cyan-400/12 ${compactConnectionsPhone ? 'px-1.5 py-0.5 text-[9px]' : 'px-2 py-0.5 text-[10px]'} font-semibold text-cyan-200`}>
+                                                                    {row.mutualCount} mutual
+                                                                </p>
+                                                            </div>
+                                                        ) : null}
+                                                        {row.bio ? (
+                                                            <p className={`truncate ${compactConnectionsPhone ? 'text-[11px]' : 'text-xs'} ${connectionsScope === 'suggested' ? 'text-cyan-300/80' : 'text-gray-500'}`}>
+                                                                {row.bio}
+                                                            </p>
+                                                        ) : null}
+                                                    </div>
+                                                </button>
+                                                {connectionsScope === 'suggested' && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => dismissSuggestedRow(row.handleNoAt)}
+                                                        className={`${compactConnectionsPhone ? 'p-1' : 'p-1.5'} rounded-full text-white/55 hover:text-white hover:bg-white/10 transition-colors`}
+                                                        title="Hide suggestion"
+                                                        aria-label="Hide suggestion"
+                                                    >
+                                                        <FiX className={`${compactConnectionsPhone ? 'w-3.5 h-3.5' : 'w-4 h-4'}`} />
+                                                    </button>
+                                                )}
+                                                {!isOwnRow && (
+                                                    <button
+                                                        type="button"
+                                                        disabled={rowActionLoading}
+                                                        onClick={() => void handleConnectionFollowToggle(row)}
+                                                        className={`${compactConnectionsPhone ? 'min-w-[78px] px-2.5 py-1 text-[11px]' : 'min-w-[88px] px-3 py-1.5 text-xs'} rounded-full font-semibold transition-[transform,box-shadow,background-color,color,border-color,opacity] duration-150 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-70 ${rowActionSuccess ? 'ring-1 ring-cyan-300/70 shadow-[0_0_0_1px_rgba(103,232,249,0.5),0_0_16px_-8px_rgba(34,211,238,0.95)]' : ''} ${rowFollowing ? 'border border-white/25 bg-black text-white hover:bg-white/10 shadow-[0_1px_0_rgba(255,255,255,0.04)] active:shadow-none' : rowRequested ? 'border border-cyan-400/50 bg-cyan-500/12 text-cyan-200 hover:bg-cyan-500/20 shadow-[0_0_0_1px_rgba(34,211,238,0.2),0_6px_14px_-10px_rgba(34,211,238,0.5)] active:shadow-[0_0_0_1px_rgba(34,211,238,0.14)]' : 'bg-cyan-500 text-black hover:bg-cyan-400 shadow-[0_0_0_1px_rgba(34,211,238,0.28),0_8px_18px_-10px_rgba(34,211,238,0.55)] active:shadow-[0_0_0_1px_rgba(34,211,238,0.18)]'}`}
+                                                    >
+                                                        {rowActionLoading ? (
+                                                            <span className="inline-flex items-center gap-1.5">
+                                                                <span className={`${compactConnectionsPhone ? 'h-2.5 w-2.5' : 'h-3 w-3'} animate-spin rounded-full border-2 border-current border-t-transparent`} />
+                                                                <span>Saving</span>
+                                                            </span>
+                                                        ) : (rowFollowing ? 'Following' : rowRequested ? 'Requested' : 'Follow')}
+                                                    </button>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                            {!connectionsSearch.trim() && connectionsLoadingMore && (
+                                <div className="py-4 text-center text-xs text-gray-500">Loading more...</div>
+                            )}
+                        </div>
+                    </div>
+                    <style>{`
+                        @keyframes vpConnectionsFadeIn {
+                            0% { opacity: 0; transform: translateY(4px) scale(0.995); }
+                            100% { opacity: 1; transform: translateY(0) scale(1); }
+                        }
+                        .vp-connections-fade-in {
+                            animation: vpConnectionsFadeIn 170ms ease-out;
+                        }
+                    `}</style>
+                    {dismissUndo && (
+                        <div className={`absolute left-1/2 -translate-x-1/2 ${compactConnectionsPhone ? 'bottom-3 px-3 py-2' : 'bottom-4 px-3.5 py-2.5'} flex items-center gap-3 rounded-full border border-white/20 bg-black/85 backdrop-blur text-white shadow-[0_10px_30px_-18px_rgba(0,0,0,0.85)]`}>
+                            <span className={`${compactConnectionsPhone ? 'text-[11px]' : 'text-xs'} text-white/90`}>Suggestion hidden</span>
+                            <button
+                                type="button"
+                                onClick={handleUndoDismissSuggestion}
+                                className={`${compactConnectionsPhone ? 'text-[11px]' : 'text-xs'} font-semibold text-cyan-300 hover:text-cyan-200`}
+                            >
+                                Undo
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* Post Viewer Modal */}
             {selectedPost && (

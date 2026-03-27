@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { FiHome, FiUser, FiUserPlus, FiUserX, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX, FiClock } from 'react-icons/fi';
+import { FiHome, FiUser, FiUserPlus, FiUserX, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX, FiClock, FiSend } from 'react-icons/fi';
 import { GiGreekTemple } from 'react-icons/gi';
 import { LuFlame, LuPlus } from 'react-icons/lu';
 import { VscLiveShare } from 'react-icons/vsc';
@@ -1076,7 +1076,11 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
       {/* Content layer - above scrim */}
       <div className="relative z-10 flex items-start justify-between w-full">
         <div className="flex items-center gap-3 flex-1">
-          <div className="relative overflow-visible">
+          <div
+            className="relative overflow-visible"
+            data-feed-author-handle={post.userHandle}
+            data-feed-dm-anchor={post.id}
+          >
             <Avatar
               src={avatarSrc}
               name={post.userHandle.split('@')[0]} // Extract name from handle like "John@Dublin"
@@ -1103,7 +1107,7 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
                     }
                   }
                 }}
-                className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-blue-500 hover:bg-blue-600 border-2 border-white dark:border-gray-900 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30"
+                className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-blue-500 hover:bg-blue-600 border border-white dark:border-gray-900 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-md z-30"
                 style={{ 
                   touchAction: 'manipulation',
                   WebkitTapHighlightColor: 'transparent',
@@ -1111,7 +1115,7 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
                 }}
                 aria-label="Follow user"
               >
-                <FiPlus className="w-3.5 h-3.5 text-white" strokeWidth={2.5} />
+                <FiPlus className="w-2.5 h-2.5 text-white" strokeWidth={2.5} />
               </button>
             )}
             {/* DM icon only when mutual follow (both follow each other) */}
@@ -1123,7 +1127,7 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
                   e.preventDefault();
                   onOpenDM(post.userHandle);
                 }}
-                className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-white border-2 border-gray-200 dark:border-gray-700 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30 hover:bg-gray-50 dark:hover:bg-gray-100"
+                className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-white border border-gray-200 dark:border-gray-700 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-md z-30 hover:bg-gray-50 dark:hover:bg-gray-100"
                 style={{ 
                   touchAction: 'manipulation',
                   WebkitTapHighlightColor: 'transparent',
@@ -1131,13 +1135,13 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
                 }}
                 aria-label="Message user"
               >
-                <VscLiveShare className="w-3.5 h-3.5 text-red-500" />
+                <VscLiveShare className="w-2.5 h-2.5 text-red-500" />
               </button>
             )}
             {/* Green tick when we follow them but they don't follow us */}
             {!isCurrentUser && onFollow && isFollowingThisUser && !isMutualFollow && (
-              <div className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-green-500 border-2 border-white dark:border-gray-900 flex items-center justify-center shadow-lg z-30">
-                <FiCheck className="w-3.5 h-3.5 text-white" strokeWidth={3} />
+              <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-green-500 border border-white dark:border-gray-900 flex items-center justify-center shadow-md z-30">
+                <FiCheck className="w-2.5 h-2.5 text-white" strokeWidth={2.75} />
               </div>
             )}
           </div>
@@ -1260,6 +1264,24 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
                   <span className="font-medium text-emerald-300">Follow</span>
                 </>
               )}
+            </button>
+          )}
+
+          {!isCurrentUser && isMutualFollow && onOpenDM && (
+            <button
+              type="button"
+              className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm border-t border-white/10 hover:bg-cyan-500/10 transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                onOpenDM(post.userHandle);
+                setProfileMenuOpen(false);
+              }}
+            >
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-cyan-500/15 border border-cyan-400/30">
+                <FiMessageSquare className="w-3.5 h-3.5 text-cyan-300" />
+              </span>
+              <span className="font-medium text-cyan-200">Message</span>
             </button>
           )}
 
@@ -4602,9 +4624,131 @@ function FeedPageWrapper() {
   // In-feed DM sheet (TikTok-style: compose without leaving feed)
   const [dmSheetOpen, setDmSheetOpen] = React.useState(false);
   const [dmSheetRecipientHandle, setDmSheetRecipientHandle] = React.useState<string | null>(null);
+  const [dmSheetAnchorPostId, setDmSheetAnchorPostId] = React.useState<string | null>(null);
   const [dmSheetMessage, setDmSheetMessage] = React.useState('');
+  const [dmSheetKeyboardInset, setDmSheetKeyboardInset] = React.useState(0);
+  const [feedDmDeliveryFx, setFeedDmDeliveryFx] = React.useState<{
+    kind: 'message';
+    toHandle: string;
+    startX: number;
+    startY: number;
+    targetX: number;
+    targetY: number;
+    phase: 'start' | 'fly';
+  } | null>(null);
   const [storiesRailItems, setStoriesRailItems] = React.useState<Array<{ handle: string; title: string; thumb?: string; previewVideoUrl?: string }>>([]);
   const dmSheetInputRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const DM_SHEET_TEXTAREA_MIN_PX = 44;
+  const DM_SHEET_TEXTAREA_MAX_PX = 160;
+  const adjustDmSheetTextareaHeight = React.useCallback(() => {
+    const el = dmSheetInputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const h = Math.min(
+      DM_SHEET_TEXTAREA_MAX_PX,
+      Math.max(DM_SHEET_TEXTAREA_MIN_PX, el.scrollHeight),
+    );
+    el.style.height = `${h}px`;
+  }, []);
+
+  function escapeFeedDmSelector(value: string) {
+    if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') return CSS.escape(value);
+    return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
+  function startFeedDmDeliveryFx(toHandle: string, anchorPostId: string | null) {
+    let avatarEl: HTMLElement | null = null;
+    try {
+      if (anchorPostId) {
+        avatarEl = document.querySelector(
+          `[data-feed-dm-anchor="${escapeFeedDmSelector(anchorPostId)}"]`,
+        ) as HTMLElement | null;
+      }
+      if (!avatarEl) {
+        avatarEl = document.querySelector(
+          `[data-feed-author-handle="${escapeFeedDmSelector(toHandle)}"]`,
+        ) as HTMLElement | null;
+      }
+    } catch {
+      avatarEl = null;
+    }
+    const avatarRect = avatarEl?.getBoundingClientRect();
+    const startX = window.innerWidth / 2;
+    const startY = window.innerHeight - 112;
+    const targetX = avatarRect ? avatarRect.left + avatarRect.width / 2 : 40;
+    const targetY = avatarRect ? avatarRect.top + avatarRect.height / 2 : 42;
+
+    setFeedDmDeliveryFx({
+      kind: 'message',
+      toHandle,
+      startX,
+      startY,
+      targetX,
+      targetY,
+      phase: 'start',
+    });
+
+    window.setTimeout(() => {
+      setFeedDmDeliveryFx((prev) => (prev ? { ...prev, phase: 'fly' } : null));
+    }, 14);
+    window.setTimeout(() => {
+      setFeedDmDeliveryFx(null);
+    }, 4300);
+  }
+
+  function sendDmFromSheet() {
+    const text = dmSheetMessage.trim();
+    if (!text || !user?.handle || !dmSheetRecipientHandle) return;
+    const recipient = dmSheetRecipientHandle;
+    const anchorId = dmSheetAnchorPostId;
+    appendMessage(user.handle, recipient, { text })
+      .then(() => {
+        setDmSheetMessage('');
+        setDmSheetOpen(false);
+        setDmSheetRecipientHandle(null);
+        setDmSheetAnchorPostId(null);
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => startFeedDmDeliveryFx(recipient, anchorId));
+        });
+      })
+      .catch((err) => console.error('Send DM failed:', err));
+  }
+  React.useEffect(() => {
+    if (!dmSheetOpen) return;
+    adjustDmSheetTextareaHeight();
+  }, [dmSheetOpen, dmSheetMessage, adjustDmSheetTextareaHeight]);
+
+  // Keep DM sheet above the on-screen keyboard (iOS / mobile Chrome visual viewport)
+  React.useEffect(() => {
+    if (!dmSheetOpen) {
+      setDmSheetKeyboardInset(0);
+      return;
+    }
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      setDmSheetKeyboardInset(inset);
+    };
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+      setDmSheetKeyboardInset(0);
+    };
+  }, [dmSheetOpen]);
+
+  React.useEffect(() => {
+    if (!dmSheetOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [dmSheetOpen]);
+
   const pagesLoadedForFilterRef = React.useRef<string | null>(null);
   // When we clear Following feed after a follow, cursor stays 0 so the load effect doesn't re-run. This forces a refetch.
   const [discoverRefreshTrigger, setDiscoverRefreshTrigger] = React.useState(0);
@@ -5426,6 +5570,9 @@ function FeedPageWrapper() {
     window.addEventListener('storyCreated', refreshStoriesRail as EventListener);
     window.addEventListener('storiesUpdated', refreshStoriesRail as EventListener);
     window.addEventListener('storiesViewed', refreshStoriesRail as EventListener);
+    // Same follow graph as before: rail still uses getFollowedUsers + fetchFollowedUsersStoryGroups.
+    // Refresh immediately when follow/unfollow changes so new rings appear without waiting for the 12s poll.
+    window.addEventListener('followToggled', refreshStoriesRail as EventListener);
 
     return () => {
       cancelled = true;
@@ -5433,6 +5580,7 @@ function FeedPageWrapper() {
       window.removeEventListener('storyCreated', refreshStoriesRail as EventListener);
       window.removeEventListener('storiesUpdated', refreshStoriesRail as EventListener);
       window.removeEventListener('storiesViewed', refreshStoriesRail as EventListener);
+      window.removeEventListener('followToggled', refreshStoriesRail as EventListener);
     };
   }, [user?.id, routerLocation.pathname, generateTextStoryPreview]);
 
@@ -6047,6 +6195,7 @@ function FeedPageWrapper() {
             } : undefined}
             onOpenDM={user?.handle ? (handle) => {
               setDmSheetRecipientHandle(handle);
+              setDmSheetAnchorPostId(p.id);
               setDmSheetMessage('');
               setDmSheetOpen(true);
               setTimeout(() => dmSheetInputRef.current?.focus(), 100);
@@ -6177,79 +6326,145 @@ function FeedPageWrapper() {
       {dmSheetOpen && dmSheetRecipientHandle && user?.handle && (
         <div
           className="fixed inset-0 z-[100] flex flex-col justify-end"
+          style={{ paddingBottom: dmSheetKeyboardInset }}
           role="dialog"
-          aria-label="Message"
+          aria-label="New message"
         >
           <div
-            className="absolute inset-0 bg-black/50"
+            className="absolute inset-0 bg-black/55 backdrop-blur-[3px]"
             onClick={() => {
               setDmSheetOpen(false);
               setDmSheetRecipientHandle(null);
+              setDmSheetAnchorPostId(null);
               setDmSheetMessage('');
             }}
             aria-hidden="true"
           />
           <div
-            className="relative z-10 bg-[#0f172a] dark:bg-[#0f172a] rounded-t-2xl shadow-xl border-t border-gray-700/50 flex flex-col max-h-[70vh]"
+            className="relative z-10 mx-auto w-full max-w-lg rounded-t-[1.25rem] border border-white/10 border-b-0 bg-gradient-to-b from-[#0b1220] via-[#080d18] to-[#05080f] shadow-[0_-12px_48px_rgba(0,0,0,0.55)] flex flex-col max-h-[78vh]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700/50">
-              <span className="text-sm font-medium text-gray-300">Message {dmSheetRecipientHandle}</span>
+            <div className="flex flex-col items-center pt-2 pb-1">
+              <div className="h-1 w-10 rounded-full bg-white/20" aria-hidden />
+            </div>
+            <div className="flex items-center gap-3 px-4 pb-3 pt-1 border-b border-white/10">
+              <Avatar
+                src={getAvatarForHandle(dmSheetRecipientHandle)}
+                name={dmSheetRecipientHandle.split('@')[0] || dmSheetRecipientHandle}
+                size="sm"
+                className="!ring-2 !ring-cyan-400/35"
+              />
+              <div className="min-w-0 flex-1">
+                <p className="text-[15px] font-semibold text-white truncate tracking-tight">
+                  {dmSheetRecipientHandle.split('@')[0] || 'User'}
+                </p>
+                <p className="text-xs text-cyan-200/80 truncate">{dmSheetRecipientHandle}</p>
+              </div>
               <button
                 type="button"
                 onClick={() => {
                   setDmSheetOpen(false);
                   setDmSheetRecipientHandle(null);
+                  setDmSheetAnchorPostId(null);
                   setDmSheetMessage('');
                 }}
-                className="p-2 rounded-full hover:bg-gray-700/50 text-gray-400 hover:text-white transition-colors"
+                className="shrink-0 p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors"
                 aria-label="Close"
               >
                 <FiX className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-4 flex gap-3 items-end">
-              <textarea
-                ref={dmSheetInputRef}
-                value={dmSheetMessage}
-                onChange={(e) => setDmSheetMessage(e.target.value)}
-                placeholder={`Message ${dmSheetRecipientHandle}. It's j...`}
-                className="flex-1 min-h-[44px] max-h-32 px-4 py-3 rounded-xl bg-gray-800 border border-gray-600 text-white placeholder-gray-500 resize-none focus:outline-none focus:ring-2 focus:ring-[#0095f6] focus:border-transparent"
-                rows={2}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    const text = dmSheetMessage.trim();
-                    if (text && user?.handle) {
-                      appendMessage(user.handle, dmSheetRecipientHandle!, { text }).then(() => {
-                        setDmSheetMessage('');
-                        setDmSheetOpen(false);
-                        setDmSheetRecipientHandle(null);
-                      }).catch((err) => console.error('Send DM failed:', err));
+            <div className="px-4 pt-3 pb-[max(14px,env(safe-area-inset-bottom))] flex flex-col gap-2">
+              <label className="sr-only" htmlFor="dm-sheet-input">
+                Message
+              </label>
+              <div className="flex items-end gap-2">
+                <textarea
+                  id="dm-sheet-input"
+                  ref={dmSheetInputRef}
+                  value={dmSheetMessage}
+                  onChange={(e) => {
+                    setDmSheetMessage(e.target.value);
+                    requestAnimationFrame(() => adjustDmSheetTextareaHeight());
+                  }}
+                  placeholder="Message…"
+                  rows={1}
+                  className="flex-1 min-h-[44px] max-h-40 rounded-2xl bg-black/35 border border-white/12 px-4 py-2.5 text-[15px] leading-snug text-white placeholder:text-gray-500 resize-none overflow-y-auto shadow-inner shadow-black/20 focus:outline-none focus:ring-2 focus:ring-cyan-500/45 focus:border-cyan-500/35"
+                  style={{ height: `${DM_SHEET_TEXTAREA_MIN_PX}px` }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      sendDmFromSheet();
                     }
-                  }
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  const text = dmSheetMessage.trim();
-                  if (!text || !user?.handle) return;
-                  appendMessage(user.handle, dmSheetRecipientHandle!, { text }).then(() => {
-                    setDmSheetMessage('');
-                    setDmSheetOpen(false);
-                    setDmSheetRecipientHandle(null);
-                  }).catch((err) => console.error('Send DM failed:', err));
-                }}
-                disabled={!dmSheetMessage.trim()}
-                className="flex-shrink-0 w-11 h-11 rounded-full bg-[#0095f6] hover:bg-[#0084d4] disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center text-white transition-colors"
-                aria-label="Send message"
-              >
-                <VscLiveShare className="w-5 h-5" />
-              </button>
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={sendDmFromSheet}
+                  disabled={!dmSheetMessage.trim()}
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-cyan-500 text-black shadow-[0_0_0_1px_rgba(34,211,238,0.35)] hover:bg-cyan-400 disabled:opacity-50 disabled:pointer-events-none disabled:shadow-none transition-colors"
+                  aria-label="Send message"
+                >
+                  <FiSend className="w-5 h-5" aria-hidden />
+                </button>
+              </div>
+              <p className="text-[11px] text-gray-500 px-1">
+                <span className="text-gray-400">Enter</span> to send · <span className="text-gray-400">Shift+Enter</span> new line
+              </p>
             </div>
           </div>
         </div>
+      )}
+
+      {feedDmDeliveryFx && (
+        <>
+          <style dangerouslySetInnerHTML={{ __html: `
+            @keyframes feed-dm-delivery-drop {
+              0% {
+                transform: translate(-50%, -50%) scale(1);
+                opacity: 1;
+              }
+              22% {
+                transform: translate(-50%, -62%) scale(1.08);
+                opacity: 1;
+              }
+              74% {
+                transform: translate(calc(-50% + var(--dx) * 0.82), calc(-50% + var(--dy) * 0.82 - 10px)) scale(0.66);
+                opacity: 0.9;
+              }
+              100% {
+                transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(0.3);
+                opacity: 0.06;
+              }
+            }
+          `}} />
+          <div className="fixed inset-0 pointer-events-none z-[95]">
+            <div
+              className="absolute rounded-2xl border border-cyan-300/40 bg-black/70 backdrop-blur-md px-3 py-2 shadow-[0_10px_30px_rgba(6,182,212,0.25)]"
+              style={{
+                left: feedDmDeliveryFx.startX,
+                top: feedDmDeliveryFx.startY,
+                transform: 'translate(-50%, -50%) scale(1)',
+                opacity: 1,
+                ['--dx' as string]: `${feedDmDeliveryFx.targetX - feedDmDeliveryFx.startX}px`,
+                ['--dy' as string]: `${feedDmDeliveryFx.targetY - feedDmDeliveryFx.startY}px`,
+                animation: feedDmDeliveryFx.phase === 'fly'
+                  ? 'feed-dm-delivery-drop 3.8s cubic-bezier(0.16,1,0.3,1) forwards'
+                  : 'none',
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-cyan-500/90 text-white">
+                  <FiSend className="w-3.5 h-3.5" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold text-white">Message sent</p>
+                  <p className="text-[10px] text-cyan-100/90 truncate">@{feedDmDeliveryFx.toHandle}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
       )}
 
       {/* Comments Modal */}

@@ -9,7 +9,10 @@ const handleToAvatar: Record<string, string> = {
 
 export function getAvatarForHandle(handle: string | undefined | null): string | undefined {
     if (!handle) return undefined;
-    return handleToAvatar[handle] || undefined;
+    if (handleToAvatar[handle]) return handleToAvatar[handle];
+    const normalized = handle.toLowerCase();
+    const key = Object.keys(handleToAvatar).find((k) => k.toLowerCase() === normalized);
+    return key ? handleToAvatar[key] : undefined;
 }
 
 export function setAvatarForHandle(handle: string, url: string): void {

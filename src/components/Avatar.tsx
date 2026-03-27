@@ -59,43 +59,39 @@ export default function Avatar({ src, name, size = 'md', className = '', hasStor
         onClick(e);
     } : undefined;
 
-    // Always show a border - blue/purple gradient for unviewed stories, white for viewed/no stories
-    const borderStyle = hasStory
-        ? { background: 'linear-gradient(135deg, #3b82f6 0%, #a855f7 100%)' }
-        : { background: '#ffffff' };
+    const storyRingStyle = { background: 'linear-gradient(135deg, #22d3ee 0%, #14b8a6 100%)' };
+
+    const inner = hasStory ? (
+        <>
+            <div className="absolute -inset-0.5 rounded-full p-[2px]" style={storyRingStyle}>
+                <div className="w-full h-full rounded-full bg-white dark:bg-gray-950" />
+            </div>
+            <div className="absolute inset-[2px] rounded-full overflow-hidden flex items-center justify-center bg-white dark:bg-gray-950">
+                {avatarContent}
+            </div>
+        </>
+    ) : (
+        <div className="w-full h-full rounded-full overflow-hidden flex items-center justify-center bg-white dark:bg-gray-950">
+            {avatarContent}
+        </div>
+    );
 
     if (onClick) {
         return (
             <button
                 onClick={handleClick}
-                className={`${baseClassName} relative rounded-full overflow-visible`}
+                className={`${baseClassName} relative rounded-full ${hasStory ? 'overflow-visible' : 'overflow-hidden'}`}
             >
-                {/* Outer border ring - purple for unviewed stories, white otherwise */}
-                <div className="absolute -inset-0.5 rounded-full p-[2px]" style={borderStyle}>
-                    <div className="w-full h-full rounded-full bg-white dark:bg-gray-950"></div>
-                </div>
-
-                {/* Avatar content */}
-                <div className="absolute inset-[2px] rounded-full overflow-hidden flex items-center justify-center bg-white dark:bg-gray-950">
-                    {avatarContent}
-                </div>
+                {inner}
             </button>
         );
-    } else {
-        return (
-            <div
-                className={`${baseClassName} relative rounded-full overflow-visible`}
-            >
-                {/* Outer border ring - purple for unviewed stories, white otherwise */}
-                <div className="absolute -inset-0.5 rounded-full p-[2px]" style={borderStyle}>
-                    <div className="w-full h-full rounded-full bg-white dark:bg-gray-950"></div>
-                </div>
-
-                {/* Avatar content */}
-                <div className="absolute inset-[2px] rounded-full overflow-hidden flex items-center justify-center bg-white dark:bg-gray-950">
-                    {avatarContent}
-                </div>
-            </div>
-        );
     }
+
+    return (
+        <div
+            className={`${baseClassName} relative rounded-full ${hasStory ? 'overflow-visible' : 'overflow-hidden'}`}
+        >
+            {inner}
+        </div>
+    );
 }
