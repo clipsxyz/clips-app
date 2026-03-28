@@ -30,6 +30,14 @@ import { enqueue, drain } from './utils/mutationQueue';
 import { loadFeed, saveFeed } from './utils/feedCache';
 import { getStableUserId } from './utils/userId';
 import { timeAgo } from './utils/timeAgo';
+import { captureVideoFrameDataUrl } from './utils/captureVideoFrame';
+import {
+  findPlaceMatchedPosts,
+  suggestedPlacesBundleKey,
+  emitSuggestedPlacesAnalytics,
+  type PlaceMatchedPost,
+} from './utils/suggestedPlaces';
+import SuggestedPlacesFeedSection from './components/SuggestedPlacesFeedSection';
 import { getActiveAds, trackAdImpression, trackAdClick } from './api/ads';
 import { getActiveBoost, getBoostTimeRemaining } from './api/boost';
 import BoostSelectionModal from './components/BoostSelectionModal';
@@ -3994,6 +4002,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   return (
     <article
       ref={articleRef}
+      data-feed-post-id={String(post.id)}
       aria-labelledby={titleId}
       className={`mx-0 border-0 border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out] relative ${
         isTileBoostMode
@@ -4529,20 +4538,8 @@ function Stories24RailCollapseOverlay() {
         'position:absolute;inset:0;pointer-events:none;background:linear-gradient(135deg,rgba(100,116,139,0.25),rgba(56,189,248,0.2),rgba(99,102,241,0.25))';
       shell.appendChild(tint);
 
-      if (previewVideoUrl) {
-        const v = document.createElement('video');
-        v.src = previewVideoUrl;
-        v.muted = true;
-        v.playsInline = true;
-        v.setAttribute('playsinline', '');
-        v.setAttribute('webkit-playsinline', 'true');
-        v.autoplay = true;
-        v.loop = true;
-        v.preload = 'metadata';
-        v.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover';
-        shell.appendChild(v);
-        void v.play();
-      } else if (previewThumb) {
+      // Static image only during shrink — video inside a transform-animated shell often no-ops the animation on Android/WebKit.
+      if (previewThumb) {
         const img = document.createElement('img');
         img.src = previewThumb;
         img.alt = '';
@@ -4774,17 +4771,8 @@ function Stories24FeedRail({
               }}
             >
               <div className="absolute inset-0 bg-gradient-to-br from-slate-500/25 via-sky-500/20 to-indigo-500/25" />
-              {expandingStory.item.previewVideoUrl ? (
-                <video
-                  src={expandingStory.item.previewVideoUrl}
-                  className="absolute inset-0 w-full h-full object-cover"
-                  muted
-                  playsInline
-                  autoPlay
-                  loop
-                  preload="metadata"
-                />
-              ) : expandingStory.item.thumb ? (
+              {/* Do not use a video element here — mobile compositors break parent expand animation. */}
+              {expandingStory.item.thumb ? (
                 <img
                   src={expandingStory.item.thumb}
                   alt={`${expandingStory.item.handle} story`}
@@ -4881,6 +4869,103 @@ function FeedPageWrapper() {
     phase: 'start' | 'fly';
   } | null>(null);
   const [storiesRailItems, setStoriesRailItems] = React.useState<Array<{ handle: string; title: string; thumb?: string; previewVideoUrl?: string }>>([]);
+
+  const readSuggestedPlacesPrefs = React.useCallback(() => {
+    if (typeof window === 'undefined') {
+      return { dismissAll: false, dismissedBundles: [] as string[], includePosterLocale: false };
+    }
+    try {
+      const dismissAll = sessionStorage.getItem('clips:suggestedPlacesDismissAll') === '1';
+      const raw = sessionStorage.getItem('clips:suggestedPlacesDismissedBundles');
+      const dismissedBundles = raw ? (JSON.parse(raw) as string[]) : [];
+      const includePosterLocale = localStorage.getItem('clips:suggestedPlacesIncludePosterLocale') === '1';
+      return { dismissAll, dismissedBundles, includePosterLocale };
+    } catch {
+      return { dismissAll: false, dismissedBundles: [] as string[], includePosterLocale: false };
+    }
+  }, []);
+
+  const [suggestedPlacesPrefs, setSuggestedPlacesPrefs] = React.useState(() => readSuggestedPlacesPrefs());
+
+  const dismissSuggestedPlacesRow = React.useCallback((bundleKey: string) => {
+    emitSuggestedPlacesAnalytics({ action: 'dismiss_row', bundleKey });
+    setSuggestedPlacesPrefs((prev) => {
+      const nextBundles = [...new Set([...prev.dismissedBundles, bundleKey])];
+      try {
+        sessionStorage.setItem('clips:suggestedPlacesDismissedBundles', JSON.stringify(nextBundles));
+      } catch {
+        /* ignore */
+      }
+      return { ...prev, dismissedBundles: nextBundles };
+    });
+  }, []);
+
+  const dismissAllSuggestedPlaces = React.useCallback(() => {
+    emitSuggestedPlacesAnalytics({ action: 'dismiss_all' });
+    try {
+      sessionStorage.setItem('clips:suggestedPlacesDismissAll', '1');
+    } catch {
+      /* ignore */
+    }
+    setSuggestedPlacesPrefs((prev) => ({ ...prev, dismissAll: true }));
+  }, []);
+
+  const setSuggestedPlacesIncludePosterLocale = React.useCallback((enabled: boolean) => {
+    try {
+      localStorage.setItem('clips:suggestedPlacesIncludePosterLocale', enabled ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+    emitSuggestedPlacesAnalytics({ action: 'toggle_poster_locale', enabled });
+    setSuggestedPlacesPrefs((prev) => ({ ...prev, includePosterLocale: enabled }));
+  }, []);
+
+  /** Laravel: server-ranked place suggestions; `undefined` = use client-side matcher (mock or API error). */
+  const [serverPlaceSuggestions, setServerPlaceSuggestions] = React.useState<PlaceMatchedPost[] | undefined>(undefined);
+  const placesTraveledKey = React.useMemo(
+    () => JSON.stringify(user?.placesTraveled ?? []),
+    [user?.placesTraveled]
+  );
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('authToken') : null;
+    const useLaravel =
+      typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false' && !!token;
+
+    if (!useLaravel || !user || customLocation) {
+      setServerPlaceSuggestions(undefined);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void import('./api/posts').then(({ fetchSuggestedPostsByPlaces, transformLaravelPost, decorateForUser }) => {
+      fetchSuggestedPostsByPlaces({
+        limit: 9,
+        include_poster_regional: suggestedPlacesPrefs.includePosterLocale,
+        places_traveled: Array.isArray(user.placesTraveled) ? user.placesTraveled : undefined,
+      })
+        .then((res) => {
+          if (cancelled) return;
+          const rows = res.suggestions || [];
+          const mapped: PlaceMatchedPost[] = rows.map((row) => ({
+            post: decorateForUser(userId, transformLaravelPost(row.post as Record<string, unknown>)),
+            matchedPlace: row.matched_place,
+            reason: row.reason === 'places_traveled' ? 'places_traveled' : 'home_area',
+          }));
+          setServerPlaceSuggestions(mapped);
+        })
+        .catch(() => {
+          if (!cancelled) setServerPlaceSuggestions(undefined);
+        });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, userId, customLocation, suggestedPlacesPrefs.includePosterLocale, placesTraveledKey]);
+
   const dmSheetInputRef = React.useRef<HTMLTextAreaElement | null>(null);
   const DM_SHEET_TEXTAREA_MIN_PX = 44;
   const DM_SHEET_TEXTAREA_MAX_PX = 160;
@@ -5692,6 +5777,68 @@ function FeedPageWrapper() {
     return feedItems;
   }, [pages, ads, userId, currentFilter]);
 
+  /** Insert “Suggested for your places” strips between posts (skipped on custom venue/location feeds). */
+  const flatWithSuggested = React.useMemo(() => {
+    if (customLocation) return flat;
+    if (!user) return flat;
+
+    const posts = flat
+      .filter((x): x is { type: 'post'; item: Post; createdAt: number } => x.type === 'post')
+      .map((x) => x.item);
+
+    const matched =
+      serverPlaceSuggestions !== undefined
+        ? serverPlaceSuggestions
+        : findPlaceMatchedPosts(user, posts, {
+            max: 9,
+            excludeOwn: true,
+            includePosterRegionalNational: suggestedPlacesPrefs.includePosterLocale,
+          });
+    if (matched.length === 0) return flat;
+
+    type StreamRow =
+      | { type: 'post'; item: Post; createdAt: number }
+      | { type: 'ad'; item: Ad; createdAt: number }
+      | { type: 'suggested'; item: { suggestions: typeof matched }; createdAt: number };
+
+    const bundlesRaw: { suggestions: typeof matched }[] = [];
+    for (let i = 0; i < matched.length; i += 3) {
+      bundlesRaw.push({ suggestions: matched.slice(i, i + 3) });
+    }
+
+    let bundles = bundlesRaw;
+    if (suggestedPlacesPrefs.dismissAll) {
+      bundles = [];
+    } else if (suggestedPlacesPrefs.dismissedBundles.length > 0) {
+      const dismissed = new Set(suggestedPlacesPrefs.dismissedBundles);
+      bundles = bundlesRaw.filter((b) => !dismissed.has(suggestedPlacesBundleKey(b.suggestions)));
+    }
+    if (bundles.length === 0) return flat;
+
+    const out: StreamRow[] = [];
+    let bundleIdx = 0;
+    let postCount = 0;
+    /** First strip after 3rd post, then every 5 posts (8, 13, …) so suggestions surface without long scroll. */
+    const shouldInsertSuggestedStrip = (count: number, bundleIndex: number) =>
+      bundleIndex < bundles.length && count === 3 + bundleIndex * 5;
+
+    for (const it of flat) {
+      out.push(it as StreamRow);
+      if (it.type === 'post') {
+        postCount += 1;
+        if (shouldInsertSuggestedStrip(postCount, bundleIdx)) {
+          out.push({
+            type: 'suggested',
+            item: bundles[bundleIdx],
+            createdAt: 0,
+          });
+          bundleIdx += 1;
+        }
+      }
+    }
+    return out;
+  }, [flat, user, customLocation, suggestedPlacesPrefs, serverPlaceSuggestions]);
+
   // Posts only (no ads) - for Scenes carousel (only posts that have media: image or video; exclude text-only)
   const postsOnly = React.useMemo(() => {
     const hasMedia = (p: Post) => {
@@ -5808,6 +5955,11 @@ function FeedPageWrapper() {
           // Dedicated visual fallback for text-only stories in rail cards.
           if (!thumb && latestMediaType !== 'video') {
             thumb = await generateTextStoryPreview(text, latest.textStyle?.color);
+          }
+
+          // Collapse-back overlay uses a static <img> only; video URLs are not drawn during the transform animation.
+          if (!thumb && latestMediaType === 'video' && latestMediaUrl) {
+            thumb = await captureVideoFrameDataUrl(latestMediaUrl);
           }
 
           nextItems.push({
@@ -6049,7 +6201,22 @@ function FeedPageWrapper() {
         // Stories 24: show once after the first post card (not above the feed). Custom/search feeds omit entirely.
         let postCounter = 0;
 
-        return flat.map((feedItem, index) => {
+        return flatWithSuggested.map((feedItem, index) => {
+          if (feedItem.type === 'suggested') {
+            const sug = feedItem.item.suggestions;
+            const bKey = suggestedPlacesBundleKey(sug);
+            return (
+              <SuggestedPlacesFeedSection
+                key={`suggested-places-${bKey}-${index}`}
+                bundleKey={bKey}
+                suggestions={sug}
+                includePosterLocale={suggestedPlacesPrefs.includePosterLocale}
+                onToggleIncludePosterLocale={setSuggestedPlacesIncludePosterLocale}
+                onDismissRow={() => dismissSuggestedPlacesRow(bKey)}
+                onDismissAll={dismissAllSuggestedPlaces}
+              />
+            );
+          }
           if (feedItem.type === 'ad') {
             const ad = feedItem.item as Ad;
             return (
@@ -6081,8 +6248,8 @@ function FeedPageWrapper() {
 
           // Priority loading: first 1-3 posts with media get priority
           const hasMedia = !!(p.mediaUrl || (p.mediaItems && p.mediaItems.length > 0));
-          const priorityPostsCount = flat.slice(0, index + 1).filter(item => {
-            if (item.type === 'ad') return false;
+          const priorityPostsCount = flatWithSuggested.slice(0, index + 1).filter(item => {
+            if (item.type === 'ad' || item.type === 'suggested') return false;
             const post = item.item as Post;
             return !!(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0));
           }).length;

@@ -22,17 +22,7 @@ import Swal from 'sweetalert2';
 import ShareProfileModal from '../components/ShareProfileModal';
 import { getStableUserId } from '../utils/userId';
 import { followRequestSentBottomSheet, accountIsPrivateBottomSheet, bottomSheet } from '../utils/swalBottomSheet';
-
-/** Parse place names from bio text. Splits on comma, semicolon, newline, "and", " - ", ":", ". " */
-function parsePlacesFromBio(bio: string): string[] {
-    if (!bio || typeof bio !== 'string') return [];
-    const parts = bio
-        .split(/[,;\n.]|\s+and\s+|\s*[-–—]\s*|:\s*/i)
-        .map((p) => p.trim())
-        .filter((p) => p.length >= 2);
-    if (parts.length === 0 && bio.trim().length >= 2) return [bio.trim()];
-    return [...new Set(parts)];
-}
+import { parsePlacesFromBio } from '../utils/suggestedPlaces';
 
 /** Resolve places for the location icon. Uses Travel Info lists first, then parses BOTH profile and auth bios so "places in my bio" always counts. */
 function getEffectivePlacesTraveled(profileUser: any, authUser: any): string[] {
@@ -1132,8 +1122,10 @@ export default function ViewProfilePage() {
                         if (userProfileData.avatar_url && !avatarUrl) avatarUrl = userProfileData.avatar_url;
                         if (userProfileData.bio && !bio) bio = userProfileData.bio;
                         if (userProfileData.social_links && !socialLinks) socialLinks = userProfileData.social_links;
-                        if (decodedHandle !== user?.handle && (userProfileData as any).places_traveled) {
-                            placesTraveled = (userProfileData as any).places_traveled;
+                        const apiPt =
+                            (userProfileData as any).places_traveled ?? (userProfileData as any).placesTraveled;
+                        if (Array.isArray(apiPt) && apiPt.length > 0) {
+                            placesTraveled = apiPt.filter((s: unknown) => typeof s === 'string');
                         }
                     } catch (error: any) {
                         const isConnectionError =

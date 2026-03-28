@@ -41,12 +41,14 @@ class StoryController extends Controller
         // Group by user
         $grouped = $stories->groupBy('user_id')->map(function ($userStories, $userGroupId) use ($userId) {
             $user = $userStories->first()->user;
+            // Newest first within each user (viewer opens on latest slide).
+            $ordered = $userStories->sortByDesc('created_at')->values();
             return [
                 'user_id' => $userGroupId,
                 'user_handle' => $user->handle,
                 'user_name' => $user->display_name,
                 'avatar_url' => $user->avatar_url,
-                'stories' => $userStories->map(function ($story) use ($userId) {
+                'stories' => $ordered->map(function ($story) use ($userId) {
                     $storyData = $story->toArray();
                     if ($userId) {
                         $storyData['has_viewed'] = $story->hasBeenViewedBy(User::find($userId));

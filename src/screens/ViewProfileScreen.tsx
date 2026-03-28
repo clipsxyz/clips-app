@@ -26,7 +26,6 @@ import Avatar from '../components/Avatar';
 export default function ViewProfileScreen({ route, navigation }: any) {
     const { handle } = route.params;
     const { user } = useAuth();
-    const userId = user?.id ?? 'anon';
 
     const [profileUser, setProfileUser] = useState<any>(null);
     const [posts, setPosts] = useState<Post[]>([]);
@@ -38,6 +37,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     const [profileIsPrivate, setProfileIsPrivate] = useState(false);
     const [stats, setStats] = useState({ following: 0, followers: 0, posts: 0 });
     const [showTraveledModal, setShowTraveledModal] = useState(false);
+    const [showProfileMenu, setShowProfileMenu] = useState(false);
 
     useEffect(() => {
         loadProfile();
@@ -78,7 +78,15 @@ export default function ViewProfileScreen({ route, navigation }: any) {
             // Fetch profile data
             try {
                 const profileData = await fetchUserProfile(decodedHandle, user?.id);
-                setProfileUser(profileData);
+                const pt =
+                    (profileData as any).placesTraveled ?? (profileData as any).places_traveled;
+                const placesTraveled =
+                    Array.isArray(pt) ? pt.filter((s: unknown) => typeof s === 'string') : undefined;
+                setProfileUser({
+                    ...profileData,
+                    placesTraveled:
+                        placesTraveled && placesTraveled.length > 0 ? placesTraveled : undefined,
+                });
                 setStats({
                     following: profileData.following_count || 0,
                     followers: profileData.followers_count || 0,
@@ -88,8 +96,8 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 console.error('Error fetching profile:', err);
             }
 
-            // Fetch posts
-            const userPosts = await fetchPostsByUser(decodedHandle, userId);
+            // Fetch posts (second arg is limit, not user id)
+            const userPosts = await fetchPostsByUser(decodedHandle, 50);
             setPosts(userPosts);
 
             // Check for stories
@@ -228,7 +236,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                         <Avatar
                             src={profileUser?.avatarUrl}
                             name={handle?.split('@')[0] || 'User'}
-                            size={80}
+                            size="xl"
                             hasStory={hasStory}
                         />
                     </TouchableOpacity>
@@ -656,6 +664,12 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '500',
         color: '#FFFFFF',
+    },
+    emptyText: {
+        fontSize: 15,
+        color: '#9CA3AF',
+        textAlign: 'center',
+        paddingVertical: 24,
     },
     menuOverlay: {
         flex: 1,

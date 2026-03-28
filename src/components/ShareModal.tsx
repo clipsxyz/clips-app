@@ -9,6 +9,7 @@ import { updateMetaTags, clearMetaTags } from '../utils/metaTags';
 import { getAvatarForHandle } from '../api/users';
 import { getFollowedUsers } from '../api/posts';
 import * as apiClient from '../api/client';
+import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { showUploadOverlay } from '../utils/uploadOverlay';
 import Avatar from './Avatar';
 import type { Post } from '../types';
@@ -35,7 +36,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
     useEffect(() => {
         if (!isOpen || !user) return;
         setLoadingFollowed(true);
-        const useLaravel = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+        const useLaravel = isLaravelApiEnabled();
 
         const setFromLocal = () => {
             getFollowedUsers(user.id)

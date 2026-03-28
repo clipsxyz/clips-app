@@ -579,6 +579,15 @@ function delay(ms = 300): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/** Newest first (Instagram-style): first slide is the latest post in the 24h window. */
+export function sortStoriesNewestFirst(stories: Story[]): Story[] {
+    return [...stories].sort((a, b) => b.createdAt - a.createdAt);
+}
+
+function sortGroupStoriesNewestFirst(groups: StoryGroup[]): StoryGroup[] {
+    return groups.map((g) => ({ ...g, stories: sortStoriesNewestFirst(g.stories) }));
+}
+
 // Get all story groups (grouped by user)
 export async function fetchStoryGroups(userId: string): Promise<StoryGroup[]> {
     await delay();
@@ -611,7 +620,7 @@ export async function fetchStoryGroups(userId: string): Promise<StoryGroup[]> {
         return acc;
     }, [] as StoryGroup[]);
 
-    return groups;
+    return sortGroupStoriesNewestFirst(groups);
 }
 
 // Get stories for a specific user
@@ -629,7 +638,7 @@ export async function fetchUserStories(viewerUserId: string, targetUserId: strin
             if (audience === 'only_me') return false;
             return followedUserHandles.includes(s.userHandle);
         })()
-    ).sort((a, b) => a.createdAt - b.createdAt);
+    ).sort((a, b) => b.createdAt - a.createdAt);
 }
 
 // Get story group for a specific user by handle
@@ -647,7 +656,7 @@ export async function fetchStoryGroupByHandle(userHandle: string): Promise<Story
         userHandle: activeStories[0].userHandle,
         name: activeStories[0].userHandle.split('@')[0],
         avatarUrl: undefined,
-        stories: activeStories.sort((a, b) => a.createdAt - b.createdAt)
+        stories: activeStories.sort((a, b) => b.createdAt - a.createdAt),
     };
 }
 
@@ -1052,7 +1061,7 @@ export async function fetchFollowedUsersStoryGroups(userId: string, followedUser
         return acc;
     }, [] as StoryGroup[]);
 
-    return groups;
+    return sortGroupStoriesNewestFirst(groups);
 }
 
 // Utility: check if a story media is still active (not expired)

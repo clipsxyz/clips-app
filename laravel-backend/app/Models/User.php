@@ -33,6 +33,7 @@ class User extends Authenticatable
         'display_name',
         'handle',
         'bio',
+        'places_traveled',
         'avatar_url',
         'social_links', // JSON field for social media links
         'location_local',
@@ -60,6 +61,7 @@ class User extends Authenticatable
         'following_count' => 'integer',
         'posts_count' => 'integer',
         'social_links' => 'array', // Cast JSON to array
+        'places_traveled' => 'array',
     ];
 
     // Relationships

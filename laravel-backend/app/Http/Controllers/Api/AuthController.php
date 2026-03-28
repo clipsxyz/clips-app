@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\Rules\Password;
 
 class AuthController extends Controller
@@ -95,6 +96,47 @@ class AuthController extends Controller
         $user = Auth::user();
         
         return response()->json($user->makeHidden(['password']));
+    }
+
+    /**
+     * Update the authenticated user's profile (bio, locations, places traveled, social links).
+     */
+    public function updateProfile(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'display_name' => 'sometimes|string|min:1|max:100',
+            'bio' => 'sometimes|nullable|string|max:5000',
+            'places_traveled' => 'sometimes|nullable|array|max:80',
+            'places_traveled.*' => 'string|max:200',
+            'location_local' => 'sometimes|nullable|string|max:100',
+            'location_regional' => 'sometimes|nullable|string|max:100',
+            'location_national' => 'sometimes|nullable|string|max:100',
+            'social_links' => 'sometimes|nullable|array',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $data = $validator->validated();
+        $fillable = ['display_name', 'bio', 'places_traveled', 'location_local', 'location_regional', 'location_national', 'social_links'];
+        foreach ($fillable as $field) {
+            if (array_key_exists($field, $data)) {
+                $user->{$field} = $data[$field];
+            }
+        }
+        $user->save();
+
+        // Bust suggested-by-places cache for this user (version bump; works on file/redis drivers)
+        $vk = 'user_profile_sig_version:'.$user->id;
+        Cache::put($vk, (int) Cache::get($vk, 0) + 1, now()->addDays(365));
+
+        return response()->json($user->makeHidden(['password'])->fresh());
     }
 
     /**

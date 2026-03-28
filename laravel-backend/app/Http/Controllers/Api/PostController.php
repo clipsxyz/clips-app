@@ -19,6 +19,34 @@ use Illuminate\Support\Str;
 class PostController extends Controller
 {
     /**
+     * Normalize a post model for feed / suggestion API responses (snake_case + relations).
+     */
+    public static function toApiArray(Post $post, ?User $viewer): array
+    {
+        $postData = $post->toArray();
+        $postData['venue'] = $post->venue;
+        $postData['landmark'] = $post->landmark;
+        $postData['taggedUsers'] = $post->relationLoaded('taggedUsers')
+            ? $post->taggedUsers->pluck('handle')->toArray()
+            : [];
+        if ($viewer) {
+            $postData['user_liked'] = $post->isLikedBy($viewer);
+            $postData['is_bookmarked'] = $post->isBookmarkedBy($viewer);
+            $postData['is_following'] = $post->isFollowingAuthor($viewer);
+            $postData['author_follows_you'] = $post->authorFollowsViewer($viewer);
+            $postData['user_reclipped'] = $post->isReclippedBy($viewer);
+        } else {
+            $postData['user_liked'] = false;
+            $postData['is_bookmarked'] = false;
+            $postData['is_following'] = false;
+            $postData['author_follows_you'] = false;
+            $postData['user_reclipped'] = false;
+        }
+
+        return $postData;
+    }
+
+    /**
      * Get posts with pagination and filtering
      */
     public function index(Request $request): JsonResponse
@@ -118,28 +146,7 @@ class PostController extends Controller
                 ->values();
 
             $userModel = $userId ? User::find($userId) : null;
-            $transformedPosts = $posts->map(function ($post) use ($userModel) {
-                $postData = $post->toArray();
-                // Ensure venue is always present in API response so frontend metadata
-                // carousel and venue feeds can rely on it for all post types.
-                $postData['venue'] = $post->venue;
-                $postData['landmark'] = $post->landmark;
-                $postData['taggedUsers'] = $post->taggedUsers->pluck('handle')->toArray();
-                if ($userModel) {
-                    $postData['user_liked'] = $post->isLikedBy($userModel);
-                    $postData['is_bookmarked'] = $post->isBookmarkedBy($userModel);
-                    $postData['is_following'] = $post->isFollowingAuthor($userModel);
-                    $postData['author_follows_you'] = $post->authorFollowsViewer($userModel);
-                    $postData['user_reclipped'] = $post->isReclippedBy($userModel);
-                } else {
-                    $postData['user_liked'] = false;
-                    $postData['is_bookmarked'] = false;
-                    $postData['is_following'] = false;
-                    $postData['author_follows_you'] = false;
-                    $postData['user_reclipped'] = false;
-                }
-                return $postData;
-            });
+            $transformedPosts = $posts->map(fn (Post $post) => self::toApiArray($post, $userModel));
 
             $nextCursor = $posts->count() === $limit ? $cursor + 1 : null;
 

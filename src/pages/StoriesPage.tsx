@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { FiX, FiChevronRight, FiChevronLeft, FiChevronDown, FiChevronUp, FiMessageCircle, FiThumbsUp, FiVolume2, FiVolumeX, FiMaximize2, FiMapPin, FiSend, FiLink, FiCopy, FiPlus, FiHome, FiClock } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
-import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle, voteOnPoll } from '../api/stories';
+import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle, voteOnPoll, sortStoriesNewestFirst } from '../api/stories';
 import { appendMessage } from '../api/messages';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
@@ -15,6 +15,7 @@ import { reclipPost } from '../api/posts';
 import { getFlagForHandle, getAvatarForHandle } from '../api/users';
 import Flag from '../components/Flag';
 import { timeAgo } from '../utils/timeAgo';
+import { captureVideoFrameDataUrl, captureVideoFrameFromElement } from '../utils/captureVideoFrame';
 import { TEXT_STORY_TEMPLATES } from '../textStoryTemplates';
 import { toggleFollow } from '../api/client';
 import { FiUserPlus, FiUserCheck } from 'react-icons/fi';
@@ -114,25 +115,39 @@ export default function StoriesPage() {
                 }
             })());
 
-    /** Signals feed rail to run the “drop back” shrink into the card (must match App.tsx `STORIES24_RAIL_RETURN_KEY`). */
-    const queueStories24RailReturnAnimation = React.useCallback(() => {
-        if (!openUserHandle || !stories24OpenFromFeedRail) return;
-        try {
-            const st = location.state as
-                | { previewVideoUrl?: string; previewThumb?: string }
-                | undefined;
-            sessionStorage.setItem(
-                'clips:stories24RailReturn',
-                JSON.stringify({
-                    handle: openUserHandle,
-                    previewVideoUrl: st?.previewVideoUrl,
-                    previewThumb: st?.previewThumb,
-                })
-            );
-        } catch {
-            /* ignore */
-        }
-    }, [stories24OpenFromFeedRail, openUserHandle, location.state]);
+    type Stories24NavState = { previewVideoUrl?: string; previewThumb?: string } | undefined;
+
+    /** Signals feed rail to run the “drop back” shrink into the card (must match App.tsx `STORIES24_RAIL_RETURN_KEY`). Uses a JPEG frame for video so the overlay matches the static-image-only collapse path. */
+    const persistStories24RailReturnAnimation = React.useCallback(
+        async (storySnapshot: Story | undefined, navState: Stories24NavState) => {
+            if (!openUserHandle || !stories24OpenFromFeedRail) return;
+            const previewVideoUrl = navState?.previewVideoUrl;
+            let previewThumb = navState?.previewThumb;
+            const mediaUrl = storySnapshot?.mediaUrl;
+            const isVideo =
+                storySnapshot?.mediaType === 'video' ||
+                (!!mediaUrl && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(mediaUrl));
+
+            if (!previewThumb && isVideo) {
+                const fromPlayer = videoRef.current ? captureVideoFrameFromElement(videoRef.current) : undefined;
+                previewThumb = fromPlayer ?? (mediaUrl ? await captureVideoFrameDataUrl(mediaUrl) : undefined);
+            }
+
+            try {
+                sessionStorage.setItem(
+                    'clips:stories24RailReturn',
+                    JSON.stringify({
+                        handle: openUserHandle,
+                        previewVideoUrl,
+                        previewThumb,
+                    })
+                );
+            } catch {
+                /* ignore */
+            }
+        },
+        [openUserHandle, stories24OpenFromFeedRail]
+    );
 
     function clearStories24RailSessionHandle() {
         try {
@@ -271,10 +286,32 @@ export default function StoriesPage() {
         if (viewingStories) return;
         // Only force /feed for feed-rail opens; otherwise this races closeStories() → navigate(-1) (e.g. Inbox).
         if (!stories24OpenFromFeedRail) return;
-        queueStories24RailReturnAnimation();
-        clearStories24RailSessionHandle();
-        navigate('/feed', { replace: true });
-    }, [openUserHandle, viewingStories, navigate, queueStories24RailReturnAnimation, stories24OpenFromFeedRail]);
+
+        let cancelled = false;
+        const navState = location.state as Stories24NavState;
+        const storySnapshot = storyGroups[currentGroupIndex]?.stories?.[currentStoryIndex];
+
+        void (async () => {
+            await persistStories24RailReturnAnimation(storySnapshot, navState);
+            if (cancelled) return;
+            clearStories24RailSessionHandle();
+            navigate('/feed', { replace: true });
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [
+        openUserHandle,
+        viewingStories,
+        navigate,
+        persistStories24RailReturnAnimation,
+        stories24OpenFromFeedRail,
+        storyGroups,
+        currentGroupIndex,
+        currentStoryIndex,
+        location.state,
+    ]);
 
     React.useEffect(() => {
         setShowStoryProfileCard(false);
@@ -525,7 +562,15 @@ export default function StoriesPage() {
     }
 
     // Close story viewer
-    function closeStories() {
+    async function closeStories() {
+        const navState = location.state as Stories24NavState;
+        const storySnapshot = storyGroups[currentGroupIndex]?.stories?.[currentStoryIndex];
+
+        // Persist collapse payload before unmounting the viewer so `videoRef` can still be snapshotted.
+        if (openUserHandle) {
+            await persistStories24RailReturnAnimation(storySnapshot, navState);
+        }
+
         setViewingStories(false);
         setProgress(0);
         setPaused(false);
@@ -536,7 +581,6 @@ export default function StoriesPage() {
         // If we came from feed (via avatar click), use navigate(-1)
         // Otherwise, navigate to /feed
         if (openUserHandle) {
-            queueStories24RailReturnAnimation();
             // Dispatch event to refresh story indicators
             window.dispatchEvent(new CustomEvent('storiesViewed', {
                 detail: { userHandle: openUserHandle }
@@ -925,50 +969,11 @@ export default function StoriesPage() {
 
             // Video stories must send an image frame thumbnail, never raw video URL.
             if (isVideoStory) {
-                // Prefer capturing from active player.
-                if (videoRef.current && videoRef.current.videoWidth > 0 && videoRef.current.videoHeight > 0) {
-                    const v = videoRef.current;
-                    const canvas = document.createElement('canvas');
-                    canvas.width = Math.min(720, v.videoWidth);
-                    canvas.height = Math.round((canvas.width / v.videoWidth) * v.videoHeight);
-                    const ctx = canvas.getContext('2d');
-                    if (!ctx) return undefined;
-                    ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-                    return canvas.toDataURL('image/jpeg', 0.82);
+                if (videoRef.current) {
+                    const fromPlayer = captureVideoFrameFromElement(videoRef.current);
+                    if (fromPlayer) return fromPlayer;
                 }
-
-                // Fallback: load video off-DOM and capture an early frame.
-                const v = document.createElement('video');
-                v.src = mediaUrl;
-                v.muted = true;
-                v.playsInline = true;
-                v.preload = 'metadata';
-                await new Promise<void>((resolve, reject) => {
-                    const onLoaded = () => resolve();
-                    const onError = () => reject(new Error('VIDEO_LOAD_FAILED'));
-                    v.addEventListener('loadeddata', onLoaded, { once: true });
-                    v.addEventListener('error', onError, { once: true });
-                });
-                try {
-                    v.currentTime = Math.min(0.1, Math.max(0, (v.duration || 0) / 10));
-                } catch (_) {
-                    // Ignore seek errors and capture current frame.
-                }
-                await new Promise<void>((resolve) => {
-                    const onSeeked = () => resolve();
-                    v.addEventListener('seeked', onSeeked, { once: true });
-                    window.setTimeout(resolve, 120);
-                });
-                if (v.videoWidth > 0 && v.videoHeight > 0) {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = Math.min(720, v.videoWidth);
-                    canvas.height = Math.round((canvas.width / v.videoWidth) * v.videoHeight);
-                    const ctx = canvas.getContext('2d');
-                    if (!ctx) return undefined;
-                    ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-                    return canvas.toDataURL('image/jpeg', 0.82);
-                }
-                return undefined;
+                return captureVideoFrameDataUrl(mediaUrl);
             }
 
             // For non-blob image URLs (https/data), use directly.
@@ -2472,23 +2477,23 @@ export default function StoriesPage() {
                                                                             const existingStoryIds = new Set(preservedStories.map(s => s.id));
                                                                             const newStories = (sameUserGroup.stories || []).filter(s => !existingStoryIds.has(s.id));
                                                                             
-                                                                            // Find the current story index in preserved order
-                                                                            let storyIndexToRestore = currentStoryIdx;
+                                                                            const mergedStories = sortStoriesNewestFirst([...preservedStories, ...newStories]);
+                                                                            let storyIndexToRestore = Math.min(currentStoryIdx, Math.max(0, mergedStories.length - 1));
                                                                             if (currentStoryId) {
-                                                                                const foundStoryIndex = preservedStories.findIndex(s => s.id === currentStoryId);
+                                                                                const foundStoryIndex = mergedStories.findIndex(s => s.id === currentStoryId);
                                                                                 if (foundStoryIndex !== -1) {
                                                                                     storyIndexToRestore = foundStoryIndex;
                                                                                 }
                                                                             }
                                                                             
-                                                                            // Update the group with preserved order but refreshed data
+                                                                            // Update the group with refreshed data; slides ordered newest-first
                                                                             // Use prev array to preserve group order, only update the specific group
                                                                             const updatedGroups = [...prev];
                                                                             if (prevGroupIndex !== -1) {
                                                                                 updatedGroups[prevGroupIndex] = {
                                                                                     ...prevGroup,
                                                                                     ...sameUserGroup, // Keep refreshed group metadata
-                                                                                    stories: [...preservedStories, ...newStories] // Preserve original story order
+                                                                                    stories: mergedStories,
                                                                                 };
                                                                             }
                                                                             
@@ -2722,23 +2727,23 @@ export default function StoriesPage() {
                                                                             const existingStoryIds = new Set(preservedStories.map(s => s.id));
                                                                             const newStories = (sameUserGroup.stories || []).filter(s => !existingStoryIds.has(s.id));
                                                                             
-                                                                            // Find the current story index in preserved order
-                                                                            let storyIndexToRestore = currentStoryIdx;
+                                                                            const mergedStories = sortStoriesNewestFirst([...preservedStories, ...newStories]);
+                                                                            let storyIndexToRestore = Math.min(currentStoryIdx, Math.max(0, mergedStories.length - 1));
                                                                             if (currentStoryId) {
-                                                                                const foundStoryIndex = preservedStories.findIndex(s => s.id === currentStoryId);
+                                                                                const foundStoryIndex = mergedStories.findIndex(s => s.id === currentStoryId);
                                                                                 if (foundStoryIndex !== -1) {
                                                                                     storyIndexToRestore = foundStoryIndex;
                                                                                 }
                                                                             }
                                                                             
-                                                                            // Update the group with preserved order but refreshed data
+                                                                            // Update the group with refreshed data; slides ordered newest-first
                                                                             // Use prev array to preserve group order, only update the specific group
                                                                             const updatedGroups = [...prev];
                                                                             if (prevGroupIndex !== -1) {
                                                                                 updatedGroups[prevGroupIndex] = {
                                                                                     ...prevGroup,
                                                                                     ...sameUserGroup, // Keep refreshed group metadata
-                                                                                    stories: [...preservedStories, ...newStories] // Preserve original story order
+                                                                                    stories: mergedStories,
                                                                                 };
                                                                             }
                                                                             
@@ -4183,9 +4188,15 @@ export default function StoriesPage() {
                     <h1 className="text-lg font-semibold text-white">Clips 24</h1>
                     <button
                         onClick={() => {
-                            queueStories24RailReturnAnimation();
-                            clearStories24RailSessionHandle();
-                            navigate('/feed', { replace: true });
+                            void (async () => {
+                                const navState = location.state as Stories24NavState;
+                                await persistStories24RailReturnAnimation(
+                                    storyGroups[currentGroupIndex]?.stories?.[currentStoryIndex],
+                                    navState
+                                );
+                                clearStories24RailSessionHandle();
+                                navigate('/feed', { replace: true });
+                            })();
                         }}
                         className="p-1.5 rounded-full hover:bg-gray-800 transition-colors"
                     >

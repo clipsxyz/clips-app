@@ -20,6 +20,7 @@ use App\Http\Controllers\Api\CollectionController;
 use App\Http\Controllers\Api\MusicController;
 use App\Http\Controllers\Api\MusicLibraryController;
 use App\Http\Controllers\Api\BoostController;
+use App\Http\Controllers\Api\SuggestedPlacesController;
 
 /*
 |--------------------------------------------------------------------------
@@ -195,6 +196,9 @@ Route::get('/dev/ava-follows-barry', function () {
 // Public posts routes (allow viewing posts without auth)
 Route::prefix('posts')->group(function () {
     Route::get('/', [PostController::class, 'index']); // Public - anyone can view feed
+    // Must be registered before /{id} so "suggested-by-places" is not parsed as a UUID
+    Route::match(['get', 'post'], '/suggested-by-places', [SuggestedPlacesController::class, 'index'])
+        ->middleware('auth:sanctum');
     Route::get('/{id}', [PostController::class, 'show']); // Public - anyone can view single post
     Route::post('/{id}/view', [PostController::class, 'incrementView']); // Public - track views without auth
 });
@@ -204,6 +208,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Auth routes
     Route::prefix('auth')->group(function () {
         Route::get('/me', [AuthController::class, 'me']);
+        Route::put('/profile', [AuthController::class, 'updateProfile']);
         Route::post('/logout', [AuthController::class, 'logout']);
     });
 

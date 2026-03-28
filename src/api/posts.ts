@@ -1,5 +1,6 @@
 import raw from '../data/posts.json';
 import type { Post, Comment, StickerOverlay } from '../types';
+import { isLaravelApiEnabled, isViteDevMode } from '../config/runtimeEnv';
 import * as apiClient from './client';
 import { randomUUID } from '../utils/uuid';
 import { wasEverAStory } from './stories';
@@ -383,7 +384,27 @@ if (!postsInitialized) {
     userNational: 'Ireland',
   } as Post;
 
-  posts = [...posts, ...artanePosts, ...bobPosts, avaBoostedPost, avaNormalPost];
+  // Venue-tagged post for “suggested for your places” (e.g. match Dublin / 3Arena in travels or bio)
+  const venueArenaDemoPost: Post = {
+    id: `venue-3arena-demo-${artaneNow - 1800000}`,
+    userHandle: 'Sarah@Artane',
+    locationLabel: 'North Wall, Dublin',
+    venue: '3Arena',
+    tags: ['music', 'dublin'],
+    mediaUrl: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800',
+    mediaType: 'image',
+    caption: 'Unreal show at 3Arena last night 🎤',
+    createdAt: artaneNow - 1800000,
+    stats: { likes: 61, views: 512, comments: 14, shares: 5, reclips: 2 },
+    isBookmarked: false,
+    isFollowing: false,
+    userLiked: false,
+    userLocal: 'Artane',
+    userRegional: 'Dublin',
+    userNational: 'Ireland',
+  } as Post;
+
+  posts = [...posts, ...artanePosts, ...bobPosts, avaBoostedPost, avaNormalPost, venueArenaDemoPost];
 
   // Dedupe by id (keep first occurrence) so corrupted localStorage or old saves don't leave thousands of duplicates
   const seenIds = new Set<string>();
@@ -653,7 +674,7 @@ function rewriteMediaUrlForNetwork(url: string): string {
 }
 
 // Transform Laravel API post response to frontend Post format
-function transformLaravelPost(response: any): Post {
+export function transformLaravelPost(response: any): Post {
   const finalVideoUrl = response.final_video_url || response.finalVideoUrl;
   const originalMediaUrl = response.media_url || response.mediaUrl || '';
   const mediaItems = response.media_items || response.mediaItems;
@@ -726,6 +747,29 @@ function transformLaravelPost(response: any): Post {
     userNational: response.user?.national || response.userNational || '',
     renderJobId: response.render_job_id || response.renderJobId,
   } as Post;
+}
+
+/** Laravel: POST /api/posts/suggested-by-places (Sanctum). */
+export async function fetchSuggestedPostsByPlaces(params: {
+  limit?: number;
+  include_poster_regional?: boolean;
+  places_traveled?: string[];
+}): Promise<{
+  suggestions: Array<{ matched_place: string; reason: string; post: Record<string, unknown> }>;
+  meta?: { count?: number; include_poster_regional?: boolean };
+}> {
+  const { apiRequest } = await import('./client');
+  const body: Record<string, unknown> = {
+    limit: params.limit ?? 12,
+    include_poster_regional: !!params.include_poster_regional,
+  };
+  if (params.places_traveled && params.places_traveled.length > 0) {
+    body.places_traveled = params.places_traveled;
+  }
+  return apiRequest('/posts/suggested-by-places', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 }
 
 /** Mock Sarah and Bob video posts for Scenes testing – always merged into first page of feed when in dev. */
@@ -915,7 +959,7 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
   const isVenueFeed = t.startsWith('venue:');
   const isLandmarkFeed = t.startsWith('landmark:');
   // When API is off, use mock for all feeds. For Discover (Following), always use mock so local follows from localStorage are used (fixes phone/tablet where API might return empty).
-  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false' && t !== 'discover' && !isVenueFeed && !isLandmarkFeed;
+  const useLaravelAPI = isLaravelApiEnabled() && t !== 'discover' && !isVenueFeed && !isLandmarkFeed;
 
   if (useLaravelAPI) {
     try {
@@ -1311,9 +1355,7 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
 
 export async function toggleLike(userId: string, id: string, currentPost?: Post): Promise<Post> {
   // In dev/mock mode, skip backend entirely and update the in-memory posts only.
-  const useLaravelAPI =
-    import.meta.env.VITE_USE_LARAVEL_API !== 'false' &&
-    import.meta.env.VITE_DEV_MODE !== 'true';
+  const useLaravelAPI = isLaravelApiEnabled() && !isViteDevMode();
 
   if (useLaravelAPI) {
     try {
@@ -1357,7 +1399,7 @@ export async function toggleLike(userId: string, id: string, currentPost?: Post)
  * Mock: removes from in-memory posts and localStorage.
  */
 export async function deletePost(_userId: string, postId: string, userHandle?: string): Promise<void> {
-  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+  const useLaravelAPI = isLaravelApiEnabled();
 
   if (useLaravelAPI) {
     try {
@@ -1424,7 +1466,7 @@ export async function incrementViews(userId: string, id: string): Promise<Post> 
     return { id, userHandle: 'Unknown', locationLabel: '', tags: [], createdAt: Date.now(), stats: { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 }, isBookmarked: false, isFollowing: false, userLiked: false };
   }
 
-  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+  const useLaravelAPI = isLaravelApiEnabled();
 
   if (useLaravelAPI) {
     try {
@@ -1514,7 +1556,7 @@ export function wasViewedRecently(userId: string, postId: string, timeWindowMs: 
 
 export async function incrementShares(userId: string, id: string): Promise<Post> {
   // Try Laravel API first, fallback to mock if it fails
-  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+  const useLaravelAPI = isLaravelApiEnabled();
 
   if (useLaravelAPI) {
     try {
@@ -1556,7 +1598,7 @@ export async function incrementShares(userId: string, id: string): Promise<Post>
 
 export async function incrementReclips(userId: string, id: string): Promise<Post> {
   // Try Laravel API first, fallback to mock if it fails
-  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+  const useLaravelAPI = isLaravelApiEnabled();
 
   if (useLaravelAPI) {
     try {
@@ -1583,7 +1625,7 @@ export async function incrementReclips(userId: string, id: string): Promise<Post
 }
 
 export async function reclipPost(userId: string, originalPostId: string, userHandle: string): Promise<{ originalPost: Post; reclippedPost: Post | null }> {
-  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+  const useLaravelAPI = isLaravelApiEnabled();
 
   if (useLaravelAPI) {
     try {
@@ -1681,7 +1723,7 @@ export async function getPostById(postId: string, userId?: string): Promise<Post
   // Laravel post ID must be a UUID – don't call API for non-UUID IDs (avoids 400 Bad Request)
   if (!UUID_REGEX.test(postId)) return null;
 
-  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+  const useLaravelAPI = isLaravelApiEnabled();
   if (!useLaravelAPI) return null;
 
   try {
@@ -1720,7 +1762,7 @@ export async function fetchPostsByUser(userHandle: string, limit = 30): Promise<
 
 export async function addComment(postId: string, userHandle: string, text: string): Promise<Comment> {
   // Try Laravel API first, fallback to mock if it fails
-  const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+  const useLaravelAPI = isLaravelApiEnabled();
 
   if (useLaravelAPI) {
     try {

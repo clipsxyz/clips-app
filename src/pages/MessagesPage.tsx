@@ -20,6 +20,7 @@ import { showToast } from '../utils/toast';
 import { getSocket } from '../services/socketio';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
+import { parsePlacesFromBio } from '../utils/suggestedPlaces';
 
 interface MessageUI extends ChatMessage {
     isFromMe: boolean;
@@ -28,19 +29,6 @@ interface MessageUI extends ChatMessage {
     replyTo?: { messageId: string; text: string; senderHandle: string; imageUrl?: string; mediaType?: 'image' | 'video' };
     edited?: boolean;
     read?: boolean;
-}
-
-// Helper to parse places from a bio string.
-// Matches the behavior on the profile page so "places in my bio"
-// are treated as traveled locations.
-function parsePlacesFromBio(bio: string): string[] {
-    if (!bio || typeof bio !== 'string') return [];
-    const parts = bio
-        .split(/[,;\n.]|\s+and\s+|\s*[-–—]\s*|:\s*/i)
-        .map((p) => p.trim())
-        .filter((p) => p.length >= 2);
-    if (parts.length === 0 && bio.trim().length >= 2) return [bio.trim()];
-    return [...new Set(parts)];
 }
 
 // Helper function to parse question messages

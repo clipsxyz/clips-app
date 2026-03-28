@@ -1,4 +1,4 @@
-const useLaravelAPI = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+import { isLaravelApiEnabled } from '../config/runtimeEnv';
 
 function hasAuthToken(): boolean {
     return typeof localStorage !== 'undefined' && !!localStorage.getItem('authToken');
@@ -49,7 +49,7 @@ function getConversationId(a: string, b: string): ConversationId {
 }
 
 export async function fetchConversation(a: string, b: string): Promise<ChatMessage[]> {
-    if (useLaravelAPI && hasAuthToken()) {
+    if (isLaravelApiEnabled() && hasAuthToken()) {
         try {
             const apiClient = await import('./client');
             const raw = await apiClient.fetchConversation(b); // b = other handle (Laravel uses auth user + other)
@@ -65,7 +65,7 @@ export async function fetchConversation(a: string, b: string): Promise<ChatMessa
 }
 
 export async function appendMessage(from: string, to: string, message: Omit<ChatMessage, 'id' | 'timestamp' | 'senderHandle'> & { timestamp?: number }): Promise<ChatMessage> {
-    if (useLaravelAPI && hasAuthToken()) {
+    if (isLaravelApiEnabled() && hasAuthToken()) {
         try {
             const apiClient = await import('./client');
             const raw = await apiClient.sendMessage(to, {
@@ -173,7 +173,7 @@ export async function editMessage(messageId: string, newText: string, from: stri
 }
 
 export async function getUnreadTotal(handle: string): Promise<number> {
-    if (useLaravelAPI && hasAuthToken()) {
+    if (isLaravelApiEnabled() && hasAuthToken()) {
         try {
             const apiClient = await import('./client');
             const res = await apiClient.fetchConversations(0, 100);
@@ -190,7 +190,7 @@ export async function getUnreadTotal(handle: string): Promise<number> {
 
 export async function markConversationRead(selfHandle: string, otherHandle: string): Promise<void> {
     unreadOverrideByThread.set(`${selfHandle}::${otherHandle}`, 0);
-    if (useLaravelAPI && hasAuthToken()) {
+    if (isLaravelApiEnabled() && hasAuthToken()) {
         try {
             const apiClient = await import('./client');
             await apiClient.markConversationRead(otherHandle);
@@ -239,7 +239,7 @@ export interface ConversationSummary {
 }
 
 export async function listConversations(forHandle: string): Promise<ConversationSummary[]> {
-    if (useLaravelAPI && hasAuthToken()) {
+    if (isLaravelApiEnabled() && hasAuthToken()) {
         try {
             const apiClient = await import('./client');
             const res = await apiClient.fetchConversations(0, 100);

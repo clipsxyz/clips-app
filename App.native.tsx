@@ -7,8 +7,9 @@ import React from 'react';
 import { StatusBar, useColorScheme } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { createStackNavigator } from '@react-navigation/stack';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { AuthProvider } from './src/context/Auth';
 import Icon from 'react-native-vector-icons/Ionicons';
 
 // Import screens
@@ -29,7 +30,7 @@ import InboxScreen from './src/screens/InboxScreen';
 import CollectionFeedScreen from './src/screens/CollectionFeedScreen';
 
 const Tab = createBottomTabNavigator();
-const Stack = createStackNavigator();
+const Stack = createNativeStackNavigator();
 
 function MainTabs() {
   const isDarkMode = useColorScheme() === 'dark';
@@ -105,15 +106,16 @@ function App(): React.JSX.Element {
   const isDarkMode = useColorScheme() === 'dark';
 
   return (
-    <SafeAreaProvider>
-      <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-      <NavigationContainer>
-        <Stack.Navigator
-          screenOptions={{
-            headerShown: false,
-            cardStyle: { backgroundColor: '#030712' },
-          }}
-        >
+    <AuthProvider>
+      <SafeAreaProvider>
+        <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
+        <NavigationContainer>
+          <Stack.Navigator
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: '#030712' },
+            }}
+          >
           <Stack.Screen name="MainTabs" component={MainTabs} />
           <Stack.Screen 
             name="Discover" 
@@ -154,9 +156,10 @@ function App(): React.JSX.Element {
             name="CollectionFeed" 
             component={CollectionFeedScreen}
           />
-        </Stack.Navigator>
-      </NavigationContainer>
-    </SafeAreaProvider>
+          </Stack.Navigator>
+        </NavigationContainer>
+      </SafeAreaProvider>
+    </AuthProvider>
   );
 }
 

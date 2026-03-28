@@ -1,24 +1,30 @@
 /// <reference types="vite/client" />
+import { getRuntimeEnv, getReactNativeDefaultApiBaseUrl, isLaravelApiEnabled } from '../config/runtimeEnv';
+
 // Updated API client for Laravel backend
-// Use IP address if accessing from network, otherwise localhost
+// Use IP address if accessing from network, otherwise localhost (web); Metro uses env or RN defaults.
 const getApiBaseUrl = () => {
-    const hostname = window.location.hostname;
-    const isHttps = window.location.protocol === 'https:';
-    const protocol = isHttps ? 'https' : 'http';
+    const envUrl = getRuntimeEnv('VITE_API_URL');
+    if (envUrl) return envUrl;
 
-    // When accessing from phone/tablet via IP (e.g. 192.168.1.5:5173), NEVER use localhost - it points to the device, not the laptop
-    const onNetwork = hostname !== 'localhost' && hostname !== '127.0.0.1';
-    if (onNetwork) {
-        const apiUrl = `${protocol}://${hostname}:8000/api`;
-        return apiUrl;
+    if (typeof window !== 'undefined' && window.location?.hostname) {
+        const hostname = window.location.hostname;
+        const isHttps = window.location.protocol === 'https:';
+        const protocol = isHttps ? 'https' : 'http';
+
+        const onNetwork = hostname !== 'localhost' && hostname !== '127.0.0.1';
+        if (onNetwork) {
+            return `${protocol}://${hostname}:8000/api`;
+        }
+
+        // localhost in browser: same-origin proxy
+        return '/api';
     }
 
-    // On laptop (localhost): use env or proxy
-    if (import.meta.env.VITE_API_URL) {
-        return import.meta.env.VITE_API_URL;
-    }
-    // For localhost, use proxy (same origin) - Vite forwards /api to http://localhost:8000/api
-    return '/api';
+    const rn = getReactNativeDefaultApiBaseUrl();
+    if (rn) return rn;
+
+    return 'http://localhost:8000/api';
 };
 
 const API_BASE_URL = getApiBaseUrl();
@@ -104,6 +110,42 @@ export async function getCurrentUser() {
     return apiRequest('/auth/me');
 }
 
+/** Map Laravel `/auth/me` or `/auth/profile` JSON into partial app `User` fields. */
+export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Record<string, unknown> {
+    const pt = apiUser.places_traveled ?? apiUser.placesTraveled;
+    return {
+        id: apiUser.id != null ? String(apiUser.id) : undefined,
+        name: (apiUser.display_name ?? apiUser.name) as string | undefined,
+        email: apiUser.email as string | undefined,
+        local: (apiUser.location_local ?? apiUser.local) as string | undefined,
+        regional: (apiUser.location_regional ?? apiUser.regional) as string | undefined,
+        national: (apiUser.location_national ?? apiUser.national) as string | undefined,
+        handle: apiUser.handle as string | undefined,
+        bio: apiUser.bio as string | undefined,
+        placesTraveled: Array.isArray(pt) ? (pt as string[]).filter((s) => typeof s === 'string') : undefined,
+        avatarUrl: (apiUser.avatar_url ?? apiUser.avatarUrl) as string | undefined,
+        profileBackgroundUrl: (apiUser.profile_background_url ?? apiUser.profileBackgroundUrl) as string | undefined,
+        socialLinks: (apiUser.social_links ?? apiUser.socialLinks) as Record<string, string> | undefined,
+        is_private: apiUser.is_private as boolean | undefined,
+        is_verified: apiUser.is_verified as boolean | undefined,
+    };
+}
+
+export async function updateAuthProfile(data: {
+    display_name?: string;
+    bio?: string | null;
+    places_traveled?: string[];
+    location_local?: string | null;
+    location_regional?: string | null;
+    location_national?: string | null;
+    social_links?: Record<string, string | undefined>;
+}) {
+    return apiRequest('/auth/profile', {
+        method: 'PUT',
+        body: JSON.stringify(data),
+    });
+}
+
 // Posts API (6s timeout for faster fallback on slow mobile networks)
 export async function fetchPostsPage(cursor: number = 0, limit: number = 10, filter: string = 'Dublin', userId?: string) {
     const params = new URLSearchParams({
@@ -125,7 +167,7 @@ export async function fetchPost(postId: string, userId?: string) {
 
 /** Check if the user with the given handle follows the current viewer (for mutual-follow DM icon). Requires auth. */
 export async function checkFollowsMe(handle: string): Promise<{ follows_me: boolean }> {
-    if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API === 'false') {
+    if (!isLaravelApiEnabled()) {
         let viewerHandle = '';
         try {
             const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('user') : null;

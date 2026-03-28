@@ -3,6 +3,7 @@ import { FiX, FiZap, FiMapPin, FiGlobe, FiTrendingUp } from 'react-icons/fi';
 import type { Post } from '../types';
 import { useAuth } from '../context/Auth';
 import { estimateBoostPriceApi } from '../api/client';
+import { isLaravelApiEnabled } from '../config/runtimeEnv';
 
 export type BoostFeedType = 'local' | 'regional' | 'national';
 export type BoostGoal = 'views' | 'profile_visits' | 'messages';
@@ -105,11 +106,11 @@ export default function BoostSelectionModal({
     const radiusFillPercent = (radiusIndex / Math.max(1, radiusOptions.length - 1)) * 100;
     const durationFillPercent = (durationIndex / Math.max(1, durationOptions.length - 1)) * 100;
     const firstVisualItem =
-        post.mediaItems?.find((item) => (item.type === 'image' || item.type === 'video') && !!item.url) ||
-        post.mediaItems?.[0];
-    const previewUrl = firstVisualItem?.url || post.mediaUrl || '';
-    const previewType = (firstVisualItem?.type || post.mediaType || 'text') as 'image' | 'video' | 'text';
-    const previewTitle = post.userHandle ? `@${post.userHandle}` : 'Gazetteer post';
+        post?.mediaItems?.find((item) => (item.type === 'image' || item.type === 'video') && !!item.url) ||
+        post?.mediaItems?.[0];
+    const previewUrl = firstVisualItem?.url || post?.mediaUrl || '';
+    const previewType = (firstVisualItem?.type || post?.mediaType || 'text') as 'image' | 'video' | 'text';
+    const previewTitle = post?.userHandle ? `@${post.userHandle}` : 'Gazetteer post';
     const previewSubtitle = 'Gazetteer selected post';
     const canContinue =
         !!selectedOption &&
@@ -149,7 +150,7 @@ export default function BoostSelectionModal({
             setEstimateLoading(true);
             setEstimateError(null);
 
-            const useLaravel = import.meta.env.VITE_USE_LARAVEL_API !== 'false';
+            const useLaravel = isLaravelApiEnabled();
             try {
                 if (useLaravel) {
                     const res = await estimateBoostPriceApi({

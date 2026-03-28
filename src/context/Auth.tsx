@@ -1,5 +1,6 @@
 import React from 'react';
 import * as Sentry from '@sentry/react';
+import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { User } from '../types';
 import { setProfilePrivacy, initializePrivateMockUser } from '../api/privacy';
 import { connectSocket, disconnectSocket } from '../services/socketio';
@@ -89,21 +90,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         // If we have an auth token (Laravel), refresh user from API so handle and profile are correct (fixes Share/DM list after refresh)
         const token = localStorage.getItem('authToken');
-        if (token && import.meta.env.VITE_USE_LARAVEL_API !== 'false') {
-          import('../api/client').then(({ getCurrentUser }) => {
+        if (token && isLaravelApiEnabled()) {
+          import('../api/client').then(({ getCurrentUser, mapLaravelUserToAppFields }) => {
             getCurrentUser()
               .then((apiUser: any) => {
-                const updated = {
-                  ...userToSet,
-                  handle: apiUser.handle ?? userToSet.handle,
-                  name: apiUser.display_name ?? apiUser.name ?? apiUser.username ?? userToSet.name,
-                  email: apiUser.email ?? userToSet.email,
-                  local: apiUser.location_local ?? userToSet.local,
-                  regional: apiUser.location_regional ?? userToSet.regional,
-                  national: apiUser.location_national ?? userToSet.national,
-                  avatarUrl: apiUser.avatar_url ?? userToSet.avatarUrl,
-                  is_private: apiUser.is_private ?? userToSet.is_private,
-                };
+                const fromApi = mapLaravelUserToAppFields(apiUser as Record<string, unknown>);
+                const updated: User = { ...userToSet };
+                for (const [key, val] of Object.entries(fromApi)) {
+                  if (val === undefined || val === null) continue;
+                  if (key === 'placesTraveled' && Array.isArray(val)) {
+                    updated.placesTraveled = val.length > 0 ? val : undefined;
+                    continue;
+                  }
+                  (updated as Record<string, unknown>)[key] = val;
+                }
                 setUser(updated);
                 localStorage.setItem('user', JSON.stringify(updated));
               })
@@ -142,7 +142,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = (userData: any) => {
     const u: User = {
-      id: userData.name.trim().toLowerCase() || 'me',
+      id:
+        userData.id != null && String(userData.id).trim() !== ''
+          ? String(userData.id)
+          : (userData.name || '').trim().toLowerCase() || 'me',
       name: userData.name.trim() || 'Me',
       email: userData.email || '',
       password: userData.password || '',

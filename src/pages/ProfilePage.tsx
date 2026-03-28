@@ -14,7 +14,8 @@ import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMap
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
 import { getUnreadTotal } from '../api/messages';
 import { getFollowedUsers } from '../api/posts';
-import { fetchFollowers, fetchFollowing } from '../api/client';
+import { fetchFollowers, fetchFollowing, updateAuthProfile, mapLaravelUserToAppFields } from '../api/client';
+import type { User } from '../types';
 import { getAvatarForHandle } from '../api/users';
 import { 
   getNotificationPreferences, 
@@ -229,6 +230,28 @@ export default function ProfilePage() {
       setLocal(user.local || '');
     }
   }, [user?.national, user?.regional, user?.local]);
+
+  const persistLaravelProfile = React.useCallback(
+    async (patch: Parameters<typeof updateAuthProfile>[0]): Promise<boolean> => {
+      const useLaravel = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+      const token = typeof localStorage !== 'undefined' ? localStorage.getItem('authToken') : null;
+      if (!useLaravel || !token || !user) return false;
+      const apiUser = await updateAuthProfile(patch);
+      const fromApi = mapLaravelUserToAppFields(apiUser as Record<string, unknown>);
+      const next: User = { ...user };
+      for (const [key, val] of Object.entries(fromApi)) {
+        if (val === undefined || val === null) continue;
+        if (key === 'placesTraveled' && Array.isArray(val)) {
+          next.placesTraveled = val.length > 0 ? val : undefined;
+          continue;
+        }
+        (next as Record<string, unknown>)[key] = val;
+      }
+      login(next);
+      return true;
+    },
+    [user, login]
+  );
 
   // Fetch regions when national selection changes or when location card opens
   React.useEffect(() => {
@@ -1178,9 +1201,21 @@ export default function ProfilePage() {
                       </div>
                     </div>
                     <button
-                      onClick={() => {
-                        const updatedUser = { ...user, bio };
-                        login(updatedUser);
+                      onClick={async () => {
+                        const bioTrim = bio.trim();
+                        try {
+                          const ok = await persistLaravelProfile({ bio: bioTrim || null });
+                          if (!ok) login({ ...user, bio: bioTrim || undefined });
+                        } catch {
+                          Swal.fire(
+                            bottomSheet({
+                              title: 'Could not save',
+                              message: 'Bio was saved on this device only.',
+                              icon: 'alert',
+                            })
+                          );
+                          login({ ...user, bio: bioTrim || undefined });
+                        }
                         setSelectedCard(null);
                       }}
                       className="w-full py-3 bg-gradient-to-r from-brand-500 to-brand-600 text-white font-semibold rounded-xl shadow-lg hover:from-brand-600 hover:to-brand-700 transition-all duration-200"
@@ -1242,9 +1277,29 @@ export default function ProfilePage() {
                       />
                     </div>
                     <button
-                      onClick={() => {
-                        const updatedUser = { ...user, socialLinks };
-                        login(updatedUser);
+                      onClick={async () => {
+                        const nextSocial = {
+                          website: socialLinks.website.trim() || undefined,
+                          x: socialLinks.x.trim() || undefined,
+                          instagram: socialLinks.instagram.trim() || undefined,
+                          tiktok: socialLinks.tiktok.trim() || undefined,
+                        };
+                        const hasAny = Object.values(nextSocial).some(Boolean);
+                        try {
+                          const ok = await persistLaravelProfile({
+                            social_links: nextSocial,
+                          });
+                          if (!ok) login({ ...user, socialLinks: hasAny ? nextSocial : undefined });
+                        } catch {
+                          Swal.fire(
+                            bottomSheet({
+                              title: 'Could not save',
+                              message: 'Social links were saved on this device only.',
+                              icon: 'alert',
+                            })
+                          );
+                          login({ ...user, socialLinks: hasAny ? nextSocial : undefined });
+                        }
                         setSelectedCard(null);
                       }}
                       className="w-full py-3 bg-gradient-to-r from-brand-500 to-brand-600 text-white font-semibold rounded-xl shadow-lg hover:from-brand-600 hover:to-brand-700 transition-all duration-200"
@@ -1290,10 +1345,21 @@ export default function ProfilePage() {
                       </div>
                     )}
                     <button
-                      onClick={() => {
+                      onClick={async () => {
                         const places = placesTraveled.split(',').map(p => p.trim()).filter(p => p);
-                        const updatedUser = { ...user, placesTraveled: places };
-                        login(updatedUser);
+                        try {
+                          const ok = await persistLaravelProfile({ places_traveled: places });
+                          if (!ok) login({ ...user, placesTraveled: places.length ? places : undefined });
+                        } catch {
+                          Swal.fire(
+                            bottomSheet({
+                              title: 'Could not save',
+                              message: 'Travel list was saved on this device only.',
+                              icon: 'alert',
+                            })
+                          );
+                          login({ ...user, placesTraveled: places.length ? places : undefined });
+                        }
                         setSelectedCard(null);
                       }}
                       className="w-full py-3 bg-gradient-to-r from-brand-500 to-brand-600 text-white font-semibold rounded-xl shadow-lg hover:from-brand-600 hover:to-brand-700 transition-all duration-200"
@@ -1420,7 +1486,7 @@ export default function ProfilePage() {
                     </div>
 
                     <button
-                      onClick={() => {
+                      onClick={async () => {
                         if (!national || !regional || !local) {
                           Swal.fire(bottomSheet({
                             title: 'Missing Information',
@@ -1429,13 +1495,29 @@ export default function ProfilePage() {
                           }));
                           return;
                         }
-                        const updatedUser = { ...user, national, regional, local };
-                        login(updatedUser);
+                        try {
+                          const ok = await persistLaravelProfile({
+                            location_local: local,
+                            location_regional: regional,
+                            location_national: national,
+                          });
+                          if (!ok) login({ ...user, national, regional, local });
+                        } catch {
+                          Swal.fire(
+                            bottomSheet({
+                              title: 'Could not save',
+                              message: 'Location was saved on this device only.',
+                              icon: 'alert',
+                            })
+                          );
+                          login({ ...user, national, regional, local });
+                        }
                         setSelectedCard(null);
-                        // Dispatch event to update newsfeed
-                        window.dispatchEvent(new CustomEvent('locationUpdated', {
-                          detail: { national, regional, local }
-                        }));
+                        window.dispatchEvent(
+                          new CustomEvent('locationUpdated', {
+                            detail: { national, regional, local },
+                          })
+                        );
                       }}
                       className="w-full py-3 bg-gradient-to-r from-brand-500 to-brand-600 text-white font-semibold rounded-xl shadow-lg hover:from-brand-600 hover:to-brand-700 transition-all duration-200"
                     >

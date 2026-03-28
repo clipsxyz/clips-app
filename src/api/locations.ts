@@ -1,4 +1,14 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+import { getRuntimeEnv, getReactNativeDefaultApiBaseUrl } from '../config/runtimeEnv';
+
+function resolveLocationsApiBase(): string {
+    const envUrl = getRuntimeEnv('VITE_API_URL');
+    if (envUrl) return envUrl;
+    const rn = getReactNativeDefaultApiBaseUrl();
+    if (rn) return rn;
+    return 'http://localhost:8000/api';
+}
+
+const API_BASE_URL = resolveLocationsApiBase();
 
 export type LocationSuggestion = {
     name: string;
