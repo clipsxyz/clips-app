@@ -170,7 +170,7 @@ export default function TextOnlyPostPage() {
                     template: templateToPass || { id: templateId },
                     textClipData: {
                         text: text.trim(),
-                        textStyle: { color: '#ffffff', size: 'medium', background: '#000000' },
+                        textStyle: { color: '#ffffff', size: 'medium', background: '#1e3a8a' },
                         clipId: clipId
                     },
                     clipId: clipId
@@ -346,10 +346,10 @@ export default function TextOnlyPostPage() {
             {showLocationSheet && (
                 <div className="fixed inset-0 z-50 flex items-end bg-black/60" onClick={() => setShowLocationSheet(false)}>
                     <div
-                        className="w-full max-h-[85vh] overflow-y-auto bg-[#1a1a1a] rounded-t-2xl border-t border-white/10"
+                        className="w-full max-h-[85vh] overflow-y-auto bg-black rounded-t-2xl border-t border-white/10"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <div className="sticky top-0 bg-[#1a1a1a] border-b border-white/10 px-4 py-3 flex items-center justify-between">
+                        <div className="sticky top-0 bg-black border-b border-white/10 px-4 py-3 flex items-center justify-between">
                             <h2 className="text-lg font-semibold text-white">Add details</h2>
                             <button
                                 onClick={() => setShowLocationSheet(false)}
@@ -367,7 +367,7 @@ export default function TextOnlyPostPage() {
                                     value={locationText}
                                     onChange={(e) => setLocationText(e.target.value)}
                                     placeholder="Add location"
-                                    className="w-full px-3 py-2.5 rounded-lg bg-[#1f1f23] border border-gray-700 text-white text-sm outline-none focus:ring-2 focus:ring-white/30"
+                                    className="w-full px-3 py-2.5 rounded-lg bg-black border border-white/15 text-white text-sm outline-none focus:ring-2 focus:ring-white/30"
                                 />
                             </div>
                             <div>
@@ -377,7 +377,7 @@ export default function TextOnlyPostPage() {
                                     value={venueText}
                                     onChange={(e) => setVenueText(e.target.value)}
                                     placeholder="Add venue (e.g. café, stadium)"
-                                    className="w-full px-3 py-2.5 rounded-lg bg-[#1f1f23] border border-gray-700 text-white text-sm outline-none focus:ring-2 focus:ring-white/30"
+                                    className="w-full px-3 py-2.5 rounded-lg bg-black border border-white/15 text-white text-sm outline-none focus:ring-2 focus:ring-white/30"
                                 />
                             </div>
                             <div>
@@ -387,7 +387,7 @@ export default function TextOnlyPostPage() {
                                     value={landmarkText}
                                     onChange={(e) => setLandmarkText(e.target.value)}
                                     placeholder="Add landmark (e.g. Phoenix Park, river)"
-                                    className="w-full px-3 py-2.5 rounded-lg bg-[#1f1f23] border border-gray-700 text-white text-sm outline-none focus:ring-2 focus:ring-white/30"
+                                    className="w-full px-3 py-2.5 rounded-lg bg-black border border-white/15 text-white text-sm outline-none focus:ring-2 focus:ring-white/30"
                                 />
                             </div>
                             <div>
@@ -399,11 +399,11 @@ export default function TextOnlyPostPage() {
                                         value={tagSearchQuery}
                                         onChange={(e) => setTagSearchQuery(e.target.value)}
                                         placeholder="Search by name or handle (e.g. sarah)"
-                                        className="w-full pl-9 pr-3 py-2.5 rounded-lg bg-[#1f1f23] border border-gray-700 text-white text-sm outline-none focus:ring-2 focus:ring-white/30"
+                                        className="w-full pl-9 pr-3 py-2.5 rounded-lg bg-black border border-white/15 text-white text-sm outline-none focus:ring-2 focus:ring-white/30"
                                         autoComplete="off"
                                     />
                                     {tagSearchQuery.trim() && (
-                                        <div className="absolute left-0 right-0 top-full mt-1 max-h-48 overflow-y-auto rounded-lg bg-[#1f1f23] border border-gray-700 shadow-xl z-10">
+                                        <div className="absolute left-0 right-0 top-full mt-1 max-h-48 overflow-y-auto rounded-lg bg-black border border-white/15 shadow-xl z-10">
                                             {tagSearchLoading ? (
                                                 <div className="py-4 text-center text-gray-400 text-sm">Searching...</div>
                                             ) : tagSearchUsers.length === 0 ? (

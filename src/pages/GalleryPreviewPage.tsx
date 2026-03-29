@@ -769,7 +769,7 @@ export default function GalleryPreviewPage() {
                 </motion.div>
             </section>
 
-            {/* Card overlay - black card, white icons, with blue→purple gradient border */}
+            {/* Card overlay - black card, white icons, grayscale accent borders on inputs */}
             <div
                 className="absolute bottom-0 left-0 right-0 z-20 flex flex-col max-h-[85dvh] rounded-t-[24px] overflow-hidden overflow-y-auto bg-black"
                 style={{
@@ -856,7 +856,7 @@ export default function GalleryPreviewPage() {
                                     }}
                                 >
                                     <div
-                                        className={`p-[2px] rounded-full transition-shadow duration-200 ${isCentered ? (isPulsing ? 'shadow-[0_0_30px_rgba(168,85,247,0.45)]' : 'shadow-[0_0_24px_rgba(255,255,255,0.22)]') : ''}`}
+                                        className={`p-[2px] rounded-full transition-shadow duration-200 ${isCentered ? (isPulsing ? 'shadow-[0_0_30px_rgba(255,255,255,0.35)]' : 'shadow-[0_0_24px_rgba(255,255,255,0.22)]') : ''}`}
                                         style={{ background: isCentered ? '#ffffff' : 'rgba(255,255,255,0.78)' }}
                                     >
                                         <div className={`${isCentered ? 'w-11 h-11' : 'w-10 h-10'} rounded-full bg-black flex items-center justify-center transition-all duration-200`}>
@@ -903,7 +903,7 @@ export default function GalleryPreviewPage() {
                             {/* Rounded gradient border ring (inner background solid dark) */}
                             <div
                                 className="rounded-2xl p-[1.5px]"
-                                style={{ background: 'linear-gradient(135deg,#3b82f6,#a855f7)' }}
+                                style={{ background: 'linear-gradient(135deg,#404040,#d4d4d4)' }}
                             >
                                 <div className="rounded-[1rem] bg-[#020617]">
                                     <textarea
@@ -1018,7 +1018,7 @@ export default function GalleryPreviewPage() {
                             {/* Venue with rounded gradient ring */}
                             <div
                                 className="rounded-2xl p-[1.5px]"
-                                style={{ background: 'linear-gradient(135deg,#3b82f6,#a855f7)' }}
+                                style={{ background: 'linear-gradient(135deg,#404040,#d4d4d4)' }}
                             >
                                 <div className="rounded-[1rem] bg-[#020617] overflow-hidden">
                                     <label className="block px-4 py-3 text-xs font-medium text-white/70 uppercase tracking-wide">Venue</label>
@@ -1035,7 +1035,7 @@ export default function GalleryPreviewPage() {
                             {/* Landmark */}
                             <div
                                 className="rounded-2xl p-[1.5px]"
-                                style={{ background: 'linear-gradient(135deg,#f59e0b,#a855f7)' }}
+                                style={{ background: 'linear-gradient(135deg,#525252,#a3a3a3)' }}
                             >
                                 <div className="rounded-[1rem] bg-[#020617] overflow-hidden">
                                     <label className="block px-4 py-3 text-xs font-medium text-white/70 uppercase tracking-wide">Landmark</label>
@@ -1063,7 +1063,7 @@ export default function GalleryPreviewPage() {
                                     >
                                         <div
                                             className="p-[1px] rounded-full flex-shrink-0"
-                                            style={{ background: 'linear-gradient(135deg,#a855f7,#3b82f6)' }}
+                                            style={{ background: 'linear-gradient(135deg,#737373,#e5e5e5)' }}
                                         >
                                             <div className="w-6 h-6 rounded-full bg-black flex items-center justify-center">
                                                 <FiUser className="w-3.5 h-3.5 text-white" />

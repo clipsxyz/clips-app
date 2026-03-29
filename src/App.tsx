@@ -56,6 +56,8 @@ import { getInstagramImageDimensions, getImageSize } from './utils/imageDimensio
 import Swal from 'sweetalert2';
 import { bottomSheet } from './utils/swalBottomSheet';
 import { TEXT_STORY_TEMPLATES } from './textStoryTemplates';
+import { IMessageDmBubbleShell } from './components/IMessageDmBubbleShell';
+import { DM_RECEIVED_BG, getDmSentBubblePreference } from './constants/dmImessageTheme';
 
 // Global map to store video playback times per post ID for seamless transitions
 const videoTimesMap = new Map<string, number>();
@@ -893,12 +895,23 @@ function BoostButton({ postId, onBoost, stretch, knownBoosted }: { postId: strin
   );
 }
 
-function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick }: {
+function PostHeader({
+  post,
+  onFollow,
+  onOpenDM,
+  isOverlaid = false,
+  onMenuClick,
+  variant = 'default',
+  children,
+}: {
   post: Post;
   onFollow?: () => Promise<void>;
   onOpenDM?: (handle: string) => void;
   isOverlaid?: boolean;
   onMenuClick?: () => void;
+  variant?: 'default' | 'textOnlyFeed';
+  /** Bubble + extras (e.g. tagged avatars); only used with `textOnlyFeed`. */
+  children?: React.ReactNode;
 }) {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -1074,6 +1087,243 @@ function PostHeader({ post, onFollow, onOpenDM, isOverlaid = false, onMenuClick 
   const reclipColorClass = isOverlaid
     ? "text-white/90 drop-shadow-md"
     : "text-gray-500 dark:text-gray-400";
+
+  if (variant === "textOnlyFeed" && children != null) {
+    const handleNorm = (h: string) => h.replace(/^@/, "").trim().toLowerCase();
+    const viewerIsAuthor = !!(
+      user?.handle && handleNorm(post.userHandle) === handleNorm(user.handle)
+    );
+    const createdTs =
+      post.createdAt != null
+        ? typeof post.createdAt === "string"
+          ? parseInt(post.createdAt, 10)
+          : post.createdAt
+        : null;
+    const timeLabel =
+      typeof createdTs === "number" && !Number.isNaN(createdTs) ? timeAgo(createdTs) : "";
+    const displayHandle = isReclippedPost ? post.originalUserHandle! : post.userHandle;
+
+    const avatarBlock = (
+      <div
+        className="relative shrink-0 pb-0.5"
+        data-feed-author-handle={post.userHandle}
+        data-feed-dm-anchor={post.id}
+      >
+        <Avatar
+          src={avatarSrc}
+          name={post.userHandle.split("@")[0]}
+          size="sm"
+          hasStory={hasStory}
+          onClick={(e) => {
+            e?.stopPropagation();
+            e?.preventDefault();
+            setProfileMenuOpen((open) => !open);
+          }}
+        />
+        {!isCurrentUser && onFollow && !isFollowingThisUser && (
+          <button
+            type="button"
+            onClick={async (e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              if (onFollow) {
+                try {
+                  await onFollow();
+                } catch (error) {
+                  console.error("Error in onFollow from click:", error);
+                }
+              }
+            }}
+            className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-blue-500 hover:bg-blue-600 border border-white dark:border-gray-900 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-md z-30"
+            style={{
+              touchAction: "manipulation",
+              WebkitTapHighlightColor: "transparent",
+              pointerEvents: "auto",
+            }}
+            aria-label="Follow user"
+          >
+            <FiPlus className="w-2.5 h-2.5 text-white" strokeWidth={2.5} />
+          </button>
+        )}
+        {!isCurrentUser && isMutualFollow && onOpenDM && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              onOpenDM(post.userHandle);
+            }}
+            className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-white border border-gray-200 dark:border-gray-700 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-md z-30 hover:bg-gray-50 dark:hover:bg-gray-100"
+            style={{
+              touchAction: "manipulation",
+              WebkitTapHighlightColor: "transparent",
+              pointerEvents: "auto",
+            }}
+            aria-label="Message user"
+          >
+            <VscLiveShare className="w-2.5 h-2.5 text-red-500" />
+          </button>
+        )}
+        {!isCurrentUser && onFollow && isFollowingThisUser && !isMutualFollow && (
+          <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-green-500 border border-white dark:border-gray-900 flex items-center justify-center shadow-md z-30">
+            <FiCheck className="w-2.5 h-2.5 text-white" strokeWidth={2.75} />
+          </div>
+        )}
+      </div>
+    );
+
+    return (
+      <div
+        className="relative w-full px-4 pb-3"
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        {/* Match reference: display name left, clock + time top-right, ⋯ under time on the right */}
+        <div className="flex items-start justify-between gap-3 pt-1">
+          <div className="min-w-0 flex-1">
+            {isReclippedPost && (
+              <div className={`text-xs mb-1 flex items-center gap-1 ${reclipColorClass}`}>
+                <FiRepeat className="w-3 h-3" />
+                <span>{post.userHandle} reclipped</span>
+              </div>
+            )}
+            <button
+              id={titleId}
+              type="button"
+              className={`text-left w-full transition-opacity hover:opacity-90 ${textColorClass}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setProfileMenuOpen((open) => !open);
+              }}
+            >
+              <h3
+                className="text-sm font-semibold flex items-center gap-1.5 leading-tight"
+                style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}
+              >
+                <span className="truncate">{displayHandle}</span>
+                <Flag
+                  value={
+                    isCurrentUser
+                      ? user?.countryFlag || ""
+                      : getFlagForHandle(isReclippedPost ? post.originalUserHandle! : post.userHandle) || ""
+                  }
+                  size={16}
+                />
+              </h3>
+            </button>
+          </div>
+          <div className="flex flex-col items-end shrink-0 gap-1 pt-0.5">
+            {timeLabel ? (
+              <div className={`flex items-center gap-1 text-[11px] font-medium whitespace-nowrap ${subtextColorClass}`}>
+                <FiClock className="w-3.5 h-3.5 flex-shrink-0 opacity-90" aria-hidden />
+                <span>{timeLabel}</span>
+              </div>
+            ) : null}
+           {onMenuClick ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  onMenuClick();
+                }}
+                className="p-1 rounded-full text-white/90 hover:bg-white/10"
+                aria-label="More options"
+              >
+                <FiMoreHorizontal className="w-4 h-4" />
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        {/* Always right-side layout: bubble tail + avatar on the right for all text-only posts */}
+        <div className="mt-1 flex w-full min-w-0 items-end justify-end gap-2">
+          <div className="min-w-0 flex flex-col gap-1 items-end max-w-[min(100%,30rem)]">
+            {children}
+          </div>
+          {avatarBlock}
+        </div>
+
+        {profileMenuOpen && (
+          <div className="absolute left-4 top-10 z-[200] w-56 rounded-2xl border border-white/20 bg-gradient-to-b from-[#0b1220] to-[#030712] shadow-[0_18px_45px_rgba(0,0,0,0.55)] backdrop-blur-sm overflow-hidden">
+            <div className="px-3 py-2 border-b border-white/10">
+              <p className="text-[11px] uppercase tracking-[0.12em] text-white/60 font-semibold">Quick actions</p>
+            </div>
+            <button
+              className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-gray-100 hover:bg-sky-500/10 transition-colors"
+              onClick={handleVisitProfile}
+            >
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-sky-500/15 border border-sky-400/30">
+                <FiUser className="w-3.5 h-3.5 text-sky-300" />
+              </span>
+              <span className="font-medium">Visit profile</span>
+            </button>
+
+            {!isCurrentUser && (
+              <button
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm border-t border-white/10 hover:bg-white/5 transition-colors"
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  try {
+                    if (onFollow) await onFollow();
+                  } finally {
+                    setProfileMenuOpen(false);
+                  }
+                }}
+              >
+                {isFollowingThisUser ? (
+                  <>
+                    <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-rose-500/15 border border-rose-400/30">
+                      <FiUserX className="w-3.5 h-3.5 text-rose-300" />
+                    </span>
+                    <span className="font-medium text-rose-300">Unfollow</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500/15 border border-emerald-400/30">
+                      <FiUserPlus className="w-3.5 h-3.5 text-emerald-300" />
+                    </span>
+                    <span className="font-medium text-emerald-300">Follow</span>
+                  </>
+                )}
+              </button>
+            )}
+
+            {!isCurrentUser && isMutualFollow && onOpenDM && (
+              <button
+                type="button"
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm border-t border-white/10 hover:bg-cyan-500/10 transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  onOpenDM(post.userHandle);
+                  setProfileMenuOpen(false);
+                }}
+              >
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-cyan-500/15 border border-cyan-400/30">
+                  <FiMessageSquare className="w-3.5 h-3.5 text-cyan-300" />
+                </span>
+                <span className="font-medium text-cyan-200">Message</span>
+              </button>
+            )}
+
+            {hasAnyStory && (
+              <button
+                className="w-full flex flex-row items-center gap-2.5 px-3 py-2.5 text-sm border-t border-white/10 hover:bg-violet-500/10 transition-colors"
+                onClick={handleViewStories}
+              >
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-violet-500/15 border border-violet-400/30">
+                  <FiPlayCircle className="w-3.5 h-3.5 text-violet-300" />
+                </span>
+                <span className="font-medium text-violet-300">View stories</span>
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="relative flex items-start justify-between px-4 pt-4 pb-3">
@@ -1329,8 +1579,55 @@ function TagRow({ tags }: { tags: string[] }) {
   );
 }
 
-function TextCard({ text, onDoubleLike, textStyle, stickers }: { text: string; onDoubleLike: () => Promise<void>; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string; fontFamily?: string }; stickers?: StickerOverlay[]; userHandle?: string; locationLabel?: string; createdAt?: string }) {
-  const [burst, setBurst] = React.useState(false);
+/** Solid fill for speech tail — templates often use gradients; extract first hex (or rgb) or fall back to DM palette. */
+function resolveTextCardTailFill(backgroundCss: string, isFromViewer: boolean): string {
+  const trimmed = String(backgroundCss).trim();
+  if (/^#([0-9a-f]{3,8})$/i.test(trimmed)) {
+    return expandShortHex(trimmed);
+  }
+  const hexStops = trimmed.match(/#[0-9a-f]{3,8}\b/gi);
+  if (hexStops?.length) {
+    return expandShortHex(hexStops[0]);
+  }
+  const rgb = trimmed.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (rgb) {
+    const r = Math.min(255, parseInt(rgb[1], 10));
+    const g = Math.min(255, parseInt(rgb[2], 10));
+    const b = Math.min(255, parseInt(rgb[3], 10));
+    return `#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`;
+  }
+  return isFromViewer
+    ? getDmSentBubblePreference() === 'green'
+      ? '#34C759'
+      : '#0A84FF'
+    : '#3A3A3C';
+}
+
+function expandShortHex(hex: string): string {
+  let h = hex.trim().replace(/^#/, '').toLowerCase();
+  if (h.length === 3) {
+    h = `${h[0]}${h[0]}${h[1]}${h[1]}${h[2]}${h[2]}`;
+  }
+  return `#${h}`;
+}
+
+function TextCard({
+  text,
+  onDoubleLike,
+  onHeartAnimation,
+  textStyle,
+  stickers,
+  isFromViewer = false,
+}: {
+  text: string;
+  onDoubleLike: () => Promise<void>;
+  /** Same as Media: viewport coords so FeedCard can run HeartDropAnimation toward the like button. */
+  onHeartAnimation?: (clientX: number, clientY: number) => void;
+  textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string; fontFamily?: string };
+  stickers?: StickerOverlay[];
+  /** Your post: iMessage “sent” bubble (blue/green) on the right; others: gray bubble on the left. */
+  isFromViewer?: boolean;
+}) {
   const [tapPosition, setTapPosition] = React.useState<{ x: number; y: number } | null>(null);
   const [isExpanded, setIsExpanded] = React.useState(false);
   const lastTap = React.useRef<number>(0);
@@ -1357,25 +1654,21 @@ function TextCard({ text, onDoubleLike, textStyle, stickers }: { text: string; o
   const shouldTruncate = text.length > 100;
   const displayText = shouldTruncate && !isExpanded ? text.substring(0, 100) + '...' : text;
 
-  // Dark blue backgrounds inspired by your reference image
   const backgrounds = [
-    '#1e3a8a', // Deep blue
-    '#1e40af', // Rich blue
-    '#1d4ed8', // Vibrant blue
-    '#2563eb', // Electric blue
-    '#3b82f6', // Bright blue
-    '#1e293b', // Dark slate blue
-    '#0f172a', // Very dark blue
-    '#1a202c', // Dark navy
+    '#1e3a8a',
+    '#1e40af',
+    '#1d4ed8',
+    '#2563eb',
+    '#3b82f6',
+    '#1e293b',
+    '#0f172a',
+    '#1a202c',
   ];
 
-  // Use background from textStyle if provided, otherwise select based on text content
-  const selectedBackground = textStyle?.background || (() => {
-    const backgroundIndex = text.length % backgrounds.length;
-    return backgrounds[backgroundIndex];
-  })();
+  const selectedBackground =
+    textStyle?.background ||
+    backgrounds[text.length % backgrounds.length];
 
-  // Get text size class - use textStyle size when provided
   const getTextSizeClass = () => {
     const size = textStyle?.size || 'medium';
     switch (size) {
@@ -1389,9 +1682,13 @@ function TextCard({ text, onDoubleLike, textStyle, stickers }: { text: string; o
     }
   };
 
-  // Get text color and font from textStyle or default to white/system font
   const textColor = textStyle?.color || 'white';
-  const textFontFamily = textStyle?.fontFamily || 'system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif';
+  const textFontFamily =
+    textStyle?.fontFamily ||
+    'system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif';
+
+  /** Inline tail color — match template / gradient first color; else DM sent/received fallback. */
+  const tailBgColor = resolveTextCardTailFill(selectedBackground, isFromViewer);
 
   function getTapPosition(e: React.MouseEvent | React.TouchEvent): { x: number; y: number } | null {
     if (!containerRef.current) return null;
@@ -1408,17 +1705,35 @@ function TextCard({ text, onDoubleLike, textStyle, stickers }: { text: string; o
     return { x: clientX - rect.left, y: clientY - rect.top };
   }
 
+  function getHeartClientPoint(e?: React.MouseEvent | React.TouchEvent): { x: number; y: number } | null {
+    if (!e) return null;
+    if ('touches' in e && e.changedTouches?.length) {
+      return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+    }
+    if ('clientX' in e) return { x: e.clientX, y: e.clientY };
+    return null;
+  }
+
   function handleTap(e?: React.MouseEvent | React.TouchEvent) {
     const now = Date.now();
     const timeSinceLastTap = now - lastTap.current;
 
     if (timeSinceLastTap < 300) {
       const pos = e ? getTapPosition(e) : null;
-      setTapPosition(pos ?? (containerRef.current ? { x: containerRef.current.offsetWidth / 2, y: containerRef.current.offsetHeight / 2 } : null));
-      setBurst(true);
+      setTapPosition(
+        pos ??
+          (containerRef.current
+            ? { x: containerRef.current.offsetWidth / 2, y: containerRef.current.offsetHeight / 2 }
+            : null),
+      );
+      const client = getHeartClientPoint(e);
+      if (onHeartAnimation && client) {
+        window.setTimeout(() => {
+          onHeartAnimation(client.x, client.y);
+        }, 50);
+      }
       onDoubleLike().catch(() => {});
-      setTimeout(() => {
-        setBurst(false);
+      window.setTimeout(() => {
         setTapPosition(null);
       }, 500);
     }
@@ -1428,7 +1743,7 @@ function TextCard({ text, onDoubleLike, textStyle, stickers }: { text: string; o
   function handleTouchEnd(e: React.TouchEvent) {
     touchHandled.current = true;
     handleTap(e);
-    setTimeout(() => {
+    window.setTimeout(() => {
       touchHandled.current = false;
     }, 300);
   }
@@ -1442,182 +1757,139 @@ function TextCard({ text, onDoubleLike, textStyle, stickers }: { text: string; o
   }
 
   function handleMoreClick(e: React.MouseEvent) {
-    e.stopPropagation(); // Prevent triggering double-tap like
+    e.stopPropagation();
     setIsExpanded(!isExpanded);
   }
 
   return (
-    <div className="mx-4 mt-4 select-none max-w-full relative">
-      {/* Decorative horizontal stripes on the left */}
-      <div className="absolute left-0 top-1/2 transform -translate-y-1/2 -translate-x-8 flex flex-col gap-2 pointer-events-none z-0">
-        <div className="w-12 h-0.5 bg-white/30"></div>
-        <div className="w-12 h-0.5 bg-white/30"></div>
-        <div className="w-12 h-0.5 bg-white/30"></div>
-      </div>
-
-      {/* Decorative horizontal stripes on the right */}
-      <div className="absolute right-0 top-1/2 transform -translate-y-1/2 translate-x-8 flex flex-col gap-2 pointer-events-none z-0">
-        <div className="w-12 h-0.5 bg-white/30"></div>
-        <div className="w-12 h-0.5 bg-white/30"></div>
-        <div className="w-12 h-0.5 bg-white/30"></div>
-      </div>
-
-      <div
-        ref={containerRef}
-        role="button"
-        tabIndex={0}
-        aria-label="Double tap or press to like"
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            onDoubleLike();
-          }
-        }}
-        onClick={handleClick}
-        onTouchEnd={handleTouchEnd}
-        className="relative w-full rounded-lg shadow-lg z-10"
-        style={{
-          maxWidth: '100%',
-          boxSizing: 'border-box',
-          padding: '16px',
-          marginBottom: '12px',
-          background: selectedBackground
-        }}
-      >
-        {/* Speech bubble content */}
-        <div className={`leading-relaxed whitespace-pre-wrap font-normal break-words w-full ${getTextSizeClass()}`} style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', maxWidth: '100%', boxSizing: 'border-box', color: textColor, fontFamily: textFontFamily }}>
-          {displayText}
-        </div>
-        {shouldTruncate && (
-          <div className="mt-3 flex justify-start">
-            <button
-              onClick={handleMoreClick}
-              className="text-white hover:text-white/90 text-sm font-medium transition-colors focus:outline-none focus:ring-0"
-              style={{ outline: 'none', border: 'none', background: 'none' }}
-              aria-label={isExpanded ? 'Show less' : 'Show more'}
-            >
-              {isExpanded ? 'Show less' : 'Show more'}
-            </button>
-          </div>
-        )}
-
-        {/* Speech bubble tail - downward pointing triangle at bottom center */}
-        <div
-          className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-full"
-          style={{
-            width: 0,
-            height: 0,
-            borderLeft: '8px solid transparent',
-            borderRight: '8px solid transparent',
-            borderTop: '12px solid ' + (selectedBackground.includes('gradient') ? '#1e293b' : selectedBackground)
+    <div className="mt-1 px-0 select-none w-full max-w-full relative">
+      <div className={`flex w-full ${isFromViewer ? 'justify-end' : 'justify-start'}`}>
+        <div ref={containerRef} className="min-w-0 max-w-[min(100%,30rem)]">
+        <IMessageDmBubbleShell
+          layout="feed"
+          isFromMe={isFromViewer}
+          tailBgClassName={DM_RECEIVED_BG}
+          tailBackgroundColor={tailBgColor}
+          bubbleClassName={`break-words cursor-pointer select-none relative overflow-visible leading-relaxed font-normal antialiased ${getTextSizeClass()} px-4 py-3 min-w-0 text-left`}
+          bubbleStyle={{
+            background: selectedBackground,
+            color: textColor,
+            fontFamily: textFontFamily,
+            wordBreak: 'break-word',
+            overflowWrap: 'anywhere',
+            maxWidth: '100%',
+            boxSizing: 'border-box',
           }}
-        />
+          role="button"
+          tabIndex={0}
+          aria-label="Double tap or press to like"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onDoubleLike();
+            }
+          }}
+          onClick={handleClick}
+          onTouchEnd={handleTouchEnd}
+        >
+          <div className="whitespace-pre-wrap w-full">{displayText}</div>
+          {shouldTruncate && (
+            <div className="mt-2 flex justify-start">
+              <button
+                type="button"
+                onClick={handleMoreClick}
+                className="text-sm font-medium transition-opacity hover:opacity-90 focus:outline-none focus:ring-0 underline underline-offset-2"
+                style={{ color: textColor, outline: 'none', border: 'none', background: 'none', opacity: 0.9 }}
+                aria-label={isExpanded ? 'Show less' : 'Show more'}
+              >
+                {isExpanded ? 'Show less' : 'Show more'}
+              </button>
+            </div>
+          )}
 
-        {/* GIF/Sticker Overlays - Scaled down and repositioned for feed view */}
-        {stickers && stickers.length > 0 && containerSize.width > 0 && (
-          <>
-            {stickers.map((overlay, index) => {
-              // Scale down overlays in feed view to prevent overlap (60% of original size)
-              const feedScale = 0.6;
+          {stickers && stickers.length > 0 && containerSize.width > 0 && (
+            <>
+              {stickers.map((overlay, index) => {
+                const feedScale = 0.6;
+                let adjustedX = overlay.x;
+                let adjustedY = overlay.y;
+                if (overlay.x >= 45 && overlay.x <= 55 && overlay.y >= 45 && overlay.y <= 55) {
+                  const total = stickers.length;
+                  const angle = (index / total) * Math.PI * 2;
+                  adjustedX = 50 + Math.cos(angle) * 30;
+                  adjustedY = 50 + Math.sin(angle) * 30;
+                  adjustedX = Math.max(15, Math.min(85, adjustedX));
+                  adjustedY = Math.max(15, Math.min(85, adjustedY));
+                }
+                const adjustedOverlay = {
+                  ...overlay,
+                  scale: overlay.scale * feedScale,
+                  x: adjustedX,
+                  y: adjustedY,
+                };
+                return (
+                  <StickerOverlayComponent
+                    key={overlay.id}
+                    overlay={adjustedOverlay}
+                    onUpdate={() => {}}
+                    onRemove={() => {}}
+                    isSelected={false}
+                    onSelect={() => {}}
+                    containerWidth={containerSize.width}
+                    containerHeight={containerSize.height}
+                  />
+                );
+              })}
+            </>
+          )}
 
-              // Adjust position to avoid center where text typically is
-              // If overlay is near center (45-55%), move it to edges
-              let adjustedX = overlay.x;
-              let adjustedY = overlay.y;
-
-              if (overlay.x >= 45 && overlay.x <= 55 && overlay.y >= 45 && overlay.y <= 55) {
-                // Move center-positioned overlays to corners/edges
-                // Distribute them around the edges in a circle
-                const total = stickers.length;
-                const angle = (index / total) * Math.PI * 2;
-                adjustedX = 50 + Math.cos(angle) * 30; // Spread around center
-                adjustedY = 50 + Math.sin(angle) * 30;
-                // Clamp to bounds (keep within 15-85% to avoid edges)
-                adjustedX = Math.max(15, Math.min(85, adjustedX));
-                adjustedY = Math.max(15, Math.min(85, adjustedY));
-              }
-
-              const adjustedOverlay = {
-                ...overlay,
-                scale: overlay.scale * feedScale,
-                x: adjustedX,
-                y: adjustedY
-              };
-
-              return (
-                <StickerOverlayComponent
-                  key={overlay.id}
-                  overlay={adjustedOverlay}
-                  onUpdate={() => { }} // Read-only in feed
-                  onRemove={() => { }} // Read-only in feed
-                  isSelected={false} // Read-only in feed
-                  onSelect={() => { }} // Read-only in feed
-                  containerWidth={containerSize.width}
-                  containerHeight={containerSize.height}
-                />
-              );
-            })}
-          </>
-        )}
-
-        {/* YouTube Shorts-style double-tap: thumbs-up + red/pink burst (same as image/video) */}
-        {tapPosition && (
-          <div
-            className="absolute pointer-events-none z-50"
-            style={{
-              left: `${tapPosition.x}px`,
-              top: `${tapPosition.y}px`,
-              transform: 'translate(-50%, -50%)',
-              width: 0,
-              height: 0,
-            }}
-          >
+          {tapPosition && (
             <div
-              className="absolute z-0"
+              className="absolute pointer-events-none z-50"
               style={{
-                left: '50%',
-                top: '50%',
-                width: '200px',
-                height: '200px',
+                left: `${tapPosition.x}px`,
+                top: `${tapPosition.y}px`,
                 transform: 'translate(-50%, -50%)',
-                animation: 'shortsThumbGlow 0.5s ease-out forwards',
+                width: 0,
+                height: 0,
               }}
             >
-              <ShortsLikeBurstLines />
+              <div
+                className="absolute z-0"
+                style={{
+                  left: '50%',
+                  top: '50%',
+                  width: '200px',
+                  height: '200px',
+                  transform: 'translate(-50%, -50%)',
+                  animation: 'shortsThumbGlow 0.5s ease-out forwards',
+                }}
+              >
+                <ShortsLikeBurstLines />
+              </div>
+              <div
+                className="absolute flex items-center justify-center z-10"
+                style={{
+                  left: '50%',
+                  top: '50%',
+                  width: '96px',
+                  height: '96px',
+                  marginLeft: '-48px',
+                  marginTop: '-48px',
+                  animation: 'heartPopUp 0.5s cubic-bezier(0.34, 1.4, 0.64, 1) forwards',
+                }}
+              >
+                <svg className="w-full h-full flex-shrink-0" viewBox="0 0 24 24" fill="none" style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.4))' }}>
+                  <path
+                    fill="#ffffff"
+                    d="M2 9H5V21H2C1.45 21 1 20.55 1 20V10C1 9.45 1.45 9 2 9ZM7.29 7.71L13.69 1.31C13.87 1.13 14.15 1.11 14.35 1.26L15.2 1.9C15.68 2.26 15.9 2.88 15.75 3.47L14.6 8H21C22.1 8 23 8.9 23 10V12.1C23 12.36 22.95 12.62 22.85 12.87L19.76 20.38C19.6 20.76 19.24 21 18.83 21H8C7.45 21 7 20.55 7 20V8.41C7 8.15 7.11 7.89 7.29 7.71Z"
+                  />
+                </svg>
+              </div>
             </div>
-            <div
-              className="absolute flex items-center justify-center z-10"
-              style={{
-                left: '50%',
-                top: '50%',
-                width: '96px',
-                height: '96px',
-                marginLeft: '-48px',
-                marginTop: '-48px',
-                animation: 'heartPopUp 0.5s cubic-bezier(0.34, 1.4, 0.64, 1) forwards',
-              }}
-            >
-              <svg className="w-full h-full flex-shrink-0" viewBox="0 0 24 24" fill="none" style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.4))' }}>
-                <path
-                  fill="#ffffff"
-                  d="M2 9H5V21H2C1.45 21 1 20.55 1 20V10C1 9.45 1.45 9 2 9ZM7.29 7.71L13.69 1.31C13.87 1.13 14.15 1.11 14.35 1.26L15.2 1.9C15.68 2.26 15.9 2.88 15.75 3.47L14.6 8H21C22.1 8 23 8.9 23 10V12.1C23 12.36 22.95 12.62 22.85 12.87L19.76 20.38C19.6 20.76 19.24 21 18.83 21H8C7.45 21 7 20.55 7 20V8.41C7 8.15 7.11 7.89 7.29 7.71Z"
-                />
-              </svg>
-            </div>
-          </div>
-        )}
-
-        {/* Speech bubble tail/pointer at bottom center */}
-        <div
-          className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-full"
-          style={{
-            width: 0,
-            height: 0,
-            borderLeft: '12px solid transparent',
-            borderRight: '12px solid transparent',
-            borderTop: '12px solid white'
-          }}
-        />
+          )}
+        </IMessageDmBubbleShell>
+        </div>
       </div>
     </div>
   );
@@ -3980,6 +4252,10 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   const hasMedia = !!(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0));
   const isTextOnly = post.text && !post.mediaUrl && (!post.mediaItems || post.mediaItems.length === 0);
   const isTileBoostMode = engagementVariant === 'boost';
+  const viewerIsAuthor =
+    !!user?.handle &&
+    post.userHandle.replace(/^@/, '').trim().toLowerCase() ===
+      user.handle.replace(/^@/, '').trim().toLowerCase();
 
   // If this is a text-only post with a templateId, derive style from TEXT_STORY_TEMPLATES
   const templateForText = post.templateId
@@ -4012,10 +4288,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
       style={{ backgroundColor: '#030712' }}
     >
       {/* overflow-visible: PostHeader quick-actions (absolute) must not be clipped by the card */}
-      {/* Show PostHeader normally for text-only posts */}
-      {isTextOnly && !isTileBoostMode && (
-        <PostHeader post={post} onFollow={onFollow} onOpenDM={onOpenDM} isOverlaid={false} onMenuClick={() => setMenuOpen(true)} />
-      )}
+      {/* Text-only: author chrome sits in a narrow column beside the bubble (see below). */}
       {!isTileBoostMode && <TagRow tags={post.tags} />}
       {!isTileBoostMode && post.isBoosted && (
         <div className="px-4 pt-2 pb-1.5 flex items-center gap-2">
@@ -4068,24 +4341,35 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         isTileBoostMode ? (
           <TileTextCard text={post.text || ''} onDoubleLike={onLike} textStyle={effectiveTextStyle} />
         ) : (
-          <>
-            <TextCard
-              text={post.text || ''}
-              onDoubleLike={onLike}
-              textStyle={effectiveTextStyle}
-              stickers={post.stickers}
-              userHandle={post.userHandle}
-              locationLabel={post.locationLabel}
-              createdAt={post.createdAt?.toString()}
-            />
-            {/* Tagged users: first 3 profile pics + "X people tagged" for text-only posts */}
-            {!isTileBoostMode && post.taggedUsers && post.taggedUsers.length > 0 && (
-              <TaggedAvatars
-                taggedUserHandles={post.taggedUsers}
-                onShowTaggedUsers={() => setShowTaggedUsersModal(true)}
+          <PostHeader
+            post={post}
+            onFollow={onFollow}
+            onOpenDM={onOpenDM}
+            isOverlaid={true}
+            onMenuClick={() => setMenuOpen(true)}
+            variant="textOnlyFeed"
+          >
+            <>
+              <TextCard
+                text={post.text || ''}
+                onDoubleLike={onLike}
+                onHeartAnimation={(clientX, clientY) => {
+                  setTimeout(() => {
+                    setHeartAnimation({ startX: clientX, startY: clientY });
+                  }, 50);
+                }}
+                textStyle={effectiveTextStyle}
+                stickers={post.stickers}
+                isFromViewer={true}
               />
-            )}
-          </>
+              {post.taggedUsers && post.taggedUsers.length > 0 && (
+                <TaggedAvatars
+                  taggedUserHandles={post.taggedUsers}
+                  onShowTaggedUsers={() => setShowTaggedUsersModal(true)}
+                />
+              )}
+            </>
+          </PostHeader>
         )
         ) : (
           <Media
@@ -4900,16 +5184,6 @@ function FeedPageWrapper() {
     });
   }, []);
 
-  const dismissAllSuggestedPlaces = React.useCallback(() => {
-    emitSuggestedPlacesAnalytics({ action: 'dismiss_all' });
-    try {
-      sessionStorage.setItem('clips:suggestedPlacesDismissAll', '1');
-    } catch {
-      /* ignore */
-    }
-    setSuggestedPlacesPrefs((prev) => ({ ...prev, dismissAll: true }));
-  }, []);
-
   const setSuggestedPlacesIncludePosterLocale = React.useCallback((enabled: boolean) => {
     try {
       localStorage.setItem('clips:suggestedPlacesIncludePosterLocale', enabled ? '1' : '0');
@@ -5704,6 +5978,25 @@ function FeedPageWrapper() {
     });
   }
 
+  function updateOneAndSuggestedStrip(id: string, updater: (p: Post) => Post, onUpdated?: (newPages: Post[][]) => void) {
+    updateOne(id, updater, onUpdated);
+    const idStr = String(id);
+    setServerPlaceSuggestions((prev) =>
+      prev?.map((row) => {
+        if (String(row.post.id) !== idStr) return row;
+        const next = updater({ ...row.post } as Post);
+        const preserved = {
+          ...next,
+          id: next.id ?? row.post.id,
+          isBoosted: next.isBoosted ?? row.post.isBoosted,
+          boostFeedType: next.boostFeedType ?? row.post.boostFeedType,
+          stats: next.stats && typeof next.stats.likes === "number" ? next.stats : (row.post.stats || next.stats),
+        };
+        return { ...row, post: preserved };
+      })
+    );
+  }
+
   // When returning from payment after boosting, mark the post so the Sponsored label shows (incl. text-only posts)
   React.useEffect(() => {
     const state = routerLocation.state as { boostSuccess?: boolean; postId?: string; feedType?: 'local' | 'regional' | 'national' } | null;
@@ -6064,6 +6357,282 @@ function FeedPageWrapper() {
     }
   }, [user, routerLocation.pathname, routerLocation.key, flat.length]);
 
+  async function handleMainFeedFollow(p: Post): Promise<void> {
+          if (!online) {
+            updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: !post.isFollowing }));
+            setFollowState(userId, p.userHandle, !p.isFollowing);
+            await enqueue({ type: 'follow', postId: p.id, userId });
+                if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
+                  setPages([]);
+                  setCursor(0);
+                  setEnd(false);
+                  setError(null);
+                  requestTokenRef.current++;
+                  setDiscoverRefreshTrigger(t => t + 1);
+                }
+                return;
+              }
+
+              const wasFollowing = p.isFollowing;
+              if (!wasFollowing) {
+                setFollowState(userId, p.userHandle, true);
+                updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: true }));
+              }
+
+              const { isProfilePrivate } = await import('./api/privacy');
+              const { toggleFollow } = await import('./api/client');
+              const { createFollowRequest, hasPendingFollowRequest, removeFollowRequest } = await import('./api/privacy');
+              const { createNotification } = await import('./api/notifications');
+              const { getFollowedUsers } = await import('./api/posts');
+              const profilePrivate = isProfilePrivate(p.userHandle);
+
+              if (profilePrivate) {
+                if (!wasFollowing) {
+                  setFollowState(userId, p.userHandle, false);
+                  updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: false }));
+                }
+                navigate(`/user/${p.userHandle}`);
+                return;
+              }
+
+              // Mock-only: keep follow state local, refresh Following feed, no API call (avoids delay and state overwrite)
+              const useLaravelApi =
+                typeof import.meta !== 'undefined' &&
+                import.meta.env?.VITE_USE_LARAVEL_API !== 'false' &&
+                import.meta.env?.VITE_DEV_MODE !== 'true';
+              if (!useLaravelApi) {
+                const newFollowing = !wasFollowing;
+                setFollowState(userId, p.userHandle, newFollowing);
+                updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: newFollowing }));
+                window.dispatchEvent(new CustomEvent('followToggled', { detail: { handle: p.userHandle, isFollowing: newFollowing } }));
+                if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
+                  setPages([]);
+                  setCursor(0);
+                  setEnd(false);
+                  setError(null);
+                  requestTokenRef.current++;
+                  setDiscoverRefreshTrigger(t => t + 1);
+                }
+                return;
+              }
+              
+              let isActuallyFollowing = p.isFollowing;
+              if (user?.id) {
+                try {
+                  const followedUsers = await getFollowedUsers(user.id);
+                  isActuallyFollowing = followedUsers.includes(p.userHandle);
+                  if (isActuallyFollowing && user.handle) removeFollowRequest(user.handle, p.userHandle);
+                } catch (error) {
+                  console.warn('Error checking followed users:', error);
+                }
+              }
+              
+              if (isActuallyFollowing && wasFollowing) {
+                if (user?.handle) removeFollowRequest(user.handle, p.userHandle);
+                const updated = await toggleFollowForPost(userId, p.id, p.userHandle);
+                updateOneAndSuggestedStrip(p.id, _post => ({ ...updated }));
+                setFollowState(userId, p.userHandle, !!updated.isFollowing);
+                return;
+              }
+              
+              // Check for pending requests only if not already following
+              let hasPending = hasPendingFollowRequest(user?.handle || '', p.userHandle);
+              
+              // If there's a pending request but user is not actually following, check if it's stale
+              // (older than 1 hour) and clear it to allow a fresh request
+              if (hasPending && !isActuallyFollowing && user?.handle) {
+                const { getFollowRequests } = await import('./api/privacy');
+                const requests = getFollowRequests();
+                const matchingRequest = requests.find(
+                  req => req.fromHandle === user.handle && req.toHandle === p.userHandle && req.status === 'pending'
+                );
+                
+                if (matchingRequest && matchingRequest.timestamp) {
+                  const oneHourAgo = Date.now() - (60 * 60 * 1000);
+                  // If request is older than 1 hour, it's stale - clear it
+                  if (matchingRequest.timestamp < oneHourAgo) {
+                    console.log('Found stale follow request (older than 1 hour), clearing it:', {
+                      fromHandle: user.handle,
+                      toHandle: p.userHandle,
+                      age: Math.floor((Date.now() - matchingRequest.timestamp) / (1000 * 60 * 60)) + ' hours'
+                    });
+                    removeFollowRequest(user.handle, p.userHandle);
+                    hasPending = false; // Reset the flag
+                  }
+                }
+              }
+              
+              // Debug logging
+              console.log('+ icon clicked - Follow check:', {
+                userHandle: user?.handle,
+                postUserHandle: p.userHandle,
+                profilePrivate,
+                hasPending,
+                isFollowing: p.isFollowing,
+                isActuallyFollowing
+              });
+              
+              if (profilePrivate && hasPending && user?.handle) {
+                await Swal.fire(bottomSheet({
+                  title: 'Follow Request Already Sent',
+                  message: `You have already sent a follow request to ${p.userHandle}. You will be notified when they respond.`,
+                  icon: 'alert',
+                }));
+                return;
+              } else if (profilePrivate && !hasPending && user?.handle) {
+                // Private profile - create follow request
+                console.log('Private profile detected, creating follow request:', {
+                  userHandle: user.handle,
+                  targetHandle: p.userHandle,
+                  hasPending
+                });
+                
+                // Double-check that there's no pending request right before creating
+                const doubleCheckPending = hasPendingFollowRequest(user?.handle || '', p.userHandle);
+                if (doubleCheckPending) {
+                  console.warn('Found pending request on double-check, showing pending message instead of creating new request');
+                  await Swal.fire(bottomSheet({
+                    title: 'Follow Request Already Sent',
+                    message: `You have already sent a follow request to ${p.userHandle}. You will be notified when they respond.`,
+                    icon: 'alert',
+                  }));
+                  return;
+                }
+                
+                try {
+                  const encodedHandle = encodeURIComponent(p.userHandle);
+                  console.log('Calling toggleFollow API for private profile:', encodedHandle);
+                  const result = await toggleFollow(encodedHandle);
+                  console.log('toggleFollow API result:', result);
+                  
+                  if (result.status === 'pending' && user?.handle) {
+                    console.log('API returned pending status, creating follow request in localStorage');
+                    createFollowRequest(user.handle, p.userHandle);
+                    
+                    // Create notification - show Follow Request Sent popup
+                    try {
+                      await createNotification({
+                        type: 'follow_request',
+                        fromHandle: user.handle,
+                        toHandle: p.userHandle,
+                        message: `${user.handle} wants to follow you`
+                      });
+                    } catch (error) {
+                      console.warn('Failed to create follow request notification:', error);
+                    }
+                    
+                    await Swal.fire(bottomSheet({
+                      title: 'Follow Request Sent',
+                      message: 'Your follow request has been sent. You will be notified when they accept.',
+                      icon: 'alert',
+                    }));
+                    
+                    // Don't update isFollowing to true - keep it false for pending request
+                    updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: false }));
+                  } else if (result.status === 'accepted' || result.following === true) {
+                    // Public profile - follow immediately (backend is authoritative)
+                    const newFollowingState = true;
+                    setFollowState(userId, p.userHandle, newFollowingState);
+                    updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: newFollowingState }));
+                  }
+                } catch (apiError: any) {
+                  const isConnectionError = 
+                    apiError?.message === 'CONNECTION_REFUSED' ||
+                    apiError?.name === 'ConnectionRefused' ||
+                    apiError?.message?.includes('Failed to fetch');
+                  
+                  if (isConnectionError && profilePrivate && user?.handle) {
+                    console.log('Connection error detected, using mock fallback for private profile');
+                    // Check again if request was created between the initial check and now
+                    const recheckPending = hasPendingFollowRequest(user.handle, p.userHandle);
+                    if (recheckPending) {
+                      console.log('Mock fallback: Found pending request on recheck, showing pending message');
+                      await Swal.fire(bottomSheet({
+                        title: 'Follow Request Already Sent',
+                        message: `You have already sent a follow request to ${p.userHandle}. You will be notified when they respond.`,
+                        icon: 'alert',
+                      }));
+                      return;
+                    }
+                    
+                    // Mock fallback for private profile - create new request
+                    console.log('Mock fallback: Creating new follow request for', p.userHandle);
+                    if (user?.handle) {
+                      try {
+                        createFollowRequest(user.handle, p.userHandle);
+                        console.log('Follow request created successfully in localStorage');
+                      } catch (error) {
+                        console.error('Error creating follow request:', error);
+                      }
+                      
+                      try {
+                        await createNotification({
+                          type: 'follow_request',
+                          fromHandle: user.handle,
+                          toHandle: p.userHandle,
+                          message: `${user.handle} wants to follow you`
+                        });
+                      } catch (error) {
+                        console.warn('Failed to create follow request notification:', error);
+                      }
+                      
+                      await Swal.fire(bottomSheet({
+                        title: 'Follow Request Sent',
+                        message: 'Your follow request has been sent. You will be notified when they accept.',
+                        icon: 'alert',
+                      }));
+                      
+                      updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: false }));
+                    }
+                  } else {
+                    // For other errors, fall back to normal follow
+                    const updated = await toggleFollowForPost(userId, p.id, p.userHandle);
+                    updateOneAndSuggestedStrip(p.id, _post => ({ ...updated }));
+                  }
+                }
+              } else {
+                // Public profile – follow via API then update UI
+                try {
+                  const result = await toggleFollow(p.userHandle);
+                  const newFollowingState =
+                    result?.status === 'accepted' || result?.following === true;
+                  setFollowState(userId, p.userHandle, newFollowingState);
+                  updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: newFollowingState }));
+                } catch (apiError: any) {
+                  const isConnectionError =
+                    apiError?.message === 'CONNECTION_REFUSED' ||
+                    apiError?.name === 'ConnectionRefused' ||
+                    apiError?.message?.includes('Failed to fetch');
+                  const is404 = apiError?.status === 404;
+
+                  if (isConnectionError) {
+                    try {
+                      const updated = await toggleFollowForPost(userId, p.id, p.userHandle);
+                      updateOneAndSuggestedStrip(p.id, _post => ({ ...updated }));
+                      setFollowState(userId, p.userHandle, !!updated.isFollowing);
+                    } catch {
+                      // Keep optimistic follow (e.g. post not in global list when feed from cache)
+                      setFollowState(userId, p.userHandle, true);
+                      updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: true }));
+                    }
+                  } else if (is404 || apiError?.status >= 400) {
+                    setFollowState(userId, p.userHandle, true);
+                    updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: true }));
+                  } else {
+                    // Any other error (e.g. CORS, timeout on phone): persist follow locally so + works on phone too
+                    try {
+                      const updated = await toggleFollowForPost(userId, p.id, p.userHandle);
+                      updateOneAndSuggestedStrip(p.id, _post => ({ ...updated }));
+                      setFollowState(userId, p.userHandle, !!updated.isFollowing);
+                    } catch {
+                      setFollowState(userId, p.userHandle, true);
+                      updateOneAndSuggestedStrip(p.id, post => ({ ...post, isFollowing: true }));
+                    }
+                  }
+                }
+              }
+  }
+
   // Not logged in
   if (!user) {
     return (
@@ -6210,10 +6779,11 @@ function FeedPageWrapper() {
                 key={`suggested-places-${bKey}-${index}`}
                 bundleKey={bKey}
                 suggestions={sug}
+                viewerHandle={user?.handle ?? null}
                 includePosterLocale={suggestedPlacesPrefs.includePosterLocale}
                 onToggleIncludePosterLocale={setSuggestedPlacesIncludePosterLocale}
                 onDismissRow={() => dismissSuggestedPlacesRow(bKey)}
-                onDismissAll={dismissAllSuggestedPlaces}
+                onFollowPost={handleMainFeedFollow}
               />
             );
           }
@@ -6295,281 +6865,7 @@ function FeedPageWrapper() {
                 }));
               }
             }}
-            onFollow={async () => {
-          if (!online) {
-            updateOne(p.id, post => ({ ...post, isFollowing: !post.isFollowing }));
-            setFollowState(userId, p.userHandle, !p.isFollowing);
-            await enqueue({ type: 'follow', postId: p.id, userId });
-                if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
-                  setPages([]);
-                  setCursor(0);
-                  setEnd(false);
-                  setError(null);
-                  requestTokenRef.current++;
-                  setDiscoverRefreshTrigger(t => t + 1);
-                }
-                return;
-              }
-
-              const wasFollowing = p.isFollowing;
-              if (!wasFollowing) {
-                setFollowState(userId, p.userHandle, true);
-                updateOne(p.id, post => ({ ...post, isFollowing: true }));
-              }
-
-              const { isProfilePrivate } = await import('./api/privacy');
-              const { toggleFollow } = await import('./api/client');
-              const { createFollowRequest, hasPendingFollowRequest, removeFollowRequest } = await import('./api/privacy');
-              const { createNotification } = await import('./api/notifications');
-              const { getFollowedUsers } = await import('./api/posts');
-              const profilePrivate = isProfilePrivate(p.userHandle);
-
-              if (profilePrivate) {
-                if (!wasFollowing) {
-                  setFollowState(userId, p.userHandle, false);
-                  updateOne(p.id, post => ({ ...post, isFollowing: false }));
-                }
-                navigate(`/user/${p.userHandle}`);
-                return;
-              }
-
-              // Mock-only: keep follow state local, refresh Following feed, no API call (avoids delay and state overwrite)
-              const useLaravelApi =
-                typeof import.meta !== 'undefined' &&
-                import.meta.env?.VITE_USE_LARAVEL_API !== 'false' &&
-                import.meta.env?.VITE_DEV_MODE !== 'true';
-              if (!useLaravelApi) {
-                const newFollowing = !wasFollowing;
-                setFollowState(userId, p.userHandle, newFollowing);
-                updateOne(p.id, post => ({ ...post, isFollowing: newFollowing }));
-                window.dispatchEvent(new CustomEvent('followToggled', { detail: { handle: p.userHandle, isFollowing: newFollowing } }));
-                if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
-                  setPages([]);
-                  setCursor(0);
-                  setEnd(false);
-                  setError(null);
-                  requestTokenRef.current++;
-                  setDiscoverRefreshTrigger(t => t + 1);
-                }
-                return;
-              }
-              
-              let isActuallyFollowing = p.isFollowing;
-              if (user?.id) {
-                try {
-                  const followedUsers = await getFollowedUsers(user.id);
-                  isActuallyFollowing = followedUsers.includes(p.userHandle);
-                  if (isActuallyFollowing && user.handle) removeFollowRequest(user.handle, p.userHandle);
-                } catch (error) {
-                  console.warn('Error checking followed users:', error);
-                }
-              }
-              
-              if (isActuallyFollowing && wasFollowing) {
-                if (user?.handle) removeFollowRequest(user.handle, p.userHandle);
-                const updated = await toggleFollowForPost(userId, p.id, p.userHandle);
-                updateOne(p.id, _post => ({ ...updated }));
-                setFollowState(userId, p.userHandle, !!updated.isFollowing);
-                return;
-              }
-              
-              // Check for pending requests only if not already following
-              let hasPending = hasPendingFollowRequest(user?.handle || '', p.userHandle);
-              
-              // If there's a pending request but user is not actually following, check if it's stale
-              // (older than 1 hour) and clear it to allow a fresh request
-              if (hasPending && !isActuallyFollowing && user?.handle) {
-                const { getFollowRequests } = await import('./api/privacy');
-                const requests = getFollowRequests();
-                const matchingRequest = requests.find(
-                  req => req.fromHandle === user.handle && req.toHandle === p.userHandle && req.status === 'pending'
-                );
-                
-                if (matchingRequest && matchingRequest.timestamp) {
-                  const oneHourAgo = Date.now() - (60 * 60 * 1000);
-                  // If request is older than 1 hour, it's stale - clear it
-                  if (matchingRequest.timestamp < oneHourAgo) {
-                    console.log('Found stale follow request (older than 1 hour), clearing it:', {
-                      fromHandle: user.handle,
-                      toHandle: p.userHandle,
-                      age: Math.floor((Date.now() - matchingRequest.timestamp) / (1000 * 60 * 60)) + ' hours'
-                    });
-                    removeFollowRequest(user.handle, p.userHandle);
-                    hasPending = false; // Reset the flag
-                  }
-                }
-              }
-              
-              // Debug logging
-              console.log('+ icon clicked - Follow check:', {
-                userHandle: user?.handle,
-                postUserHandle: p.userHandle,
-                profilePrivate,
-                hasPending,
-                isFollowing: p.isFollowing,
-                isActuallyFollowing
-              });
-              
-              if (profilePrivate && hasPending && user?.handle) {
-                await Swal.fire(bottomSheet({
-                  title: 'Follow Request Already Sent',
-                  message: `You have already sent a follow request to ${p.userHandle}. You will be notified when they respond.`,
-                  icon: 'alert',
-                }));
-                return;
-              } else if (profilePrivate && !hasPending && user?.handle) {
-                // Private profile - create follow request
-                console.log('Private profile detected, creating follow request:', {
-                  userHandle: user.handle,
-                  targetHandle: p.userHandle,
-                  hasPending
-                });
-                
-                // Double-check that there's no pending request right before creating
-                const doubleCheckPending = hasPendingFollowRequest(user?.handle || '', p.userHandle);
-                if (doubleCheckPending) {
-                  console.warn('Found pending request on double-check, showing pending message instead of creating new request');
-                  await Swal.fire(bottomSheet({
-                    title: 'Follow Request Already Sent',
-                    message: `You have already sent a follow request to ${p.userHandle}. You will be notified when they respond.`,
-                    icon: 'alert',
-                  }));
-                  return;
-                }
-                
-                try {
-                  const encodedHandle = encodeURIComponent(p.userHandle);
-                  console.log('Calling toggleFollow API for private profile:', encodedHandle);
-                  const result = await toggleFollow(encodedHandle);
-                  console.log('toggleFollow API result:', result);
-                  
-                  if (result.status === 'pending' && user?.handle) {
-                    console.log('API returned pending status, creating follow request in localStorage');
-                    createFollowRequest(user.handle, p.userHandle);
-                    
-                    // Create notification - show Follow Request Sent popup
-                    try {
-                      await createNotification({
-                        type: 'follow_request',
-                        fromHandle: user.handle,
-                        toHandle: p.userHandle,
-                        message: `${user.handle} wants to follow you`
-                      });
-                    } catch (error) {
-                      console.warn('Failed to create follow request notification:', error);
-                    }
-                    
-                    await Swal.fire(bottomSheet({
-                      title: 'Follow Request Sent',
-                      message: 'Your follow request has been sent. You will be notified when they accept.',
-                      icon: 'alert',
-                    }));
-                    
-                    // Don't update isFollowing to true - keep it false for pending request
-                    updateOne(p.id, post => ({ ...post, isFollowing: false }));
-                  } else if (result.status === 'accepted' || result.following === true) {
-                    // Public profile - follow immediately (backend is authoritative)
-                    const newFollowingState = true;
-                    setFollowState(userId, p.userHandle, newFollowingState);
-                    updateOne(p.id, post => ({ ...post, isFollowing: newFollowingState }));
-                  }
-                } catch (apiError: any) {
-                  const isConnectionError = 
-                    apiError?.message === 'CONNECTION_REFUSED' ||
-                    apiError?.name === 'ConnectionRefused' ||
-                    apiError?.message?.includes('Failed to fetch');
-                  
-                  if (isConnectionError && profilePrivate && user?.handle) {
-                    console.log('Connection error detected, using mock fallback for private profile');
-                    // Check again if request was created between the initial check and now
-                    const recheckPending = hasPendingFollowRequest(user.handle, p.userHandle);
-                    if (recheckPending) {
-                      console.log('Mock fallback: Found pending request on recheck, showing pending message');
-                      await Swal.fire(bottomSheet({
-                        title: 'Follow Request Already Sent',
-                        message: `You have already sent a follow request to ${p.userHandle}. You will be notified when they respond.`,
-                        icon: 'alert',
-                      }));
-                      return;
-                    }
-                    
-                    // Mock fallback for private profile - create new request
-                    console.log('Mock fallback: Creating new follow request for', p.userHandle);
-                    if (user?.handle) {
-                      try {
-                        createFollowRequest(user.handle, p.userHandle);
-                        console.log('Follow request created successfully in localStorage');
-                      } catch (error) {
-                        console.error('Error creating follow request:', error);
-                      }
-                      
-                      try {
-                        await createNotification({
-                          type: 'follow_request',
-                          fromHandle: user.handle,
-                          toHandle: p.userHandle,
-                          message: `${user.handle} wants to follow you`
-                        });
-                      } catch (error) {
-                        console.warn('Failed to create follow request notification:', error);
-                      }
-                      
-                      await Swal.fire(bottomSheet({
-                        title: 'Follow Request Sent',
-                        message: 'Your follow request has been sent. You will be notified when they accept.',
-                        icon: 'alert',
-                      }));
-                      
-                      updateOne(p.id, post => ({ ...post, isFollowing: false }));
-                    }
-                  } else {
-                    // For other errors, fall back to normal follow
-                    const updated = await toggleFollowForPost(userId, p.id, p.userHandle);
-                    updateOne(p.id, _post => ({ ...updated }));
-                  }
-                }
-              } else {
-                // Public profile – follow via API then update UI
-                try {
-                  const result = await toggleFollow(p.userHandle);
-                  const newFollowingState =
-                    result?.status === 'accepted' || result?.following === true;
-                  setFollowState(userId, p.userHandle, newFollowingState);
-                  updateOne(p.id, post => ({ ...post, isFollowing: newFollowingState }));
-                } catch (apiError: any) {
-                  const isConnectionError =
-                    apiError?.message === 'CONNECTION_REFUSED' ||
-                    apiError?.name === 'ConnectionRefused' ||
-                    apiError?.message?.includes('Failed to fetch');
-                  const is404 = apiError?.status === 404;
-
-                  if (isConnectionError) {
-                    try {
-                      const updated = await toggleFollowForPost(userId, p.id, p.userHandle);
-                      updateOne(p.id, _post => ({ ...updated }));
-                      setFollowState(userId, p.userHandle, !!updated.isFollowing);
-                    } catch {
-                      // Keep optimistic follow (e.g. post not in global list when feed from cache)
-                      setFollowState(userId, p.userHandle, true);
-                      updateOne(p.id, post => ({ ...post, isFollowing: true }));
-                    }
-                  } else if (is404 || apiError?.status >= 400) {
-                    setFollowState(userId, p.userHandle, true);
-                    updateOne(p.id, post => ({ ...post, isFollowing: true }));
-                  } else {
-                    // Any other error (e.g. CORS, timeout on phone): persist follow locally so + works on phone too
-                    try {
-                      const updated = await toggleFollowForPost(userId, p.id, p.userHandle);
-                      updateOne(p.id, _post => ({ ...updated }));
-                      setFollowState(userId, p.userHandle, !!updated.isFollowing);
-                    } catch {
-                      setFollowState(userId, p.userHandle, true);
-                      updateOne(p.id, post => ({ ...post, isFollowing: true }));
-                    }
-                  }
-                }
-              }
-            }}
+            onFollow={() => handleMainFeedFollow(p)}
             onShare={async () => {
               setSelectedPostForShare(p);
               setShareModalOpen(true);

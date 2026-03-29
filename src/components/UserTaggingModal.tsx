@@ -103,25 +103,17 @@ export default function UserTaggingModal({ isOpen, onClose, onSelectUser, tagged
 
     return (
         <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center animate-in fade-in duration-200 p-4">
-            <svg width="0" height="0" aria-hidden="true" style={{ position: 'absolute' }}>
-                <defs>
-                    <linearGradient id="userTaggingModalIconGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" stopColor="#3b82f6" />
-                        <stop offset="100%" stopColor="#a855f7" />
-                    </linearGradient>
-                </defs>
-            </svg>
-            <div className="w-full max-w-md max-h-[80vh] rounded-2xl p-[2px] flex flex-col overflow-hidden mx-4" style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)' }}>
-                <div className="bg-gray-900 rounded-[14px] flex flex-col overflow-hidden flex-1 min-h-0">
+            <div className="w-full max-w-md max-h-[80vh] rounded-2xl p-[2px] flex flex-col overflow-hidden mx-4 border border-white/30 bg-white/90">
+                <div className="bg-black rounded-[14px] flex flex-col overflow-hidden flex-1 min-h-0">
                 {/* Header */}
-                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
                     <div className="flex items-center gap-2">
-                        <FiUser className="w-6 h-6 shrink-0" style={{ stroke: 'url(#userTaggingModalIconGrad)', fill: 'none', strokeWidth: 2 }} />
+                        <FiUser className="w-6 h-6 shrink-0 text-white" strokeWidth={2} />
                         <h2 className="text-xl font-bold text-white">Tag People</h2>
                     </div>
                     <button
                         onClick={onClose}
-                        className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-full transition-colors"
+                        className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-full transition-colors"
                         aria-label="Close"
                     >
                         <FiX className="w-6 h-6" />
@@ -129,7 +121,7 @@ export default function UserTaggingModal({ isOpen, onClose, onSelectUser, tagged
                 </div>
 
                 {/* Search Bar */}
-                <div className="px-4 py-3 border-b border-gray-800">
+                <div className="px-4 py-3 border-b border-white/10">
                     <div className="relative">
                         <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                         <input
@@ -138,7 +130,7 @@ export default function UserTaggingModal({ isOpen, onClose, onSelectUser, tagged
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             placeholder="Search by handle (e.g., sarah or sarah@artane)..."
-                            className="w-full pl-10 pr-4 py-2.5 bg-gray-800 text-white rounded-xl border border-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent text-base"
+                            className="w-full pl-10 pr-4 py-2.5 bg-black text-white rounded-xl border border-white/15 focus:outline-none focus:ring-2 focus:ring-white/30 focus:border-white/15 text-base"
                             autoFocus
                             autoComplete="off"
                             autoCorrect="off"
@@ -180,8 +172,8 @@ export default function UserTaggingModal({ isOpen, onClose, onSelectUser, tagged
                                         disabled={isTagged}
                                         className={`w-full flex items-center gap-3 p-3 rounded-xl transition-colors ${
                                             isTagged
-                                                ? 'bg-gray-800/50 cursor-not-allowed opacity-50'
-                                                : 'bg-gray-800 hover:bg-gray-700 cursor-pointer'
+                                                ? 'bg-white/5 cursor-not-allowed opacity-50 border border-white/10'
+                                                : 'bg-black border border-white/15 hover:bg-white/10 cursor-pointer'
                                         }`}
                                     >
                                         <Avatar

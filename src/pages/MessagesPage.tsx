@@ -6,6 +6,7 @@ import { BsEmojiSmile } from 'react-icons/bs';
 import { FaPaperPlane, FaExclamationCircle } from 'react-icons/fa';
 import { MdStickyNote2, MdTranslate } from 'react-icons/md';
 import Avatar from '../components/Avatar';
+import { IMessageDmBubbleShell } from '../components/IMessageDmBubbleShell';
 import { useAuth } from '../context/Auth';
 import { fetchConversation, appendMessage, editMessage, type ChatMessage, markConversationRead, deleteConversation, blockUser, muteConversation, unmuteConversation, isConversationMuted } from '../api/messages';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
@@ -21,6 +22,15 @@ import { getSocket } from '../services/socketio';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 import { parsePlacesFromBio } from '../utils/suggestedPlaces';
+import {
+    DM_RECEIVED_BG,
+    DM_INPUT_BAR,
+    DM_INPUT_FIELD,
+    type DmSentBubbleStyle,
+    getDmSentBubblePreference,
+    setDmSentBubblePreference,
+    dmSentBubbleBgClass,
+} from '../constants/dmImessageTheme';
 
 interface MessageUI extends ChatMessage {
     isFromMe: boolean;
@@ -573,6 +583,9 @@ export default function MessagesPage() {
     // Chat info modal state
     const [showChatInfo, setShowChatInfo] = useState(false);
     const [isMuted, setIsMuted] = useState(false);
+    /** Sent bubble: iMessage blue vs SMS green (persisted). */
+    const [dmSentStyle, setDmSentStyle] = useState<DmSentBubbleStyle>(() => getDmSentBubblePreference());
+    const sentBubbleBg = dmSentBubbleBgClass(dmSentStyle);
     
     // Edit state
     const [editingMessage, setEditingMessage] = useState<MessageUI | null>(null);
@@ -1943,7 +1956,7 @@ export default function MessagesPage() {
     return (
         <div className="min-h-screen bg-black text-white flex flex-col">
             {/* Header */}
-            <div className="sticky top-0 bg-black border-b border-gray-800 z-10">
+            <div className="sticky top-0 bg-black border-b border-white/[0.08] z-10">
                 <div className={`flex items-center ${compactPhone ? 'px-2.5 py-2.5' : 'px-4 py-3'}`}>
                     <button
                         onClick={() => navigate(-1)}
@@ -2032,7 +2045,9 @@ export default function MessagesPage() {
                                             }
                                         }}
                                         disabled={isFollowLoading}
-                                        className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-cyan-500 hover:bg-cyan-600 border-2 border-white dark:border-gray-900 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30"
+                                        className={`absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full border-2 border-white dark:border-gray-900 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30 ${
+                                            dmSentStyle === 'green' ? 'bg-[#34C759] hover:bg-[#2DB84E]' : 'bg-[#0A84FF] hover:bg-[#0077ED]'
+                                        }`}
                                         aria-label="Follow user"
                                     >
                                         <FiPlus className="w-3 h-3 text-white" strokeWidth={2.5} />
@@ -2113,7 +2128,7 @@ export default function MessagesPage() {
                             <React.Fragment key={msg.id}>
                                 {showTimestamp && msg.isSystemMessage && (
                                     <div className="text-center py-2">
-                                        <span className="text-xs text-gray-400">{formatTimestamp(msg.timestamp)}</span>
+                                        <span className="text-xs text-[#8E8E93]">{formatTimestamp(msg.timestamp)}</span>
                                     </div>
                                 )}
                                 {msg.isSystemMessage && (
@@ -2275,25 +2290,14 @@ export default function MessagesPage() {
                                                 }
                                                 
                                                 return (
-                                                    <div className={`flex items-start gap-2 ml-auto ${compactPhone ? 'max-w-[82%]' : 'max-w-[75%]'}`}>
-                                                        {msg.senderAvatar && (
-                                                            <Avatar
-                                                                src={msg.senderAvatar}
-                                                                name={msg.senderHandle}
-                                                                size="sm"
-                                                                className="flex-shrink-0 order-2 cursor-pointer"
-                                                                onClick={() => {
-                                                                    if (user?.handle) {
-                                                                        navigate(`/user/${encodeURIComponent(user.handle)}`);
-                                                                    }
-                                                                }}
-                                                            />
-                                                        )}
-                                                        <div className="flex flex-col items-end gap-1 flex-1 min-w-0 order-1">
-                                                            <div
+                                                    <div className={`flex items-end gap-2 ml-auto ${compactPhone ? 'max-w-[82%]' : 'max-w-[75%]'}`}>
+                                                        <div className="flex flex-col items-end gap-1 min-w-0 flex-1">
+                                                            <IMessageDmBubbleShell
+                                                                isFromMe
+                                                                tailBgClassName={sentBubbleBg}
+                                                                bubbleClassName={`${sentBubbleBg} break-words cursor-pointer select-none relative text-[15px] leading-snug antialiased ${compactPhone ? 'px-3.5 py-2' : 'px-4 py-2.5'}`}
                                                                 data-message-bubble-id={msg.id}
-                                                                className={`bg-cyan-500 rounded-2xl rounded-tr-sm break-words cursor-pointer select-none shadow-sm relative ${compactPhone ? 'px-3 py-2' : 'px-4 py-2.5'}`}
-                                                            style={{
+                                                                bubbleStyle={{
                                                                 maxWidth: '100%',
                                                                 wordBreak: 'break-word',
                                                                 overflowWrap: 'break-word',
@@ -2420,26 +2424,39 @@ export default function MessagesPage() {
                                                                     })}
                                                                 </div>
                                                             )}
-                                                            </div>
+                                                            </IMessageDmBubbleShell>
                                                             {/* Read receipt and timestamp */}
                                                             <div className={`flex items-center gap-1.5 px-1 ${compactPhone ? 'pt-0.5' : ''}`}>
-                                                                <span className={`text-gray-400 ${compactPhone ? 'text-[9px]' : 'text-[10px]'}`}>
+                                                                <span className={`text-[#8E8E93] ${compactPhone ? 'text-[9px]' : 'text-[10px]'}`}>
                                                                     {formatTimestamp(msg.timestamp)}
                                                                 </span>
                                                                 {msg.edited && (
-                                                                    <span className={`${compactPhone ? 'text-[9px]' : 'text-[10px]'} text-gray-500 italic`}>edited</span>
+                                                                    <span className={`${compactPhone ? 'text-[9px]' : 'text-[10px]'} text-[#8E8E93]/80 italic`}>edited</span>
                                                                 )}
                                                                 {/* Read receipt - double checkmark (sent), filled (delivered), blue (read) */}
                                                                 <div className="flex items-center">
-                                                                    <svg className={`w-3.5 h-3.5 ${msg.read ? 'text-blue-400' : 'text-gray-400'}`} fill="currentColor" viewBox="0 0 20 20">
+                                                                    <svg className={`w-3.5 h-3.5 ${msg.read ? (dmSentStyle === 'green' ? 'text-[#34C759]' : 'text-[#0A84FF]') : 'text-[#8E8E93]'}`} fill="currentColor" viewBox="0 0 20 20">
                                                                         <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                                                                     </svg>
-                                                                    <svg className={`w-3.5 h-3.5 -ml-1.5 ${msg.read ? 'text-blue-400' : 'text-gray-400'}`} fill="currentColor" viewBox="0 0 20 20">
+                                                                    <svg className={`w-3.5 h-3.5 -ml-1.5 ${msg.read ? (dmSentStyle === 'green' ? 'text-[#34C759]' : 'text-[#0A84FF]') : 'text-[#8E8E93]'}`} fill="currentColor" viewBox="0 0 20 20">
                                                                         <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                                                                     </svg>
                                                                 </div>
                                                             </div>
                                                         </div>
+                                                        {msg.senderAvatar && (
+                                                            <Avatar
+                                                                src={msg.senderAvatar}
+                                                                name={msg.senderHandle}
+                                                                size="sm"
+                                                                className="flex-shrink-0 cursor-pointer"
+                                                                onClick={() => {
+                                                                    if (user?.handle) {
+                                                                        navigate(`/user/${encodeURIComponent(user.handle)}`);
+                                                                    }
+                                                                }}
+                                                            />
+                                                        )}
                                                     </div>
                                                 );
                                             })()
@@ -2706,7 +2723,7 @@ export default function MessagesPage() {
                                                 }
                                                 
                                                 return (
-                                                    <div className={`flex items-start gap-2 ${compactPhone ? 'max-w-[82%]' : 'max-w-[75%]'}`}>
+                                                    <div className={`flex items-end gap-2 ${compactPhone ? 'max-w-[82%]' : 'max-w-[75%]'}`}>
                                                         {msg.senderAvatar && (
                                                             <Avatar
                                                                 src={msg.senderAvatar}
@@ -2716,10 +2733,12 @@ export default function MessagesPage() {
                                                             />
                                                         )}
                                                         <div className="flex flex-col gap-1.5 flex-1 min-w-0">
-                                                            <div
+                                                            <IMessageDmBubbleShell
+                                                                isFromMe={false}
+                                                                tailBgClassName={DM_RECEIVED_BG}
+                                                                bubbleClassName={`${DM_RECEIVED_BG} break-words cursor-pointer select-none relative text-[15px] leading-snug antialiased ${compactPhone ? 'px-3.5 py-2' : 'px-4 py-2.5'}`}
                                                                 data-message-bubble-id={msg.id}
-                                                                className={`bg-gray-800 rounded-2xl rounded-tl-sm break-words cursor-pointer select-none shadow-sm relative ${compactPhone ? 'px-3 py-2' : 'px-4 py-2.5'}`}
-                                                                style={{
+                                                                bubbleStyle={{
                                                                     maxWidth: '100%',
                                                                     wordBreak: 'break-word',
                                                                     overflowWrap: 'break-word',
@@ -2846,14 +2865,14 @@ export default function MessagesPage() {
                                                                         })}
                                                                     </div>
                                                                 )}
-                                                                </div>
+                                                            </IMessageDmBubbleShell>
                                                             {/* Timestamp */}
                                                             <div className={`flex items-center gap-1.5 px-1 ${compactPhone ? 'pt-0.5' : ''}`}>
-                                                                <span className={`text-gray-400 ${compactPhone ? 'text-[9px]' : 'text-[10px]'}`}>
+                                                                <span className={`text-[#8E8E93] ${compactPhone ? 'text-[9px]' : 'text-[10px]'}`}>
                                                                     {formatTimestamp(msg.timestamp)}
                                                                 </span>
                                                                 {msg.edited && (
-                                                                    <span className={`${compactPhone ? 'text-[9px]' : 'text-[10px]'} text-gray-500 italic`}>edited</span>
+                                                                    <span className={`${compactPhone ? 'text-[9px]' : 'text-[10px]'} text-[#8E8E93]/80 italic`}>edited</span>
                                                                 )}
                                                             </div>
                                                         </div>
@@ -2869,27 +2888,31 @@ export default function MessagesPage() {
                     
                     {/* Typing Indicator */}
                     {isTyping && (
-                        <div className={`flex items-start gap-2 ${compactPhone ? 'max-w-[82%]' : 'max-w-[75%]'}`}>
+                        <div className={`flex items-end gap-2 ${compactPhone ? 'max-w-[82%]' : 'max-w-[75%]'}`}>
                             <Avatar
                                 src={otherUserAvatar}
                                 name={handle || ''}
                                 size="sm"
                                 className="flex-shrink-0"
                             />
-                            <div className="bg-gray-800 rounded-2xl rounded-tl-sm px-4 py-3">
+                            <IMessageDmBubbleShell
+                                isFromMe={false}
+                                tailBgClassName={DM_RECEIVED_BG}
+                                bubbleClassName={`${DM_RECEIVED_BG} px-4 py-3 relative`}
+                            >
                                 <div className="flex items-center gap-1">
                                     <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                                     <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                                     <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                                 </div>
-                            </div>
+                            </IMessageDmBubbleShell>
                         </div>
                     )}
                 </div>
             </div>
 
-            {/* Input Bar */}
-            <div className={`fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 z-20 ${compactPhone ? 'pb-[max(2px,env(safe-area-inset-bottom))]' : ''}`}>
+            {/* Input bar — grayscale chrome only (bubbles keep blue/green preference) */}
+            <div className={`fixed bottom-0 left-0 right-0 ${DM_INPUT_BAR} border-t border-white/10 z-20 ${compactPhone ? 'pb-[max(2px,env(safe-area-inset-bottom))]' : ''}`}>
                 {/* Reply Preview - show screenshot/thumbnail when replying to shared post (MP4 or image) */}
                 {replyingTo && (() => {
                     const replyPostId = replyingTo.postId || extractPostId(replyingTo.text || '');
@@ -2897,12 +2920,12 @@ export default function MessagesPage() {
                     const replyThumbUrl = replyingTo.imageUrl || replyPost?.mediaUrl;
                     const isVideoReply = replyPost?.mediaType === 'video';
                     return (
-                        <div className={`${compactPhone ? 'px-2.5 pt-2.5 pb-2' : 'px-4 pt-3 pb-2'} border-b border-gray-800 bg-gray-800/50`}>
+                        <div className={`${compactPhone ? 'px-2.5 pt-2.5 pb-2' : 'px-4 pt-3 pb-2'} border-b border-white/10 bg-black`}>
                             <div className="flex items-center justify-between gap-3">
                                 <div className="flex items-center gap-3 flex-1 min-w-0">
-                                    <div className="w-0.5 h-12 bg-cyan-500 rounded-full flex-shrink-0" />
+                                    <div className="w-px h-11 rounded-full flex-shrink-0 bg-white/25" />
                                     {replyThumbUrl && (
-                                        <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 border border-gray-700 bg-black">
+                                        <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 border border-white/15 bg-zinc-950">
                                             {isVideoReply ? (
                                                 <video src={replyThumbUrl} className="w-full h-full object-cover" muted playsInline preload="metadata" />
                                             ) : (
@@ -2911,17 +2934,18 @@ export default function MessagesPage() {
                                         </div>
                                     )}
                                     <div className="flex-1 min-w-0">
-                                        <div className="text-xs text-gray-400 mb-0.5">Replying to {replyingTo.senderHandle}</div>
-                                        <div className="text-sm text-gray-300 truncate">
+                                        <div className="text-[11px] uppercase tracking-wide text-neutral-500 mb-0.5">Replying to {replyingTo.senderHandle}</div>
+                                        <div className="text-sm text-neutral-200 truncate">
                                             {replyThumbUrl ? (isVideoReply ? 'Video' : 'Photo') : (replyingTo.text || 'Message')}
                                         </div>
                                     </div>
                                 </div>
                                 <button
                                     onClick={handleCancelReply}
-                                    className="p-1 hover:bg-gray-700 rounded-full transition-colors flex-shrink-0"
+                                    type="button"
+                                    className="p-2 rounded-full text-neutral-400 hover:bg-white/10 hover:text-white transition-colors flex-shrink-0"
                                 >
-                                    <FiX className="w-4 h-4 text-gray-400" />
+                                    <FiX className="w-4 h-4" />
                                 </button>
                             </div>
                         </div>
@@ -2929,47 +2953,50 @@ export default function MessagesPage() {
                 })()}
                 {/* Edit Preview */}
                 {editingMessage && (
-                    <div className={`${compactPhone ? 'px-2.5 pt-2.5 pb-2' : 'px-4 pt-3 pb-2'} border-b border-gray-800 bg-gray-800/50`}>
+                    <div className={`${compactPhone ? 'px-2.5 pt-2.5 pb-2' : 'px-4 pt-3 pb-2'} border-b border-white/10 bg-black`}>
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2 flex-1 min-w-0">
-                                <span className="text-xs text-gray-400">Editing message</span>
+                                <span className="text-[11px] uppercase tracking-wide text-neutral-500">Editing message</span>
                             </div>
                             <button
+                                type="button"
                                 onClick={handleCancelEdit}
-                                className="p-1 hover:bg-gray-700 rounded-full transition-colors flex-shrink-0"
+                                className="p-2 rounded-full text-neutral-400 hover:bg-white/10 hover:text-white transition-colors flex-shrink-0"
                             >
-                                <FiX className="w-4 h-4 text-gray-400" />
+                                <FiX className="w-4 h-4" />
                             </button>
                         </div>
                     </div>
                 )}
                 {/* Image compose: preview + caption before sending */}
                 {imageCompose && (
-                    <div className={`${compactPhone ? 'px-2.5 py-2' : 'px-3 py-2 sm:px-4'} border-b border-gray-800 bg-gray-800/50`}>
+                    <div className={`${compactPhone ? 'px-2.5 py-2' : 'px-3 py-2 sm:px-4'} border-b border-white/10 bg-black`}>
                         <div className="flex items-center gap-3">
-                            <div className="flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden bg-gray-700">
+                            <div className="flex-shrink-0 w-14 h-14 rounded-xl overflow-hidden border border-white/10 bg-zinc-950">
                                 <img src={imageCompose.imageUrl} alt="Preview" className="w-full h-full object-cover" />
                             </div>
-                            <div className="flex-1 min-w-0 flex flex-col gap-1">
+                            <div className="flex-1 min-w-0 flex flex-col gap-2">
                                 <input
                                     type="text"
                                     value={imageCompose.caption}
                                     onChange={(e) => setImageCompose(prev => prev ? { ...prev, caption: e.target.value } : null)}
                                     placeholder="Add a caption..."
-                                    className="w-full bg-gray-700 text-white placeholder-gray-400 px-3 py-2 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400"
+                                    className={`w-full ${DM_INPUT_FIELD} text-white placeholder:text-neutral-500 px-3 py-2.5 rounded-2xl text-sm border border-white/10 shadow-inner shadow-black/40 focus:outline-none focus:ring-1 focus:ring-white/25 focus:border-white/20`}
                                     autoFocus
                                 />
                                 <div className="flex items-center gap-2">
                                     <button
+                                        type="button"
                                         onClick={handleSendImageWithCaption}
-                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-cyan-500 text-white text-sm font-medium hover:bg-cyan-600 transition-colors"
+                                        className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-white text-black text-sm font-medium hover:bg-neutral-200 transition-colors"
                                     >
                                         <FiSend className="w-4 h-4" />
                                         Send
                                     </button>
                                     <button
+                                        type="button"
                                         onClick={handleCancelImageCompose}
-                                        className="p-1.5 hover:bg-gray-700 rounded-full transition-colors text-gray-400"
+                                        className="p-2 rounded-full text-neutral-400 hover:bg-white/10 hover:text-white transition-colors"
                                         aria-label="Cancel"
                                     >
                                         <FiX className="w-4 h-4" />
@@ -2979,16 +3006,18 @@ export default function MessagesPage() {
                         </div>
                     </div>
                 )}
-                <div className={`flex items-center ${compactPhone ? 'gap-1.5 px-2.5 py-2.5' : 'gap-2 px-3 py-3 sm:gap-3 sm:px-4'}`}>
+                <div className={`flex items-end ${compactPhone ? 'gap-2 px-2.5 py-3' : 'gap-2.5 px-3 py-3.5 sm:px-4'}`}>
                     {!messageText.trim() && (
                         <button
+                            type="button"
                             onClick={handleImageClick}
-                            className={`${compactPhone ? 'p-1.5' : 'p-2'} hover:bg-gray-800 rounded-full transition-colors flex-shrink-0`}
+                            className={`${compactPhone ? 'p-2' : 'p-2.5'} rounded-full text-neutral-400 hover:text-neutral-200 hover:bg-white/5 active:bg-white/10 transition-colors flex-shrink-0`}
+                            aria-label="Add photo"
                         >
-                            <IoMdPhotos className="w-5 h-5 sm:w-6 sm:h-6 text-gray-400" />
+                            <IoMdPhotos className="w-5 h-5 sm:w-6 sm:h-6" />
                         </button>
                     )}
-                    <div className="flex-1 flex items-center gap-2 min-w-0">
+                    <div className="flex-1 flex items-center gap-2 min-w-0 pb-px">
                         <input
                             type="text"
                             value={messageText}
@@ -3002,15 +3031,17 @@ export default function MessagesPage() {
                                     handleSend();
                                 }
                             }}
-                            placeholder={editingMessage ? "Edit message..." : replyingTo ? "Message..." : "Message..."}
-                            className={`flex-1 bg-gray-800 text-white placeholder-gray-500 rounded-full focus:outline-none focus:ring-2 focus:ring-cyan-400 min-w-0 ${
-                                compactPhone ? 'px-2.5 py-2 text-[13px]' : 'px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base'
+                            placeholder={editingMessage ? "Edit message…" : replyingTo ? "Message…" : "Message…"}
+                            className={`flex-1 min-h-[44px] ${DM_INPUT_FIELD} text-white placeholder:text-neutral-500 rounded-[24px] border border-white/[0.12] shadow-inner shadow-black/30 focus:outline-none focus:ring-1 focus:ring-white/20 focus:border-white/[0.18] min-w-0 ${
+                                compactPhone ? 'px-4 py-2.5 text-[15px]' : 'px-5 py-3 text-[15px] sm:text-base'
                             }`}
                         />
                         {messageText.trim() && (
                             <button
+                                type="button"
                                 onClick={handleSend}
-                                className="text-cyan-400 hover:text-cyan-300 transition-colors flex-shrink-0"
+                                className="flex-shrink-0 rounded-full bg-white p-2.5 text-black hover:bg-neutral-200 active:scale-[0.98] transition-all shadow-sm"
+                                aria-label="Send"
                             >
                                 <FiSend className="w-5 h-5 sm:w-6 sm:h-6" />
                             </button>
@@ -3415,6 +3446,37 @@ export default function MessagesPage() {
                                 <div className="flex-1">
                                     <h4 className="text-white font-semibold text-lg">{handle}</h4>
                                     <p className="text-gray-400 text-sm">Active now</p>
+                                </div>
+                            </div>
+
+                            <div className="mb-6">
+                                <p className="text-xs text-gray-500 mb-2">Your sent messages</p>
+                                <p className="text-[11px] text-gray-500 mb-2">iMessage blue or SMS-style green (saved on this device).</p>
+                                <div className="flex rounded-xl overflow-hidden border border-gray-700 p-0.5 bg-black/30">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setDmSentStyle('blue');
+                                            setDmSentBubblePreference('blue');
+                                        }}
+                                        className={`flex-1 py-2.5 text-sm font-medium rounded-lg transition-colors ${
+                                            dmSentStyle === 'blue' ? 'bg-[#0A84FF] text-white' : 'text-gray-400 hover:text-white'
+                                        }`}
+                                    >
+                                        Blue
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setDmSentStyle('green');
+                                            setDmSentBubblePreference('green');
+                                        }}
+                                        className={`flex-1 py-2.5 text-sm font-medium rounded-lg transition-colors ${
+                                            dmSentStyle === 'green' ? 'bg-[#34C759] text-white' : 'text-gray-400 hover:text-white'
+                                        }`}
+                                    >
+                                        Green
+                                    </button>
                                 </div>
                             </div>
 

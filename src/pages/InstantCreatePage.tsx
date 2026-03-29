@@ -1471,7 +1471,7 @@ export default function InstantCreatePage() {
                     </button>
                     <button 
                         title={dualCamera ? 'Disable dual camera' : 'Enable dual camera'} 
-                        className={`p-2 rounded-lg ${dualCamera ? 'bg-purple-600/80' : 'bg-black/60'} text-white hover:bg-black/80 active:scale-95 transition-all duration-200`}
+                        className={`p-2 rounded-lg ${dualCamera ? 'bg-white/25' : 'bg-black/60'} text-white hover:bg-black/80 active:scale-95 transition-all duration-200`}
                         onClick={toggleDualCamera}
                     >
                         <FiCopy className="w-4 h-4" />
@@ -1762,7 +1762,7 @@ export default function InstantCreatePage() {
                                         previewVideoRef.current.currentTime = Math.max(0, Math.min(newTime, videoDuration));
                                     }}
                                 >
-                                    <div className="h-full bg-gradient-to-r from-cyan-400 to-cyan-600 transition-all duration-100"
+                                    <div className="h-full bg-gradient-to-r from-neutral-300 to-neutral-500 transition-all duration-100"
                                         style={{ width: `${videoDuration > 0 ? (currentTime / videoDuration) * 100 : 0}%` }}
                                     />
                                 </div>
@@ -1934,10 +1934,10 @@ export default function InstantCreatePage() {
                                 const t2 = setTimeout(() => setCountdown(1), 2000);
                                 const t3 = setTimeout(() => { setCountdown(null); startRecording(); }, 3000);
                             }}
-                            className="w-20 h-20 rounded-full bg-gradient-to-br from-[#22d3ee] to-[#06b6d4] border-4 border-white shadow-2xl flex items-center justify-center hover:scale-105 transition-all duration-300 active:scale-95"
+                            className="w-20 h-20 rounded-full bg-gradient-to-br from-neutral-200 to-neutral-500 border-4 border-white shadow-2xl flex items-center justify-center hover:scale-105 transition-all duration-300 active:scale-95"
                             aria-label={recordingMode === 'photo' ? 'Take photo' : 'Record video'}
                         >
-                            <FiCircle className="w-10 h-10 text-white" fill="white" />
+                            <FiCircle className="w-10 h-10 text-black" fill="currentColor" />
                         </button>
                     ) : (
                         <button
@@ -1978,7 +1978,7 @@ export default function InstantCreatePage() {
                         
                         {/* Title */}
                         <div className="flex items-center justify-center gap-2 mb-6">
-                            <EffectsIcon className="w-5 h-5 text-red-400" />
+                            <EffectsIcon className="w-5 h-5 text-white/80" />
                             <h3 className="text-white text-xl font-bold">Effects</h3>
                         </div>
                         
@@ -1991,16 +1991,16 @@ export default function InstantCreatePage() {
                                     console.log('Boomerang option clicked');
                                     setShowEffectsCard(false);
                                 }}
-                                className="group flex items-center gap-4 p-4 bg-gray-800/80 hover:bg-purple-600/20 rounded-xl border border-gray-700/50 hover:border-purple-500/50 transition-all duration-200 active:scale-98"
+                                className="group flex items-center gap-4 p-4 bg-gray-800/80 hover:bg-white/10 rounded-xl border border-gray-700/50 hover:border-white/30 transition-all duration-200 active:scale-98"
                             >
-                                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-purple-500/30 to-purple-600/20 flex items-center justify-center group-hover:scale-110 transition-transform shadow-lg shadow-purple-500/20">
-                                    <FiRefreshCw className="w-7 h-7 text-purple-400" />
+                                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-white/15 to-white/5 flex items-center justify-center group-hover:scale-110 transition-transform shadow-lg shadow-black/30">
+                                    <FiRefreshCw className="w-7 h-7 text-white/90" />
                                 </div>
                                 <div className="flex-1 text-left">
                                     <div className="text-white font-semibold text-base mb-0.5">Boomerang</div>
                                     <div className="text-gray-400 text-sm">Record a boomerang video</div>
                                 </div>
-                                <div className="text-gray-500 group-hover:text-purple-400 transition-colors">
+                                <div className="text-gray-500 group-hover:text-white/80 transition-colors">
                                     <FiArrowLeft className="w-5 h-5 rotate-180" />
                                 </div>
                             </button>
@@ -2061,16 +2061,16 @@ export default function InstantCreatePage() {
                                     }
                                     setShowEffectsCard(false);
                                 }}
-                                className="group flex items-center gap-4 p-4 bg-gray-800/80 hover:bg-green-600/20 rounded-xl border border-gray-700/50 hover:border-green-500/50 transition-all duration-200 active:scale-98"
+                                className="group flex items-center gap-4 p-4 bg-gray-800/80 hover:bg-white/10 rounded-xl border border-gray-700/50 hover:border-white/30 transition-all duration-200 active:scale-98"
                             >
-                                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-green-500/30 to-green-600/20 flex items-center justify-center group-hover:scale-110 transition-transform shadow-lg shadow-green-500/20">
-                                    <FiEdit3 className="w-7 h-7 text-green-400" />
+                                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-white/15 to-white/5 flex items-center justify-center group-hover:scale-110 transition-transform shadow-lg shadow-black/30">
+                                    <FiEdit3 className="w-7 h-7 text-white/90" />
                                 </div>
                                 <div className="flex-1 text-left">
                                     <div className="text-white font-semibold text-base mb-0.5">Edit</div>
                                     <div className="text-gray-400 text-sm">Edit video settings</div>
                                 </div>
-                                <div className="text-gray-500 group-hover:text-green-400 transition-colors">
+                                <div className="text-gray-500 group-hover:text-white/80 transition-colors">
                                     <FiArrowLeft className="w-5 h-5 rotate-180" />
                                 </div>
                             </button>
@@ -2094,7 +2094,7 @@ export default function InstantCreatePage() {
                         
                         {/* Title */}
                         <div className="flex items-center justify-center gap-2 mb-6">
-                            <FiFilter className="w-5 h-5 text-purple-400" />
+                            <FiFilter className="w-5 h-5 text-white/80" />
                             <h3 className="text-white text-xl font-bold">Filters</h3>
                         </div>
                         
@@ -2106,7 +2106,7 @@ export default function InstantCreatePage() {
                                     onClick={() => setSelectedFilter(filter)}
                                     className={`flex-shrink-0 px-4 py-3 rounded-xl font-medium text-sm transition-all duration-200 ${
                                         selectedFilter === filter
-                                            ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/50'
+                                            ? 'bg-white text-black shadow-lg shadow-white/20'
                                             : 'bg-gray-800/80 text-gray-300 hover:bg-gray-700'
                                     }`}
                                 >
@@ -2124,7 +2124,7 @@ export default function InstantCreatePage() {
                             className="w-full flex items-center justify-between p-4 bg-gray-800/80 hover:bg-gray-700 rounded-xl border border-gray-700/50 transition-all duration-200"
                         >
                             <div className="flex items-center gap-3">
-                                <FiSliders className="w-5 h-5 text-blue-400" />
+                                <FiSliders className="w-5 h-5 text-white/80" />
                                 <div className="text-left">
                                     <div className="text-white font-semibold text-base">Adjustments</div>
                                     <div className="text-gray-400 text-sm">Brightness, Contrast, Saturation, Hue</div>
@@ -2151,7 +2151,7 @@ export default function InstantCreatePage() {
                         
                         {/* Title */}
                         <div className="flex items-center justify-center gap-2 mb-6">
-                            <FiSliders className="w-5 h-5 text-blue-400" />
+                            <FiSliders className="w-5 h-5 text-white/80" />
                             <h3 className="text-white text-xl font-bold">Adjustments</h3>
                         </div>
                         
@@ -2161,10 +2161,10 @@ export default function InstantCreatePage() {
                             <div className="space-y-2">
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-2">
-                                        <FiZap className="w-4 h-4 text-yellow-400" />
+                                        <FiZap className="w-4 h-4 text-white/70" />
                                         <span className="text-sm font-medium text-gray-200">Brightness</span>
                                     </div>
-                                    <span className="text-xs font-semibold text-blue-400 bg-blue-500/20 px-2 py-0.5 rounded">
+                                    <span className="text-xs font-semibold text-white/90 bg-white/10 px-2 py-0.5 rounded">
                                         {Math.round(brightness * 100)}%
                                     </span>
                                 </div>
@@ -2175,9 +2175,9 @@ export default function InstantCreatePage() {
                                     step={0.01} 
                                     value={brightness} 
                                     onChange={(e) => setBrightness(parseFloat(e.target.value))}
-                                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-neutral-300"
                                     style={{
-                                        background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${((brightness - 0.4) / 1.4) * 100}%, #374151 ${((brightness - 0.4) / 1.4) * 100}%, #374151 100%)`
+                                        background: `linear-gradient(to right, #e5e7eb 0%, #e5e7eb ${((brightness - 0.4) / 1.4) * 100}%, #374151 ${((brightness - 0.4) / 1.4) * 100}%, #374151 100%)`
                                     }}
                                 />
                             </div>
@@ -2186,10 +2186,10 @@ export default function InstantCreatePage() {
                             <div className="space-y-2">
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-2">
-                                        <FiLayers className="w-4 h-4 text-purple-400" />
+                                        <FiLayers className="w-4 h-4 text-white/70" />
                                         <span className="text-sm font-medium text-gray-200">Contrast</span>
                                     </div>
-                                    <span className="text-xs font-semibold text-purple-400 bg-purple-500/20 px-2 py-0.5 rounded">
+                                    <span className="text-xs font-semibold text-white/90 bg-white/10 px-2 py-0.5 rounded">
                                         {Math.round(contrast * 100)}%
                                     </span>
                                 </div>
@@ -2200,9 +2200,9 @@ export default function InstantCreatePage() {
                                     step={0.01} 
                                     value={contrast} 
                                     onChange={(e) => setContrast(parseFloat(e.target.value))}
-                                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-neutral-300"
                                     style={{
-                                        background: `linear-gradient(to right, #a855f7 0%, #a855f7 ${((contrast - 0.5) / 1.5) * 100}%, #374151 ${((contrast - 0.5) / 1.5) * 100}%, #374151 100%)`
+                                        background: `linear-gradient(to right, #e5e7eb 0%, #e5e7eb ${((contrast - 0.5) / 1.5) * 100}%, #374151 ${((contrast - 0.5) / 1.5) * 100}%, #374151 100%)`
                                     }}
                                 />
                             </div>
@@ -2211,10 +2211,10 @@ export default function InstantCreatePage() {
                             <div className="space-y-2">
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-2">
-                                        <FiDroplet className="w-4 h-4 text-pink-400" />
+                                        <FiDroplet className="w-4 h-4 text-white/70" />
                                         <span className="text-sm font-medium text-gray-200">Saturation</span>
                                     </div>
-                                    <span className="text-xs font-semibold text-pink-400 bg-pink-500/20 px-2 py-0.5 rounded">
+                                    <span className="text-xs font-semibold text-white/90 bg-white/10 px-2 py-0.5 rounded">
                                         {Math.round(saturation * 100)}%
                                     </span>
                                 </div>
@@ -2225,9 +2225,9 @@ export default function InstantCreatePage() {
                                     step={0.01} 
                                     value={saturation} 
                                     onChange={(e) => setSaturation(parseFloat(e.target.value))}
-                                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-pink-500"
+                                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-neutral-300"
                                     style={{
-                                        background: `linear-gradient(to right, #ec4899 0%, #ec4899 ${(saturation / 2.0) * 100}%, #374151 ${(saturation / 2.0) * 100}%, #374151 100%)`
+                                        background: `linear-gradient(to right, #e5e7eb 0%, #e5e7eb ${(saturation / 2.0) * 100}%, #374151 ${(saturation / 2.0) * 100}%, #374151 100%)`
                                     }}
                                 />
                             </div>
@@ -2236,10 +2236,10 @@ export default function InstantCreatePage() {
                             <div className="space-y-2">
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-2">
-                                        <FiGrid className="w-4 h-4 text-green-400" />
+                                        <FiGrid className="w-4 h-4 text-white/70" />
                                         <span className="text-sm font-medium text-gray-200">Hue</span>
                                     </div>
-                                    <span className="text-xs font-semibold text-green-400 bg-green-500/20 px-2 py-0.5 rounded">
+                                    <span className="text-xs font-semibold text-white/90 bg-white/10 px-2 py-0.5 rounded">
                                         {hue > 0 ? '+' : ''}{Math.round(hue * 100)}%
                                     </span>
                                 </div>
@@ -2250,9 +2250,9 @@ export default function InstantCreatePage() {
                                     step={0.01} 
                                     value={hue} 
                                     onChange={(e) => setHue(parseFloat(e.target.value))}
-                                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-green-500"
+                                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-neutral-300"
                                     style={{
-                                        background: `linear-gradient(to right, #10b981 0%, #10b981 ${((hue + 1.0) / 2.0) * 100}%, #374151 ${((hue + 1.0) / 2.0) * 100}%, #374151 100%)`
+                                        background: `linear-gradient(to right, #e5e7eb 0%, #e5e7eb ${((hue + 1.0) / 2.0) * 100}%, #374151 ${((hue + 1.0) / 2.0) * 100}%, #374151 100%)`
                                     }}
                                 />
                             </div>
@@ -2358,7 +2358,7 @@ export default function InstantCreatePage() {
                                         }));
                                     }
                                 }}
-                                className="w-full p-4 rounded-xl bg-gradient-to-br from-green-500/20 to-white/10 border border-green-500/30 hover:border-green-500/50 transition-all text-left"
+                                className="w-full p-4 rounded-xl bg-white/5 border border-white/15 hover:border-white/35 transition-all text-left"
                             >
                                 <div className="text-white font-semibold mb-1">Create a carousel</div>
                                 <div className="text-gray-400 text-sm">Create a multi-clip carousel post</div>
@@ -2370,7 +2370,7 @@ export default function InstantCreatePage() {
                                     setShowGazetteerMenu(false);
                                     gazetteerCameraRollInputRef.current?.click();
                                 }}
-                                className="w-full p-4 rounded-xl bg-gradient-to-br from-green-500/20 to-white/10 border border-green-500/30 hover:border-green-500/50 transition-all text-left"
+                                className="w-full p-4 rounded-xl bg-white/5 border border-white/15 hover:border-white/35 transition-all text-left"
                             >
                                 <div className="text-white font-semibold mb-1">Create a scenes</div>
                                 <div className="text-gray-400 text-sm">Select from camera roll</div>
@@ -2382,7 +2382,7 @@ export default function InstantCreatePage() {
                                     setShowGazetteerMenu(false);
                                     navigate('/clip', { state: { storyMode: true, storyAudience } });
                                 }}
-                                className="w-full p-4 rounded-xl bg-gradient-to-br from-green-500/20 to-white/10 border border-green-500/30 hover:border-green-500/50 transition-all text-left"
+                                className="w-full p-4 rounded-xl bg-white/5 border border-white/15 hover:border-white/35 transition-all text-left"
                             >
                                 <div className="text-white font-semibold mb-1">Create a 24hr clip</div>
                                 <div className="text-gray-400 text-sm">Create a 24-hour story clip</div>
@@ -2647,7 +2647,7 @@ export default function InstantCreatePage() {
                                     // TODO: Apply vertical split layout
                                     console.log('Vertical split selected');
                                 }}
-                                className={`p-3 rounded-xl ${selectedLayout === 'vertical' ? 'bg-purple-600 shadow-lg shadow-purple-500/50' : 'bg-black/60'} text-white hover:bg-purple-500/80 active:scale-95 transition-all duration-200`}
+                                className={`p-3 rounded-xl ${selectedLayout === 'vertical' ? 'bg-white text-black shadow-lg shadow-white/25' : 'bg-black/60'} text-white hover:bg-white/15 active:scale-95 transition-all duration-200`}
                             >
                                 <VerticalSplitIcon className="w-6 h-6" selected={selectedLayout === 'vertical'} />
                             </button>
@@ -2658,7 +2658,7 @@ export default function InstantCreatePage() {
                                     // TODO: Apply horizontal split layout
                                     console.log('Horizontal split selected');
                                 }}
-                                className={`p-3 rounded-xl ${selectedLayout === 'horizontal' ? 'bg-purple-600 shadow-lg shadow-purple-500/50' : 'bg-black/60'} text-white hover:bg-purple-500/80 active:scale-95 transition-all duration-200`}
+                                className={`p-3 rounded-xl ${selectedLayout === 'horizontal' ? 'bg-white text-black shadow-lg shadow-white/25' : 'bg-black/60'} text-white hover:bg-white/15 active:scale-95 transition-all duration-200`}
                             >
                                 <HorizontalSplitIcon className="w-6 h-6" selected={selectedLayout === 'horizontal'} />
                             </button>
@@ -2669,7 +2669,7 @@ export default function InstantCreatePage() {
                                     // TODO: Apply 2x2 grid layout
                                     console.log('2x2 grid selected');
                                 }}
-                                className={`p-3 rounded-xl ${selectedLayout === 'grid2x2' ? 'bg-purple-600 shadow-lg shadow-purple-500/50' : 'bg-black/60'} text-white hover:bg-purple-500/80 active:scale-95 transition-all duration-200`}
+                                className={`p-3 rounded-xl ${selectedLayout === 'grid2x2' ? 'bg-white text-black shadow-lg shadow-white/25' : 'bg-black/60'} text-white hover:bg-white/15 active:scale-95 transition-all duration-200`}
                             >
                                 <Grid2x2Icon className="w-6 h-6" selected={selectedLayout === 'grid2x2'} />
                             </button>
@@ -2680,7 +2680,7 @@ export default function InstantCreatePage() {
                                     // TODO: Apply 3x3 grid layout
                                     console.log('3x3 grid selected');
                                 }}
-                                className={`p-3 rounded-xl ${selectedLayout === 'grid3x3' ? 'bg-purple-600 shadow-lg shadow-purple-500/50' : 'bg-black/60'} text-white hover:bg-purple-500/80 active:scale-95 transition-all duration-200`}
+                                className={`p-3 rounded-xl ${selectedLayout === 'grid3x3' ? 'bg-white text-black shadow-lg shadow-white/25' : 'bg-black/60'} text-white hover:bg-white/15 active:scale-95 transition-all duration-200`}
                             >
                                 <Grid3x3Icon className="w-6 h-6" selected={selectedLayout === 'grid3x3'} />
                             </button>
@@ -2694,7 +2694,7 @@ export default function InstantCreatePage() {
                                 onClick={() => {
                                     bgInputRef.current?.click();
                                 }}
-                                className={`p-3 rounded-xl ${greenEnabled ? 'bg-green-600 shadow-lg shadow-green-500/50' : 'bg-black/60'} text-white hover:bg-green-500/80 active:scale-95 transition-all duration-200 flex items-center justify-center`}
+                                className={`p-3 rounded-xl ${greenEnabled ? 'bg-white text-black shadow-lg shadow-white/25' : 'bg-black/60'} text-white hover:bg-white/15 active:scale-95 transition-all duration-200 flex items-center justify-center`}
                             >
                                 <FiImage className="w-5 h-5" />
                             </button>
@@ -2708,7 +2708,7 @@ export default function InstantCreatePage() {
                                     setBgUrl(list[presetIdxRef.current]);
                                     setGreenEnabled(true);
                                 }}
-                                className="p-3 rounded-xl bg-black/60 text-white hover:bg-purple-600/80 active:scale-95 transition-all duration-200 flex items-center justify-center"
+                                className="p-3 rounded-xl bg-black/60 text-white hover:bg-white/15 active:scale-95 transition-all duration-200 flex items-center justify-center"
                             >
                                 <FiDroplet className="w-5 h-5" />
                             </button>
@@ -2723,7 +2723,7 @@ export default function InstantCreatePage() {
                                                 <FiSliders className="w-4 h-4 text-gray-300" />
                                                 <span className="text-xs font-medium text-gray-200">Blur</span>
                                             </div>
-                                            <span className="text-xs font-semibold text-green-400 bg-green-500/20 px-2 py-0.5 rounded">{bgBlurPx}</span>
+                                            <span className="text-xs font-semibold text-white/90 bg-white/10 px-2 py-0.5 rounded">{bgBlurPx}</span>
                                         </div>
                                         <input 
                                             type="range" 
@@ -2732,9 +2732,9 @@ export default function InstantCreatePage() {
                                             step={1} 
                                             value={bgBlurPx} 
                                             onChange={(e) => setBgBlurPx(parseInt(e.target.value))}
-                                            className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-green-500"
+                                            className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-neutral-300"
                                             style={{
-                                                background: `linear-gradient(to right, #10b981 0%, #10b981 ${(bgBlurPx / 10) * 100}%, #374151 ${(bgBlurPx / 10) * 100}%, #374151 100%)`
+                                                background: `linear-gradient(to right, #e5e7eb 0%, #e5e7eb ${(bgBlurPx / 10) * 100}%, #374151 ${(bgBlurPx / 10) * 100}%, #374151 100%)`
                                             }}
                                         />
                                     </div>
@@ -2746,7 +2746,7 @@ export default function InstantCreatePage() {
                                                 <FiLayers className="w-4 h-4 text-gray-300" />
                                                 <span className="text-xs font-medium text-gray-200">Feather</span>
                                             </div>
-                                            <span className="text-xs font-semibold text-green-400 bg-green-500/20 px-2 py-0.5 rounded">{featherPx}</span>
+                                            <span className="text-xs font-semibold text-white/90 bg-white/10 px-2 py-0.5 rounded">{featherPx}</span>
                                         </div>
                                         <input 
                                             type="range" 
@@ -2755,9 +2755,9 @@ export default function InstantCreatePage() {
                                             step={1} 
                                             value={featherPx} 
                                             onChange={(e) => setFeatherPx(parseInt(e.target.value))}
-                                            className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-green-500"
+                                            className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-neutral-300"
                                             style={{
-                                                background: `linear-gradient(to right, #10b981 0%, #10b981 ${(featherPx / 8) * 100}%, #374151 ${(featherPx / 8) * 100}%, #374151 100%)`
+                                                background: `linear-gradient(to right, #e5e7eb 0%, #e5e7eb ${(featherPx / 8) * 100}%, #374151 ${(featherPx / 8) * 100}%, #374151 100%)`
                                             }}
                                         />
                                     </div>

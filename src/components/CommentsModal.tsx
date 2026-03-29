@@ -2,10 +2,21 @@ import React from 'react';
 import { FiX, FiSend, FiMessageSquare, FiThumbsUp, FiChevronDown, FiChevronUp, FiSmile } from 'react-icons/fi';
 import { useAuth } from '../context/Auth';
 import { useOnline } from '../hooks/useOnline';
-import { fetchComments, addComment, addReply, toggleCommentLike, toggleReplyLike } from '../api/posts';
+import {
+    fetchComments,
+    addComment,
+    addReply,
+    toggleCommentLike,
+    toggleReplyLike,
+    getPostById,
+    toggleFollowForPost,
+    setFollowState,
+} from '../api/posts';
+import { toggleFollow } from '../api/client';
+import { isLaravelApiEnabled, isViteDevMode } from '../config/runtimeEnv';
 import { enqueue } from '../utils/mutationQueue';
 import Avatar from './Avatar';
-import type { Comment } from '../types';
+import type { Comment, Post } from '../types';
 import { getAvatarForHandle } from '../api/users';
 
 interface CommentsModalProps {
@@ -25,6 +36,20 @@ function formatTime(timestamp: number): string {
     if (minutes < 60) return `${minutes}m`;
     if (hours < 24) return `${hours}h`;
     return `${days}d`;
+}
+
+/** Relative time for post caption footer (e.g. "4 days ago"). */
+function formatPostRelative(timestamp: number): string {
+    const diff = Date.now() - timestamp;
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+    if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+    if (days < 7) return `${days} day${days === 1 ? '' : 's'} ago`;
+    const weeks = Math.floor(days / 7);
+    return `${weeks} week${weeks === 1 ? '' : 's'} ago`;
 }
 
 function CommentItem({
@@ -291,26 +316,97 @@ function CommentInput({
 export default function CommentsModal({ postId, isOpen, onClose }: CommentsModalProps) {
     const { user } = useAuth();
     const online = useOnline();
+    const [post, setPost] = React.useState<Post | null>(null);
     const [comments, setComments] = React.useState<Comment[]>([]);
     const [loading, setLoading] = React.useState(false);
     const [submitting, setSubmitting] = React.useState(false);
+    const [followBusy, setFollowBusy] = React.useState(false);
 
-    // Load comments when modal opens
+    // Load post (author, caption) + comments when modal opens
     React.useEffect(() => {
-        if (isOpen) {
-            loadComments();
-        }
-    }, [isOpen, postId]);
+        if (!isOpen || !postId) return;
+        let cancelled = false;
+        (async () => {
+            setLoading(true);
+            setPost(null);
+            try {
+                const [fetchedPost, fetchedComments] = await Promise.all([
+                    getPostById(postId, user?.id),
+                    fetchComments(postId),
+                ]);
+                if (cancelled) return;
+                setPost(fetchedPost);
+                setComments(fetchedComments);
+            } catch (error) {
+                console.error('Failed to load comments sheet:', error);
+                if (!cancelled) {
+                    setPost(null);
+                    setComments([]);
+                }
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [isOpen, postId, user?.id]);
 
-    const loadComments = async () => {
-        setLoading(true);
+    const handleFollowAuthor = async () => {
+        if (!user?.id || !post || user.handle === post.userHandle) return;
+        setFollowBusy(true);
+        const authorHandle = post.userHandle;
+        /** Match FeedCard: real API unless mock-only dev mode. */
+        const useLaravelFollow =
+            isLaravelApiEnabled() && !isViteDevMode();
+
         try {
-            const fetchedComments = await fetchComments(postId);
-            setComments(fetchedComments);
-        } catch (error) {
-            console.error('Failed to load comments:', error);
+            let newFollowing: boolean;
+
+            if (useLaravelFollow) {
+                try {
+                    const result = await toggleFollow(authorHandle);
+                    newFollowing =
+                        result?.status === 'accepted' || result?.following === true;
+                    setFollowState(user.id, authorHandle, newFollowing);
+                } catch (apiError: any) {
+                    const isConnection =
+                        apiError?.message === 'CONNECTION_REFUSED' ||
+                        apiError?.name === 'ConnectionRefused' ||
+                        apiError?.message?.includes('Failed to fetch');
+                    if (isConnection) {
+                        const updated = await toggleFollowForPost(
+                            user.id,
+                            postId,
+                            authorHandle
+                        );
+                        newFollowing = !!updated.isFollowing;
+                    } else {
+                        throw apiError;
+                    }
+                }
+            } else {
+                const updated = await toggleFollowForPost(
+                    user.id,
+                    postId,
+                    authorHandle
+                );
+                newFollowing = !!updated.isFollowing;
+            }
+
+            setPost((prev) =>
+                prev ? { ...prev, isFollowing: newFollowing } : null
+            );
+            // Keeps feed cards, stories rail, and other listeners in sync with profile/+ button
+            window.dispatchEvent(
+                new CustomEvent('followToggled', {
+                    detail: { handle: authorHandle, isFollowing: newFollowing },
+                })
+            );
+        } catch (e) {
+            console.error('Follow toggle failed:', e);
         } finally {
-            setLoading(false);
+            setFollowBusy(false);
         }
     };
 
@@ -480,6 +576,11 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
 
     if (!isOpen) return null;
 
+    const storyText = (post?.caption || post?.text || '').trim();
+    const authorHandle = post?.userHandle ?? '';
+    const showFollow =
+        Boolean(user?.handle && authorHandle && user.handle !== authorHandle);
+
     return (
         <div className="fixed inset-0 z-[150] flex items-end md:items-center justify-center">
             {/* Backdrop */}
@@ -490,8 +591,13 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
 
             {/* Modal - always light theme (no dark mode) */}
             <div className="relative bg-white w-full h-full md:max-w-md md:h-[80vh] rounded-none md:rounded-2xl md:rounded-b-2xl rounded-t-2xl shadow-xl flex flex-col text-gray-900">
-                {/* Header - match Scenes/TikTok style: "X comments" + close */}
-                <div className="flex items-center justify-between p-4 border-b border-gray-200">
+                {/* Mobile drag affordance */}
+                <div className="flex justify-center pt-2 pb-0.5 flex-shrink-0 md:hidden">
+                    <div className="w-10 h-1 bg-gray-300 rounded-full" aria-hidden />
+                </div>
+
+                {/* Header: comment count + close */}
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
                     <h2 className="text-base font-semibold text-gray-900">
                         {comments.length} {comments.length === 1 ? 'comment' : 'comments'}
                     </h2>
@@ -504,38 +610,88 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                     </button>
                 </div>
 
-                {/* Comments List - Scenes-style spacing */}
-                <div className="flex-1 overflow-y-auto p-4 bg-white">
+                {/* Scrollable: author row → story text → comments (Instagram-style order) */}
+                <div className="flex-1 overflow-y-auto min-h-0 bg-white">
                     {loading ? (
-                        <div className="flex items-center justify-center py-8">
-                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600"></div>
-                        </div>
-                    ) : comments.length === 0 ? (
-                        <div className="text-center py-8 text-gray-500">
-                            <FiMessageSquare size={48} className="mx-auto mb-4 opacity-50" />
-                            <p>No comments yet</p>
-                            <p className="text-sm">Be the first to comment!</p>
+                        <div className="flex items-center justify-center py-12">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
                         </div>
                     ) : (
-                        <div className="space-y-4">
-                            {comments.map(comment => (
-                                <CommentItem
-                                    key={comment.id}
-                                    comment={comment}
-                                    onLikeComment={handleLikeComment}
-                                    onLikeReply={handleLikeReply}
-                                    onReply={handleReplyToComment}
-                                    userId={user?.id || ''}
-                                    postId={postId}
+                        <>
+                            {/* 1 — Post author + Follow */}
+                            <div className="flex items-center gap-3 px-4 pt-4 pb-3 border-b border-gray-100">
+                                <Avatar
+                                    src={authorHandle ? getAvatarForHandle(authorHandle) : undefined}
+                                    name={authorHandle.split('@')[0] || 'User'}
+                                    size="md"
+                                    className="flex-shrink-0 ring-1 ring-gray-200"
                                 />
-                            ))}
-                        </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="font-semibold text-sm text-gray-900 truncate">
+                                        {authorHandle || 'Unknown'}
+                                    </p>
+                                </div>
+                                {showFollow && (
+                                    <button
+                                        type="button"
+                                        onClick={handleFollowAuthor}
+                                        disabled={followBusy}
+                                        className={`flex-shrink-0 px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 ${
+                                            post?.isFollowing
+                                                ? 'bg-gray-200 text-gray-800'
+                                                : 'bg-gray-900 text-white hover:bg-gray-800'
+                                        }`}
+                                    >
+                                        {post?.isFollowing ? 'Following' : 'Follow'}
+                                    </button>
+                                )}
+                            </div>
+
+                            {/* 2 — Story / caption */}
+                            {storyText ? (
+                                <div className="px-4 py-3 border-b border-gray-100">
+                                    <p className="text-sm text-gray-900 whitespace-pre-wrap leading-relaxed">
+                                        {storyText}
+                                    </p>
+                                    {post?.createdAt != null && (
+                                        <p className="text-xs text-gray-500 mt-2">
+                                            {formatPostRelative(post.createdAt)}
+                                        </p>
+                                    )}
+                                </div>
+                            ) : null}
+
+                            {/* 3 — Comments list */}
+                            <div className="p-4">
+                                {comments.length === 0 ? (
+                                    <div className="text-center py-8 text-gray-500">
+                                        <FiMessageSquare size={48} className="mx-auto mb-4 opacity-50" />
+                                        <p>No comments yet</p>
+                                        <p className="text-sm">Be the first to comment!</p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-4">
+                                        {comments.map(comment => (
+                                            <CommentItem
+                                                key={comment.id}
+                                                comment={comment}
+                                                onLikeComment={handleLikeComment}
+                                                onLikeReply={handleLikeReply}
+                                                onReply={handleReplyToComment}
+                                                userId={user?.id || ''}
+                                                postId={postId}
+                                            />
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </>
                     )}
                 </div>
 
                 {/* Comment Input */}
                 <CommentInput
-                    placeholder="Write a comment..."
+                    placeholder="Join the conversation..."
                     onSubmit={handleAddComment}
                     isLoading={submitting}
                 />

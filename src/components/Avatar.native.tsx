@@ -48,9 +48,9 @@ export default function Avatar({
 
     const body = hasStory ? (
         <LinearGradient
-            colors={['#22d3ee', '#14b8a6']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
+            colors={['#2dd4bf', '#0ea5e9', '#d946ef']}
+            start={{ x: 0, y: 1 }}
+            end={{ x: 1, y: 0 }}
             style={[
                 styles.storyRing,
                 {

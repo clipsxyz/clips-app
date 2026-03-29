@@ -56,15 +56,18 @@ export default function Avatar({
         ? (e: React.MouseEvent<HTMLButtonElement>) => onClick(e)
         : undefined;
 
-    const storyRingStyle = { background: 'linear-gradient(135deg, #22d3ee 0%, #14b8a6 100%)' };
+    // Match Inbox / Notifications stories row: `bg-gradient-to-tr from-teal-400 via-sky-500 to-fuchsia-500` + black inner gap
+    const storyRingStyle = {
+        background: 'linear-gradient(to top right, #2dd4bf, #0ea5e9, #d946ef)',
+    };
 
     const inner = hasStory ? (
         <>
             <div className="absolute -inset-0.5 rounded-full p-[2px]" style={storyRingStyle}>
-                <div className="w-full h-full rounded-full bg-white dark:bg-gray-950" />
+                <div className="w-full h-full rounded-full bg-black" />
             </div>
             <div
-                className="absolute inset-[2px] rounded-full overflow-hidden flex items-center justify-center bg-white dark:bg-gray-950"
+                className="absolute inset-[2px] rounded-full overflow-hidden flex items-center justify-center bg-black"
                 style={isNumericSize ? { width: dim, height: dim } : undefined}
             >
                 {avatarContent}

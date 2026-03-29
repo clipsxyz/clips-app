@@ -1481,10 +1481,10 @@ export default function CreatePage() {
             {showLocationMetaSheet && (
                 <div className="fixed inset-0 z-[100] flex items-end bg-black/50 dark:bg-black/60" onClick={() => setShowLocationMetaSheet(false)}>
                     <div
-                        className="w-full max-h-[85vh] overflow-y-auto bg-white dark:bg-[#1a1a1a] rounded-t-2xl border-t border-gray-200 dark:border-white/10 shadow-2xl"
+                        className="w-full max-h-[85vh] overflow-y-auto bg-white dark:bg-black rounded-t-2xl border-t border-gray-200 dark:border-white/10 shadow-2xl"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <div className="sticky top-0 z-10 bg-white dark:bg-[#1a1a1a] border-b border-gray-100 dark:border-white/10 px-4 py-3 flex items-center justify-between">
+                        <div className="sticky top-0 z-10 bg-white dark:bg-black border-b border-gray-100 dark:border-white/10 px-4 py-3 flex items-center justify-between">
                             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Add details</h2>
                             <button
                                 type="button"
@@ -1503,7 +1503,7 @@ export default function CreatePage() {
                                     value={location}
                                     onChange={(e) => setLocation(e.target.value)}
                                     placeholder="Add location"
-                                    className="w-full px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-[#1f1f23] border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-brand-500/40"
+                                    className="w-full px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-black border border-gray-200 dark:border-white/15 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-white/30 dark:focus:ring-white/30"
                                 />
                             </div>
                             <div>
@@ -1513,7 +1513,7 @@ export default function CreatePage() {
                                     value={venue}
                                     onChange={(e) => setVenue(e.target.value)}
                                     placeholder="Add venue (e.g. café, stadium)"
-                                    className="w-full px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-[#1f1f23] border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-brand-500/40"
+                                    className="w-full px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-black border border-gray-200 dark:border-white/15 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-white/30 dark:focus:ring-white/30"
                                 />
                             </div>
                             <div>
@@ -1523,7 +1523,7 @@ export default function CreatePage() {
                                     value={landmark}
                                     onChange={(e) => setLandmark(e.target.value)}
                                     placeholder="Add landmark (e.g. Phoenix Park, river)"
-                                    className="w-full px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-[#1f1f23] border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-brand-500/40"
+                                    className="w-full px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-black border border-gray-200 dark:border-white/15 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-white/30 dark:focus:ring-white/30"
                                 />
                             </div>
                         </div>
@@ -1598,7 +1598,7 @@ export default function CreatePage() {
                                     }}
                                 >
                                     <div
-                                        className={`p-[2px] rounded-full transition-shadow duration-200 ${isCentered ? (isPulsing ? 'shadow-[0_0_30px_rgba(168,85,247,0.45)]' : 'shadow-[0_0_24px_rgba(255,255,255,0.22)]') : ''}`}
+                                        className={`p-[2px] rounded-full transition-shadow duration-200 ${isCentered ? (isPulsing ? 'shadow-[0_0_30px_rgba(255,255,255,0.35)]' : 'shadow-[0_0_24px_rgba(255,255,255,0.22)]') : ''}`}
                                         style={{ background: isCentered ? '#ffffff' : 'rgba(255,255,255,0.78)' }}
                                     >
                                         <div className={`${isCentered ? 'w-11 h-11' : 'w-10 h-10'} rounded-full bg-black flex items-center justify-center transition-all duration-200`}>

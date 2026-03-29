@@ -141,7 +141,7 @@ export default function TextOnlyPostDetailsPage() {
                 undefined, // templateId
                 undefined, // mediaItems
                 undefined, // bannerText
-                { color: '#ffffff', size: 'medium', background: '#000000' }, // textStyle
+                { color: '#ffffff', size: 'medium', background: '#1e3a8a' }, // textStyle (visible on dark feed; not pure black)
                 taggedUsers.length > 0 ? taggedUsers : undefined, // taggedUsers
                 undefined, // videoCaptionsEnabled
                 undefined, // videoCaptionText

@@ -1766,12 +1766,12 @@ export default function ClipPage() {
           {/* Link Modal */}
           {showLinkModal && (
             <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm">
-              <div className="bg-gray-900 rounded-2xl p-6 max-w-md w-full mx-4 border border-gray-700">
+              <div className="bg-black rounded-2xl p-6 max-w-md w-full mx-4 border border-white/15">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-bold text-white">Add Link</h2>
                   <button
                     onClick={() => setShowLinkModal(false)}
-                    className="p-2 hover:bg-gray-800 rounded-full transition-colors"
+                    className="p-2 hover:bg-white/10 rounded-full transition-colors"
                   >
                     <FiX className="w-5 h-5 text-white" />
                   </button>
@@ -1797,7 +1797,7 @@ export default function ClipPage() {
                       type="text"
                       name="name"
                       placeholder="e.g., Check out my website"
-                      className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      className="w-full px-4 py-3 bg-black border border-white/15 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-white/30 focus:border-white/15"
                       maxLength={50}
                     />
                   </div>
@@ -1810,20 +1810,20 @@ export default function ClipPage() {
                       name="url"
                       placeholder="https://example.com"
                       required
-                      className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      className="w-full px-4 py-3 bg-black border border-white/15 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-white/30 focus:border-white/15"
                     />
                   </div>
                   <div className="flex gap-3">
                     <button
                       type="button"
                       onClick={() => setShowLinkModal(false)}
-                      className="flex-1 px-4 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl font-medium transition-colors"
+                      className="flex-1 px-4 py-3 bg-black border border-white/20 hover:bg-white/10 text-white rounded-xl font-medium transition-colors"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
-                      className="flex-1 px-4 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
+                      className="flex-1 px-4 py-3 bg-white text-black rounded-xl font-medium hover:bg-gray-200 transition-colors"
                     >
                       Add Link
                     </button>
@@ -1840,7 +1840,7 @@ export default function ClipPage() {
               onClick={() => setShowStoryLocationSheet(false)}
             >
               <div
-                className="w-full max-h-[75vh] bg-[#050816] rounded-t-2xl border-t border-white/10 p-4 pt-3"
+                className="w-full max-h-[75vh] bg-black rounded-t-2xl border-t border-white/10 p-4 pt-3"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-3" />
@@ -1868,7 +1868,7 @@ export default function ClipPage() {
                       value={storyLocation}
                       onChange={(e) => setStoryLocation(e.target.value)}
                       placeholder="e.g. Dublin, Ireland"
-                      className="w-full px-4 py-2.5 rounded-xl bg-gray-900 text-white placeholder-gray-500 border border-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-4 py-2.5 rounded-xl bg-black text-white placeholder-gray-500 border border-white/15 focus:ring-2 focus:ring-white/30 focus:border-white/15"
                       maxLength={60}
                     />
                   </div>
@@ -1882,12 +1882,12 @@ export default function ClipPage() {
                       value={venue}
                       onChange={(e) => setVenue(e.target.value)}
                       placeholder="e.g. Phoenix Park, Local café"
-                      className="w-full px-4 py-2.5 rounded-xl bg-gray-900 text-white placeholder-gray-500 border border-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-4 py-2.5 rounded-xl bg-black text-white placeholder-gray-500 border border-white/15 focus:ring-2 focus:ring-white/30 focus:border-white/15"
                       maxLength={60}
                     />
                   </div>
 
-                  <div className="rounded-2xl bg-gray-900/60 border border-white/10 p-3 text-xs text-gray-400">
+                  <div className="rounded-2xl bg-black border border-white/10 p-3 text-xs text-gray-400">
                     Your location and venue help other users discover where this story is from.
                   </div>
 
@@ -1955,16 +1955,15 @@ export default function ClipPage() {
         {/* Main Upload Area - fills remaining space, no scroll */}
         <div className="flex-1 flex items-center justify-center min-h-0 overflow-hidden px-6">
           <div className="text-center max-w-md">
-            {/* Camera Icon with Gradient Border (blue–purple) */}
+            {/* Camera Icon with grayscale gradient border */}
             <button
               onClick={handleCameraClick}
               className="relative mx-auto mb-6 w-32 h-32 cursor-pointer hover:scale-105 transition-transform"
             >
-              {/* Outer border: linear gradient blue → purple */}
               <div
                 className="w-32 h-32 rounded-full p-[3px] absolute top-0 left-0"
                 style={{
-                  background: 'linear-gradient(135deg, #3b82f6, #a855f7)',
+                  background: 'linear-gradient(135deg, #404040, #d4d4d4)',
                 }}
               >
                 {/* Inner container */}
@@ -1974,7 +1973,7 @@ export default function ClipPage() {
                 
                 {/* + icon overlay sitting on the border (same style as follow button) */}
                 <div 
-                  className="absolute w-5 h-5 rounded-full bg-blue-500 hover:bg-blue-600 border-2 border-white flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30 pointer-events-none"
+                  className="absolute w-5 h-5 rounded-full bg-neutral-600 hover:bg-neutral-500 border-2 border-white flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30 pointer-events-none"
                   style={{
                     bottom: '6px',
                     right: '6px',
@@ -1988,7 +1987,7 @@ export default function ClipPage() {
               <div
                 className="absolute top-0 left-0 w-32 h-32 rounded-full opacity-30 pointer-events-none"
                 style={{
-                  background: 'radial-gradient(circle, rgba(59,130,246,0.5) 0%, rgba(16,185,129,0.5) 50%, transparent 70%)',
+                  background: 'radial-gradient(circle, rgba(255,255,255,0.35) 0%, rgba(115,115,115,0.25) 50%, transparent 70%)',
                   animation: 'pulse 2s ease-in-out infinite',
                 }}
               />
@@ -2012,7 +2011,7 @@ export default function ClipPage() {
                   <div 
                     className="px-5 py-3.5 rounded-2xl relative overflow-visible"
                     style={{
-                      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 50%, #667eea 100%)',
+                      background: 'linear-gradient(135deg, #404040 0%, #737373 50%, #525252 100%)',
                       border: '2.5px solid rgba(255, 255, 255, 0.9)',
                       boxShadow: '0 6px 16px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.3)'
                     }}
@@ -2030,7 +2029,7 @@ export default function ClipPage() {
                     </div>
                     
                     {/* Plus icon on border */}
-                    <div className="absolute -top-1 -right-1 w-4 h-4 bg-blue-500 border-2 border-white rounded-full flex items-center justify-center shadow-lg z-20">
+                    <div className="absolute -top-1 -right-1 w-4 h-4 bg-neutral-600 border-2 border-white rounded-full flex items-center justify-center shadow-lg z-20">
                       <span className="text-white text-[8px] font-bold">+</span>
                     </div>
                 </div>
@@ -2403,7 +2402,7 @@ export default function ClipPage() {
         {showTextCard && (
           <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm">
             <div className="rounded-2xl p-[2px] max-w-md w-full mx-4 border border-white/30 bg-white/90">
-              <div className="bg-gray-900 rounded-[14px] p-6 w-full">
+              <div className="bg-black rounded-[14px] p-6 w-full">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <FiType className="w-6 h-6 shrink-0 text-white" />
@@ -2411,7 +2410,7 @@ export default function ClipPage() {
                 </div>
                 <button
                   onClick={() => setShowTextCard(false)}
-                  className="p-2 hover:bg-gray-800 rounded-full transition-colors"
+                  className="p-2 hover:bg-white/10 rounded-full transition-colors"
                 >
                   <FiX className="w-5 h-5 text-white" />
                 </button>
@@ -2461,7 +2460,7 @@ export default function ClipPage() {
                   <textarea
                     name="text"
                     placeholder="Enter your text..."
-                    className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-white/40 focus:border-white/40 resize-none"
+                    className="w-full px-4 py-3 bg-black border border-white/15 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-white/40 focus:border-white/15 resize-none"
                     rows={3}
                     maxLength={100}
                     required
@@ -2509,7 +2508,7 @@ export default function ClipPage() {
                   <button
                     type="button"
                     onClick={() => setShowTextCard(false)}
-                    className="flex-1 px-4 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl font-medium transition-colors"
+                    className="flex-1 px-4 py-3 bg-black border border-white/20 hover:bg-white/10 text-white rounded-xl font-medium transition-colors"
                   >
                     Cancel
                   </button>
@@ -2530,7 +2529,7 @@ export default function ClipPage() {
         {showLocationCard && (
           <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm">
             <div className="rounded-2xl p-[2px] max-w-md w-full mx-4 border border-white/30 bg-white/90">
-              <div className="bg-gray-900 rounded-[14px] p-6 w-full">
+              <div className="bg-black rounded-[14px] p-6 w-full">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <FiMapPin className="w-6 h-6 shrink-0 text-white" />
@@ -2538,7 +2537,7 @@ export default function ClipPage() {
                 </div>
                 <button
                   onClick={() => setShowLocationCard(false)}
-                  className="p-2 hover:bg-gray-800 rounded-full transition-colors"
+                  className="p-2 hover:bg-white/10 rounded-full transition-colors"
                 >
                   <FiX className="w-5 h-5 text-white" />
                 </button>
@@ -2584,7 +2583,7 @@ export default function ClipPage() {
                     type="text"
                     name="location"
                     placeholder="e.g., Dublin, Ireland"
-                    className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-white/40 focus:border-white/40"
+                    className="w-full px-4 py-3 bg-black border border-white/15 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-white/40 focus:border-white/15"
                     maxLength={50}
                     required
                   />
@@ -2593,7 +2592,7 @@ export default function ClipPage() {
                   <button
                     type="button"
                     onClick={() => setShowLocationCard(false)}
-                    className="flex-1 px-4 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl font-medium transition-colors"
+                    className="flex-1 px-4 py-3 bg-black border border-white/20 hover:bg-white/10 text-white rounded-xl font-medium transition-colors"
                   >
                     Cancel
                   </button>
@@ -2614,7 +2613,7 @@ export default function ClipPage() {
         {showLinkCard && (
           <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm">
             <div className="rounded-2xl p-[2px] max-w-md w-full mx-4 border border-white/30 bg-white/90">
-              <div className="bg-gray-900 rounded-[14px] p-6 w-full">
+              <div className="bg-black rounded-[14px] p-6 w-full">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <FiLink className="w-6 h-6 shrink-0 text-white" />
@@ -2622,7 +2621,7 @@ export default function ClipPage() {
                 </div>
                 <button
                   onClick={() => setShowLinkCard(false)}
-                  className="p-2 hover:bg-gray-800 rounded-full transition-colors"
+                  className="p-2 hover:bg-white/10 rounded-full transition-colors"
                 >
                   <FiX className="w-5 h-5 text-white" />
                 </button>
@@ -2648,7 +2647,7 @@ export default function ClipPage() {
                     type="text"
                     name="name"
                     placeholder="e.g., Check out my website"
-                    className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-white/40 focus:border-white/40"
+                    className="w-full px-4 py-3 bg-black border border-white/15 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-white/40 focus:border-white/15"
                     maxLength={50}
                   />
                 </div>
@@ -2661,14 +2660,14 @@ export default function ClipPage() {
                     name="url"
                     placeholder="https://example.com"
                     required
-                    className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-white/40 focus:border-white/40"
+                    className="w-full px-4 py-3 bg-black border border-white/15 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-white/40 focus:border-white/15"
                   />
                 </div>
                 <div className="flex gap-3">
                   <button
                     type="button"
                     onClick={() => setShowLinkCard(false)}
-                    className="flex-1 px-4 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl font-medium transition-colors"
+                    className="flex-1 px-4 py-3 bg-black border border-white/20 hover:bg-white/10 text-white rounded-xl font-medium transition-colors"
                   >
                     Cancel
                   </button>
@@ -2771,7 +2770,7 @@ export default function ClipPage() {
                     }
                   }
                 }}
-                className="px-3 py-1.5 bg-purple-600/80 backdrop-blur-sm text-white rounded-full hover:bg-purple-600 transition-colors text-xs font-semibold flex items-center gap-1.5"
+                className="px-3 py-1.5 bg-white/20 backdrop-blur-sm text-white rounded-full hover:bg-white/30 transition-colors text-xs font-semibold flex items-center gap-1.5"
                 title="Show Full Scenes"
               >
                 <FiMaximize2 className="w-3.5 h-3.5" />
@@ -2798,12 +2797,12 @@ export default function ClipPage() {
               className="max-w-full max-h-full w-auto h-auto"
             />
             {filteredFromFlow && (
-              <span className="absolute top-4 left-4 z-10 px-2 py-1 rounded-full text-[11px] font-semibold bg-purple-600 text-white shadow">Filtered</span>
+              <span className="absolute top-4 left-4 z-10 px-2 py-1 rounded-full text-[11px] font-semibold bg-neutral-800 text-white shadow border border-white/20">Filtered</span>
             )}
             {/* Question Reply Overlay - Show the response */}
             {replyToQuestion && (
               <div className="absolute top-20 left-1/2 -translate-x-1/2 z-20 pointer-events-none max-w-[80%]">
-                <div className="bg-white/95 backdrop-blur-md rounded-2xl p-4 shadow-2xl border-2 border-purple-500">
+                <div className="bg-white/95 backdrop-blur-md rounded-2xl p-4 shadow-2xl border-2 border-neutral-400">
                   <p className="text-xs text-gray-500 mb-1 font-semibold">Question:</p>
                   <p className="text-sm text-gray-700 mb-3 font-medium">{replyToQuestion.question || 'Ask me anything'}</p>
                   <p className="text-xs text-gray-500 mb-1 font-semibold">Response from {replyToQuestion.responderHandle}:</p>
@@ -2855,12 +2854,12 @@ export default function ClipPage() {
               />
             </div>
             {filteredFromFlow && (
-              <span className="absolute top-4 left-4 z-10 px-2 py-1 rounded-full text-[11px] font-semibold bg-purple-600 text-white shadow">Filtered</span>
+              <span className="absolute top-4 left-4 z-10 px-2 py-1 rounded-full text-[11px] font-semibold bg-neutral-800 text-white shadow border border-white/20">Filtered</span>
             )}
             {/* Question Reply Overlay - Show the response */}
             {replyToQuestion && (
               <div className="absolute top-20 left-1/2 -translate-x-1/2 z-20 pointer-events-none max-w-[80%]">
-                <div className="bg-white/95 backdrop-blur-md rounded-2xl p-4 shadow-2xl border-2 border-purple-500">
+                <div className="bg-white/95 backdrop-blur-md rounded-2xl p-4 shadow-2xl border-2 border-neutral-400">
                   <p className="text-xs text-gray-500 mb-1 font-semibold">Question:</p>
                   <p className="text-sm text-gray-700 mb-3 font-medium">{replyToQuestion.question || 'Ask me anything'}</p>
                   <p className="text-xs text-gray-500 mb-1 font-semibold">Response from {replyToQuestion.responderHandle}:</p>
@@ -2898,7 +2897,7 @@ export default function ClipPage() {
             {/* Add Text Button */}
             <button
               onClick={() => setShowTextEditor(!showTextEditor)}
-              className="w-full py-4 rounded-2xl bg-gray-900 text-white font-semibold hover:bg-gray-800 transition-colors flex items-center justify-center gap-3"
+              className="w-full py-4 rounded-2xl bg-black border border-white/15 text-white font-semibold hover:bg-white/10 transition-colors flex items-center justify-center gap-3"
             >
               <FiType className="w-5 h-5" />
               {showTextEditor ? 'Hide Text Editor' : 'Add Text'}
@@ -2913,7 +2912,7 @@ export default function ClipPage() {
                   onChange={(e) => setText(e.target.value)}
                   placeholder={replyToQuestion ? "Type your reply..." : "Type your story text..."}
                   maxLength={200}
-                  className="w-full h-32 p-4 rounded-2xl bg-gray-900 text-white placeholder-gray-500 resize-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  className="w-full h-32 p-4 rounded-2xl bg-black border border-white/15 text-white placeholder-gray-500 resize-none focus:ring-2 focus:ring-white/30 focus:border-white/15"
                 />
                 <div className="text-right text-sm text-gray-500">{text.length}/200</div>
 
@@ -2972,7 +2971,7 @@ export default function ClipPage() {
                 value={storyLocation}
                 onChange={(e) => setStoryLocation(e.target.value)}
                 placeholder="Where are you?"
-                className="w-full px-4 py-3 rounded-xl bg-gray-900 text-white placeholder-gray-500 focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                className="w-full px-4 py-3 rounded-xl bg-black border border-white/15 text-white placeholder-gray-500 focus:ring-2 focus:ring-white/30 focus:border-white/15"
               />
             </div>
 
@@ -2987,12 +2986,12 @@ export default function ClipPage() {
                 value={venue}
                 onChange={(e) => setVenue(e.target.value)}
                 placeholder="e.g. café, stadium, park"
-                className="w-full px-4 py-3 rounded-xl bg-gray-900 text-white placeholder-gray-500 focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                className="w-full px-4 py-3 rounded-xl bg-black border border-white/15 text-white placeholder-gray-500 focus:ring-2 focus:ring-white/30 focus:border-white/15"
               />
             </div>
 
             {/* Info */}
-            <div className="rounded-2xl bg-gray-900/50 p-4 text-center">
+            <div className="rounded-2xl bg-black border border-white/10 p-4 text-center">
               <div className="text-sm text-gray-400">
                 📸 Your story will be visible for 24 hours
               </div>
@@ -3000,12 +2999,12 @@ export default function ClipPage() {
 
             {/* Share Button */}
             {videoSegments.length > 1 && (
-              <div className="mb-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
-                <p className="text-sm text-blue-700 dark:text-blue-400 font-medium">
+              <div className="mb-3 p-3 bg-white/5 rounded-xl border border-white/15">
+                <p className="text-sm text-white/90 font-medium">
                   📹 Your video will be split into {videoSegments.length} clips (15 seconds each)
                 </p>
                 {isPostingSegments && (
-                  <p className="text-xs text-blue-600 dark:text-blue-500 mt-1">
+                  <p className="text-xs text-white/60 mt-1">
                     Posting clips... ({currentSegmentIndex + 1} of {videoSegments.length})
                   </p>
                 )}
@@ -3014,7 +3013,7 @@ export default function ClipPage() {
             <button
               onClick={handleSubmit}
               disabled={isUploading || isPostingSegments}
-              className="w-full py-4 rounded-2xl bg-gradient-to-r from-green-500 via-blue-500 to-blue-600 text-white font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-all shadow-lg hover:scale-[1.02] active:scale-[0.98]"
+              className="w-full py-4 rounded-2xl bg-white text-black font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-neutral-200 transition-all shadow-lg hover:scale-[1.02] active:scale-[0.98]"
             >
               {isPostingSegments
                 ? `Posting ${videoSegments.length} Clips... (${currentSegmentIndex + 1}/${videoSegments.length})`
@@ -3035,7 +3034,7 @@ export default function ClipPage() {
           onClick={() => setShowStoryLocationSheet(false)}
         >
           <div
-            className="w-full max-h-[75vh] bg-[#050816] rounded-t-2xl border-t border-white/10 p-4 pt-3"
+            className="w-full max-h-[75vh] bg-black rounded-t-2xl border-t border-white/10 p-4 pt-3"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-3" />
@@ -3064,7 +3063,7 @@ export default function ClipPage() {
                   value={storyLocation}
                   onChange={(e) => setStoryLocation(e.target.value)}
                   placeholder="e.g. Dublin, Ireland"
-                  className="w-full px-4 py-2.5 rounded-xl bg-gray-900 text-white placeholder-gray-500 border border-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-4 py-2.5 rounded-xl bg-black text-white placeholder-gray-500 border border-white/15 focus:ring-2 focus:ring-white/30 focus:border-white/15"
                   maxLength={60}
                 />
               </div>
@@ -3079,12 +3078,12 @@ export default function ClipPage() {
                   value={venue}
                   onChange={(e) => setVenue(e.target.value)}
                   placeholder="e.g. Phoenix Park, Local café"
-                  className="w-full px-4 py-2.5 rounded-xl bg-gray-900 text-white placeholder-gray-500 border border-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-4 py-2.5 rounded-xl bg-black text-white placeholder-gray-500 border border-white/15 focus:ring-2 focus:ring-white/30 focus:border-white/15"
                   maxLength={60}
                 />
               </div>
 
-              <div className="rounded-2xl bg-gray-900/60 border border-white/10 p-3 text-xs text-gray-400">
+              <div className="rounded-2xl bg-black border border-white/10 p-3 text-xs text-gray-400">
                 Your location and venue help other users discover where this story is from.
               </div>
 
@@ -3106,7 +3105,7 @@ export default function ClipPage() {
           onClick={() => setShowStoryAudienceSheet(false)}
         >
           <div
-            className="w-full max-h-[75vh] bg-[#050816] rounded-t-2xl border-t border-white/10 p-4 pt-3"
+            className="w-full max-h-[75vh] bg-black rounded-t-2xl border-t border-white/10 p-4 pt-3"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-3" />
@@ -3207,12 +3206,12 @@ export default function ClipPage() {
       {/* Link Modal - Accessible from all modes */}
       {showLinkModal && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm">
-          <div className="bg-gray-900 rounded-2xl p-6 max-w-md w-full mx-4 border border-gray-700">
+          <div className="bg-black rounded-2xl p-6 max-w-md w-full mx-4 border border-white/15">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold text-white">Add Link</h2>
               <button
                 onClick={() => setShowLinkModal(false)}
-                className="p-2 hover:bg-gray-800 rounded-full transition-colors"
+                className="p-2 hover:bg-white/10 rounded-full transition-colors"
               >
                 <FiX className="w-5 h-5 text-white" />
               </button>
@@ -3238,7 +3237,7 @@ export default function ClipPage() {
                   type="text"
                   name="name"
                   placeholder="e.g., Check out my website"
-                  className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="w-full px-4 py-3 bg-black border border-white/15 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-white/30 focus:border-white/15"
                   maxLength={50}
                 />
               </div>
@@ -3251,20 +3250,20 @@ export default function ClipPage() {
                   name="url"
                   placeholder="https://example.com"
                   required
-                  className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="w-full px-4 py-3 bg-black border border-white/15 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-white/30 focus:border-white/15"
                 />
               </div>
               <div className="flex gap-3">
                 <button
                   type="button"
                   onClick={() => setShowLinkModal(false)}
-                  className="flex-1 px-4 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl font-medium transition-colors"
+                  className="flex-1 px-4 py-3 bg-black border border-white/20 hover:bg-white/10 text-white rounded-xl font-medium transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
+                  className="flex-1 px-4 py-3 bg-white text-black rounded-xl font-medium hover:bg-gray-200 transition-colors"
                 >
                   Add Link
                 </button>

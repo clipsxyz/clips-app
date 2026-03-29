@@ -137,6 +137,8 @@ export default function ViewProfilePage() {
     const [debouncedConnectionsSearch, setDebouncedConnectionsSearch] = React.useState('');
     const [dismissedSuggestedMap, setDismissedSuggestedMap] = React.useState<Record<string, boolean>>({});
     const [dismissUndo, setDismissUndo] = React.useState<{ handleNoAt: string; expiresAt: number } | null>(null);
+    /** Instagram-style horizontal cards vs dense list (Suggested tab only). */
+    const [suggestedConnectionsLayout, setSuggestedConnectionsLayout] = React.useState<'carousel' | 'list'>('carousel');
 
     const flashConnectionActionSuccess = React.useCallback((key: string) => {
         setConnectionActionSuccessMap((prev) => ({ ...prev, [key]: true }));
@@ -435,6 +437,12 @@ export default function ViewProfilePage() {
         }, 160);
         return () => window.clearTimeout(timer);
     }, [connectionsSearch]);
+
+    React.useEffect(() => {
+        if (connectionsScope === 'suggested') {
+            setSuggestedConnectionsLayout('carousel');
+        }
+    }, [connectionsScope]);
 
     const visibleConnections = React.useMemo(() => {
         const followerMap = new Map(followersList.map((row) => [row.handleNoAt.toLowerCase(), row]));
@@ -1904,8 +1912,115 @@ export default function ViewProfilePage() {
                                 <div className="py-16 text-center text-sm text-gray-500">
                                     {connectionsSearch.trim() ? 'No people match your search.' : `No ${connectionsScope} yet.`}
                                 </div>
+                            ) : connectionsScope === 'suggested' && !debouncedConnectionsSearch.trim() && suggestedConnectionsLayout === 'carousel' ? (
+                                <div className="vp-connections-fade-in">
+                                    <div className="flex items-center justify-between mb-3 px-0.5">
+                                        <h3 className="text-sm font-semibold text-white tracking-tight">Suggested for you</h3>
+                                        <button
+                                            type="button"
+                                            onClick={() => setSuggestedConnectionsLayout('list')}
+                                            className="text-xs font-semibold text-[#0095f6] hover:text-[#67b9ff] active:opacity-80"
+                                        >
+                                            See all
+                                        </button>
+                                    </div>
+                                    <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-2 -mx-0.5 px-0.5">
+                                        {visibleConnections.map((row) => {
+                                            const isOwnRow = !!user?.handle && row.handleNoAt.toLowerCase() === user.handle.toLowerCase().replace(/^@/, '');
+                                            const rowFollowing = connectionFollowMap[row.handleNoAt] ?? row.isFollowing;
+                                            const rowRequested = connectionRequestMap[row.handleNoAt] ?? row.isRequested;
+                                            const rowActionLoading = connectionActionLoadingMap[row.handleNoAt] ?? false;
+                                            const rowActionSuccess = connectionActionSuccessMap[row.handleNoAt] ?? false;
+                                            const handleLabel = row.handle?.startsWith('@') ? row.handle : `@${row.handleNoAt}`;
+                                            const secondaryName =
+                                                row.name &&
+                                                String(row.name).replace(/^@/, '').toLowerCase() !== String(row.handleNoAt).toLowerCase()
+                                                    ? row.name
+                                                    : null;
+                                            const contextLine = (row as { suggestionReason?: string }).suggestionReason || row.bio || '';
+                                            return (
+                                                <div
+                                                    key={row.id}
+                                                    className="relative shrink-0 w-[158px] rounded-3xl border border-[#363636] bg-[#121212] px-2.5 pb-3 pt-7 shadow-[0_2px_12px_rgba(0,0,0,0.45)]"
+                                                >
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            dismissSuggestedRow(row.handleNoAt);
+                                                        }}
+                                                        className="absolute top-1.5 right-1.5 z-10 p-1 rounded-full text-[#a8a8a8] hover:text-white hover:bg-white/10 transition-colors"
+                                                        title="Hide suggestion"
+                                                        aria-label="Hide suggestion"
+                                                    >
+                                                        <FiX className="w-3.5 h-3.5" />
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setShowConnectionsModal(false);
+                                                            navigate(`/user/${encodeURIComponent(row.handleNoAt)}`);
+                                                        }}
+                                                        className="w-full flex flex-col items-center text-center"
+                                                    >
+                                                        <div className="w-[88px] h-[88px] mx-auto mb-2 rounded-full p-[2px] bg-gradient-to-tr from-teal-400 via-sky-500 to-fuchsia-500">
+                                                            <div className="w-full h-full rounded-full bg-black overflow-hidden flex items-center justify-center">
+                                                                <Avatar src={row.avatarUrl} name={row.name} size={84} />
+                                                            </div>
+                                                        </div>
+                                                        <p className="text-[13px] font-semibold text-white truncate w-full leading-tight">{handleLabel}</p>
+                                                        {secondaryName ? (
+                                                            <p className="text-[12px] text-[#a8a8a8] truncate w-full mt-0.5">{secondaryName}</p>
+                                                        ) : null}
+                                                        {contextLine ? (
+                                                            <p className="text-[11px] text-[#8e8e8e] line-clamp-2 mt-1.5 min-h-[2.25rem] leading-snug w-full">
+                                                                {contextLine}
+                                                            </p>
+                                                        ) : null}
+                                                    </button>
+                                                    {!isOwnRow && (
+                                                        <button
+                                                            type="button"
+                                                            disabled={rowActionLoading}
+                                                            onClick={() => void handleConnectionFollowToggle(row)}
+                                                            className={`w-full mt-2.5 py-1.5 rounded-2xl text-xs font-semibold transition-colors active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70 ${rowActionSuccess ? 'ring-1 ring-[#0095f6]/80' : ''} ${
+                                                                rowFollowing
+                                                                    ? 'border border-[#363636] bg-transparent text-white hover:bg-white/5'
+                                                                    : rowRequested
+                                                                      ? 'border border-[#363636] bg-white/5 text-[#a8a8a8]'
+                                                                      : 'bg-[#0095f6] text-white hover:bg-[#1877f2]'
+                                                            }`}
+                                                        >
+                                                            {rowActionLoading ? (
+                                                                <span className="inline-flex items-center justify-center gap-2">
+                                                                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                                                                    <span>Saving…</span>
+                                                                </span>
+                                                            ) : rowFollowing ? (
+                                                                'Following'
+                                                            ) : rowRequested ? (
+                                                                'Requested'
+                                                            ) : (
+                                                                'Follow'
+                                                            )}
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
                             ) : (
                                 <div key={connectionsScope} className="vp-connections-fade-in space-y-2">
+                                    {connectionsScope === 'suggested' && suggestedConnectionsLayout === 'list' && !debouncedConnectionsSearch.trim() && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setSuggestedConnectionsLayout('carousel')}
+                                            className="mb-1 text-xs font-semibold text-[#0095f6] hover:text-[#67b9ff]"
+                                        >
+                                            ← Card view
+                                        </button>
+                                    )}
                                     {visibleConnections.map((row) => {
                                         const isOwnRow = !!user?.handle && row.handleNoAt.toLowerCase() === user.handle.toLowerCase().replace(/^@/, '');
                                         const rowFollowing = connectionFollowMap[row.handleNoAt] ?? row.isFollowing;
@@ -1915,7 +2030,7 @@ export default function ViewProfilePage() {
                                         return (
                                             <div
                                                 key={row.id}
-                                                className={`flex items-center ${compactConnectionsPhone ? 'gap-2.5 px-2.5 py-2 rounded-lg' : 'gap-3 px-3 py-2.5 rounded-xl'} border border-white/10 bg-white/[0.03]`}
+                                                className={`flex items-center ${compactConnectionsPhone ? 'gap-2.5 px-2.5 py-2 rounded-2xl' : 'gap-3 px-3 py-2.5 rounded-3xl'} border border-white/10 bg-white/[0.03]`}
                                             >
                                                 <button
                                                     type="button"
