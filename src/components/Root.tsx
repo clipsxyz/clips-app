@@ -31,6 +31,7 @@ import TextOnlyPostDetailsPage from '../pages/TextOnlyPostDetailsPage';
 import GalleryPreviewPage from '../pages/GalleryPreviewPage';
 import ReplyQuestionPage from '../pages/ReplyQuestionPage';
 import TermsPage from '../pages/TermsPage';
+import PortraitEnforcer from './PortraitEnforcer';
 
 
 function ErrorFallback({ error, resetError }: { error: Error; resetError: () => void }) {
@@ -57,6 +58,7 @@ export default function Root() {
         >
             <AuthProvider>
                 <ThemeProvider>
+                    <PortraitEnforcer />
                     <BrowserRouter future={{ v7_relativeSplatPath: true }}>
                         <Routes>
                             <Route path="/splash" element={<SplashPage />} />

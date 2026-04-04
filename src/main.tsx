@@ -6,10 +6,12 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import Root from './components/Root';
 import { initSentry } from './sentry';
+import { initPortraitLockWeb } from './utils/portraitLockWeb';
 import './index.css';
 
 // Initialize Sentry early
 initSentry();
+initPortraitLockWeb();
 
 // Initialize Web Vitals in production
 if (import.meta.env.PROD) {
