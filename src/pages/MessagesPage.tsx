@@ -8,12 +8,27 @@ import { MdStickyNote2, MdTranslate } from 'react-icons/md';
 import Avatar from '../components/Avatar';
 import { IMessageDmBubbleShell } from '../components/IMessageDmBubbleShell';
 import { useAuth } from '../context/Auth';
-import { fetchConversation, appendMessage, editMessage, type ChatMessage, markConversationRead, deleteConversation, blockUser, muteConversation, unmuteConversation, isConversationMuted } from '../api/messages';
+import {
+    fetchConversation,
+    appendMessage,
+    appendGroupChatMessage,
+    editMessage,
+    type ChatMessage,
+    markConversationRead,
+    deleteConversation,
+    blockUser,
+    muteConversation,
+    unmuteConversation,
+    isConversationMuted,
+    fetchGroupThread,
+    markGroupConversationReadById,
+} from '../api/messages';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
 import { isStoryMediaActive, wasEverAStory, userHasUnviewedStoriesByHandle, userHasStoriesByHandle } from '../api/stories';
 import { getPostById, getFollowedUsers, getState, toggleLike } from '../api/posts';
-import { toggleFollow, fetchUserProfile } from '../api/client';
+import { toggleFollow, fetchUserProfile, leaveChatGroup } from '../api/client';
 import ScenesModal from '../components/ScenesModal';
+import InviteMemberToGroupModal from '../components/InviteMemberToGroupModal';
 import type { Post } from '../types';
 import Flag from '../components/Flag';
 import { timeAgo } from '../utils/timeAgo';
@@ -476,7 +491,8 @@ function SharedPostCard({ post, onTap }: { post: Post; onTap?: (post: Post) => v
 export default function MessagesPage() {
     const navigate = useNavigate();
     const location = useLocation();
-    const { handle } = useParams<{ handle: string }>();
+    const { handle, groupId } = useParams<{ handle?: string; groupId?: string }>();
+    const isGroupThread = Boolean(groupId);
     const { user } = useAuth();
     const [messages, setMessages] = useState<MessageUI[]>([]);
     const [storyActiveByUrl, setStoryActiveByUrl] = useState<Record<string, boolean>>({});
@@ -489,6 +505,7 @@ export default function MessagesPage() {
     // Direct share to DM (Instagram/TikTok style): send the post immediately when opening the conversation
     React.useEffect(() => {
         const state = location.state as { sharePostUrl?: string; sharePostId?: string } | null;
+        if (groupId) return;
         if (!state?.sharePostUrl || !handle || !user?.handle) return;
         if (sharedPostSentRef.current) return;
 
@@ -530,7 +547,7 @@ export default function MessagesPage() {
                 if (state.sharePostId) setPendingSharePostId(state.sharePostId);
             }
         })();
-    }, [location.state, handle, user?.handle, location.pathname, navigate]);
+    }, [location.state, handle, groupId, user?.handle, location.pathname, navigate]);
     const [loading, setLoading] = useState(true);
     const [otherUserAvatar, setOtherUserAvatar] = useState<string | undefined>(undefined);
     const [hasUnviewedStories, setHasUnviewedStories] = useState(false);
@@ -608,8 +625,20 @@ export default function MessagesPage() {
     // Scenes modal: tap shared post in DM to open fullscreen, close returns to DM
     const [scenesOpen, setScenesOpen] = useState(false);
     const [selectedPostForScenes, setSelectedPostForScenes] = useState<Post | null>(null);
+    const [inviteMemberOpen, setInviteMemberOpen] = useState(false);
     const [compactPhone, setCompactPhone] = useState<boolean>(() => (typeof window !== 'undefined' ? window.innerWidth <= 390 : false));
     const threadCardMaxWidth = compactPhone ? '86vw' : '448px';
+    const [groupDisplayName, setGroupDisplayName] = useState<string>('Group');
+
+    const appendToThread = React.useCallback(
+        (payload: Omit<ChatMessage, 'id' | 'timestamp' | 'senderHandle'> & { timestamp?: number }) => {
+            if (!user?.handle) throw new Error('Not signed in');
+            if (groupId) return appendGroupChatMessage(user.handle, groupId, payload);
+            if (!handle) throw new Error('No conversation');
+            return appendMessage(user.handle, handle, payload);
+        },
+        [user?.handle, handle, groupId],
+    );
 
     useEffect(() => {
         const onResize = () => setCompactPhone(typeof window !== 'undefined' ? window.innerWidth <= 390 : false);
@@ -653,11 +682,15 @@ export default function MessagesPage() {
                 const reader = new FileReader();
                 reader.onloadend = async () => {
                     const base64Audio = reader.result as string;
-                    if (user?.handle && handle) {
-                        await appendMessage(user.handle, handle, {
-                            text: `🎤 Voice Message`,
-                            audioUrl: base64Audio // Use audioUrl field for voice messages
-                        });
+                    if (user?.handle && (handle || groupId)) {
+                        try {
+                            await appendToThread({
+                                text: `🎤 Voice Message`,
+                                audioUrl: base64Audio, // Use audioUrl field for voice messages
+                            });
+                        } catch {
+                            showToast?.('Could not send voice message in this chat');
+                        }
                         scrollToBottom();
                     }
                 };
@@ -1028,10 +1061,13 @@ export default function MessagesPage() {
         if (socket) {
             // Listen for conversation updates via Socket.IO
             const handleConversationUpdate = (data: any) => {
-                const participants: string[] = data.participants || [];
-                if (!participants.includes(user?.handle || '') || !participants.includes(handle || '')) return;
-                
-                // Trigger the existing onUpdate handler
+                if (groupId) {
+                    const gid = data.chat_group_id ?? data.chatGroupId;
+                    if (String(gid || '') !== String(groupId)) return;
+                } else {
+                    const participants: string[] = data.participants || [];
+                    if (!participants.includes(user?.handle || '') || !participants.includes(handle || '')) return;
+                }
                 window.dispatchEvent(new CustomEvent('conversationUpdated', { detail: data }));
             };
             
@@ -1047,12 +1083,113 @@ export default function MessagesPage() {
                 socket.off('inboxUnreadChanged', handleInboxUnreadChanged);
             };
         }
-    }, [user?.handle, handle]);
+    }, [user?.handle, handle, groupId]);
 
     // Load conversation from API
     React.useEffect(() => {
-        if (!handle || !user?.handle) return;
-            fetchConversation(user.handle, handle).then(items => {
+        if (!user?.handle) return;
+
+        if (groupId) {
+            setLoading(true);
+            fetchGroupThread(groupId)
+                .then(({ groupName, messages: items }) => {
+                    setGroupDisplayName(groupName);
+                    const sorted = [...items].sort((a, b) => a.timestamp - b.timestamp);
+                    const mapped: MessageUI[] = sorted.map((m) => ({
+                        ...m,
+                        isFromMe: m.senderHandle === user.handle,
+                        senderAvatar:
+                            m.senderHandle === user.handle
+                                ? (user.avatarUrl || getAvatarForHandle(user.handle))
+                                : getAvatarForHandle(m.senderHandle),
+                        replyTo: m.replyTo,
+                    }));
+                    setMessages(mapped);
+                    setLoading(false);
+                    lastMessageCountRef.current = mapped.length;
+                    lastMessageIdRef.current = mapped.length > 0 ? mapped[mapped.length - 1].id : null;
+                    setTimeout(scrollToBottom, 0);
+                    markGroupConversationReadById(groupId, user?.handle).catch(() => {});
+                    const urls = Array.from(new Set(mapped.map((m) => m.imageUrl).filter(Boolean) as string[]));
+                    Promise.all(urls.map(async (u) => [u, await isStoryMediaActive(u)] as const)).then((entries) =>
+                        setStoryActiveByUrl(Object.fromEntries(entries)),
+                    );
+                    const postIds = new Set<string>();
+                    mapped.forEach((msg) => {
+                        if (msg.postId) postIds.add(msg.postId);
+                        else if (msg.text) {
+                            const pid = extractPostId(msg.text);
+                            if (pid) postIds.add(pid);
+                        }
+                    });
+                    Promise.all(
+                        Array.from(postIds).map(async (postId) => {
+                            try {
+                                const post = await getPostById(postId, user?.id);
+                                if (post) setSharedPosts((prev) => ({ ...prev, [postId]: post }));
+                            } catch {
+                                /* ignore */
+                            }
+                        }),
+                    );
+                })
+                .catch(() => setLoading(false));
+
+            const onUpdateGroup = (e: any) => {
+                const detailGid = e.detail?.chat_group_id ?? e.detail?.chatGroupId;
+                if (String(detailGid || '') !== String(groupId)) return;
+                const newMessage = e.detail?.message;
+                if (newMessage && newMessage.senderHandle === user?.handle) {
+                    setMessages((prev) => {
+                        const idx = prev.findIndex((m) => m.id === newMessage.id);
+                        if (idx >= 0) {
+                            const next = [...prev];
+                            const existing = next[idx];
+                            next[idx] = {
+                                ...newMessage,
+                                isFromMe: true,
+                                senderAvatar: user!.avatarUrl || getAvatarForHandle(user!.handle),
+                                replyTo: newMessage.replyTo || existing.replyTo,
+                                imageUrl: newMessage.imageUrl || existing.imageUrl,
+                            };
+                            return next;
+                        }
+                        return [
+                            ...prev,
+                            {
+                                ...newMessage,
+                                isFromMe: true,
+                                senderAvatar: user!.avatarUrl || getAvatarForHandle(user!.handle),
+                                replyTo: newMessage.replyTo,
+                            },
+                        ].sort((a, b) => a.timestamp - b.timestamp);
+                    });
+                    return;
+                }
+                fetchGroupThread(groupId).then(({ messages: items }) => {
+                    const sorted = [...items].sort((a, b) => a.timestamp - b.timestamp);
+                    setMessages((prev) => {
+                        const replyToMap = new Map(prev.map((m) => [m.id, m.replyTo]));
+                        return sorted.map((m) => ({
+                            ...m,
+                            isFromMe: m.senderHandle === user.handle,
+                            senderAvatar:
+                                m.senderHandle === user.handle
+                                    ? (user.avatarUrl || getAvatarForHandle(user.handle))
+                                    : getAvatarForHandle(m.senderHandle),
+                            replyTo: m.replyTo || replyToMap.get(m.id),
+                        }));
+                    });
+                    setTimeout(scrollToBottom, 80);
+                });
+            };
+            window.addEventListener('conversationUpdated', onUpdateGroup as any);
+            return () => window.removeEventListener('conversationUpdated', onUpdateGroup as any);
+        }
+
+        if (!handle) return;
+
+        fetchConversation(user.handle, handle).then((items) => {
             // Ensure ascending order by timestamp so latest is at the bottom
             const sorted = [...items].sort((a, b) => a.timestamp - b.timestamp);
             const mapped: MessageUI[] = sorted.map(m => ({
@@ -1325,16 +1462,23 @@ export default function MessagesPage() {
         };
         window.addEventListener('conversationUpdated', onUpdate as any);
         return () => window.removeEventListener('conversationUpdated', onUpdate as any);
-    }, [handle, user?.handle, scrollToBottom]);
+    }, [handle, groupId, user?.handle, scrollToBottom]);
 
     const handleSend = async () => {
         if (!messageText.trim()) return;
-        if (!user?.handle || !handle) return;
+        if (!user?.handle || (!handle && !groupId)) return;
 
         // Handle editing existing message
         if (editingMessage) {
+            if (groupId) {
+                showToast('Editing is not available in group chats');
+                setEditingMessage(null);
+                setMessageText('');
+                closeContextMenu();
+                return;
+            }
             try {
-                const updatedMessage = await editMessage(editingMessage.id, messageText, user.handle, handle);
+                const updatedMessage = await editMessage(editingMessage.id, messageText, user.handle, handle!);
                 if (updatedMessage) {
                     setMessages(prev => prev.map(msg => 
                         msg.id === editingMessage.id
@@ -1414,7 +1558,7 @@ export default function MessagesPage() {
 
         // Then send to API - replace temp message with real one to preserve replyTo
         const tempId = tempMessage.id;
-        appendMessage(user.handle, handle, { 
+        appendToThread({ 
             text: messageText,
             postId: postId || undefined,
             replyTo: replyToData
@@ -1462,7 +1606,7 @@ export default function MessagesPage() {
     };
 
     const handleSendSticker = async (sticker: string) => {
-        if (!user?.handle || !handle) return;
+        if (!user?.handle || (!handle && !groupId)) return;
 
         // Use ref first (set synchronously when opening picker) so we don't lose the message to state timing
         const targetMessage = messageForStickerRef.current ?? messageForSticker;
@@ -1486,7 +1630,7 @@ export default function MessagesPage() {
                 return sorted;
             });
             setTimeout(() => scrollToBottom(), 100);
-            appendMessage(user.handle, handle, { imageUrl }).then((realMessage) => {
+            appendToThread({ imageUrl }).then((realMessage) => {
                 setMessages(prev => {
                     const filtered = prev.filter(m => m.id !== tempId);
                     const existingIndex = filtered.findIndex(m => m.id === realMessage.id);
@@ -1527,7 +1671,7 @@ export default function MessagesPage() {
             return sorted;
         });
         setTimeout(() => scrollToBottom(), 100);
-        await appendMessage(user.handle, handle, { text: sticker });
+        await appendToThread({ text: sticker });
     };
 
     const handleImageClick = () => {
@@ -1546,7 +1690,7 @@ export default function MessagesPage() {
         const reader = new FileReader();
         reader.onloadend = () => {
             const imageUrl = reader.result as string;
-            if (!user?.handle || !handle) return;
+            if (!user?.handle || (!handle && !groupId)) return;
             // Show image compose UI: preview + optional caption before sending
             setImageCompose({ imageUrl, caption: '' });
         };
@@ -1558,7 +1702,7 @@ export default function MessagesPage() {
     };
 
     const handleSendImageWithCaption = async () => {
-        if (!imageCompose || !user?.handle || !handle) return;
+        if (!imageCompose || !user?.handle || (!handle && !groupId)) return;
         const { imageUrl, caption } = imageCompose;
         setImageCompose(null);
 
@@ -1581,7 +1725,7 @@ export default function MessagesPage() {
         setTimeout(() => scrollToBottom(), 100);
         isSendingMessageRef.current = true;
 
-        appendMessage(user.handle, handle, { imageUrl, text: caption.trim() || undefined }).then((realMessage) => {
+        appendToThread({ imageUrl, text: caption.trim() || undefined }).then((realMessage) => {
             setMessages(prev => {
                 const filtered = prev.filter(m => m.id !== tempId);
                 const existingIndex = filtered.findIndex(m => m.id === realMessage.id);
@@ -1721,7 +1865,11 @@ export default function MessagesPage() {
         const conversations = await listConversations(user.handle);
         
         // Filter out current conversation
-        const otherConversations = conversations.filter(conv => conv.otherHandle !== handle);
+        const otherConversations = conversations.filter((conv) => {
+            if (conv.kind === 'group') return false;
+            if (groupId) return true;
+            return conv.otherHandle !== handle;
+        });
         
         setAvailableConversations(otherConversations);
         setForwardingMessage(contextMenu.message);
@@ -1964,7 +2112,16 @@ export default function MessagesPage() {
                     >
                         <FiChevronLeft className={compactPhone ? 'w-5 h-5' : 'w-6 h-6'} />
                     </button>
-                    {handle && (
+                    {isGroupThread && (
+                        <div className="flex items-center ml-3 flex-1 min-w-0">
+                            <Avatar name={groupDisplayName} size="sm" className="flex-shrink-0" />
+                            <div className="ml-3 flex-1 min-w-0">
+                                <span className="font-semibold text-white truncate block">{groupDisplayName}</span>
+                                <span className="text-xs text-gray-400">Group chat</span>
+                            </div>
+                        </div>
+                    )}
+                    {handle && !isGroupThread && (
                         <div className="flex items-center ml-3 flex-1">
                             <div className="relative overflow-visible flex-shrink-0">
                                 <Avatar
@@ -2077,7 +2234,7 @@ export default function MessagesPage() {
                     )}
                     <div className={`flex items-center ${compactPhone ? 'gap-1' : 'gap-2'}`}>
                         {/* Location Icon Button */}
-                        {handle && (
+                        {handle && !isGroupThread && (
                             <button
                                 className={`${compactPhone ? 'p-1.5' : 'p-2'} hover:bg-gray-900 rounded-full transition-colors`}
                                 onClick={() => {
@@ -2106,6 +2263,17 @@ export default function MessagesPage() {
                                 <FiMapPin className={compactPhone ? 'w-5 h-5' : 'w-6 h-6'} />
                             </button>
                         )}
+                        {isGroupThread && groupId ? (
+                            <button
+                                type="button"
+                                className={`${compactPhone ? 'p-1.5' : 'p-2'} hover:bg-gray-900 rounded-full transition-colors text-cyan-400`}
+                                onClick={() => setInviteMemberOpen(true)}
+                                title="Invite someone by username"
+                                aria-label="Invite to group"
+                            >
+                                <FiUserPlus className={compactPhone ? 'w-5 h-5' : 'w-6 h-6'} />
+                            </button>
+                        ) : null}
                         <button
                             className={`${compactPhone ? 'p-1.5' : 'p-2'} hover:bg-gray-900 rounded-full transition-colors`}
                             onClick={() => setShowChatInfo(true)}
@@ -3416,7 +3584,7 @@ export default function MessagesPage() {
             )}
 
             {/* Chat Info/Options Modal */}
-            {showChatInfo && handle && (
+            {showChatInfo && (handle || groupId) && (
                 <div
                     className="fixed inset-0 bg-black/80 z-50 flex items-end justify-center"
                     onClick={() => setShowChatInfo(false)}
@@ -3436,15 +3604,53 @@ export default function MessagesPage() {
                         </div>
 
                         <div className="p-4">
+                            {isGroupThread && groupId ? (
+                                <>
+                                    <div className="flex items-center gap-4 mb-6">
+                                        <Avatar name={groupDisplayName} size="lg" />
+                                        <div className="flex-1">
+                                            <h4 className="text-white font-semibold text-lg">{groupDisplayName}</h4>
+                                            <p className="text-gray-400 text-sm">Group chat</p>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <p className="text-xs text-gray-400 mb-4 leading-relaxed">
+                                            To add people, use the <span className="text-cyan-400">+</span> button in the chat header, or
+                                            open their profile and choose <span className="text-cyan-400">Invite to group</span>.
+                                        </p>
+                                        <button
+                                            onClick={async () => {
+                                                if (!groupId) return;
+                                                if (confirm(`Leave "${groupDisplayName}"? You can be invited again later.`)) {
+                                                    try {
+                                                        await leaveChatGroup(groupId);
+                                                        showToast('Left group');
+                                                        setShowChatInfo(false);
+                                                        navigate('/inbox');
+                                                    } catch (error) {
+                                                        console.error('Error leaving group:', error);
+                                                        showToast('Failed to leave group');
+                                                    }
+                                                }
+                                            }}
+                                            className="w-full text-left px-4 py-3 hover:bg-gray-800 rounded-lg flex items-center gap-3 text-red-500 transition-colors"
+                                        >
+                                            <FiX className="w-5 h-5" />
+                                            <span>Leave Group</span>
+                                        </button>
+                                    </div>
+                                </>
+                            ) : (
+                                <>
                             {/* User Info */}
                             <div className="flex items-center gap-4 mb-6">
                                 <Avatar
-                                    name={handle}
-                                    src={getAvatarForHandle(handle)}
+                                    name={handle ?? ''}
+                                    src={getAvatarForHandle(handle ?? '')}
                                     size="lg"
                                 />
                                 <div className="flex-1">
-                                    <h4 className="text-white font-semibold text-lg">{handle}</h4>
+                                    <h4 className="text-white font-semibold text-lg">{handle ?? ''}</h4>
                                     <p className="text-gray-400 text-sm">Active now</p>
                                 </div>
                             </div>
@@ -3561,10 +3767,21 @@ export default function MessagesPage() {
                                     <span>Delete Conversation</span>
                                 </button>
                             </div>
+                                </>
+                            )}
                         </div>
                     </div>
                 </div>
             )}
+
+            {isGroupThread && groupId ? (
+                <InviteMemberToGroupModal
+                    isOpen={inviteMemberOpen}
+                    onClose={() => setInviteMemberOpen(false)}
+                    groupId={groupId}
+                    groupName={groupDisplayName}
+                />
+            ) : null}
 
             {/* Scenes modal: tap shared post in DM to view fullscreen; close returns to DM feed */}
             {scenesOpen && selectedPostForScenes && user?.id && (

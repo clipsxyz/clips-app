@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { FiChevronLeft, FiBell, FiShare2, FiMessageSquare, FiMoreHorizontal, FiX, FiLock, FiMapPin, FiEye, FiUserPlus, FiMaximize, FiPlay, FiSearch } from 'react-icons/fi';
+import { FiChevronLeft, FiBell, FiShare2, FiMessageSquare, FiMoreHorizontal, FiX, FiLock, FiMapPin, FiEye, FiUserPlus, FiMaximize, FiPlay, FiSearch, FiUsers } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
 import { MOCK_FOLLOWING_GRAPH } from '../api/mockFollowGraph';
@@ -20,6 +20,7 @@ import {
 } from '../api/privacy';
 import Swal from 'sweetalert2';
 import ShareProfileModal from '../components/ShareProfileModal';
+import InviteToGroupModal from '../components/InviteToGroupModal';
 import { getStableUserId } from '../utils/userId';
 import { followRequestSentBottomSheet, accountIsPrivateBottomSheet, bottomSheet } from '../utils/swalBottomSheet';
 import { parsePlacesFromBio } from '../utils/suggestedPlaces';
@@ -113,6 +114,7 @@ export default function ViewProfilePage() {
     const [showTraveledModal, setShowTraveledModal] = React.useState(false);
     const [placesForTravelModal, setPlacesForTravelModal] = React.useState<string[]>([]);
     const [showProfileMenu, setShowProfileMenu] = React.useState(false);
+    const [inviteToGroupOpen, setInviteToGroupOpen] = React.useState(false);
     const [showQRCodeModal, setShowQRCodeModal] = React.useState(false);
     const [showShareProfileModal, setShowShareProfileModal] = React.useState(false);
     const [contentTab, setContentTab] = React.useState<'all' | 'videos' | 'photos' | 'text'>('all');
@@ -1398,7 +1400,10 @@ export default function ViewProfilePage() {
                         {/* Profile Picture */}
                         <div className="mb-3">
                             <Avatar
-                                src={profileUser.avatarUrl}
+                                src={
+                                    profileUser.avatarUrl ||
+                                    getAvatarForHandle(profileUser.handle || decodeURIComponent(handle || ''))
+                                }
                                 name={profileUser.name}
                                 size="xl"
                                 className="!w-28 !h-28 border-4 border-white/90 shadow-2xl cursor-pointer"
@@ -2183,16 +2188,34 @@ export default function ViewProfilePage() {
             )}
 
             {/* Profile Menu Modal */}
-            {showProfileMenu && (
+            {showProfileMenu && profileUser && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center">
                     {/* Backdrop */}
                     <div
-                        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                        className="absolute inset-0 bg-black/85 backdrop-blur-sm"
                         onClick={() => setShowProfileMenu(false)}
                     />
 
                     {/* Menu - stopPropagation so backdrop doesn't steal click */}
-                    <div className="relative bg-[#262626] dark:bg-[#1a1a1a] rounded-3xl p-4 sm:p-6 shadow-2xl mx-4 max-w-full" onClick={(e) => e.stopPropagation()}>
+                    <div
+                        className="relative bg-black rounded-3xl p-4 sm:p-6 shadow-2xl mx-4 max-w-full border border-white/15"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex flex-col items-center mb-5 pb-5 border-b border-white/10">
+                            <Avatar
+                                src={
+                                    profileUser.avatarUrl ||
+                                    getAvatarForHandle(profileUser.handle || decodeURIComponent(handle || ''))
+                                }
+                                name={profileUser.name || profileUser.handle}
+                                size="lg"
+                                className="!w-[72px] !h-[72px] border-2 border-white/25 shadow-lg"
+                            />
+                            <div className="mt-2.5 text-center max-w-[240px]">
+                                <div className="text-white font-semibold text-sm truncate">{profileUser.name}</div>
+                                <div className="text-white/50 text-xs truncate">{profileUser.handle}</div>
+                            </div>
+                        </div>
                         <div className="flex flex-row flex-wrap gap-3 sm:gap-6 items-center justify-center">
                             {/* View Stories - only show if user has stories */}
                             {hasStory && (
@@ -2227,6 +2250,23 @@ export default function ViewProfilePage() {
                                 <span className="text-[10px] sm:text-xs text-white font-medium text-center">{isFollowing ? 'Unfollow' : 'Follow'}</span>
                             </button>
                             )}
+
+                            {handle &&
+                                user?.handle &&
+                                decodeURIComponent(handle) !== user.handle && (
+                                    <button
+                                        onClick={() => {
+                                            setShowProfileMenu(false);
+                                            setInviteToGroupOpen(true);
+                                        }}
+                                        className="flex flex-col items-center gap-1.5 sm:gap-2 min-w-[60px] sm:min-w-0"
+                                    >
+                                        <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-black flex items-center justify-center">
+                                            <FiUsers className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
+                                        </div>
+                                        <span className="text-[10px] sm:text-xs text-white font-medium text-center">Invite to group</span>
+                                    </button>
+                                )}
 
                             {/* Share Profile */}
                             <button
@@ -2280,6 +2320,12 @@ export default function ViewProfilePage() {
                     avatarUrl={profileUser.avatarUrl}
                 />
             )}
+
+            <InviteToGroupModal
+                isOpen={inviteToGroupOpen}
+                onClose={() => setInviteToGroupOpen(false)}
+                inviteeHandle={handle ? decodeURIComponent(handle) : ''}
+            />
         </div>
     );
 }

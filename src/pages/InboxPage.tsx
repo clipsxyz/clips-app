@@ -17,6 +17,13 @@ import type { StoryGroup } from '../types';
 import { FiBookmark } from 'react-icons/fi';
 import { toggleFollow, acceptFollowRequest, denyFollowRequest } from '../api/client';
 import { getSocket } from '../services/socketio';
+import { leaveChatGroup } from '../api/client';
+import { markGroupConversationReadById } from '../api/messages';
+
+function inboxConversationRowId(conv: ConversationSummary): string {
+    if (conv.kind === 'group' && conv.chatGroupId) return `g:${conv.chatGroupId}`;
+    return conv.otherHandle;
+}
 
 // Conversation Item Component
 function ConversationItem({ 
@@ -51,8 +58,11 @@ function ConversationItem({
     const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 390;
     const SWIPE_ACTION_WIDTH = viewportWidth < 360 ? 188 : viewportWidth < 430 ? 208 : 224;
     const SWIPE_OPEN_THRESHOLD_RATIO = viewportWidth < 360 ? 0.26 : viewportWidth < 430 ? 0.3 : 0.35;
-    const isCurrentUser = currentUserHandle === conv.otherHandle;
-    const hasStory = conv.hasUnviewedStories || false;
+    const rowId = inboxConversationRowId(conv);
+    const isGroupRow = conv.kind === 'group';
+    const displayTitle = isGroupRow ? (conv.groupName || 'Group') : conv.otherHandle;
+    const isCurrentUser = !isGroupRow && currentUserHandle === conv.otherHandle;
+    const hasStory = !isGroupRow && (conv.hasUnviewedStories || false);
     const isFollowing = conv.isFollowing || false;
     const [showFollowCheck, setShowFollowCheck] = React.useState(isFollowing);
     const [showActions, setShowActions] = React.useState(false);
@@ -87,6 +97,10 @@ function ConversationItem({
         if (e) {
             e.stopPropagation();
         }
+        if (isGroupRow && conv.chatGroupId) {
+            navigate(`/messages/group/${encodeURIComponent(conv.chatGroupId)}`);
+            return;
+        }
         if (hasStory) {
             // Navigate to stories page with state to auto-open this user's stories
             navigate('/stories', { state: { openUserHandle: conv.otherHandle } });
@@ -107,6 +121,10 @@ function ConversationItem({
         if (swipeOffset > 0) {
             setSwipeOffset(0);
             onSwipeOpenChange?.(null);
+            return;
+        }
+        if (isGroupRow && conv.chatGroupId) {
+            navigate(`/messages/group/${encodeURIComponent(conv.chatGroupId)}`);
             return;
         }
         navigate(`/messages/${encodeURIComponent(conv.otherHandle)}`);
@@ -161,7 +179,7 @@ function ConversationItem({
             setPulseOpen(true);
             window.setTimeout(() => setPulseOpen(false), 140);
         }
-        onSwipeOpenChange?.(shouldOpen ? conv.otherHandle : null);
+        onSwipeOpenChange?.(shouldOpen ? rowId : null);
         touchStartXRef.current = null;
         touchStartYRef.current = null;
         touchLastXRef.current = null;
@@ -244,9 +262,9 @@ function ConversationItem({
                             closeSwipeActions();
                         }}
                         className="w-14 sm:w-16 bg-red-600/90 hover:bg-red-500 active:brightness-110 active:scale-[0.98] transition-all text-white text-[11px] font-semibold"
-                        title="Delete conversation"
+                        title={isGroupRow ? 'Leave group' : 'Delete conversation'}
                     >
-                        Delete
+                        {isGroupRow ? 'Leave' : 'Delete'}
                     </button>
                 )}
             </div>
@@ -277,14 +295,14 @@ function ConversationItem({
             {/* Avatar with story/follow - separate from conversation button */}
             <div className="relative overflow-visible flex-shrink-0">
                 <Avatar
-                    name={conv.otherHandle}
-                    src={getAvatarForHandle(conv.otherHandle)}
+                    name={displayTitle}
+                    src={isGroupRow ? undefined : getAvatarForHandle(conv.otherHandle)}
                     size="md"
                     hasStory={hasStory}
                     onClick={handleAvatarClick}
                 />
                 {/* + icon overlay on profile picture to follow (TikTok style) */}
-                {!isCurrentUser && onFollow && (isFollowing === false || isFollowing === undefined) && (
+                {!isGroupRow && !isCurrentUser && onFollow && (isFollowing === false || isFollowing === undefined) && (
                     <button
                         onClick={handleFollowClick}
                         className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-cyan-500 hover:bg-cyan-600 border-2 border-white dark:border-gray-900 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30"
@@ -294,7 +312,7 @@ function ConversationItem({
                     </button>
                 )}
                 {/* Checkmark icon when following (replaces + icon) */}
-                {!isCurrentUser && onFollow && isFollowing && showFollowCheck && (
+                {!isGroupRow && !isCurrentUser && onFollow && isFollowing && showFollowCheck && (
                     <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-green-500 border-2 border-white dark:border-gray-900 flex items-center justify-center shadow-lg z-30">
                         <FiCheck className="w-3 h-3 text-white" strokeWidth={3} />
                     </div>
@@ -307,7 +325,7 @@ function ConversationItem({
             >
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                        <span className={`font-medium truncate ${compactPhone ? 'text-[13px]' : ''}`}>{conv.otherHandle}</span>
+                        <span className={`font-medium truncate ${compactPhone ? 'text-[13px]' : ''}`}>{displayTitle}</span>
                         {conv.isPinned && (
                             <FiBookmark className="w-3 h-3 text-cyan-400 fill-cyan-400 flex-shrink-0" />
                         )}
@@ -416,7 +434,7 @@ function ConversationItem({
                             className="w-full px-3 py-2 text-left text-xs rounded-lg hover:bg-red-500/15 text-red-300 flex items-center gap-2"
                         >
                             <FiTrash2 className="w-3.5 h-3.5" />
-                            Delete conversation
+                            {isGroupRow ? 'Leave group' : 'Delete conversation'}
                         </button>
                     )}
                 </div>
@@ -436,7 +454,7 @@ export default function InboxPage() {
     const [items, setItems] = React.useState<ConversationSummary[]>([]);
     const [loading, setLoading] = React.useState(true);
     const [activeTab, setActiveTab] = React.useState<'insights' | 'notifications' | 'messages'>('messages');
-    const [messageFilter, setMessageFilter] = React.useState<'all' | 'unread' | 'requests' | 'pinned'>('all');
+    const [messageFilter, setMessageFilter] = React.useState<'all' | 'groups' | 'unread' | 'requests' | 'pinned'>('all');
     const [conversationQuery, setConversationQuery] = React.useState('');
     const [selectedQuestionInsight, setSelectedQuestionInsight] = React.useState<StoryInsight | null>(null);
     const [openSwipeHandle, setOpenSwipeHandle] = React.useState<string | null>(null);
@@ -466,7 +484,7 @@ export default function InboxPage() {
             // Add follow status to conversations
             const conversationsWithFollowStatus = conversations.map(conv => ({
                 ...conv,
-                isFollowing: (followedUsers as string[]).includes(conv.otherHandle)
+                isFollowing: conv.kind === 'group' ? false : (followedUsers as string[]).includes(conv.otherHandle),
             }));
             
             // Convert conversations to notifications format so they appear in Notifs tab
@@ -478,6 +496,7 @@ export default function InboxPage() {
                     // 1. Has a last message
                     // 2. The OTHER person sent the last message (not the user)
                     // 3. Doesn't already have a notification for this handle
+                    if (conv.kind === 'group') return false;
                     if (!conv.lastMessage) return false;
                     if (conv.lastMessage.senderHandle === user.handle) return false; // User sent it, don't create notification
                     if (existingNotifHandles.has(conv.otherHandle)) return false; // Already has notification
@@ -703,7 +722,7 @@ export default function InboxPage() {
     }, [user, loadData]);
 
     const handleToggleMuteConversation = React.useCallback(async (conv: ConversationSummary) => {
-        if (!user?.handle) return;
+        if (!user?.handle || conv.kind === 'group') return;
         try {
             if (conv.isMuted) {
                 await unmuteConversation(user.handle, conv.otherHandle);
@@ -721,29 +740,45 @@ export default function InboxPage() {
 
     const handleDeleteConversation = React.useCallback(async (conv: ConversationSummary) => {
         if (!user?.handle) return;
+        const isGroup = conv.kind === 'group' && conv.chatGroupId;
         const result = await Swal.fire(bottomSheet({
-            title: 'Delete conversation?',
-            message: `This will remove your chat with ${conv.otherHandle}.`,
+            title: isGroup ? 'Leave group?' : 'Delete conversation?',
+            message: isGroup
+                ? `You will leave "${conv.groupName || 'this group'}". You can be invited again later.`
+                : `This will remove your chat with ${conv.otherHandle}.`,
             icon: 'alert',
             showCancelButton: true,
-            confirmButtonText: 'Delete',
+            confirmButtonText: isGroup ? 'Leave' : 'Delete',
             cancelButtonText: 'Cancel',
         }));
         if (!result.isConfirmed) return;
         try {
-            await deleteConversation(user.handle, conv.otherHandle);
+            if (isGroup && conv.chatGroupId) {
+                await leaveChatGroup(conv.chatGroupId);
+                showToast?.('Left group');
+            } else {
+                await deleteConversation(user.handle, conv.otherHandle);
+                showToast?.('Conversation deleted');
+            }
             await loadData();
-            showToast?.('Conversation deleted');
         } catch (error) {
             console.error('Error deleting conversation:', error);
-            Swal.fire(bottomSheet({ title: 'Error', message: 'Failed to delete conversation', icon: 'alert' }));
+            Swal.fire(bottomSheet({
+                title: 'Error',
+                message: isGroup ? 'Failed to leave group' : 'Failed to delete conversation',
+                icon: 'alert',
+            }));
         }
     }, [user?.handle, loadData]);
 
     const handleMarkConversationRead = React.useCallback(async (conv: ConversationSummary) => {
         if (!user?.handle) return;
         try {
-            await markConversationRead(user.handle, conv.otherHandle);
+            if (conv.kind === 'group' && conv.chatGroupId) {
+                await markGroupConversationReadById(conv.chatGroupId, user.handle);
+            } else {
+                await markConversationRead(user.handle, conv.otherHandle);
+            }
             await loadData();
         } catch (error) {
             console.error('Error marking conversation read:', error);
@@ -751,7 +786,7 @@ export default function InboxPage() {
     }, [user?.handle, loadData]);
 
     const handleMarkConversationUnread = React.useCallback(async (conv: ConversationSummary) => {
-        if (!user?.handle) return;
+        if (!user?.handle || conv.kind === 'group') return;
         try {
             await markConversationUnread(user.handle, conv.otherHandle);
             await loadData();
@@ -769,7 +804,7 @@ export default function InboxPage() {
     const normalizedQuery = conversationQuery.trim().toLowerCase();
     const queriedItems = normalizedQuery
         ? items.filter((c) => {
-            const hay = `${c.otherHandle} ${c.lastMessage?.text || ''}`.toLowerCase();
+            const hay = `${c.otherHandle} ${c.groupName || ''} ${c.lastMessage?.text || ''}`.toLowerCase();
             return hay.includes(normalizedQuery);
         })
         : items;
@@ -777,6 +812,7 @@ export default function InboxPage() {
     const requestItems = queriedItems.filter(c => c.isRequest);
     const regularItems = queriedItems.filter(c => !c.isPinned && !c.isRequest);
     const unreadItems = queriedItems.filter(c => c.unread > 0);
+    const groupItems = queriedItems.filter(c => c.kind === 'group');
 
     const handleNotificationClick = async (notif: Notification) => {
         if (!notif.read && user?.handle) {
@@ -1088,6 +1124,7 @@ export default function InboxPage() {
                         <div className={`flex overflow-x-auto scrollbar-hide pb-1 ${compactPhone ? 'gap-1.5' : 'gap-2'}`}>
                             {([
                                 { id: 'all' as const, label: `All (${queriedItems.length})` },
+                                { id: 'groups' as const, label: `Groups (${groupItems.length})` },
                                 { id: 'unread' as const, label: `Unread (${unreadItems.length})` },
                                 { id: 'requests' as const, label: `Requests (${requestItems.length})` },
                                 { id: 'pinned' as const, label: `Pinned (${pinnedItems.length})` },
@@ -1115,9 +1152,9 @@ export default function InboxPage() {
                                 <div className="text-xs text-gray-400 uppercase tracking-wide mb-2 px-2">Pinned</div>
                                 {pinnedItems.map(conv => (
                                     <ConversationItem
-                                        key={conv.otherHandle}
+                                        key={inboxConversationRowId(conv)}
                                         conv={conv}
-                                        onPin={() => {
+                                        onPin={conv.kind === 'group' ? undefined : () => {
                                             if (user?.handle) {
                                                 unpinConversation(user.handle, conv.otherHandle);
                                                 loadData();
@@ -1132,11 +1169,11 @@ export default function InboxPage() {
                                         navigate={navigate}
                                         currentUserHandle={user?.handle}
                                         onFollow={handleFollow}
-                                        onToggleMute={() => handleToggleMuteConversation(conv)}
+                                        onToggleMute={conv.kind === 'group' ? undefined : () => handleToggleMuteConversation(conv)}
                                         onDeleteConversation={() => handleDeleteConversation(conv)}
                                         onMarkRead={() => handleMarkConversationRead(conv)}
                                         onMarkUnread={() => handleMarkConversationUnread(conv)}
-                                        isSwipeOpen={openSwipeHandle === conv.otherHandle}
+                                        isSwipeOpen={openSwipeHandle === inboxConversationRowId(conv)}
                                         onSwipeOpenChange={setOpenSwipeHandle}
                                         compactPhone={compactPhone}
                                     />
@@ -1150,7 +1187,7 @@ export default function InboxPage() {
                                 <div className="text-xs text-gray-400 uppercase tracking-wide mb-2 px-2">Message Requests</div>
                                 {requestItems.map(conv => (
                                     <ConversationItem
-                                        key={conv.otherHandle}
+                                        key={inboxConversationRowId(conv)}
                                         conv={conv}
                                         onAcceptRequest={() => {
                                             if (user?.handle) {
@@ -1161,11 +1198,11 @@ export default function InboxPage() {
                                         navigate={navigate}
                                         currentUserHandle={user?.handle}
                                         onFollow={handleFollow}
-                                        onToggleMute={() => handleToggleMuteConversation(conv)}
+                                        onToggleMute={conv.kind === 'group' ? undefined : () => handleToggleMuteConversation(conv)}
                                         onDeleteConversation={() => handleDeleteConversation(conv)}
                                         onMarkRead={() => handleMarkConversationRead(conv)}
                                         onMarkUnread={() => handleMarkConversationUnread(conv)}
-                                        isSwipeOpen={openSwipeHandle === conv.otherHandle}
+                                        isSwipeOpen={openSwipeHandle === inboxConversationRowId(conv)}
                                         onSwipeOpenChange={setOpenSwipeHandle}
                                         compactPhone={compactPhone}
                                     />
@@ -1176,9 +1213,9 @@ export default function InboxPage() {
                         {/* Regular Conversations */}
                         {regularItems.map(conv => (
                             <ConversationItem
-                                key={conv.otherHandle}
+                                key={inboxConversationRowId(conv)}
                                 conv={conv}
-                                onPin={() => {
+                                onPin={conv.kind === 'group' ? undefined : () => {
                                     if (user?.handle) {
                                         pinConversation(user.handle, conv.otherHandle);
                                         loadData();
@@ -1187,11 +1224,11 @@ export default function InboxPage() {
                                 navigate={navigate}
                                 currentUserHandle={user?.handle}
                                 onFollow={handleFollow}
-                                onToggleMute={() => handleToggleMuteConversation(conv)}
+                                onToggleMute={conv.kind === 'group' ? undefined : () => handleToggleMuteConversation(conv)}
                                 onDeleteConversation={() => handleDeleteConversation(conv)}
                                 onMarkRead={() => handleMarkConversationRead(conv)}
                                 onMarkUnread={() => handleMarkConversationUnread(conv)}
-                                isSwipeOpen={openSwipeHandle === conv.otherHandle}
+                                isSwipeOpen={openSwipeHandle === inboxConversationRowId(conv)}
                                 onSwipeOpenChange={setOpenSwipeHandle}
                                 compactPhone={compactPhone}
                             />
@@ -1204,9 +1241,9 @@ export default function InboxPage() {
                                 <div className="space-y-1">
                                     {unreadItems.map(conv => (
                                         <ConversationItem
-                                            key={conv.otherHandle}
+                                            key={inboxConversationRowId(conv)}
                                             conv={conv}
-                                            onPin={() => {
+                                            onPin={conv.kind === 'group' ? undefined : () => {
                                                 if (user?.handle) {
                                                     pinConversation(user.handle, conv.otherHandle);
                                                     loadData();
@@ -1215,11 +1252,11 @@ export default function InboxPage() {
                                             navigate={navigate}
                                             currentUserHandle={user?.handle}
                                             onFollow={handleFollow}
-                                            onToggleMute={() => handleToggleMuteConversation(conv)}
+                                            onToggleMute={conv.kind === 'group' ? undefined : () => handleToggleMuteConversation(conv)}
                                             onDeleteConversation={() => handleDeleteConversation(conv)}
                                             onMarkRead={() => handleMarkConversationRead(conv)}
                                             onMarkUnread={() => handleMarkConversationUnread(conv)}
-                                            isSwipeOpen={openSwipeHandle === conv.otherHandle}
+                                            isSwipeOpen={openSwipeHandle === inboxConversationRowId(conv)}
                                             onSwipeOpenChange={setOpenSwipeHandle}
                                             compactPhone={compactPhone}
                                         />
@@ -1237,7 +1274,7 @@ export default function InboxPage() {
                                 <div className="space-y-1">
                                     {requestItems.map(conv => (
                                         <ConversationItem
-                                            key={conv.otherHandle}
+                                            key={inboxConversationRowId(conv)}
                                             conv={conv}
                                             onAcceptRequest={() => {
                                                 if (user?.handle) {
@@ -1248,11 +1285,11 @@ export default function InboxPage() {
                                             navigate={navigate}
                                             currentUserHandle={user?.handle}
                                             onFollow={handleFollow}
-                                            onToggleMute={() => handleToggleMuteConversation(conv)}
+                                            onToggleMute={conv.kind === 'group' ? undefined : () => handleToggleMuteConversation(conv)}
                                             onDeleteConversation={() => handleDeleteConversation(conv)}
                                             onMarkRead={() => handleMarkConversationRead(conv)}
                                             onMarkUnread={() => handleMarkConversationUnread(conv)}
-                                            isSwipeOpen={openSwipeHandle === conv.otherHandle}
+                                            isSwipeOpen={openSwipeHandle === inboxConversationRowId(conv)}
                                             onSwipeOpenChange={setOpenSwipeHandle}
                                             compactPhone={compactPhone}
                                         />
@@ -1270,9 +1307,9 @@ export default function InboxPage() {
                                 <div className="space-y-1">
                                     {pinnedItems.map(conv => (
                                         <ConversationItem
-                                            key={conv.otherHandle}
+                                            key={inboxConversationRowId(conv)}
                                             conv={conv}
-                                            onPin={() => {
+                                            onPin={conv.kind === 'group' ? undefined : () => {
                                                 if (user?.handle) {
                                                     unpinConversation(user.handle, conv.otherHandle);
                                                     loadData();
@@ -1281,11 +1318,11 @@ export default function InboxPage() {
                                             navigate={navigate}
                                             currentUserHandle={user?.handle}
                                             onFollow={handleFollow}
-                                            onToggleMute={() => handleToggleMuteConversation(conv)}
+                                            onToggleMute={conv.kind === 'group' ? undefined : () => handleToggleMuteConversation(conv)}
                                             onDeleteConversation={() => handleDeleteConversation(conv)}
                                             onMarkRead={() => handleMarkConversationRead(conv)}
                                             onMarkUnread={() => handleMarkConversationUnread(conv)}
-                                            isSwipeOpen={openSwipeHandle === conv.otherHandle}
+                                            isSwipeOpen={openSwipeHandle === inboxConversationRowId(conv)}
                                             onSwipeOpenChange={setOpenSwipeHandle}
                                             compactPhone={compactPhone}
                                         />
@@ -1294,6 +1331,36 @@ export default function InboxPage() {
                             ) : (
                                 <div className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-5 text-center text-sm text-gray-400">
                                     No pinned conversations.
+                                </div>
+                            )
+                        )}
+
+                        {messageFilter === 'groups' && (
+                            groupItems.length > 0 ? (
+                                <div className="space-y-1">
+                                    {groupItems.map(conv => (
+                                        <ConversationItem
+                                            key={inboxConversationRowId(conv)}
+                                            conv={conv}
+                                            onPin={undefined}
+                                            navigate={navigate}
+                                            currentUserHandle={user?.handle}
+                                            onFollow={handleFollow}
+                                            onToggleMute={undefined}
+                                            onDeleteConversation={() => handleDeleteConversation(conv)}
+                                            onMarkRead={() => handleMarkConversationRead(conv)}
+                                            onMarkUnread={() => handleMarkConversationUnread(conv)}
+                                            isSwipeOpen={openSwipeHandle === inboxConversationRowId(conv)}
+                                            onSwipeOpenChange={setOpenSwipeHandle}
+                                            compactPhone={compactPhone}
+                                        />
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-5 text-center text-sm text-gray-400 leading-relaxed">
+                                    No group chats yet. Use <span className="text-cyan-300/90">New group</span> on your profile or{' '}
+                                    <span className="text-cyan-300/90">Create group</span> on your own post (⋯ menu), then invite people from the{' '}
+                                    <span className="text-cyan-300/90">+</span> button in the group or from their profile.
                                 </div>
                             )
                         )}

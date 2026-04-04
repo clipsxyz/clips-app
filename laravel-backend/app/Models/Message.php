@@ -11,6 +11,7 @@ class Message extends Model
 
     protected $fillable = [
         'conversation_id',
+        'chat_group_id',
         'sender_handle',
         'recipient_handle',
         'text',
@@ -35,6 +36,16 @@ class Message extends Model
     public function recipient()
     {
         return $this->belongsTo(User::class, 'recipient_handle', 'handle');
+    }
+
+    public function chatGroup()
+    {
+        return $this->belongsTo(ChatGroup::class, 'chat_group_id');
+    }
+
+    public function isGroupMessage(): bool
+    {
+        return $this->chat_group_id !== null;
     }
 
     // Scopes

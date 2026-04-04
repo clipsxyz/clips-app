@@ -371,6 +371,76 @@ export async function markConversationRead(otherHandle: string) {
     });
 }
 
+/** Group thread: metadata + messages array */
+export async function fetchGroupConversation(groupId: string) {
+    return apiRequest(`/messages/group/${encodeURIComponent(groupId)}`);
+}
+
+export async function sendGroupMessage(
+    groupId: string,
+    payload: { text?: string | null; image_url?: string | null; is_system_message?: boolean },
+) {
+    return apiRequest('/messages/send', {
+        method: 'POST',
+        body: JSON.stringify({
+            chat_group_id: groupId,
+            text: payload.text ?? null,
+            image_url: payload.image_url ?? null,
+            is_system_message: payload.is_system_message ?? false,
+        }),
+    });
+}
+
+export async function markGroupConversationRead(groupId: string) {
+    return apiRequest(`/messages/group/${encodeURIComponent(groupId)}/read`, {
+        method: 'POST',
+    });
+}
+
+// —— Chat groups (community / WhatsApp-style) ——
+export async function fetchChatGroups() {
+    return apiRequest('/chat-groups');
+}
+
+export async function createChatGroupApi(name: string) {
+    return apiRequest('/chat-groups', {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+    });
+}
+
+export async function deleteChatGroup(id: string) {
+    return apiRequest(`/chat-groups/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export async function leaveChatGroup(id: string) {
+    if (!isLaravelApiEnabled()) {
+        const { mockLeaveChatGroup } = await import('./messages');
+        mockLeaveChatGroup(id);
+        return Promise.resolve({ ok: true });
+    }
+    return apiRequest(`/chat-groups/${encodeURIComponent(id)}/leave`, { method: 'POST' });
+}
+
+export async function inviteToChatGroup(groupId: string, inviteeHandle: string) {
+    return apiRequest(`/chat-groups/${encodeURIComponent(groupId)}/invites`, {
+        method: 'POST',
+        body: JSON.stringify({ invitee_handle: inviteeHandle }),
+    });
+}
+
+export async function fetchPendingChatGroupInvites() {
+    return apiRequest('/chat-groups/invites/pending');
+}
+
+export async function acceptChatGroupInvite(inviteId: string) {
+    return apiRequest(`/chat-groups/invites/${encodeURIComponent(inviteId)}/accept`, { method: 'POST' });
+}
+
+export async function declineChatGroupInvite(inviteId: string) {
+    return apiRequest(`/chat-groups/invites/${encodeURIComponent(inviteId)}/decline`, { method: 'POST' });
+}
+
 export async function estimateBoostPriceApi(params: {
     feedType: 'local' | 'regional' | 'national';
     userId: string;

@@ -30,6 +30,7 @@ class Notification extends Model
         'message',
         'post_id',
         'comment_id',
+        'chat_group_invite_id',
         'read',
     ];
 
@@ -53,6 +54,11 @@ class Notification extends Model
     public function comment()
     {
         return $this->belongsTo(Comment::class);
+    }
+
+    public function chatGroupInvite()
+    {
+        return $this->belongsTo(ChatGroupInvite::class, 'chat_group_invite_id');
     }
 
     // Scopes

@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { FiX, FiThumbsUp, FiShare2, FiRepeat, FiMapPin, FiHome, FiClock, FiVolume2, FiVolumeX, FiMessageSquare, FiMessageCircle, FiChevronUp, FiChevronDown, FiBookmark, FiMoreHorizontal, FiSend, FiSmile } from 'react-icons/fi';
 import SavePostModal from './SavePostModal';
 import PostMenuModal from './PostMenuModal';
+import CreateGroupModal from './CreateGroupModal';
 import Avatar from './Avatar';
 import ShareModal from './ShareModal';
 import StickerOverlayComponent from './StickerOverlay';
@@ -24,6 +25,7 @@ import { getAvatarForHandle, getFlagForHandle } from '../api/users';
 import { timeAgo } from '../utils/timeAgo';
 import type { Post } from '../types';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from '../constants';
+import { showToast } from '../utils/toast';
 import { TEXT_STORY_TEMPLATES } from '../textStoryTemplates';
 
 /** Radiating red/pink lines burst for YouTube Shorts-style double-tap like (used in Scenes). */
@@ -249,6 +251,7 @@ export default function ScenesModal({
     const [saveModalOpen, setSaveModalOpen] = React.useState(false);
     const [isSaved, setIsSaved] = React.useState(false);
     const [menuOpen, setMenuOpen] = React.useState(false);
+    const [createGroupOpen, setCreateGroupOpen] = React.useState(false);
 
     const effectivePosts = React.useMemo(() => (posts && posts.length > 0 ? posts : (post ? [post] : [])), [posts, post]);
     const isCarousel = Boolean(effectivePosts.length > 1);
@@ -2522,8 +2525,27 @@ export default function ScenesModal({
                     isBlocked={false}
                     hasNotifications={false}
                     onOpenSave={() => setSaveModalOpen(true)}
+                    onCreateGroup={
+                        user?.id && user?.handle === post.userHandle
+                            ? () => {
+                                  setMenuOpen(false);
+                                  setCreateGroupOpen(true);
+                              }
+                            : undefined
+                    }
                 />
             )}
+            <CreateGroupModal
+                isOpen={createGroupOpen}
+                onClose={() => setCreateGroupOpen(false)}
+                onCreated={(g) => {
+                    setCreateGroupOpen(false);
+                    navigate(`/messages/group/${encodeURIComponent(g.id)}`);
+                    showToast(
+                        `You're in “${g.name}”. Tap + in the header to invite people, or use their profile → Invite to group.`,
+                    );
+                }}
+            />
         </>
     );
 }

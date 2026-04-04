@@ -88,6 +88,7 @@ export default function Root() {
                                 <Route path="user/:handle" element={<ViewProfilePage />} />
                                 <Route path="collection/:collectionId" element={<CollectionFeedPage />} />
                             </Route>
+                            <Route path="messages/group/:groupId" element={<MessagesPage />} />
                             <Route path="messages/:handle" element={<MessagesPage />} />
                             <Route path="inbox" element={<InboxPage />} />
                             <Route path="reply-question" element={<ReplyQuestionPage />} />

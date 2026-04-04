@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import Avatar from '../components/Avatar';
+import CreateGroupModal from '../components/CreateGroupModal';
 import { FiCamera, FiBookmark, FiMessageCircle, FiLock, FiUnlock, FiX, FiUser, FiMapPin, FiThumbsUp, FiGlobe, FiEdit3, FiLink2, FiUsers, FiUserCheck, FiPlus, FiTwitter, FiInstagram, FiVideo, FiSettings, FiFileText, FiLayers, FiType, FiImage } from 'react-icons/fi';
 import Flag from '../components/Flag';
 import { getUserCollections } from '../api/collections';
@@ -9,6 +10,7 @@ import type { Collection } from '../types';
 import { posts } from '../api/posts';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
+import { showToast } from '../utils/toast';
 import { setProfilePrivacy } from '../api/privacy';
 import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMaps';
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
@@ -126,6 +128,7 @@ export default function ProfilePage() {
   const [loadingFollowers, setLoadingFollowers] = React.useState(false);
   const [loadingFollowing, setLoadingFollowing] = React.useState(false);
   const [unreadCount, setUnreadCount] = React.useState(0);
+  const [createGroupOpen, setCreateGroupOpen] = React.useState(false);
   const [placesTraveled, setPlacesTraveled] = React.useState<string>(user?.placesTraveled?.join(', ') || '');
   const [showProfilePictureModal, setShowProfilePictureModal] = React.useState(false);
   const [notificationPrefs, setNotificationPrefs] = React.useState<NotificationPreferences>(getNotificationPreferences());
@@ -675,6 +678,21 @@ export default function ProfilePage() {
               >
                 <FiCamera className="w-4 h-4" />
                 <span className="text-xs font-semibold">Cover</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setCreateGroupOpen(true);
+                }}
+                className="shrink-0 min-h-[44px] px-3.5 py-2 rounded-xl border border-cyan-500/35 bg-cyan-950/40 text-cyan-200 hover:bg-cyan-900/50 transition-colors flex items-center gap-2"
+                style={{ scrollSnapAlign: 'start' }}
+                title="Create a group chat"
+              >
+                <FiUsers className="w-4 h-4" />
+                <span className="text-xs font-semibold">New group</span>
               </button>
 
               <button
@@ -1975,6 +1993,18 @@ export default function ProfilePage() {
             </div>
           </div>
         )}
+
+      <CreateGroupModal
+        isOpen={createGroupOpen}
+        onClose={() => setCreateGroupOpen(false)}
+        onCreated={(g) => {
+          setCreateGroupOpen(false);
+          nav(`/messages/group/${encodeURIComponent(g.id)}`);
+          showToast(
+            `You're in “${g.name}”. Tap + in the header to invite people, or use their profile → Invite to group.`,
+          );
+        }}
+      />
     </div>
   );
 }

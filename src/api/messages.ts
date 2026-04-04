@@ -44,6 +44,81 @@ const pinnedConversations = new Map<string, Set<string>>();
 // Track message requests per user: userHandle => Set<senderHandle>
 const messageRequests = new Map<string, Set<string>>();
 
+/** In-memory chat groups when `VITE_USE_LARAVEL_API=false` (local / mock mode). */
+const mockChatGroups = new Map<string, { name: string; creatorHandle: string; conversation_id: string }>();
+const mockGroupMessageLists = new Map<string, ChatMessage[]>();
+const mockGroupLastReadByUser = new Map<string, number>();
+
+export function createMockChatGroup(name: string, creatorHandle: string): { id: string; name: string; conversation_id: string } {
+    const trimmed = name.trim();
+    const id = `mock-cg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const conversation_id = `mock-conv-${id}`;
+    mockChatGroups.set(id, { name: trimmed, creatorHandle, conversation_id });
+    mockGroupMessageLists.set(id, []);
+    window.dispatchEvent(new CustomEvent('conversationUpdated'));
+    return { id, name: trimmed, conversation_id };
+}
+
+/** ChatGroupSummary-shaped rows for InviteToGroupModal / fetchMyChatGroups in mock mode. */
+export function listMockChatGroupsAsSummaries(viewerHandle: string): Array<{
+    id: string;
+    name: string;
+    conversation_id: string;
+    creator_id: string;
+    is_admin: boolean;
+    role: string;
+    member_count: number;
+}> {
+    const h = viewerHandle.trim();
+    return Array.from(mockChatGroups.entries())
+        .filter(([, meta]) => meta.creatorHandle === h)
+        .map(([id, meta]) => ({
+            id,
+            name: meta.name,
+            conversation_id: meta.conversation_id,
+            creator_id: 'mock',
+            is_admin: true,
+            role: 'admin',
+            member_count: 1,
+        }));
+}
+
+export function mockLeaveChatGroup(groupId: string): void {
+    mockChatGroups.delete(groupId);
+    mockGroupMessageLists.delete(groupId);
+    for (const key of Array.from(mockGroupLastReadByUser.keys())) {
+        if (key.endsWith(`::${groupId}`)) mockGroupLastReadByUser.delete(key);
+    }
+    window.dispatchEvent(new CustomEvent('conversationUpdated'));
+}
+
+function buildMockGroupConversationSummaries(forHandle: string): ConversationSummary[] {
+    const out: ConversationSummary[] = [];
+    mockChatGroups.forEach((meta, id) => {
+        if (meta.creatorHandle !== forHandle) return;
+        const msgs = mockGroupMessageLists.get(id) ?? [];
+        const sorted = msgs.slice().sort((m1, m2) => m2.timestamp - m1.timestamp);
+        const last = sorted[0];
+        const lastRead = mockGroupLastReadByUser.get(`${forHandle}::${id}`) ?? 0;
+        const unread = sorted.filter(
+            (m) => !m.isSystemMessage && m.senderHandle !== forHandle && m.timestamp > lastRead,
+        ).length;
+        out.push({
+            kind: 'group',
+            chatGroupId: id,
+            groupName: meta.name,
+            otherHandle: '',
+            lastMessage: last,
+            unread,
+            isPinned: false,
+            isRequest: false,
+            hasUnviewedStories: false,
+            isMuted: false,
+        });
+    });
+    return out;
+}
+
 function getConversationId(a: string, b: string): ConversationId {
     return [a, b].sort((x, y) => x.localeCompare(y)).join('|');
 }
@@ -229,6 +304,10 @@ export async function markConversationUnread(selfHandle: string, otherHandle: st
 
 export interface ConversationSummary {
     otherHandle: string;
+    /** `group` = community chat thread (Laravel chat-groups) */
+    kind?: 'dm' | 'group';
+    chatGroupId?: string;
+    groupName?: string;
     lastMessage?: ChatMessage;
     unread: number;
     isPinned?: boolean;
@@ -236,6 +315,96 @@ export interface ConversationSummary {
     hasUnviewedStories?: boolean; // True if the other user has unviewed stories
     isFollowing?: boolean; // True if current user is following the other user
     isMuted?: boolean;
+}
+
+/** Load messages for a group thread (Laravel API). */
+export async function fetchGroupChatMessages(_viewerHandle: string, groupId: string): Promise<ChatMessage[]> {
+    const { messages } = await fetchGroupThread(groupId);
+    return messages;
+}
+
+/** Group thread payload from GET /messages/group/:id (name + messages). */
+export async function fetchGroupThread(groupId: string): Promise<{ groupName: string; messages: ChatMessage[] }> {
+    if (isLaravelApiEnabled() && hasAuthToken()) {
+        try {
+            const apiClient = await import('./client');
+            const raw = (await apiClient.fetchGroupConversation(groupId)) as {
+                group?: { id?: string; name?: string };
+                messages?: unknown[];
+            };
+            const groupName = raw?.group?.name?.trim() || 'Group';
+            const list = Array.isArray(raw?.messages) ? raw.messages.map((m) => laravelMsgToChatMessage(m as any)) : [];
+            return { groupName, messages: list.sort((m1, m2) => m1.timestamp - m2.timestamp) };
+        } catch (e) {
+            if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
+            console.warn('Laravel fetchGroupThread failed:', e);
+        }
+    }
+    const meta = mockChatGroups.get(groupId);
+    if (!meta) return { groupName: 'Group', messages: [] };
+    const list = mockGroupMessageLists.get(groupId) ?? [];
+    return { groupName: meta.name, messages: list.slice().sort((m1, m2) => m1.timestamp - m2.timestamp) };
+}
+
+export async function appendGroupChatMessage(
+    _fromHandle: string,
+    groupId: string,
+    message: Omit<ChatMessage, 'id' | 'timestamp' | 'senderHandle'> & { timestamp?: number },
+): Promise<ChatMessage> {
+    if (isLaravelApiEnabled() && hasAuthToken()) {
+        try {
+            const apiClient = await import('./client');
+            const raw = await apiClient.sendGroupMessage(groupId, {
+                text: message.text ?? undefined,
+                image_url: message.imageUrl ?? undefined,
+                is_system_message: message.isSystemMessage ?? false,
+            });
+            return laravelMsgToChatMessage(raw);
+        } catch (e) {
+            if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
+            throw e;
+        }
+    }
+    const meta = mockChatGroups.get(groupId);
+    if (!meta) throw new Error('Unknown group');
+    const msg: ChatMessage = {
+        id: `mock-gm-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        senderHandle: _fromHandle,
+        text: message.text,
+        imageUrl: message.imageUrl,
+        audioUrl: message.audioUrl,
+        timestamp: message.timestamp ?? Date.now(),
+        isSystemMessage: message.isSystemMessage ?? false,
+        postId: message.postId,
+        replyTo: message.replyTo,
+    };
+    const list = mockGroupMessageLists.get(groupId) ?? [];
+    list.push(msg);
+    mockGroupMessageLists.set(groupId, list);
+    window.dispatchEvent(
+        new CustomEvent('conversationUpdated', {
+            detail: { chat_group_id: groupId, chatGroupId: groupId, message: msg },
+        }),
+    );
+    return msg;
+}
+
+export async function markGroupConversationReadById(groupId: string, viewerHandle?: string): Promise<void> {
+    if (isLaravelApiEnabled() && hasAuthToken()) {
+        try {
+            const apiClient = await import('./client');
+            await apiClient.markGroupConversationRead(groupId);
+        } catch (e) {
+            if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
+            console.warn('Laravel markGroupConversationRead failed:', e);
+        }
+        return;
+    }
+    const msgs = mockGroupMessageLists.get(groupId) ?? [];
+    const t = msgs.length ? Math.max(...msgs.map((m) => m.timestamp)) : Date.now();
+    const v = viewerHandle?.trim();
+    if (v) mockGroupLastReadByUser.set(`${v}::${groupId}`, t);
+    window.dispatchEvent(new CustomEvent('conversationUpdated'));
 }
 
 export async function listConversations(forHandle: string): Promise<ConversationSummary[]> {
@@ -246,23 +415,53 @@ export async function listConversations(forHandle: string): Promise<Conversation
             const items = res?.items ?? [];
             const { userHasUnviewedStoriesByHandle } = await import('./stories');
             const summaries: ConversationSummary[] = await Promise.all(
-                items.map(async (row: { other_user?: { handle: string }; latest_message?: any; unread_count?: number }) => {
-                    const otherHandle = row.other_user?.handle ?? '';
-                    const lastMessage = row.latest_message ? laravelMsgToChatMessage(row.latest_message) : undefined;
-                    const unread = Number(row.unread_count) || 0;
-                    const hasUnviewedStories = await userHasUnviewedStoriesByHandle(otherHandle);
-                    return {
-                        otherHandle,
-                        lastMessage,
-                        unread: unreadOverrideByThread.get(`${forHandle}::${otherHandle}`) ?? unread,
-                        isPinned: false,
-                        isRequest: false,
-                        hasUnviewedStories,
-                        isMuted: mutedConversations.get(forHandle)?.has(otherHandle) ?? false,
-                    };
-                })
+                items.map(
+                    async (row: {
+                        type?: string;
+                        chat_group_id?: string;
+                        group?: { id: string; name: string; creator_id?: string };
+                        other_user?: { handle: string };
+                        latest_message?: any;
+                        unread_count?: number;
+                    }) => {
+                        if (row.type === 'group' && row.chat_group_id) {
+                            const lastMessage = row.latest_message ? laravelMsgToChatMessage(row.latest_message) : undefined;
+                            const unread = Number(row.unread_count) || 0;
+                            return {
+                                kind: 'group' as const,
+                                chatGroupId: row.chat_group_id,
+                                groupName: row.group?.name ?? 'Group',
+                                otherHandle: '',
+                                lastMessage,
+                                unread,
+                                isPinned: false,
+                                isRequest: false,
+                                hasUnviewedStories: false,
+                                isMuted: false,
+                            };
+                        }
+                        const otherHandle = row.other_user?.handle ?? '';
+                        const lastMessage = row.latest_message ? laravelMsgToChatMessage(row.latest_message) : undefined;
+                        const unread = Number(row.unread_count) || 0;
+                        const hasUnviewedStories = await userHasUnviewedStoriesByHandle(otherHandle);
+                        return {
+                            kind: 'dm' as const,
+                            otherHandle,
+                            lastMessage,
+                            unread: unreadOverrideByThread.get(`${forHandle}::${otherHandle}`) ?? unread,
+                            isPinned: false,
+                            isRequest: false,
+                            hasUnviewedStories,
+                            isMuted: mutedConversations.get(forHandle)?.has(otherHandle) ?? false,
+                        };
+                    },
+                ),
             );
-            return summaries.sort((a, b) => (b.lastMessage?.timestamp ?? 0) - (a.lastMessage?.timestamp ?? 0));
+            return summaries.sort((a, b) => {
+                const ta = a.lastMessage?.timestamp ?? 0;
+                const tb = b.lastMessage?.timestamp ?? 0;
+                return tb - ta;
+            });
         } catch (e) {
             if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
             console.warn('Laravel listConversations failed, using mock:', e);
@@ -307,8 +506,11 @@ export async function listConversations(forHandle: string): Promise<Conversation
         })
     );
     
+    const mockGroupRows = buildMockGroupConversationSummaries(forHandle);
+    const merged = [...mockGroupRows, ...allConversations];
+
     // Sort: pinned first, then by timestamp
-    return allConversations.sort((a, b) => {
+    return merged.sort((a, b) => {
         if (a.isPinned && !b.isPinned) return -1;
         if (!a.isPinned && b.isPinned) return 1;
         return (b.lastMessage?.timestamp || 0) - (a.lastMessage?.timestamp || 0);

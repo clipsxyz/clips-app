@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\LocationController;
 use App\Http\Controllers\Api\SearchController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\MessageController;
+use App\Http\Controllers\Api\ChatGroupController;
 use App\Http\Controllers\Api\StoryController;
 use App\Http\Controllers\Api\CollectionController;
 use App\Http\Controllers\Api\MusicController;
@@ -278,9 +279,23 @@ Route::middleware('auth:sanctum')->group(function () {
     // Messages routes
     Route::prefix('messages')->group(function () {
         Route::get('/conversations', [MessageController::class, 'getConversations']);
+        Route::get('/group/{groupId}', [MessageController::class, 'getGroupConversation']);
+        Route::post('/group/{groupId}/read', [MessageController::class, 'markGroupRead']);
         Route::get('/conversation/{otherHandle}', [MessageController::class, 'getConversation']);
         Route::post('/send', [MessageController::class, 'sendMessage']);
         Route::post('/conversation/{otherHandle}/read', [MessageController::class, 'markConversationRead']);
+    });
+
+    // Community / WhatsApp-style chat groups
+    Route::prefix('chat-groups')->group(function () {
+        Route::get('/invites/pending', [ChatGroupController::class, 'pendingInvites']);
+        Route::post('/invites/{inviteId}/accept', [ChatGroupController::class, 'acceptInvite']);
+        Route::post('/invites/{inviteId}/decline', [ChatGroupController::class, 'declineInvite']);
+        Route::get('/', [ChatGroupController::class, 'index']);
+        Route::post('/', [ChatGroupController::class, 'store']);
+        Route::delete('/{id}', [ChatGroupController::class, 'destroy']);
+        Route::post('/{id}/leave', [ChatGroupController::class, 'leave']);
+        Route::post('/{id}/invites', [ChatGroupController::class, 'invite']);
     });
 
     // Stories routes

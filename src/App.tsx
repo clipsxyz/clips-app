@@ -43,6 +43,7 @@ import { getActiveBoost, getBoostTimeRemaining } from './api/boost';
 import BoostSelectionModal from './components/BoostSelectionModal';
 import SavePostModal from './components/SavePostModal';
 import PostMenuModal from './components/PostMenuModal';
+import CreateGroupModal from './components/CreateGroupModal';
 import EditPostModal from './components/EditPostModal';
 import ShareToStoriesModal from './components/ShareToStoriesModal';
 import { getCollectionsForPost } from './api/collections';
@@ -55,6 +56,7 @@ import ZoomableMedia from './components/ZoomableMedia';
 import { getInstagramImageDimensions, getImageSize } from './utils/imageDimensions';
 import Swal from 'sweetalert2';
 import { bottomSheet } from './utils/swalBottomSheet';
+import { showToast } from './utils/toast';
 import { TEXT_STORY_TEMPLATES } from './textStoryTemplates';
 import { IMessageDmBubbleShell } from './components/IMessageDmBubbleShell';
 import { DM_RECEIVED_BG, getDmSentBubblePreference } from './constants/dmImessageTheme';
@@ -4155,6 +4157,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   const [isBoosted, setIsBoosted] = React.useState(false);
   const [saveModalOpen, setSaveModalOpen] = React.useState(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const [createGroupOpen, setCreateGroupOpen] = React.useState(false);
   const [editModalOpen, setEditModalOpen] = React.useState(false);
   const [isSaved, setIsSaved] = React.useState(false);
   const [carouselIndex, setCarouselIndex] = React.useState(0);
@@ -4551,6 +4554,23 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             isBlocked={false} // TODO: Check if blocked
             hasNotifications={false} // TODO: Check notifications
             onOpenSave={() => setSaveModalOpen(true)}
+            onCreateGroup={
+              user?.id && user?.handle === post.userHandle
+                ? () => {
+                    setMenuOpen(false);
+                    setCreateGroupOpen(true);
+                  }
+                : undefined
+            }
+          />
+          <CreateGroupModal
+            isOpen={createGroupOpen}
+            onClose={() => setCreateGroupOpen(false)}
+            onCreated={(g) => {
+              setCreateGroupOpen(false);
+              navigate(`/messages/group/${encodeURIComponent(g.id)}`);
+              showToast(`You're in “${g.name}”. Tap + in the header to invite people, or use their profile → Invite to group.`);
+            }}
           />
           <SavePostModal
             post={post}

@@ -19,7 +19,8 @@ import {
     FiBellOff,
     FiInfo,
     FiZap,
-    FiRepeat
+    FiRepeat,
+    FiUsers,
 } from 'react-icons/fi';
 import SavePostModal from './SavePostModal';
 import QRCodeModal from './QRCodeModal';
@@ -46,6 +47,8 @@ interface PostMenuModalProps {
     onTurnOffNotifications?: () => void;
     /** When set, Save opens this (e.g. parent SavePostModal). Required so Save works after menu closes — internal state was lost on unmount. */
     onOpenSave?: () => void;
+    /** Opens community group creation (Gazetteer chat groups). */
+    onCreateGroup?: () => void;
     isCurrentUser?: boolean;
     isFollowing?: boolean;
     isSaved?: boolean;
@@ -75,6 +78,7 @@ export default function PostMenuModal({
     onTurnOnNotifications,
     onTurnOffNotifications,
     onOpenSave,
+    onCreateGroup,
     isCurrentUser = false,
     isFollowing = false,
     isSaved = false,
@@ -171,6 +175,11 @@ export default function PostMenuModal({
                         handleSave();
                         return;
                     }
+                    if (item.label === 'Create group') {
+                        onCreateGroup?.();
+                        onClose();
+                        return;
+                    }
                     // QR opens a higher z-index modal; closing the menu first would drop internal state
                     if (item.label === 'QR code') {
                         item.action();
@@ -205,6 +214,12 @@ export default function PostMenuModal({
                         {/* Own post: Copy link, Save/Unsave, Share, Boost, then divider and rest */}
                         {isCurrentUser ? (
                             <>
+                                {isCurrentUser && onCreateGroup ? (
+                                    <div className="py-1">
+                                        {renderRow({ icon: FiUsers, label: 'Create group', action: onCreateGroup }, -1)}
+                                    </div>
+                                ) : null}
+                                {isCurrentUser && onCreateGroup ? <div className="mx-4 border-t border-white/15" /> : null}
                                 <div className="py-1">
                                     {[
                                         { icon: FiCopy, label: 'Copy link', action: handleCopyLink },
