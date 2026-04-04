@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile, FiUserPlus, FiX, FiPlus, FiCheck, FiMoreHorizontal, FiBellOff, FiTrash2 } from 'react-icons/fi';
+import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile, FiUserPlus, FiUser, FiX, FiPlus, FiCheck, FiMoreHorizontal, FiBellOff, FiTrash2, FiBookmark } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { getAvatarForHandle } from '../api/users';
@@ -14,7 +14,6 @@ import { acceptFollowRequest as acceptFollowRequestLocal, denyFollowRequest as d
 import { showToast } from '../utils/toast';
 import { getFollowedUsers } from '../api/posts';
 import type { StoryGroup } from '../types';
-import { FiBookmark } from 'react-icons/fi';
 import { toggleFollow, acceptFollowRequest, denyFollowRequest } from '../api/client';
 import { getSocket } from '../services/socketio';
 import { leaveChatGroup } from '../api/client';
@@ -29,7 +28,6 @@ function inboxConversationRowId(conv: ConversationSummary): string {
 function ConversationItem({ 
     conv, 
     onPin, 
-    onAcceptRequest,
     navigate,
     currentUserHandle,
     onFollow,
@@ -40,6 +38,7 @@ function ConversationItem({
     isSwipeOpen,
     onSwipeOpenChange,
     compactPhone,
+    onOpenChatInfo,
 }: { 
     conv: ConversationSummary; 
     onPin?: () => void;
@@ -54,6 +53,8 @@ function ConversationItem({
     isSwipeOpen?: boolean;
     onSwipeOpenChange?: (handle: string | null) => void;
     compactPhone?: boolean;
+    /** Opens black & white chat info sheet (inbox list). */
+    onOpenChatInfo?: (conv: ConversationSummary) => void;
 }) {
     const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 390;
     const SWIPE_ACTION_WIDTH = viewportWidth < 360 ? 188 : viewportWidth < 430 ? 208 : 224;
@@ -65,7 +66,6 @@ function ConversationItem({
     const hasStory = !isGroupRow && (conv.hasUnviewedStories || false);
     const isFollowing = conv.isFollowing || false;
     const [showFollowCheck, setShowFollowCheck] = React.useState(isFollowing);
-    const [showActions, setShowActions] = React.useState(false);
     const [swipeOffset, setSwipeOffset] = React.useState(0);
     const [pulseOpen, setPulseOpen] = React.useState(false);
     const touchStartXRef = React.useRef<number | null>(null);
@@ -194,7 +194,7 @@ function ConversationItem({
     };
     const revealProgress = Math.max(0, Math.min(1, swipeOffset / SWIPE_ACTION_WIDTH));
     const rowScale = 1 - revealProgress * 0.012;
-    const rowShadow = revealProgress > 0 ? '0 8px 24px rgba(6, 182, 212, 0.16)' : 'none';
+    const rowShadow = revealProgress > 0 ? '0 8px 24px rgba(255, 255, 255, 0.08)' : 'none';
 
     return (
         <div className="relative overflow-hidden rounded-lg" data-conversation-row="true">
@@ -221,7 +221,7 @@ function ConversationItem({
                             onPin();
                             closeSwipeActions();
                         }}
-                        className="w-14 sm:w-16 bg-cyan-600/90 hover:bg-cyan-500 active:brightness-110 active:scale-[0.98] transition-all text-white text-[11px] font-semibold"
+                        className="w-14 sm:w-16 bg-white/20 hover:bg-white/30 active:brightness-110 active:scale-[0.98] transition-all text-white text-[11px] font-semibold"
                         title={conv.isPinned ? 'Unpin conversation' : 'Pin conversation'}
                     >
                         {conv.isPinned ? 'Unpin' : 'Pin'}
@@ -235,7 +235,7 @@ function ConversationItem({
                             else onMarkUnread?.();
                             closeSwipeActions();
                         }}
-                        className="w-14 sm:w-16 bg-sky-500/90 hover:bg-sky-400 active:brightness-110 active:scale-[0.98] transition-all text-white text-[11px] font-semibold"
+                        className="w-14 sm:w-16 bg-white/25 hover:bg-white/35 active:brightness-110 active:scale-[0.98] transition-all text-white text-[11px] font-semibold"
                         title={conv.unread > 0 ? 'Mark as read' : 'Mark as unread'}
                     >
                         {conv.unread > 0 ? 'Read' : 'Unread'}
@@ -248,7 +248,7 @@ function ConversationItem({
                             onToggleMute();
                             closeSwipeActions();
                         }}
-                        className="w-14 sm:w-16 bg-cyan-800/90 hover:bg-cyan-700 active:brightness-110 active:scale-[0.98] transition-all text-white text-[11px] font-semibold"
+                        className="w-14 sm:w-16 bg-white/15 hover:bg-white/25 active:brightness-110 active:scale-[0.98] transition-all text-white text-[11px] font-semibold"
                         title={conv.isMuted ? 'Unmute conversation' : 'Mute conversation'}
                     >
                         {conv.isMuted ? 'Unmute' : 'Mute'}
@@ -276,7 +276,7 @@ function ConversationItem({
                 style={{
                     transform: `translateX(-${swipeOffset}px) scale(${rowScale})`,
                     transformOrigin: 'right center',
-                    boxShadow: pulseOpen ? '0 0 0 2px rgba(34, 211, 238, 0.42), 0 10px 24px rgba(6, 182, 212, 0.24)' : rowShadow,
+                    boxShadow: pulseOpen ? '0 0 0 2px rgba(255, 255, 255, 0.35), 0 10px 24px rgba(255, 255, 255, 0.12)' : rowShadow,
                     transition: isSwipingRef.current ? 'none' : 'transform 180ms ease, box-shadow 180ms ease',
                 }}
                 onTouchStart={handleTouchStart}
@@ -288,7 +288,7 @@ function ConversationItem({
                 className="pointer-events-none absolute inset-0 rounded-lg"
                 style={{
                     opacity: pulseOpen ? 0.22 : 0,
-                    background: 'linear-gradient(90deg, rgba(34,211,238,0.05) 0%, rgba(34,211,238,0.22) 100%)',
+                    background: 'linear-gradient(90deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.14) 100%)',
                     transition: 'opacity 140ms ease',
                 }}
             />
@@ -305,10 +305,10 @@ function ConversationItem({
                 {!isGroupRow && !isCurrentUser && onFollow && (isFollowing === false || isFollowing === undefined) && (
                     <button
                         onClick={handleFollowClick}
-                        className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-cyan-500 hover:bg-cyan-600 border-2 border-white dark:border-gray-900 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30"
+                        className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-white hover:bg-white/90 border-2 border-white dark:border-gray-900 flex items-center justify-center transition-all duration-200 active:scale-90 shadow-lg z-30"
                         aria-label="Follow user"
                     >
-                        <FiPlus className="w-3 h-3 text-white" strokeWidth={2.5} />
+                        <FiPlus className="w-3 h-3 text-gray-900" strokeWidth={2.5} />
                     </button>
                 )}
                 {/* Checkmark icon when following (replaces + icon) */}
@@ -327,7 +327,7 @@ function ConversationItem({
                     <div className="flex items-center gap-2">
                         <span className={`font-medium truncate ${compactPhone ? 'text-[13px]' : ''}`}>{displayTitle}</span>
                         {conv.isPinned && (
-                            <FiBookmark className="w-3 h-3 text-cyan-400 fill-cyan-400 flex-shrink-0" />
+                            <FiBookmark className="w-3 h-3 text-gray-800 fill-gray-800 dark:text-white dark:fill-white flex-shrink-0" />
                         )}
                     </div>
                     <div className={`text-gray-500 truncate ${compactPhone ? 'text-[11px]' : 'text-xs'}`}>
@@ -339,7 +339,7 @@ function ConversationItem({
                         {conv.lastMessage ? timeAgo(conv.lastMessage.timestamp) : ''}
                     </div>
                     {conv.unread > 0 && (
-                        <span className="px-1.5 py-0.5 bg-cyan-500 text-white text-[10px] rounded-full min-w-[18px] text-center">
+                        <span className="px-1.5 py-0.5 bg-neutral-900 text-white dark:bg-white dark:text-gray-900 text-[10px] rounded-full min-w-[18px] text-center font-semibold">
                             {conv.unread > 9 ? '9+' : conv.unread}
                         </span>
                     )}
@@ -347,98 +347,22 @@ function ConversationItem({
             </button>
             <div className={`flex items-center gap-1 transition-opacity ${compactPhone ? 'pr-0.5' : ''}`}>
                 <button
+                    type="button"
                     onClick={(e) => {
                         e.stopPropagation();
+                        e.preventDefault();
                         closeSwipeActions();
-                        setShowActions((prev) => !prev);
+                        onOpenChatInfo?.(conv);
                     }}
-                    className={`rounded-full text-gray-400 hover:bg-gray-700 hover:text-gray-200 transition-colors ${
+                    className={`rounded-full text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-200 transition-colors ${
                         compactPhone ? 'p-1.5' : 'p-2'
                     }`}
-                    title="More actions"
+                    title="Chat info"
+                    aria-label="Chat info and options"
                 >
                     <FiMoreHorizontal className="w-4 h-4" />
                 </button>
             </div>
-            {showActions && (
-                <div className="absolute right-2 top-[52px] z-40 rounded-xl border border-white/15 bg-[#0c1119] shadow-2xl p-1 min-w-[170px]">
-                    {conv.isRequest && onAcceptRequest && (
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onAcceptRequest();
-                                setShowActions(false);
-                            }}
-                            className="w-full px-3 py-2 text-left text-xs rounded-lg hover:bg-white/10 text-white"
-                        >
-                            Accept request
-                        </button>
-                    )}
-                    {onMarkRead && conv.unread > 0 && (
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onMarkRead();
-                                setShowActions(false);
-                            }}
-                            className="w-full px-3 py-2 text-left text-xs rounded-lg hover:bg-white/10 text-white"
-                        >
-                            Mark as read
-                        </button>
-                    )}
-                    {onMarkUnread && conv.unread === 0 && (
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onMarkUnread();
-                                setShowActions(false);
-                            }}
-                            className="w-full px-3 py-2 text-left text-xs rounded-lg hover:bg-white/10 text-white"
-                        >
-                            Mark as unread
-                        </button>
-                    )}
-                    {onPin && (
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onPin();
-                                setShowActions(false);
-                            }}
-                            className="w-full px-3 py-2 text-left text-xs rounded-lg hover:bg-white/10 text-white flex items-center gap-2"
-                        >
-                            <FiBookmark className={`w-3.5 h-3.5 ${conv.isPinned ? 'fill-current text-cyan-400' : 'text-gray-300'}`} />
-                            {conv.isPinned ? 'Unpin conversation' : 'Pin conversation'}
-                        </button>
-                    )}
-                    {onToggleMute && (
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onToggleMute();
-                                setShowActions(false);
-                            }}
-                            className="w-full px-3 py-2 text-left text-xs rounded-lg hover:bg-white/10 text-white flex items-center gap-2"
-                        >
-                            <FiBellOff className="w-3.5 h-3.5 text-cyan-300" />
-                            {conv.isMuted ? 'Unmute conversation' : 'Mute conversation'}
-                        </button>
-                    )}
-                    {onDeleteConversation && (
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onDeleteConversation();
-                                setShowActions(false);
-                            }}
-                            className="w-full px-3 py-2 text-left text-xs rounded-lg hover:bg-red-500/15 text-red-300 flex items-center gap-2"
-                        >
-                            <FiTrash2 className="w-3.5 h-3.5" />
-                            {isGroupRow ? 'Leave group' : 'Delete conversation'}
-                        </button>
-                    )}
-                </div>
-            )}
             </div>
         </div>
     );
@@ -458,10 +382,17 @@ export default function InboxPage() {
     const [conversationQuery, setConversationQuery] = React.useState('');
     const [selectedQuestionInsight, setSelectedQuestionInsight] = React.useState<StoryInsight | null>(null);
     const [openSwipeHandle, setOpenSwipeHandle] = React.useState<string | null>(null);
+    const [inboxChatInfo, setInboxChatInfo] = React.useState<ConversationSummary | null>(null);
     const [compactPhone, setCompactPhone] = React.useState<boolean>(() => (typeof window !== 'undefined' ? window.innerWidth <= 390 : false));
+
+    const openInboxChatInfo = React.useCallback((c: ConversationSummary) => {
+        setOpenSwipeHandle(null);
+        setInboxChatInfo(c);
+    }, []);
 
     React.useEffect(() => {
         setOpenSwipeHandle(null);
+        setInboxChatInfo(null);
     }, [activeTab, messageFilter, conversationQuery]);
 
     React.useEffect(() => {
@@ -843,17 +774,18 @@ export default function InboxPage() {
     };
 
     const getNotificationIcon = (type: Notification['type']) => {
+        const cls = 'w-5 h-5 text-gray-700 dark:text-white';
         switch (type) {
             case 'sticker':
-                return <FiSmile className="w-5 h-5 text-purple-500" />;
+                return <FiSmile className={cls} />;
             case 'reply':
-                return <FiCornerUpLeft className="w-5 h-5 text-blue-500" />;
+                return <FiCornerUpLeft className={cls} />;
             case 'dm':
-                return <FiMessageCircle className="w-5 h-5 text-green-500" />;
+                return <FiMessageCircle className={cls} />;
             case 'follow_request':
-                return <FiUserPlus className="w-5 h-5 text-amber-500" />;
+                return <FiUserPlus className={cls} />;
             default:
-                return <FiMessageCircle className="w-5 h-5 text-gray-500" />;
+                return <FiMessageCircle className={cls} />;
         }
     };
 
@@ -1038,13 +970,13 @@ export default function InboxPage() {
                 <button
                     onClick={() => setActiveTab('messages')}
                     className={`flex-1 py-1.5 text-xs font-medium transition-colors relative whitespace-nowrap flex items-center justify-center gap-1 ${activeTab === 'messages'
-                            ? 'text-cyan-400 border-b-2 border-cyan-400'
+                            ? 'text-white border-b-2 border-white'
                             : 'text-gray-500 hover:text-gray-300'
                         }`}
                 >
                     <span>Messages</span>
                     {unreadMessagesTotal > 0 && (
-                        <span className="px-1 py-0.5 bg-cyan-500 text-white text-[9px] rounded-full min-w-[16px] text-center leading-none">
+                        <span className="px-1 py-0.5 bg-white text-gray-900 text-[9px] rounded-full min-w-[16px] text-center leading-none font-semibold">
                             {unreadMessagesTotal > 9 ? '9+' : unreadMessagesTotal}
                         </span>
                     )}
@@ -1052,13 +984,13 @@ export default function InboxPage() {
                 <button
                     onClick={() => setActiveTab('notifications')}
                     className={`flex-1 py-1.5 text-xs font-medium transition-colors relative whitespace-nowrap flex items-center justify-center gap-1 ${activeTab === 'notifications'
-                            ? 'text-cyan-400 border-b-2 border-cyan-400'
+                            ? 'text-white border-b-2 border-white'
                             : 'text-gray-500 hover:text-gray-300'
                         }`}
                 >
                     <span>Notifs</span>
                     {unreadNotifications > 0 && (
-                        <span className="px-1 py-0.5 bg-cyan-500 text-white text-[9px] rounded-full min-w-[16px] text-center leading-none">
+                        <span className="px-1 py-0.5 bg-white text-gray-900 text-[9px] rounded-full min-w-[16px] text-center leading-none font-semibold">
                             {unreadNotifications > 9 ? '9+' : unreadNotifications}
                         </span>
                     )}
@@ -1066,13 +998,13 @@ export default function InboxPage() {
                 <button
                     onClick={() => setActiveTab('insights')}
                     className={`flex-1 py-1.5 text-xs font-medium transition-colors relative whitespace-nowrap flex items-center justify-center gap-1 ${activeTab === 'insights'
-                            ? 'text-cyan-400 border-b-2 border-cyan-400'
+                            ? 'text-white border-b-2 border-white'
                             : 'text-gray-500 hover:text-gray-300'
                         }`}
                 >
                     <span>Insights</span>
                     {insights && insights.length > 0 && (
-                        <span className="px-1 py-0.5 bg-cyan-500 text-white text-[9px] rounded-full min-w-[16px] text-center leading-none">
+                        <span className="px-1 py-0.5 bg-white text-gray-900 text-[9px] rounded-full min-w-[16px] text-center leading-none font-semibold">
                             {insights.length > 9 ? '9+' : insights.length}
                         </span>
                     )}
@@ -1102,7 +1034,7 @@ export default function InboxPage() {
                         }}
                     >
                         <div className={`flex items-center gap-2 rounded-xl border border-white/10 bg-[#09090d] ${compactPhone ? 'px-2.5 py-2' : 'px-3 py-2'}`}>
-                            <FiMessageCircle className="w-4 h-4 text-cyan-300" />
+                            <FiMessageCircle className="w-4 h-4 text-white" />
                             <input
                                 value={conversationQuery}
                                 onChange={(e) => setConversationQuery(e.target.value)}
@@ -1135,8 +1067,8 @@ export default function InboxPage() {
                                     onClick={() => setMessageFilter(chip.id)}
                                     className={`${compactPhone ? 'px-2.5 py-1.5 text-[10px] min-h-[32px]' : 'px-3 py-1.5 text-[11px]'} rounded-full font-medium whitespace-nowrap border transition-colors ${
                                         messageFilter === chip.id
-                                            ? 'bg-cyan-500 text-white border-cyan-400'
-                                            : 'bg-black/40 text-gray-300 border-white/15 hover:border-cyan-400/60'
+                                            ? 'bg-white text-gray-900 border-white'
+                                            : 'bg-black/40 text-gray-300 border-white/15 hover:border-white/50'
                                     }`}
                                 >
                                     {chip.label}
@@ -1175,6 +1107,7 @@ export default function InboxPage() {
                                         onMarkUnread={() => handleMarkConversationUnread(conv)}
                                         isSwipeOpen={openSwipeHandle === inboxConversationRowId(conv)}
                                         onSwipeOpenChange={setOpenSwipeHandle}
+                                        onOpenChatInfo={openInboxChatInfo}
                                         compactPhone={compactPhone}
                                     />
                                 ))}
@@ -1204,6 +1137,7 @@ export default function InboxPage() {
                                         onMarkUnread={() => handleMarkConversationUnread(conv)}
                                         isSwipeOpen={openSwipeHandle === inboxConversationRowId(conv)}
                                         onSwipeOpenChange={setOpenSwipeHandle}
+                                        onOpenChatInfo={openInboxChatInfo}
                                         compactPhone={compactPhone}
                                     />
                                 ))}
@@ -1230,6 +1164,7 @@ export default function InboxPage() {
                                 onMarkUnread={() => handleMarkConversationUnread(conv)}
                                 isSwipeOpen={openSwipeHandle === inboxConversationRowId(conv)}
                                 onSwipeOpenChange={setOpenSwipeHandle}
+                                onOpenChatInfo={openInboxChatInfo}
                                 compactPhone={compactPhone}
                             />
                         ))}
@@ -1258,6 +1193,7 @@ export default function InboxPage() {
                                             onMarkUnread={() => handleMarkConversationUnread(conv)}
                                             isSwipeOpen={openSwipeHandle === inboxConversationRowId(conv)}
                                             onSwipeOpenChange={setOpenSwipeHandle}
+                                            onOpenChatInfo={openInboxChatInfo}
                                             compactPhone={compactPhone}
                                         />
                                     ))}
@@ -1291,6 +1227,7 @@ export default function InboxPage() {
                                             onMarkUnread={() => handleMarkConversationUnread(conv)}
                                             isSwipeOpen={openSwipeHandle === inboxConversationRowId(conv)}
                                             onSwipeOpenChange={setOpenSwipeHandle}
+                                            onOpenChatInfo={openInboxChatInfo}
                                             compactPhone={compactPhone}
                                         />
                                     ))}
@@ -1324,6 +1261,7 @@ export default function InboxPage() {
                                             onMarkUnread={() => handleMarkConversationUnread(conv)}
                                             isSwipeOpen={openSwipeHandle === inboxConversationRowId(conv)}
                                             onSwipeOpenChange={setOpenSwipeHandle}
+                                            onOpenChatInfo={openInboxChatInfo}
                                             compactPhone={compactPhone}
                                         />
                                     ))}
@@ -1352,15 +1290,16 @@ export default function InboxPage() {
                                             onMarkUnread={() => handleMarkConversationUnread(conv)}
                                             isSwipeOpen={openSwipeHandle === inboxConversationRowId(conv)}
                                             onSwipeOpenChange={setOpenSwipeHandle}
+                                            onOpenChatInfo={openInboxChatInfo}
                                             compactPhone={compactPhone}
                                         />
                                     ))}
                                 </div>
                             ) : (
                                 <div className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-5 text-center text-sm text-gray-400 leading-relaxed">
-                                    No group chats yet. Use <span className="text-cyan-300/90">New group</span> on your profile or{' '}
-                                    <span className="text-cyan-300/90">Create group</span> on your own post (⋯ menu), then invite people from the{' '}
-                                    <span className="text-cyan-300/90">+</span> button in the group or from their profile.
+                                    No group chats yet. Use <span className="text-white/90">New group</span> on your profile or{' '}
+                                    <span className="text-white/90">Create group</span> on your own post (⋯ menu), then invite people from the{' '}
+                                    <span className="text-white/90">+</span> button in the group or from their profile.
                                 </div>
                             )
                         )}
@@ -1380,7 +1319,7 @@ export default function InboxPage() {
                                             await loadData();
                                         }
                                     }}
-                                    className="text-xs text-cyan-400 hover:text-cyan-300"
+                                    className="text-xs text-white hover:text-white/70"
                                 >
                                     Mark all as read
                                 </button>
@@ -1391,7 +1330,7 @@ export default function InboxPage() {
                                 key={notif.id}
                                 className={`w-full text-left flex items-center gap-3 py-3 px-2 rounded-lg transition-colors ${notif.read
                                         ? 'hover:bg-gray-100 dark:hover:bg-gray-800'
-                                        : 'bg-cyan-900/20 hover:bg-cyan-900/30 border-l-4 border-cyan-500'
+                                        : 'bg-white/10 hover:bg-white/15 border-l-4 border-white'
                                     }`}
                             >
                                 <button
@@ -1417,7 +1356,7 @@ export default function InboxPage() {
                                             {new Date(notif.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                         </div>
                                         {!notif.read && (
-                                            <span className="w-2 h-2 bg-cyan-500 rounded-full"></span>
+                                            <span className="w-2 h-2 bg-white rounded-full"></span>
                                         )}
                                     </div>
                                 </button>
@@ -1504,6 +1443,167 @@ export default function InboxPage() {
                 </div>
             )
             ) : null}
+
+            {(() => {
+                const c = inboxChatInfo;
+                if (!c) return null;
+                const isGroupRow = c.kind === 'group' && !!c.chatGroupId;
+                const title = isGroupRow ? (c.groupName || 'Group') : c.otherHandle;
+                const closeSheet = () => setInboxChatInfo(null);
+                const goOpenChat = () => {
+                    closeSheet();
+                    if (isGroupRow && c.chatGroupId) {
+                        navigate(`/messages/group/${encodeURIComponent(c.chatGroupId)}`);
+                    } else {
+                        navigate(`/messages/${encodeURIComponent(c.otherHandle)}`);
+                    }
+                };
+                const rowBtn =
+                    'w-full text-left px-4 py-3.5 text-sm font-medium text-white hover:bg-white/10 active:bg-white/15 border-b border-white/10 last:border-b-0 flex items-center gap-3';
+                const rowIcon = 'w-4 h-4 text-white/55 flex-shrink-0';
+                return (
+                    <div className="fixed inset-0 z-[55] flex flex-col justify-end sm:items-center sm:justify-end sm:p-4">
+                        <button
+                            type="button"
+                            className="absolute inset-0 bg-black/60"
+                            onClick={closeSheet}
+                            aria-label="Close chat info"
+                        />
+                        <div
+                            className="relative mx-0 mb-0 sm:mb-0 w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl border border-white/20 bg-black text-white shadow-[0_-12px_48px_rgba(0,0,0,0.65)] overflow-hidden flex flex-col max-h-[min(85vh,620px)]"
+                            role="dialog"
+                            aria-modal="true"
+                            aria-labelledby="inbox-chat-info-title"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <div className="h-1 w-10 rounded-full bg-white/25 mx-auto mt-2 sm:hidden shrink-0" aria-hidden />
+                            <div className="flex items-start gap-3 p-4 border-b border-white/15">
+                                <Avatar
+                                    name={title}
+                                    src={isGroupRow ? undefined : getAvatarForHandle(c.otherHandle)}
+                                    size="lg"
+                                />
+                                <div className="flex-1 min-w-0 pt-0.5">
+                                    <h2 id="inbox-chat-info-title" className="font-semibold text-lg text-white truncate">
+                                        {title}
+                                    </h2>
+                                    {!isGroupRow && <p className="text-sm text-white/50 truncate">@{c.otherHandle}</p>}
+                                    {c.lastMessage?.text ? (
+                                        <p className="text-xs text-white/40 truncate mt-1">{c.lastMessage.text}</p>
+                                    ) : null}
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={closeSheet}
+                                    className="p-2 rounded-full hover:bg-white/10 -mr-1 -mt-1 text-white"
+                                    aria-label="Close"
+                                >
+                                    <FiX className="w-5 h-5" />
+                                </button>
+                            </div>
+                            <div className="overflow-y-auto py-1 pb-safe">
+                                <button type="button" className={rowBtn} onClick={goOpenChat}>
+                                    <FiMessageCircle className={rowIcon} />
+                                    Open chat
+                                </button>
+                                {!isGroupRow && (
+                                    <button
+                                        type="button"
+                                        className={rowBtn}
+                                        onClick={() => {
+                                            closeSheet();
+                                            navigate(`/user/${encodeURIComponent(c.otherHandle)}`);
+                                        }}
+                                    >
+                                        <FiUser className={rowIcon} />
+                                        View profile
+                                    </button>
+                                )}
+                                {c.isRequest && user?.handle ? (
+                                    <button
+                                        type="button"
+                                        className={rowBtn}
+                                        onClick={() => {
+                                            void acceptMessageRequest(user.handle, c.otherHandle)
+                                                .then(() => loadData())
+                                                .finally(closeSheet);
+                                        }}
+                                    >
+                                        <FiCheck className={rowIcon} />
+                                        Accept request
+                                    </button>
+                                ) : null}
+                                {c.unread > 0 ? (
+                                    <button
+                                        type="button"
+                                        className={rowBtn}
+                                        onClick={() => {
+                                            void handleMarkConversationRead(c).finally(closeSheet);
+                                        }}
+                                    >
+                                        <FiCheck className={rowIcon} />
+                                        Mark read
+                                    </button>
+                                ) : !isGroupRow ? (
+                                    <button
+                                        type="button"
+                                        className={rowBtn}
+                                        onClick={() => {
+                                            void handleMarkConversationUnread(c).finally(closeSheet);
+                                        }}
+                                    >
+                                        <FiBellOff className={rowIcon} />
+                                        Mark unread
+                                    </button>
+                                ) : null}
+                                {!isGroupRow && user?.handle ? (
+                                    <button
+                                        type="button"
+                                        className={rowBtn}
+                                        onClick={() => {
+                                            if (c.isPinned) {
+                                                void unpinConversation(user.handle, c.otherHandle)
+                                                    .then(() => loadData())
+                                                    .finally(closeSheet);
+                                            } else {
+                                                void pinConversation(user.handle, c.otherHandle)
+                                                    .then(() => loadData())
+                                                    .finally(closeSheet);
+                                            }
+                                        }}
+                                    >
+                                        <FiBookmark className={rowIcon} />
+                                        {c.isPinned ? 'Unpin' : 'Pin'}
+                                    </button>
+                                ) : null}
+                                {!isGroupRow ? (
+                                    <button
+                                        type="button"
+                                        className={rowBtn}
+                                        onClick={() => {
+                                            void handleToggleMuteConversation(c).finally(closeSheet);
+                                        }}
+                                    >
+                                        <FiBellOff className={rowIcon} />
+                                        {c.isMuted ? 'Unmute' : 'Mute'}
+                                    </button>
+                                ) : null}
+                                <button
+                                    type="button"
+                                    className={`${rowBtn} border-b-0`}
+                                    onClick={() => {
+                                        closeSheet();
+                                        void handleDeleteConversation(c);
+                                    }}
+                                >
+                                    <FiTrash2 className={rowIcon} />
+                                    {isGroupRow ? 'Leave group' : 'Delete conversation'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
 
             {/* Question Responses Modal */}
             {selectedQuestionInsight && selectedQuestionInsight.question && (
