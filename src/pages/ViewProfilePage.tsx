@@ -1,12 +1,19 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { FiChevronLeft, FiBell, FiShare2, FiMessageSquare, FiMoreHorizontal, FiX, FiLock, FiMapPin, FiEye, FiUserPlus, FiMaximize, FiPlay, FiSearch, FiUsers } from 'react-icons/fi';
+import { FiChevronLeft, FiBell, FiShare2, FiMessageSquare, FiMoreHorizontal, FiX, FiLock, FiMapPin, FiEye, FiUserPlus, FiMaximize, FiPlay, FiSearch, FiUsers, FiHeart, FiRepeat, FiVolume2, FiVolumeX, FiAlertCircle } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
 import { MOCK_FOLLOWING_GRAPH } from '../api/mockFollowGraph';
 import Flag from '../components/Flag';
 import { useAuth } from '../context/Auth';
-import { fetchPostsPage, toggleFollowForPost, getFollowedUsers, getFollowState, setFollowState, posts as allPosts } from '../api/posts';
+import { fetchPostsPage, toggleFollowForPost, getFollowedUsers, getFollowState, setFollowState, setReclipState, posts as allPosts, toggleLike, reclipPost, incrementViews, deletePost } from '../api/posts';
+import { enqueue } from '../utils/mutationQueue';
+import { useOnline } from '../hooks/useOnline';
+import { FeedCard } from '../App';
+import CommentsModal from '../components/CommentsModal';
+import ShareModal from '../components/ShareModal';
+import ScenesModal from '../components/ScenesModal';
+import { getEffectiveTextStyleForPost, getTextOnlyFallbackBackground, getTextOnlyPreviewTextClass } from '../utils/effectiveTextPostStyle';
 import { userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/stories';
 import { fetchFollowers, fetchFollowing, fetchUserProfile, toggleFollow } from '../api/client';
 import type { Post } from '../types';
@@ -97,6 +104,96 @@ function computeMockGraphFollowCounts(
     return { followers: followersSet.size, following: followingSet.size };
 }
 
+const PROFILE_GRID_PEEK_LONG_PRESS_MS = 450;
+
+type ProfilePostFeedSlideProps = {
+    post: Post;
+    onLike: (post: Post) => Promise<void>;
+    onFollow: () => Promise<void>;
+    onShare: (post: Post) => void;
+    onOpenComments: (post: Post) => void;
+    onView: (post: Post) => Promise<void>;
+    onReclip: (post: Post) => Promise<void>;
+    onOpenScenes: (post: Post) => void;
+    onShareSuccess: (postId: string) => void;
+    onDelete?: (post: Post) => Promise<void>;
+    onOpenDM?: (handle: string) => void;
+    onBoost?: () => Promise<void>;
+    showBoostIcon: boolean;
+    priority?: boolean;
+};
+
+const ProfilePostFeedSlide = React.memo(
+    React.forwardRef<HTMLDivElement, ProfilePostFeedSlideProps>(function ProfilePostFeedSlide(
+        {
+            post,
+            onLike,
+            onFollow,
+            onShare,
+            onOpenComments,
+            onView,
+            onReclip,
+            onOpenScenes,
+            onShareSuccess,
+            onDelete,
+            onOpenDM,
+            onBoost,
+            showBoostIcon,
+            priority = false,
+        },
+        ref,
+    ) {
+        return (
+            <div
+                ref={ref}
+                className="w-full shrink-0 [&_article]:animate-none"
+            >
+                <FeedCard
+                    post={post}
+                    priority={priority}
+                    onLike={() => onLike(post)}
+                    onFollow={onFollow}
+                    onShare={async () => {
+                        onShare(post);
+                    }}
+                    onOpenComments={() => onOpenComments(post)}
+                    onView={() => onView(post)}
+                    onReclip={() => onReclip(post)}
+                    onOpenScenes={() => onOpenScenes(post)}
+                    showBoostIcon={showBoostIcon}
+                    onBoost={onBoost}
+                    onDelete={onDelete ? () => onDelete(post) : undefined}
+                    onOpenDM={onOpenDM}
+                    onShareSuccess={onShareSuccess}
+                    engagementVariant="default"
+                />
+            </div>
+        );
+    }),
+);
+
+/** Short vibration when the grid peek opens (Android / supported browsers; iOS WebView may vary). */
+function hapticProfilePeekOpen() {
+    try {
+        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+            navigator.vibrate(14);
+        }
+    } catch {
+        /* ignore */
+    }
+}
+
+/** Light pattern when peek is dismissed by dragging down. */
+function hapticProfilePeekDismiss() {
+    try {
+        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+            navigator.vibrate([10, 28, 12]);
+        }
+    } catch {
+        /* ignore */
+    }
+}
+
 export default function ViewProfilePage() {
     const navigate = useNavigate();
     const { handle } = useParams<{ handle: string }>();
@@ -107,6 +204,18 @@ export default function ViewProfilePage() {
     const [isFollowing, setIsFollowing] = React.useState(false);
     const [stats, setStats] = React.useState({ following: 0, followers: 0, likes: 0, views: 0 });
     const [selectedPost, setSelectedPost] = React.useState<Post | null>(null);
+    const [gridPeekPost, setGridPeekPost] = React.useState<Post | null>(null);
+    const [peekVideoMuted, setPeekVideoMuted] = React.useState(true);
+    const [peekPullY, setPeekPullY] = React.useState(0);
+    const [peekPullTransition, setPeekPullTransition] = React.useState('');
+    const peekPullYRef = React.useRef(0);
+    const peekPullStartYRef = React.useRef(0);
+    const peekPullPointerIdRef = React.useRef<number | null>(null);
+    const peekPullDraggingRef = React.useRef(false);
+    const profilePostScrollRef = React.useRef<HTMLDivElement>(null);
+    const profilePostSlideRefs = React.useRef<Record<string, HTMLDivElement | null>>({});
+    const gridLongPressTimerRef = React.useRef<number | null>(null);
+    const suppressGridOpenClickRef = React.useRef(false);
     const [hasStory, setHasStory] = React.useState(false);
     const [canViewProfileState, setCanViewProfileState] = React.useState(true);
     const [hasPendingRequest, setHasPendingRequest] = React.useState(false);
@@ -115,6 +224,16 @@ export default function ViewProfilePage() {
     const [placesForTravelModal, setPlacesForTravelModal] = React.useState<string[]>([]);
     const [showProfileMenu, setShowProfileMenu] = React.useState(false);
     const [inviteToGroupOpen, setInviteToGroupOpen] = React.useState(false);
+    const [profileCommentsOpen, setProfileCommentsOpen] = React.useState(false);
+    const [profileCommentsPostId, setProfileCommentsPostId] = React.useState<string | null>(null);
+    const [profileShareOpen, setProfileShareOpen] = React.useState(false);
+    const [profileSharePost, setProfileSharePost] = React.useState<Post | null>(null);
+    const [profileScenesOpen, setProfileScenesOpen] = React.useState(false);
+    const [profileScenesPost, setProfileScenesPost] = React.useState<Post | null>(null);
+    const [profileScenesInitialTime, setProfileScenesInitialTime] = React.useState<number | null>(null);
+    const [profileScenesInitialMuted, setProfileScenesInitialMuted] = React.useState<boolean | null>(null);
+    const profileViewerVideoTimesRef = React.useRef<Map<string, number>>(new Map());
+    const online = useOnline();
     const [showQRCodeModal, setShowQRCodeModal] = React.useState(false);
     const [showShareProfileModal, setShowShareProfileModal] = React.useState(false);
     const [contentTab, setContentTab] = React.useState<'all' | 'videos' | 'photos' | 'text'>('all');
@@ -139,8 +258,8 @@ export default function ViewProfilePage() {
     const [debouncedConnectionsSearch, setDebouncedConnectionsSearch] = React.useState('');
     const [dismissedSuggestedMap, setDismissedSuggestedMap] = React.useState<Record<string, boolean>>({});
     const [dismissUndo, setDismissUndo] = React.useState<{ handleNoAt: string; expiresAt: number } | null>(null);
-    /** Instagram-style horizontal cards vs dense list (Suggested tab only). */
-    const [suggestedConnectionsLayout, setSuggestedConnectionsLayout] = React.useState<'carousel' | 'list'>('carousel');
+    /** Suggested tab: optional horizontal cards; default is vertical list (same as other connection tabs). */
+    const [suggestedConnectionsLayout, setSuggestedConnectionsLayout] = React.useState<'carousel' | 'list'>('list');
 
     const flashConnectionActionSuccess = React.useCallback((key: string) => {
         setConnectionActionSuccessMap((prev) => ({ ...prev, [key]: true }));
@@ -160,6 +279,374 @@ export default function ViewProfilePage() {
         if (contentTab === 'text') return posts.filter((p) => !p.mediaUrl);
         return posts;
     }, [posts, contentTab]);
+
+    const profileScenesFeedPosts = React.useMemo(
+        () => filteredPosts.filter((p) => !!(p.mediaUrl || (p.mediaItems && p.mediaItems.length > 0))),
+        [filteredPosts],
+    );
+
+    const mergeProfilePost = React.useCallback((postId: string, updater: (p: Post) => Post) => {
+        setPosts((prev) => prev.map((p) => (String(p.id) === String(postId) ? updater(p) : p)));
+    }, []);
+
+    React.useEffect(() => {
+        if (!profileUser?.handle || posts.length === 0) return;
+        const h = String(profileUser.handle).replace(/^@/, '').trim().toLowerCase();
+        setPosts((prev) =>
+            prev.map((p) => {
+                const ph = String(p.userHandle || '').replace(/^@/, '').trim().toLowerCase();
+                return ph === h ? { ...p, isFollowing } : p;
+            }),
+        );
+    }, [isFollowing, profileUser?.handle, posts.length]);
+
+    const handleProfileFeedLike = React.useCallback(
+        async (p: Post) => {
+            if (!user) {
+                Swal.fire(bottomSheet({ title: 'Sign in to like posts', icon: 'info' }));
+                return;
+            }
+            const userId = getStableUserId(user);
+            if (!online) {
+                mergeProfilePost(p.id, (post) => {
+                    const nextLiked = !post.userLiked;
+                    return {
+                        ...post,
+                        userLiked: nextLiked,
+                        stats: {
+                            ...post.stats,
+                            likes: Math.max(0, post.stats.likes + (nextLiked ? 1 : -1)),
+                        },
+                    };
+                });
+                await enqueue({ type: 'like', postId: p.id, userId });
+                return;
+            }
+            const nextLiked = !p.userLiked;
+            const nextLikes = Math.max(0, p.stats.likes + (nextLiked ? 1 : -1));
+            mergeProfilePost(p.id, (post) => ({
+                ...post,
+                userLiked: nextLiked,
+                stats: { ...post.stats, likes: nextLikes },
+            }));
+            window.dispatchEvent(
+                new CustomEvent(`likeToggled-${p.id}`, { detail: { liked: nextLiked, likes: nextLikes } }),
+            );
+            try {
+                const updated = await toggleLike(userId, p.id, p);
+                mergeProfilePost(p.id, () => ({ ...updated }));
+                window.dispatchEvent(
+                    new CustomEvent(`likeToggled-${p.id}`, {
+                        detail: { liked: updated.userLiked, likes: updated.stats.likes },
+                    }),
+                );
+            } catch (err) {
+                console.warn('Profile viewer like failed, reverting:', err);
+                mergeProfilePost(p.id, (post) => ({
+                    ...post,
+                    userLiked: p.userLiked,
+                    stats: { ...post.stats, likes: p.stats.likes },
+                }));
+            }
+        },
+        [user, online, mergeProfilePost],
+    );
+
+    const handleProfileFeedView = React.useCallback(
+        async (p: Post) => {
+            if (!p?.id || !user) return;
+            if (p.id.startsWith('mock-scenes-')) return;
+            const userId = getStableUserId(user);
+            if (!online) {
+                await enqueue({ type: 'view', postId: p.id, userId });
+                return;
+            }
+            try {
+                const updated = await incrementViews(userId, p.id);
+                if (updated.userHandle === 'Unknown') return;
+                mergeProfilePost(p.id, (post) => ({
+                    ...post,
+                    stats:
+                        updated.stats && typeof updated.stats.views === 'number'
+                            ? { ...post.stats, views: updated.stats.views }
+                            : post.stats,
+                }));
+                window.dispatchEvent(new CustomEvent(`viewAdded-${p.id}`));
+            } catch (err) {
+                console.warn('incrementViews error:', err);
+            }
+        },
+        [user, online, mergeProfilePost],
+    );
+
+    const handleProfileFeedReclip = React.useCallback(
+        async (p: Post) => {
+            if (!user?.handle) {
+                Swal.fire(bottomSheet({ title: 'Sign in to repost', icon: 'info' }));
+                return;
+            }
+            if (p.userHandle === user.handle || p.userReclipped) return;
+            const userId = getStableUserId(user);
+            const newReclipsCount = p.stats.reclips + 1;
+            const optimisticPost = {
+                ...p,
+                userReclipped: true,
+                stats: { ...p.stats, reclips: newReclipsCount },
+            };
+            setReclipState(userId, p.id, true);
+            mergeProfilePost(p.id, () => optimisticPost);
+            window.dispatchEvent(
+                new CustomEvent(`reclipAdded-${p.id}`, { detail: { reclips: newReclipsCount } }),
+            );
+            if (!online) {
+                await enqueue({ type: 'reclip', postId: p.id, userId, userHandle: user.handle });
+                return;
+            }
+            try {
+                const { originalPost: updatedOriginalPost } = await reclipPost(userId, p.id, user.handle);
+                mergeProfilePost(p.id, () => ({
+                    ...p,
+                    userReclipped: updatedOriginalPost.userReclipped,
+                    stats: updatedOriginalPost.stats,
+                }));
+                if (updatedOriginalPost.stats.reclips !== newReclipsCount) {
+                    window.dispatchEvent(
+                        new CustomEvent(`reclipAdded-${p.id}`, {
+                            detail: { reclips: updatedOriginalPost.stats.reclips },
+                        }),
+                    );
+                }
+            } catch (err) {
+                console.warn('Reclip failed:', err);
+            }
+        },
+        [user, online, mergeProfilePost],
+    );
+
+    const openProfileShare = React.useCallback((p: Post) => {
+        setProfileSharePost(p);
+        setProfileShareOpen(true);
+    }, []);
+
+    const openProfileComments = React.useCallback((p: Post) => {
+        setProfileCommentsPostId(p.id);
+        setProfileCommentsOpen(true);
+    }, []);
+
+    const openProfileScenes = React.useCallback((p: Post) => {
+        const t = profileViewerVideoTimesRef.current.get(p.id);
+        setProfileScenesInitialTime(t !== undefined ? t : null);
+        setProfileScenesInitialMuted(null);
+        setProfileScenesPost(p);
+        setProfileScenesOpen(true);
+        window.dispatchEvent(new CustomEvent(`scenesOpening-${p.id}`));
+    }, []);
+
+    const handleCloseProfileComments = React.useCallback(() => {
+        setProfileCommentsOpen(false);
+        setProfileCommentsPostId(null);
+    }, []);
+
+    React.useLayoutEffect(() => {
+        if (!selectedPost) return;
+        const id = String(selectedPost.id);
+        requestAnimationFrame(() => {
+            const el = profilePostSlideRefs.current[id];
+            el?.scrollIntoView({ block: 'start', behavior: 'auto' });
+        });
+    }, [selectedPost?.id]);
+
+    React.useEffect(() => {
+        if (!selectedPost) return;
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => {
+            document.body.style.overflow = prev;
+        };
+    }, [selectedPost]);
+
+    React.useEffect(() => {
+        if (!selectedPost) return;
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') setSelectedPost(null);
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [selectedPost]);
+
+    React.useEffect(() => {
+        if (!selectedPost) return;
+        if (!filteredPosts.some((p) => p.id === selectedPost.id)) {
+            setSelectedPost(null);
+        }
+    }, [filteredPosts, selectedPost]);
+
+    React.useEffect(() => {
+        setPeekVideoMuted(true);
+    }, [gridPeekPost?.id]);
+
+    React.useEffect(() => {
+        if (!gridPeekPost?.id) return;
+        const fresh = posts.find((x) => String(x.id) === String(gridPeekPost.id));
+        if (fresh) setGridPeekPost(fresh);
+    }, [posts, gridPeekPost?.id]);
+
+    const clearGridLongPressTimer = React.useCallback(() => {
+        if (gridLongPressTimerRef.current) {
+            clearTimeout(gridLongPressTimerRef.current);
+            gridLongPressTimerRef.current = null;
+        }
+    }, []);
+
+    const handleGridPointerDown = React.useCallback(
+        (e: React.PointerEvent, _post: Post) => {
+            clearGridLongPressTimer();
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
+            const t = window.setTimeout(() => {
+                gridLongPressTimerRef.current = null;
+                suppressGridOpenClickRef.current = true;
+                hapticProfilePeekOpen();
+                setGridPeekPost(_post);
+            }, PROFILE_GRID_PEEK_LONG_PRESS_MS);
+            gridLongPressTimerRef.current = t;
+        },
+        [clearGridLongPressTimer],
+    );
+
+    const handleGridPointerUp = React.useCallback(() => {
+        clearGridLongPressTimer();
+    }, [clearGridLongPressTimer]);
+
+    const handleGridCellClick = React.useCallback((post: Post) => {
+        if (suppressGridOpenClickRef.current) {
+            suppressGridOpenClickRef.current = false;
+            return;
+        }
+        setGridPeekPost(null);
+        setSelectedPost(post);
+    }, []);
+
+    const closeGridPeek = React.useCallback(() => {
+        setGridPeekPost(null);
+        setPeekPullY(0);
+        peekPullYRef.current = 0;
+        peekPullDraggingRef.current = false;
+        peekPullPointerIdRef.current = null;
+        setPeekPullTransition('');
+    }, []);
+
+    const handlePeekPreviewPointerDown = React.useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        if ((e.target as HTMLElement).closest('[data-no-peek-drag]')) return;
+        peekPullPointerIdRef.current = e.pointerId;
+        peekPullStartYRef.current = e.clientY;
+        peekPullDraggingRef.current = true;
+        setPeekPullTransition('');
+        try {
+            e.currentTarget.setPointerCapture(e.pointerId);
+        } catch {
+            /* ignore */
+        }
+    }, []);
+
+    const handlePeekPreviewPointerMove = React.useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+        if (peekPullPointerIdRef.current !== e.pointerId || !peekPullDraggingRef.current) return;
+        const dy = e.clientY - peekPullStartYRef.current;
+        if (dy <= 0) {
+            peekPullYRef.current = 0;
+            setPeekPullY(0);
+            return;
+        }
+        const rubber = Math.min(dy * 0.58 + Math.sqrt(dy) * 1.85, 240);
+        peekPullYRef.current = rubber;
+        setPeekPullY(rubber);
+    }, []);
+
+    const handlePeekPreviewPointerEnd = React.useCallback(
+        (e: React.PointerEvent<HTMLDivElement>) => {
+            if (peekPullPointerIdRef.current !== e.pointerId) return;
+            peekPullDraggingRef.current = false;
+            peekPullPointerIdRef.current = null;
+            try {
+                e.currentTarget.releasePointerCapture(e.pointerId);
+            } catch {
+                /* ignore */
+            }
+            const y = peekPullYRef.current;
+            setPeekPullTransition('transform 0.22s cubic-bezier(0.22, 1, 0.36, 1)');
+            if (y > 88) {
+                hapticProfilePeekDismiss();
+                closeGridPeek();
+                return;
+            }
+            peekPullYRef.current = 0;
+            setPeekPullY(0);
+        },
+        [closeGridPeek],
+    );
+
+    React.useEffect(() => {
+        if (!gridPeekPost) return;
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') setGridPeekPost(null);
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [gridPeekPost]);
+
+    const handlePeekLike = React.useCallback(async () => {
+        if (!gridPeekPost) return;
+        await handleProfileFeedLike(gridPeekPost);
+    }, [gridPeekPost, handleProfileFeedLike]);
+
+    const handlePeekComment = React.useCallback(() => {
+        if (!gridPeekPost) return;
+        const p = gridPeekPost;
+        openProfileComments(p);
+        closeGridPeek();
+    }, [gridPeekPost, openProfileComments, closeGridPeek]);
+
+    const handlePeekReclip = React.useCallback(async () => {
+        if (!gridPeekPost) return;
+        if (!user?.handle) {
+            Swal.fire(bottomSheet({ title: 'Sign in to repost', icon: 'info' }));
+            return;
+        }
+        const p = gridPeekPost;
+        try {
+            await handleProfileFeedReclip(p);
+            Swal.fire(bottomSheet({ title: 'Reposted', message: 'Added to your profile.', icon: 'success' }));
+            closeGridPeek();
+        } catch (e) {
+            console.error(e);
+            Swal.fire(bottomSheet({ title: 'Could not repost', icon: 'alert' }));
+        }
+    }, [gridPeekPost, user?.handle, handleProfileFeedReclip, closeGridPeek]);
+
+    const handlePeekShare = React.useCallback(() => {
+        if (!gridPeekPost) return;
+        const p = gridPeekPost;
+        openProfileShare(p);
+        closeGridPeek();
+    }, [gridPeekPost, openProfileShare, closeGridPeek]);
+
+    const handlePeekReport = React.useCallback(() => {
+        if (!gridPeekPost) return;
+        void Swal.fire(
+            bottomSheet({
+                title: 'Report this post?',
+                message: 'Our team will review it.',
+                showCancelButton: true,
+                confirmButtonText: 'Report',
+                cancelButtonText: 'Cancel',
+            }),
+        ).then((r) => {
+            if (r.isConfirmed) {
+                Swal.fire(bottomSheet({ title: "Thanks — we'll review it.", icon: 'success' }));
+                closeGridPeek();
+            }
+        });
+    }, [gridPeekPost, closeGridPeek]);
 
     const normalizeHandleKey = React.useCallback((value: string) => value.replace(/^@/, '').trim().toLowerCase(), []);
     const getHandleCluster = React.useCallback((value: string) => {
@@ -440,12 +927,6 @@ export default function ViewProfilePage() {
         return () => window.clearTimeout(timer);
     }, [connectionsSearch]);
 
-    React.useEffect(() => {
-        if (connectionsScope === 'suggested') {
-            setSuggestedConnectionsLayout('carousel');
-        }
-    }, [connectionsScope]);
-
     const visibleConnections = React.useMemo(() => {
         const followerMap = new Map(followersList.map((row) => [row.handleNoAt.toLowerCase(), row]));
         const followingMap = new Map(followingList.map((row) => [row.handleNoAt.toLowerCase(), row]));
@@ -580,9 +1061,13 @@ export default function ViewProfilePage() {
     }, [dismissUndo, normalizeHandleKey]);
 
     const handleConnectionFollowToggle = React.useCallback(async (row: any) => {
-        if (!row?.handleNoAt) return;
+        if (!row?.handleNoAt || !user) return;
         const key = row.handleNoAt;
         if (connectionActionLoadingMap[key]) return;
+        const followUserId = user.id != null ? String(user.id) : getStableUserId(user);
+        const targetHandle = String(row.handleNoAt).trim();
+        const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+
         setConnectionActionLoadingMap((prev) => ({ ...prev, [key]: true }));
         const rowPrivate = !!row?.isPrivate;
         const current = connectionFollowMap[key] ?? !!row.isFollowing;
@@ -614,9 +1099,14 @@ export default function ViewProfilePage() {
         setFollowersList((prev) => prev.map((item) => item.handleNoAt === key ? { ...item, isFollowing: !current, isRequested: false } : item));
         setFollowingList((prev) => prev.map((item) => item.handleNoAt === key ? { ...item, isFollowing: !current, isRequested: false } : item));
         try {
-            await toggleFollow(row.handleNoAt);
-            if (user?.id != null) {
-                await setFollowState(String(user.id), row.handleNoAt, !current);
+            if (!useLaravelApi) {
+                setFollowState(followUserId, targetHandle, !current);
+                window.dispatchEvent(
+                    new CustomEvent('followToggled', { detail: { handle: targetHandle, isFollowing: !current } }),
+                );
+            } else {
+                await toggleFollow(targetHandle);
+                setFollowState(followUserId, targetHandle, !current);
             }
             flashConnectionActionSuccess(key);
         } catch (error) {
@@ -628,7 +1118,7 @@ export default function ViewProfilePage() {
         } finally {
             setConnectionActionLoadingMap((prev) => ({ ...prev, [key]: false }));
         }
-    }, [connectionActionLoadingMap, connectionFollowMap, connectionRequestMap, flashConnectionActionSuccess, user?.handle, user?.id]);
+    }, [connectionActionLoadingMap, connectionFollowMap, connectionRequestMap, flashConnectionActionSuccess, user]);
 
     const handleConnectionsScroll = React.useCallback((e: React.UIEvent<HTMLDivElement>) => {
         if (connectionsLoading || connectionsLoadingMore || debouncedConnectionsSearch.trim()) return;
@@ -1638,8 +2128,21 @@ export default function ViewProfilePage() {
                         filteredPosts.map((post) => (
                             <div
                                 key={post.id}
-                                className="aspect-square relative group cursor-pointer bg-gray-900 rounded-lg overflow-hidden border border-white/10"
-                                onClick={() => setSelectedPost(post)}
+                                role="button"
+                                tabIndex={0}
+                                className="aspect-square relative group cursor-pointer bg-gray-900 rounded-lg overflow-hidden border border-white/10 touch-manipulation select-none"
+                                onPointerDown={(e) => handleGridPointerDown(e, post)}
+                                onPointerUp={handleGridPointerUp}
+                                onPointerCancel={handleGridPointerUp}
+                                onPointerLeave={handleGridPointerUp}
+                                onContextMenu={(e) => e.preventDefault()}
+                                onClick={() => handleGridCellClick(post)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault();
+                                        handleGridCellClick(post);
+                                    }
+                                }}
                             >
                                 {post.mediaUrl ? (
                                     post.mediaType === 'video' ? (
@@ -1698,17 +2201,21 @@ export default function ViewProfilePage() {
                                         </>
                                     )
                                 ) : (
-                                    // Text-only post with gradient background
-                                    <div className="w-full h-full relative flex items-center justify-center p-3" style={{
-                                        background: (() => {
-                                            const backgrounds = [
-                                                '#1e3a8a', '#1e40af', '#1d4ed8', '#2563eb',
-                                                '#3b82f6', '#1e293b', '#0f172a', '#1a202c'
-                                            ];
-                                            return backgrounds[post.text ? post.text.length % backgrounds.length : 0];
-                                        })()
-                                    }}>
-                                        <p className="text-white text-xs font-semibold text-center line-clamp-6">
+                                    (() => {
+                                        const tStyle = getEffectiveTextStyleForPost(post);
+                                        const bg = getTextOnlyFallbackBackground(post);
+                                        const color = tStyle?.color || '#ffffff';
+                                        const fontFamily = tStyle?.fontFamily;
+                                        const sizeCls = `${getTextOnlyPreviewTextClass(tStyle?.size)} font-semibold`;
+                                        return (
+                                    <div
+                                        className="w-full h-full relative flex items-center justify-center p-3"
+                                        style={{ background: bg, fontFamily: fontFamily || undefined }}
+                                    >
+                                        <p
+                                            className={`${sizeCls} text-center line-clamp-6`}
+                                            style={{ color }}
+                                        >
                                             {post.text || 'No preview'}
                                         </p>
                                         {/* Location badge for text-only posts */}
@@ -1722,6 +2229,8 @@ export default function ViewProfilePage() {
                                             </div>
                                         )}
                                     </div>
+                                        );
+                                    })()
                                 )}
                                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
                             </div>
@@ -1742,6 +2251,195 @@ export default function ViewProfilePage() {
                     )}
                 </div>
             </div>
+
+            {/* Instagram-style long-press peek: blurred backdrop, preview card, action sheet */}
+            {gridPeekPost && profileUser && (
+                <div
+                    className="fixed inset-0 z-[85] flex flex-col items-center justify-center px-4 py-6 overscroll-none"
+                    style={{ overscrollBehavior: 'contain' }}
+                    role="presentation"
+                    onClick={closeGridPeek}
+                >
+                    <div
+                        className="absolute inset-0 bg-black/45 backdrop-blur-2xl backdrop-saturate-150 transition-[opacity] duration-100"
+                        style={{ opacity: Math.max(0.22, 1 - Math.min(peekPullY / 360, 0.58)) }}
+                        aria-hidden
+                    />
+                    <div
+                        className="relative z-10 w-full max-w-[360px] flex flex-col gap-2.5 will-change-transform"
+                        style={{ transform: `translateY(${peekPullY}px)`, transition: peekPullTransition }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div
+                            role="presentation"
+                            className="rounded-[14px] overflow-hidden bg-[#1c1c1c] border border-white/12 shadow-[0_24px_80px_rgba(0,0,0,0.65)] cursor-grab active:cursor-grabbing touch-pan-y"
+                            onPointerDown={handlePeekPreviewPointerDown}
+                            onPointerMove={handlePeekPreviewPointerMove}
+                            onPointerUp={handlePeekPreviewPointerEnd}
+                            onPointerCancel={handlePeekPreviewPointerEnd}
+                        >
+                            <div className="flex items-center gap-2.5 px-3 py-2.5 border-b border-white/10 bg-[#1c1c1c]">
+                                <Avatar
+                                    src={
+                                        profileUser.avatarUrl ||
+                                        getAvatarForHandle(profileUser.handle || decodeURIComponent(handle || ''))
+                                    }
+                                    name={profileUser.name || profileUser.handle}
+                                    size="sm"
+                                />
+                                <div className="min-w-0 flex-1 flex items-center gap-1">
+                                    <span className="font-semibold text-white text-[15px] truncate">
+                                        {(profileUser.handle || gridPeekPost.userHandle || '').replace(/^@/, '')
+                                            ? `@${String(profileUser.handle || gridPeekPost.userHandle).replace(/^@/, '')}`
+                                            : ''}
+                                    </span>
+                                    {profileUser.is_verified ? (
+                                        <span
+                                            className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full bg-[#0095f6]"
+                                            title="Verified"
+                                            aria-label="Verified"
+                                        >
+                                            <svg className="h-2.5 w-2.5 text-white" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                                                <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" />
+                                            </svg>
+                                        </span>
+                                    ) : null}
+                                </div>
+                            </div>
+                            <div className="relative max-h-[min(52vh,420px)] min-h-[200px] bg-black flex items-center justify-center">
+                                {!gridPeekPost.mediaUrl ? (
+                                    (() => {
+                                        const tStyle = getEffectiveTextStyleForPost(gridPeekPost);
+                                        const bg = getTextOnlyFallbackBackground(gridPeekPost);
+                                        const color = tStyle?.color || '#ffffff';
+                                        const fontFamily = tStyle?.fontFamily;
+                                        const sizeCls = `${getTextOnlyPreviewTextClass(tStyle?.size)} font-semibold`;
+                                        return (
+                                    <div
+                                        className="w-full min-h-[240px] flex items-center justify-center p-6"
+                                        style={{ background: bg, fontFamily: fontFamily || undefined }}
+                                    >
+                                        <p
+                                            className={`${sizeCls} leading-relaxed whitespace-pre-wrap text-center line-clamp-8`}
+                                            style={{ color }}
+                                        >
+                                            {gridPeekPost.text || gridPeekPost.caption || 'Post'}
+                                        </p>
+                                    </div>
+                                        );
+                                    })()
+                                ) : gridPeekPost.mediaType === 'video' ? (
+                                    <>
+                                        <video
+                                            key={gridPeekPost.id}
+                                            src={gridPeekPost.mediaUrl}
+                                            className="w-full max-h-[min(52vh,420px)] object-contain"
+                                            playsInline
+                                            autoPlay
+                                            muted={peekVideoMuted}
+                                            loop
+                                        />
+                                        <button
+                                            type="button"
+                                            data-no-peek-drag
+                                            onClick={() => setPeekVideoMuted((m) => !m)}
+                                            className="absolute bottom-3 right-3 w-9 h-9 rounded-full bg-black/70 border border-white/20 flex items-center justify-center text-white hover:bg-black/90"
+                                            aria-label={peekVideoMuted ? 'Unmute' : 'Mute'}
+                                        >
+                                            {peekVideoMuted ? <FiVolumeX className="w-4 h-4" /> : <FiVolume2 className="w-4 h-4" />}
+                                        </button>
+                                    </>
+                                ) : (
+                                    <img
+                                        src={gridPeekPost.mediaUrl}
+                                        alt=""
+                                        className="w-full max-h-[min(52vh,420px)] object-contain"
+                                    />
+                                )}
+                                {(gridPeekPost.text || gridPeekPost.caption || gridPeekPost.imageText) &&
+                                gridPeekPost.mediaUrl ? (
+                                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-3 pb-3 pt-8">
+                                        <p className="text-white text-sm leading-snug line-clamp-4">
+                                            {gridPeekPost.text || gridPeekPost.caption || gridPeekPost.imageText}
+                                        </p>
+                                    </div>
+                                ) : null}
+                            </div>
+                            {gridPeekPost.mediaType === 'video' ? (
+                                <div className="px-3 py-2 border-t border-white/10 flex items-center justify-between bg-[#1c1c1c]">
+                                    <span className="text-[11px] text-white/50 truncate pr-2">Original audio</span>
+                                </div>
+                            ) : null}
+                        </div>
+
+                        <div
+                            className="relative z-20 rounded-[14px] overflow-hidden bg-[#262626] border border-white/10 divide-y divide-white/10 shadow-[0_16px_48px_rgba(0,0,0,0.5)] touch-manipulation pointer-events-auto"
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    void handlePeekLike();
+                                }}
+                                className="flex w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-white/[0.06] active:bg-white/10 transition-colors"
+                            >
+                                <FiHeart
+                                    className={`w-5 h-5 shrink-0 ${gridPeekPost.userLiked ? 'text-red-500' : 'text-white'}`}
+                                    strokeWidth={gridPeekPost.userLiked ? 2.5 : 2}
+                                />
+                                <span className="text-[15px] font-medium text-white">Like</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handlePeekComment();
+                                }}
+                                className="flex w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-white/[0.06] active:bg-white/10 transition-colors"
+                            >
+                                <FiMessageSquare className="w-5 h-5 text-white shrink-0" />
+                                <span className="text-[15px] font-medium text-white">Comment</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    void handlePeekReclip();
+                                }}
+                                disabled={isOwnProfile}
+                                className="flex w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-white/[0.06] active:bg-white/10 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                            >
+                                <FiRepeat className="w-5 h-5 text-white shrink-0" />
+                                <span className="text-[15px] font-medium text-white">Repost</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handlePeekShare();
+                                }}
+                                className="flex w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-white/[0.06] active:bg-white/10 transition-colors"
+                            >
+                                <FiShare2 className="w-5 h-5 text-white shrink-0" />
+                                <span className="text-[15px] font-medium text-white">Share</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    void handlePeekReport();
+                                }}
+                                className="flex w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-red-500/10 active:bg-red-500/15 transition-colors"
+                            >
+                                <FiAlertCircle className="w-5 h-5 text-red-500 shrink-0" />
+                                <span className="text-[15px] font-medium text-red-500">Report</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Traveled Modal - compute places at render time with localStorage fallback so bio / Travel Info always show */}
             {showTraveledModal && (() => {
@@ -1924,7 +2622,7 @@ export default function ViewProfilePage() {
                                         <button
                                             type="button"
                                             onClick={() => setSuggestedConnectionsLayout('list')}
-                                            className="text-xs font-semibold text-[#0095f6] hover:text-[#67b9ff] active:opacity-80"
+                                            className="text-xs font-semibold text-white/75 hover:text-white active:opacity-80"
                                         >
                                             See all
                                         </button>
@@ -1968,7 +2666,7 @@ export default function ViewProfilePage() {
                                                         }}
                                                         className="w-full flex flex-col items-center text-center"
                                                     >
-                                                        <div className="w-[88px] h-[88px] mx-auto mb-2 rounded-full p-[2px] bg-gradient-to-tr from-teal-400 via-sky-500 to-fuchsia-500">
+                                                        <div className="w-[88px] h-[88px] mx-auto mb-2 rounded-full p-[2px] bg-white/25">
                                                             <div className="w-full h-full rounded-full bg-black overflow-hidden flex items-center justify-center">
                                                                 <Avatar src={row.avatarUrl} name={row.name} size={84} />
                                                             </div>
@@ -1988,12 +2686,12 @@ export default function ViewProfilePage() {
                                                             type="button"
                                                             disabled={rowActionLoading}
                                                             onClick={() => void handleConnectionFollowToggle(row)}
-                                                            className={`w-full mt-2.5 py-1.5 rounded-2xl text-xs font-semibold transition-colors active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70 ${rowActionSuccess ? 'ring-1 ring-[#0095f6]/80' : ''} ${
+                                                            className={`w-full mt-2.5 py-1.5 rounded-2xl text-xs font-semibold transition-colors active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70 ${rowActionSuccess ? 'ring-1 ring-white/45' : ''} ${
                                                                 rowFollowing
-                                                                    ? 'border border-[#363636] bg-transparent text-white hover:bg-white/5'
+                                                                    ? 'border border-white/20 bg-transparent text-white hover:bg-white/10'
                                                                     : rowRequested
-                                                                      ? 'border border-[#363636] bg-white/5 text-[#a8a8a8]'
-                                                                      : 'bg-[#0095f6] text-white hover:bg-[#1877f2]'
+                                                                      ? 'border border-white/25 bg-white/10 text-white/75'
+                                                                      : 'bg-white text-black hover:bg-white/90 border border-white/15'
                                                             }`}
                                                         >
                                                             {rowActionLoading ? (
@@ -2021,7 +2719,7 @@ export default function ViewProfilePage() {
                                         <button
                                             type="button"
                                             onClick={() => setSuggestedConnectionsLayout('carousel')}
-                                            className="mb-1 text-xs font-semibold text-[#0095f6] hover:text-[#67b9ff]"
+                                            className="mb-1 text-xs font-semibold text-white/75 hover:text-white"
                                         >
                                             ← Card view
                                         </button>
@@ -2032,6 +2730,16 @@ export default function ViewProfilePage() {
                                         const rowRequested = connectionRequestMap[row.handleNoAt] ?? row.isRequested;
                                         const rowActionLoading = connectionActionLoadingMap[row.handleNoAt] ?? false;
                                         const rowActionSuccess = connectionActionSuccessMap[row.handleNoAt] ?? false;
+                                        const connectionFollowBtnClass =
+                                            connectionsScope === 'suggested'
+                                                ? `${compactConnectionsPhone ? 'min-w-[78px] px-2.5 py-1 text-[11px]' : 'min-w-[88px] px-3 py-1.5 text-xs'} rounded-full font-semibold transition-[transform,box-shadow,background-color,color,border-color,opacity] duration-150 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-70 ${rowActionSuccess ? 'ring-1 ring-white/50' : ''} ${
+                                                      rowFollowing
+                                                          ? 'border border-white/25 bg-black text-white hover:bg-white/10 shadow-[0_1px_0_rgba(255,255,255,0.04)] active:shadow-none'
+                                                          : rowRequested
+                                                            ? 'border border-white/35 bg-white/10 text-white/85 hover:bg-white/15'
+                                                            : 'bg-white text-black hover:bg-white/90 border border-white/15'
+                                                  }`
+                                                : `${compactConnectionsPhone ? 'min-w-[78px] px-2.5 py-1 text-[11px]' : 'min-w-[88px] px-3 py-1.5 text-xs'} rounded-full font-semibold transition-[transform,box-shadow,background-color,color,border-color,opacity] duration-150 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-70 ${rowActionSuccess ? 'ring-1 ring-cyan-300/70 shadow-[0_0_0_1px_rgba(103,232,249,0.5),0_0_16px_-8px_rgba(34,211,238,0.95)]' : ''} ${rowFollowing ? 'border border-white/25 bg-black text-white hover:bg-white/10 shadow-[0_1px_0_rgba(255,255,255,0.04)] active:shadow-none' : rowRequested ? 'border border-cyan-400/50 bg-cyan-500/12 text-cyan-200 hover:bg-cyan-500/20 shadow-[0_0_0_1px_rgba(34,211,238,0.2),0_6px_14px_-10px_rgba(34,211,238,0.5)] active:shadow-[0_0_0_1px_rgba(34,211,238,0.14)]' : 'bg-cyan-500 text-black hover:bg-cyan-400 shadow-[0_0_0_1px_rgba(34,211,238,0.28),0_8px_18px_-10px_rgba(34,211,238,0.55)] active:shadow-[0_0_0_1px_rgba(34,211,238,0.18)]'}`;
                                         return (
                                             <div
                                                 key={row.id}
@@ -2064,13 +2772,13 @@ export default function ViewProfilePage() {
                                                                         </div>
                                                                     ))}
                                                                 </div>
-                                                                <p className={`inline-flex items-center rounded-full border border-cyan-400/40 bg-cyan-400/12 ${compactConnectionsPhone ? 'px-1.5 py-0.5 text-[9px]' : 'px-2 py-0.5 text-[10px]'} font-semibold text-cyan-200`}>
+                                                                <p className={`inline-flex items-center rounded-full border border-white/20 bg-white/[0.08] ${compactConnectionsPhone ? 'px-1.5 py-0.5 text-[9px]' : 'px-2 py-0.5 text-[10px]'} font-semibold text-white/85`}>
                                                                     {row.mutualCount} mutual
                                                                 </p>
                                                             </div>
                                                         ) : null}
                                                         {row.bio ? (
-                                                            <p className={`truncate ${compactConnectionsPhone ? 'text-[11px]' : 'text-xs'} ${connectionsScope === 'suggested' ? 'text-cyan-300/80' : 'text-gray-500'}`}>
+                                                            <p className={`truncate ${compactConnectionsPhone ? 'text-[11px]' : 'text-xs'} ${connectionsScope === 'suggested' ? 'text-gray-400' : 'text-gray-500'}`}>
                                                                 {row.bio}
                                                             </p>
                                                         ) : null}
@@ -2092,7 +2800,7 @@ export default function ViewProfilePage() {
                                                         type="button"
                                                         disabled={rowActionLoading}
                                                         onClick={() => void handleConnectionFollowToggle(row)}
-                                                        className={`${compactConnectionsPhone ? 'min-w-[78px] px-2.5 py-1 text-[11px]' : 'min-w-[88px] px-3 py-1.5 text-xs'} rounded-full font-semibold transition-[transform,box-shadow,background-color,color,border-color,opacity] duration-150 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-70 ${rowActionSuccess ? 'ring-1 ring-cyan-300/70 shadow-[0_0_0_1px_rgba(103,232,249,0.5),0_0_16px_-8px_rgba(34,211,238,0.95)]' : ''} ${rowFollowing ? 'border border-white/25 bg-black text-white hover:bg-white/10 shadow-[0_1px_0_rgba(255,255,255,0.04)] active:shadow-none' : rowRequested ? 'border border-cyan-400/50 bg-cyan-500/12 text-cyan-200 hover:bg-cyan-500/20 shadow-[0_0_0_1px_rgba(34,211,238,0.2),0_6px_14px_-10px_rgba(34,211,238,0.5)] active:shadow-[0_0_0_1px_rgba(34,211,238,0.14)]' : 'bg-cyan-500 text-black hover:bg-cyan-400 shadow-[0_0_0_1px_rgba(34,211,238,0.28),0_8px_18px_-10px_rgba(34,211,238,0.55)] active:shadow-[0_0_0_1px_rgba(34,211,238,0.18)]'}`}
+                                                        className={connectionFollowBtnClass}
                                                     >
                                                         {rowActionLoading ? (
                                                             <span className="inline-flex items-center gap-1.5">
@@ -2127,7 +2835,7 @@ export default function ViewProfilePage() {
                             <button
                                 type="button"
                                 onClick={handleUndoDismissSuggestion}
-                                className={`${compactConnectionsPhone ? 'text-[11px]' : 'text-xs'} font-semibold text-cyan-300 hover:text-cyan-200`}
+                                className={`${compactConnectionsPhone ? 'text-[11px]' : 'text-xs'} font-semibold text-white hover:text-white/80`}
                             >
                                 Undo
                             </button>
@@ -2136,55 +2844,197 @@ export default function ViewProfilePage() {
                 </div>
             )}
 
-            {/* Post Viewer Modal */}
-            {selectedPost && (
-                <div className="fixed inset-0 bg-black z-50 flex items-center justify-center" onClick={() => setSelectedPost(null)}>
+            {/* Post viewer: vertical snap-scrolling feed through all grid posts (Instagram-style) */}
+            {selectedPost && filteredPosts.length > 0 && (
+                <div className="fixed inset-0 z-50 flex flex-col bg-[#030712]">
                     <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedPost(null);
-                        }}
-                        className="absolute top-4 left-4 w-10 h-10 bg-black bg-opacity-60 hover:bg-opacity-80 rounded-full flex items-center justify-center transition-colors z-10"
+                        type="button"
+                        onClick={() => setSelectedPost(null)}
+                        className="absolute top-[max(12px,env(safe-area-inset-top))] left-3 z-20 w-10 h-10 bg-black/70 hover:bg-black/90 border border-white/15 rounded-full flex items-center justify-center transition-colors"
+                        aria-label="Close post viewer"
                     >
                         <FiX className="w-6 h-6 text-white" />
                     </button>
-                    <div className="relative max-w-4xl w-full h-full flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
-                        {!selectedPost.mediaUrl ? (
-                            // Text-only post
-                            <div className="w-full max-w-2xl p-8" style={{
-                                background: (() => {
-                                    const backgrounds = [
-                                        '#1e3a8a', '#1e40af', '#1d4ed8', '#2563eb',
-                                        '#3b82f6', '#1e293b', '#0f172a', '#1a202c'
-                                    ];
-                                    return backgrounds[selectedPost.text ? selectedPost.text.length % backgrounds.length : 0];
-                                })()
-                            }}>
-                                <p className="text-white text-xl font-bold leading-relaxed whitespace-pre-wrap">
-                                    {selectedPost.text}
-                                </p>
-                            </div>
-                        ) : selectedPost.mediaType === 'video' ? (
-                            <video
-                                src={selectedPost.mediaUrl}
-                                className="max-h-[90vh] w-auto"
-                                controls
-                                autoPlay
-                            />
-                        ) : (
-                            <img
-                                src={selectedPost.mediaUrl}
-                                alt=""
-                                className="max-h-[90vh] w-auto object-contain"
-                            />
-                        )}
-                        {selectedPost.text && selectedPost.mediaUrl && (
-                            <div className="absolute bottom-4 left-4 right-4 bg-black bg-opacity-70 rounded-lg p-4">
-                                <p className="text-white text-sm">{selectedPost.text}</p>
-                            </div>
-                        )}
+                    <p className="absolute top-[max(12px,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-20 text-[11px] text-white/55 pointer-events-none max-w-[70%] text-center">
+                        Scroll for more posts
+                    </p>
+                    <div
+                        ref={profilePostScrollRef}
+                        className="flex-1 h-full min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain pt-[max(3.5rem,calc(env(safe-area-inset-top)+2.75rem))] pb-8"
+                        style={{ WebkitOverflowScrolling: 'touch' }}
+                    >
+                        {filteredPosts.map((post, index) => {
+                            const hasMedia = !!(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0));
+                            const priorityPostsCount = filteredPosts
+                                .slice(0, index + 1)
+                                .filter((q) => !!(q.mediaUrl || (q.mediaItems && q.mediaItems.length > 0))).length;
+                            const isPriority = hasMedia && priorityPostsCount <= 3;
+                            const viewerNorm = user?.handle?.replace(/^@/, '').trim().toLowerCase() || '';
+                            const authorNorm = post.userHandle.replace(/^@/, '').trim().toLowerCase();
+                            const showBoostIcon = !!(user?.handle && viewerNorm === authorNorm && !post.originalUserHandle);
+                            return (
+                                <ProfilePostFeedSlide
+                                    key={post.id}
+                                    ref={(el) => {
+                                        profilePostSlideRefs.current[String(post.id)] = el;
+                                    }}
+                                    post={post}
+                                    priority={isPriority}
+                                    showBoostIcon={showBoostIcon}
+                                    onLike={handleProfileFeedLike}
+                                    onFollow={async () => {
+                                        await handleFollow();
+                                    }}
+                                    onShare={openProfileShare}
+                                    onOpenComments={openProfileComments}
+                                    onView={handleProfileFeedView}
+                                    onReclip={handleProfileFeedReclip}
+                                    onOpenScenes={openProfileScenes}
+                                    onShareSuccess={(postId) =>
+                                        mergeProfilePost(postId, (x) => ({
+                                            ...x,
+                                            stats: { ...x.stats, shares: x.stats.shares + 1 },
+                                        }))
+                                    }
+                                    onOpenDM={(dmHandle) => {
+                                        const h = dmHandle.replace(/^@/, '').trim();
+                                        if (h) navigate(`/messages/${encodeURIComponent(h)}`);
+                                    }}
+                                    onBoost={
+                                        showBoostIcon
+                                            ? async () => {
+                                                  navigate('/boost');
+                                              }
+                                            : undefined
+                                    }
+                                    onDelete={
+                                        user?.handle && viewerNorm === authorNorm && !post.originalUserHandle
+                                            ? async (pRow) => {
+                                                  const uid = getStableUserId(user!);
+                                                  const result = await Swal.fire(
+                                                      bottomSheet({
+                                                          title: 'Delete post?',
+                                                          message: "This can't be undone.",
+                                                          icon: 'alert',
+                                                          showCancelButton: true,
+                                                          confirmButtonText: 'Delete',
+                                                          cancelButtonText: 'Cancel',
+                                                      }),
+                                                  );
+                                                  if (!result.isConfirmed) return;
+                                                  try {
+                                                      await deletePost(uid, pRow.id, user?.handle);
+                                                      setPosts((cur) => cur.filter((x) => x.id !== pRow.id));
+                                                      setSelectedPost((cur) => (cur?.id === pRow.id ? null : cur));
+                                                  } catch (err) {
+                                                      await Swal.fire(
+                                                          bottomSheet({
+                                                              title: 'Could not delete post',
+                                                              message:
+                                                                  err instanceof Error ? err.message : 'Try again.',
+                                                              icon: 'alert',
+                                                          }),
+                                                      );
+                                                  }
+                                              }
+                                            : undefined
+                                    }
+                                />
+                            );
+                        })}
                     </div>
                 </div>
+            )}
+
+            {profileCommentsPostId && (
+                <CommentsModal
+                    postId={profileCommentsPostId}
+                    isOpen={profileCommentsOpen}
+                    onClose={handleCloseProfileComments}
+                />
+            )}
+
+            {profileSharePost && (
+                <ShareModal
+                    post={profileSharePost}
+                    isOpen={profileShareOpen}
+                    onClose={() => {
+                        setProfileShareOpen(false);
+                        setProfileSharePost(null);
+                    }}
+                />
+            )}
+
+            {profileScenesPost && (
+                <ScenesModal
+                    post={profileScenesPost}
+                    isOpen={profileScenesOpen}
+                    initialVideoTime={profileScenesInitialTime}
+                    initialMutedState={profileScenesInitialMuted}
+                    posts={profileScenesFeedPosts.length > 1 ? profileScenesFeedPosts : undefined}
+                    feedLabel={
+                        profileUser?.handle
+                            ? `@${String(profileUser.handle).replace(/^@/, '')}`
+                            : decodeURIComponent(handle || '') || undefined
+                    }
+                    onClose={(savedTime) => {
+                        const closing = profileScenesPost;
+                        if (savedTime != null && closing) {
+                            profileViewerVideoTimesRef.current.set(closing.id, savedTime);
+                        }
+                        setProfileScenesOpen(false);
+                        setProfileScenesPost(null);
+                        setProfileScenesInitialTime(null);
+                        setProfileScenesInitialMuted(null);
+                        if (closing) {
+                            window.dispatchEvent(
+                                new CustomEvent(`resumeVideo-${closing.id}`, { detail: { time: savedTime } }),
+                            );
+                        }
+                    }}
+                    onLike={async () => {
+                        const p = profileScenesPost;
+                        if (p) await handleProfileFeedLike(p);
+                    }}
+                    onFollow={async () => {
+                        await handleFollow();
+                    }}
+                    onShare={async () => {
+                        const p = profileScenesPost;
+                        if (p) openProfileShare(p);
+                    }}
+                    onOpenComments={() => {
+                        const p = profileScenesPost;
+                        if (p) openProfileComments(p);
+                    }}
+                    onReclip={async () => {
+                        const p = profileScenesPost;
+                        if (p) await handleProfileFeedReclip(p);
+                    }}
+                    onBoost={
+                        user?.handle &&
+                        profileScenesPost.userHandle.replace(/^@/, '').toLowerCase() ===
+                            user.handle.replace(/^@/, '').toLowerCase() &&
+                        !profileScenesPost.originalUserHandle
+                            ? () => {
+                                  navigate('/boost');
+                              }
+                            : undefined
+                    }
+                    onPostChange={(newIndex, savedVideoTime) => {
+                        const list = profileScenesFeedPosts;
+                        const prev = profileScenesPost;
+                        if (prev && savedVideoTime != null) {
+                            profileViewerVideoTimesRef.current.set(prev.id, savedVideoTime);
+                        }
+                        const next = list[newIndex];
+                        if (next) {
+                            setProfileScenesPost(next);
+                            setProfileScenesInitialTime(profileViewerVideoTimesRef.current.get(next.id) ?? null);
+                            setProfileScenesInitialMuted(null);
+                        }
+                    }}
+                />
             )}
 
             {/* Profile Menu Modal */}
