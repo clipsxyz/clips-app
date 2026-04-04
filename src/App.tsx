@@ -1102,15 +1102,6 @@ function PostHeader({
     : "text-gray-500 dark:text-gray-400";
 
   if (variant === "textOnlyFeed" && children != null) {
-    const createdTs =
-      post.createdAt != null
-        ? typeof post.createdAt === "string"
-          ? parseInt(post.createdAt, 10)
-          : post.createdAt
-        : null;
-    const timeLabel =
-      typeof createdTs === "number" && !Number.isNaN(createdTs) ? timeAgo(createdTs) : "";
-
     const avatarBlock = (
       <div
         className="relative shrink-0 pb-0.5"
@@ -1186,53 +1177,110 @@ function PostHeader({
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        {/* News-style header: optional reclip, time + menu; author line lives inside the card */}
-        <div className="flex items-start justify-between gap-3 pt-1">
-          <div className="min-w-0 flex-1">
-            {isReclippedPost && (
-              <div className={`text-xs mb-1 flex items-center gap-1 ${reclipColorClass}`}>
-                <FiRepeat className="w-3 h-3" />
-                <span>{post.userHandle} reclipped</span>
-              </div>
-            )}
-          </div>
-          <div className="flex flex-col items-end shrink-0 gap-1 pt-0.5">
-            {timeLabel ? (
-              <div className={`flex items-center gap-1 text-[11px] font-medium whitespace-nowrap ${subtextColorClass}`}>
-                <FiClock className="w-3.5 h-3.5 flex-shrink-0 opacity-90" aria-hidden />
-                <span>{timeLabel}</span>
-              </div>
-            ) : null}
-           {onMenuClick ? (
+        {/* Top row: @handle + flag (left), same metadata carousel as media cards + menu (right). Byline stays inside the bubble below. */}
+        {/* z-40 so the quick-actions sheet (absolute below header) paints above the bubble row — a following sibling would otherwise cover it. */}
+        <div className="relative z-40">
+          <div className="flex items-start justify-between gap-3 pt-1">
+            <div className="min-w-0 flex-1 flex flex-col gap-1">
+              {isReclippedPost && (
+                <div className={`text-xs flex items-center gap-1 ${reclipColorClass}`}>
+                  <FiRepeat className="w-3 h-3" />
+                  <span>{post.userHandle} reclipped</span>
+                </div>
+              )}
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   e.preventDefault();
-                  onMenuClick();
+                  setProfileMenuOpen((open) => !open);
                 }}
-                className="p-1 rounded-full text-white/90 hover:bg-white/10"
-                aria-label="More options"
+                className={`text-left w-full min-w-0 transition-opacity ${isOverlaid ? 'hover:opacity-80' : 'hover:opacity-70'}`}
               >
-                <FiMoreHorizontal className="w-4 h-4" />
+                <span
+                  className={`text-sm font-semibold flex items-center gap-1.5 leading-tight ${textColorClass}`}
+                  style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}
+                >
+                  <span className="truncate">{isReclippedPost ? post.originalUserHandle : post.userHandle}</span>
+                  <Flag
+                    value={isCurrentUser ? user?.countryFlag || '' : getFlagForHandle(isReclippedPost ? post.originalUserHandle! : post.userHandle) || ''}
+                    size={16}
+                  />
+                </span>
               </button>
-            ) : null}
+            </div>
+            <div className="flex flex-col items-end shrink-0 gap-0.5 pt-0.5">
+              {metadataItems.length > 0 && (() => {
+                const current = metadataItems[metadataIndex];
+                const Icon =
+                  current.type === 'location'
+                    ? FiMapPin
+                    : current.type === 'venue'
+                      ? FiHome
+                      : current.type === 'landmark'
+                        ? GiGreekTemple
+                        : FiClock;
+                const iconMuted = isOverlaid ? 'text-white/80' : 'text-gray-500 dark:text-gray-400';
+                const labelMuted = isOverlaid ? 'text-white/90' : 'text-gray-600 dark:text-gray-300';
+                return (
+                  <div
+                    className="flex items-center gap-0.5 min-w-0 max-w-[140px] justify-end min-h-[0.9rem] overflow-visible"
+                    title={metadataItems.map((m) => m.label).join(' · ')}
+                  >
+                    <div
+                      key={metadataIndex}
+                      className={`flex items-center gap-1 justify-end min-w-0 max-w-[140px] ${metadataTransitionClass}`}
+                    >
+                      <Icon className={`w-3 h-3 flex-shrink-0 ${iconMuted}`} />
+                      <span
+                        className={`text-[10px] font-medium whitespace-nowrap truncate min-w-0 tracking-tight ${labelMuted}`}
+                      >
+                        {current.label}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
+              {onMenuClick ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    onMenuClick();
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
+                  className={`p-2 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full transition-all active:scale-[.98] z-50 relative ${
+                    isOverlaid
+                      ? 'text-white hover:opacity-70'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
+                  }`}
+                  aria-label="More options"
+                  title="More options"
+                >
+                  <FiMoreHorizontal className="w-4 h-4" />
+                </button>
+              ) : null}
+            </div>
           </div>
-        </div>
 
-        {/* Card + profile pic: bottom-right row, avatar beside card (aligned to bottom) */}
-        <div className="mt-2 flex w-full min-w-0 items-end justify-end gap-2">
-          <div className="min-w-0 max-w-[min(100%,30rem)] shrink">{children}</div>
-          <div className="shrink-0 self-end z-30 pointer-events-auto pb-px">{avatarBlock}</div>
-        </div>
-        {textOnlyFooter != null ? (
-          <div className="mt-2 flex w-full min-w-0 justify-end pr-0.5">{textOnlyFooter}</div>
-        ) : null}
-
-        {profileMenuOpen && (
-          <div className="absolute left-4 top-10 z-[200] w-56 rounded-2xl border border-white/20 bg-gradient-to-b from-[#0b1220] to-[#030712] shadow-[0_18px_45px_rgba(0,0,0,0.55)] backdrop-blur-sm overflow-hidden">
-            <div className="px-3 py-2 border-b border-white/10">
+          {profileMenuOpen && (
+            <div className="absolute left-0 top-full z-[200] mt-1 w-56 rounded-2xl border border-white/20 bg-gradient-to-b from-[#0b1220] to-[#030712] shadow-[0_18px_45px_rgba(0,0,0,0.55)] backdrop-blur-sm overflow-hidden">
+            <div className="flex items-center justify-between gap-2 px-2 py-1.5 pl-3 border-b border-white/10">
               <p className="text-[11px] uppercase tracking-[0.12em] text-white/60 font-semibold">Quick actions</p>
+              <button
+                type="button"
+                className="p-1.5 rounded-full text-white/80 hover:bg-white/10 hover:text-white transition-colors"
+                aria-label="Close quick actions"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  setProfileMenuOpen(false);
+                }}
+              >
+                <FiX className="w-4 h-4" strokeWidth={2.2} />
+              </button>
             </div>
             <button
               className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-gray-100 hover:bg-sky-500/10 transition-colors"
@@ -1305,7 +1353,17 @@ function PostHeader({
               </button>
             )}
           </div>
-        )}
+          )}
+        </div>
+
+        {/* Card + profile pic: bottom-right row, avatar beside card (aligned to bottom) */}
+        <div className="relative z-0 mt-2 flex w-full min-w-0 items-end justify-end gap-2">
+          <div className="min-w-0 max-w-[min(100%,30rem)] shrink">{children}</div>
+          <div className="shrink-0 self-end z-30 pointer-events-auto pb-px">{avatarBlock}</div>
+        </div>
+        {textOnlyFooter != null ? (
+          <div className="mt-2 flex w-full min-w-0 justify-end pr-0.5">{textOnlyFooter}</div>
+        ) : null}
       </div>
     );
   }
@@ -1467,8 +1525,20 @@ function PostHeader({
       {/* Inline profile actions card (Visit profile / Follow-Unfollow / View stories) */}
       {profileMenuOpen && (
         <div className="absolute left-4 top-full mt-2 z-40 w-56 rounded-2xl border border-white/20 bg-gradient-to-b from-[#0b1220] to-[#030712] shadow-[0_18px_45px_rgba(0,0,0,0.55)] backdrop-blur-sm overflow-hidden">
-          <div className="px-3 py-2 border-b border-white/10">
+          <div className="flex items-center justify-between gap-2 px-2 py-1.5 pl-3 border-b border-white/10">
             <p className="text-[11px] uppercase tracking-[0.12em] text-white/60 font-semibold">Quick actions</p>
+            <button
+              type="button"
+              className="p-1.5 rounded-full text-white/80 hover:bg-white/10 hover:text-white transition-colors"
+              aria-label="Close quick actions"
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                setProfileMenuOpen(false);
+              }}
+            >
+              <FiX className="w-4 h-4" strokeWidth={2.2} />
+            </button>
           </div>
           <button
             className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-gray-100 hover:bg-sky-500/10 transition-colors"
@@ -4926,7 +4996,7 @@ function Stories24RailCollapseOverlay() {
   return null;
 }
 
-/** Horizontal Stories 24 strip (map pin + title + cards). */
+/** Horizontal Stories 24 strip (map pin + title + cards). Colours match `Avatar` story ring (teal → sky → fuchsia). */
 function Stories24FeedRail({
   stories24Items,
   navigate,
@@ -4998,13 +5068,13 @@ function Stories24FeedRail({
     <div className="mx-3 my-3 rounded-2xl border border-slate-700/60 bg-[#0a1323] p-3 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-white text-base font-semibold flex items-center gap-1.5">
-          <FiMapPin className="w-4 h-4 text-cyan-300 shrink-0" aria-hidden />
+          <FiMapPin className="w-4 h-4 text-teal-400 shrink-0" aria-hidden />
           <span>Stories 24</span>
         </h3>
         <button
           type="button"
           onClick={() => navigate('/clip')}
-          className="inline-flex items-center gap-1 rounded-full border border-cyan-300/35 bg-cyan-400/10 px-2.5 py-1 text-[11px] font-semibold text-cyan-200 hover:bg-cyan-400/20 transition-colors"
+          className="inline-flex items-center gap-1 rounded-full border border-teal-400/40 bg-teal-400/10 px-2.5 py-1 text-[11px] font-semibold text-teal-100 hover:bg-sky-500/15 transition-colors"
         >
           <FiPlus className="w-3 h-3" />
           <span>Add yours</span>
@@ -5017,14 +5087,18 @@ function Stories24FeedRail({
               key="stories24-add-yours"
               type="button"
               onClick={() => navigate('/clip')}
-              className="relative w-[112px] h-[156px] shrink-0 rounded-2xl border border-cyan-300/35 overflow-hidden bg-gradient-to-br from-[#0e1a30] via-[#12243f] to-[#1e3a5f] text-left"
+              className="relative w-[112px] h-[156px] shrink-0 rounded-2xl border border-teal-400/40 overflow-hidden bg-gradient-to-br from-[#0e1a30] via-[#12243f] to-[#1a1530] text-left"
             >
+              <div
+                className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-teal-400/20 via-sky-500/15 to-fuchsia-500/20"
+                aria-hidden
+              />
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-                <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-cyan-400 text-[#021428]">
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-tr from-teal-400 via-sky-500 to-fuchsia-500 text-[#021428] shadow-md">
                   <FiPlus className="w-5 h-5" />
                 </span>
                 <p className="text-[12px] font-semibold text-white">Add yours</p>
-                <p className="text-[10px] text-cyan-100/90">Post to Stories 24</p>
+                <p className="text-[10px] text-teal-100/90">Post to Stories 24</p>
               </div>
             </button>
           ) : (
@@ -5035,7 +5109,7 @@ function Stories24FeedRail({
               onClick={(e) => handleStoryCardTap(e, storyItem)}
               className="relative w-[112px] h-[156px] shrink-0 rounded-2xl border border-white/10 overflow-hidden bg-[#101b2f] text-left"
             >
-              <div className="absolute inset-0 bg-gradient-to-br from-slate-500/25 via-sky-500/20 to-indigo-500/25" />
+              <div className="absolute inset-0 bg-gradient-to-tr from-teal-500/20 via-sky-500/20 to-fuchsia-500/20" />
               {storyItem.previewVideoUrl ? (
                 <video
                   src={storyItem.previewVideoUrl}
@@ -5064,7 +5138,7 @@ function Stories24FeedRail({
               ) : null}
               <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/45 to-transparent p-2">
                 <p className="text-[11px] text-white font-semibold leading-tight line-clamp-2">{storyItem.title}</p>
-                <p className="text-[10px] text-sky-200/90 mt-1 truncate">
+                <p className="text-[10px] text-teal-100/90 mt-1 truncate">
                   {storyItem.subtitle ||
                     (storyItem.handle.startsWith('@') ? storyItem.handle : `@${storyItem.handle}`)}
                 </p>
@@ -5087,7 +5161,7 @@ function Stories24FeedRail({
                 borderRadius: expandingStory.phase === 'start' ? 16 : 0,
               }}
             >
-              <div className="absolute inset-0 bg-gradient-to-br from-slate-500/25 via-sky-500/20 to-indigo-500/25" />
+              <div className="absolute inset-0 bg-gradient-to-tr from-teal-500/20 via-sky-500/20 to-fuchsia-500/20" />
               {/* Do not use a video element here — mobile compositors break parent expand animation. */}
               {expandingStory.item.thumb ? (
                 <img
@@ -5099,10 +5173,10 @@ function Stories24FeedRail({
               <div className="absolute inset-0 bg-black/10" />
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none px-4">
                 <p className="text-center text-2xl sm:text-3xl font-bold tracking-tight text-white/95 [text-shadow:0_2px_28px_rgba(0,0,0,0.55)]">
-                  <span className="bg-gradient-to-r from-cyan-200 via-white to-sky-300 bg-clip-text text-transparent">Gazetter</span>
+                  <span className="bg-gradient-to-r from-teal-200 via-white to-fuchsia-300 bg-clip-text text-transparent">Gazetter</span>
                   <span className="text-white/95"> 24</span>
                 </p>
-                <p className="mt-2 text-[11px] uppercase tracking-[0.22em] text-cyan-200/75">Stories</p>
+                <p className="mt-2 text-[11px] uppercase tracking-[0.22em] text-teal-200/80">Stories</p>
               </div>
             </div>
           </div>,

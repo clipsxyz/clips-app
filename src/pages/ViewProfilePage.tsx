@@ -2844,21 +2844,24 @@ export default function ViewProfilePage() {
 
             {/* Post viewer: vertical snap-scrolling feed through all grid posts (Instagram-style) */}
             {selectedPost && filteredPosts.length > 0 && (
-                <div className="fixed inset-0 z-50 flex flex-col bg-[#030712]">
+                <div className="fixed inset-0 z-50 flex flex-col bg-[#030712] isolate">
+                    {/*
+                      FeedCard PostHeader uses z-20–z-50 (avatars/menus up to z-[200]). Keep chrome above so the X stays tappable while scrolling.
+                    */}
                     <button
                         type="button"
                         onClick={() => setSelectedPost(null)}
-                        className="absolute top-[max(12px,env(safe-area-inset-top))] left-3 z-20 w-10 h-10 bg-black/70 hover:bg-black/90 border border-white/15 rounded-full flex items-center justify-center transition-colors"
+                        className="absolute top-[max(12px,env(safe-area-inset-top))] left-3 z-[250] w-10 h-10 bg-black/70 hover:bg-black/90 border border-white/15 rounded-full flex items-center justify-center transition-colors shadow-md pointer-events-auto"
                         aria-label="Close post viewer"
                     >
                         <FiX className="w-6 h-6 text-white" />
                     </button>
-                    <p className="absolute top-[max(12px,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-20 text-[11px] text-white/55 pointer-events-none max-w-[70%] text-center">
+                    <p className="absolute top-[max(12px,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[250] text-[11px] text-white/55 pointer-events-none max-w-[70%] text-center">
                         Scroll for more posts
                     </p>
                     <div
                         ref={profilePostScrollRef}
-                        className="flex-1 h-full min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain pt-[max(3.5rem,calc(env(safe-area-inset-top)+2.75rem))] pb-8"
+                        className="relative z-0 flex-1 h-full min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain pt-[max(3.5rem,calc(env(safe-area-inset-top)+2.75rem))] pb-8"
                         style={{ WebkitOverflowScrolling: 'touch' }}
                     >
                         {filteredPosts.map((post, index) => {
