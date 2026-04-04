@@ -6,17 +6,86 @@ export interface TextStoryTemplate {
   background: string; // CSS color or gradient string
   textColor: string; // CSS color
   textSize: TextStoryTemplateSize;
-  fontFamily: string; // CSS font-family string
+  fontFamily: string;
 }
 
+/** Plain system UI sans-serif for every template (no cursive, serif, mono, or display fonts). */
+export const TEXT_STORY_TEMPLATE_FONT =
+  'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+
 export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
+  // Blues, golds & jewel tones — listed first in create template picker
+  {
+    id: 'broadcast-blue',
+    name: 'Broadcast',
+    background: 'linear-gradient(165deg, #2563eb 0%, #1d4ed8 38%, #1e3a8a 72%, #172554 100%)',
+    textColor: '#ffffff',
+    textSize: 'medium',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
+  },
+  {
+    id: 'cobalt',
+    name: 'Cobalt',
+    background: '#1e40af',
+    textColor: '#f1f5f9',
+    textSize: 'medium',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
+  },
+  {
+    id: 'sapphire',
+    name: 'Sapphire',
+    background: 'linear-gradient(180deg, #1e3a8a 0%, #312e81 55%, #1e1b4b 100%)',
+    textColor: '#e0e7ff',
+    textSize: 'medium',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
+  },
+  {
+    id: 'gold-luxe',
+    name: 'Luxe Gold',
+    background: 'linear-gradient(135deg, #713f12 0%, #b45309 25%, #ca8a04 55%, #eab308 78%, #a16207 100%)',
+    textColor: '#fefce8',
+    textSize: 'medium',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
+  },
+  {
+    id: 'champagne',
+    name: 'Champagne',
+    background: 'linear-gradient(135deg, #fef9c3, #fde68a, #fcd34d)',
+    textColor: '#422006',
+    textSize: 'medium',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
+  },
+  {
+    id: 'antique-gold',
+    name: 'Antique',
+    background: 'linear-gradient(145deg, #422006 0%, #78350f 45%, #92400e 100%)',
+    textColor: '#fef3c7',
+    textSize: 'medium',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
+  },
+  {
+    id: 'bronze',
+    name: 'Bronze',
+    background: 'linear-gradient(135deg, #431407, #7c2d12, #b45309)',
+    textColor: '#fed7aa',
+    textSize: 'medium',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
+  },
+  {
+    id: 'midnight-gold',
+    name: 'Midnight & Gold',
+    background: 'radial-gradient(ellipse at top right, #422006 0%, #0f172a 55%, #020617 100%)',
+    textColor: '#fcd34d',
+    textSize: 'medium',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
+  },
   {
     id: 'minimal-white',
     name: 'Minimal',
     background: '#ffffff',
     textColor: '#111827',
     textSize: 'medium',
-    fontFamily: 'Georgia, \"Times New Roman\", serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'night-mode',
@@ -24,7 +93,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: 'radial-gradient(circle at top, #111827, #020617)',
     textColor: '#f9fafb',
     textSize: 'medium',
-    fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'gazetteer-gradient',
@@ -32,7 +101,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: 'linear-gradient(135deg,#3b82f6,#a855f7)',
     textColor: '#ffffff',
     textSize: 'medium',
-    fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'paper-map',
@@ -40,7 +109,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: 'linear-gradient(135deg,#4b5563,#111827)',
     textColor: '#f9fafb',
     textSize: 'medium',
-    fontFamily: 'Georgia, \"Times New Roman\", serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'polaroid',
@@ -48,7 +117,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: '#e5e7eb',
     textColor: '#111827',
     textSize: 'medium',
-    fontFamily: '\"Times New Roman\", Georgia, serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'postcard',
@@ -56,7 +125,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: '#f3f4f6',
     textColor: '#111827',
     textSize: 'small',
-    fontFamily: 'Georgia, \"Times New Roman\", serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'bold-color',
@@ -64,7 +133,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: '#f97316',
     textColor: '#ffffff',
     textSize: 'large',
-    fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'highlight',
@@ -72,7 +141,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: '#fef9c3',
     textColor: '#111827',
     textSize: 'medium',
-    fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'sticky-note',
@@ -80,7 +149,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: '#fde68a',
     textColor: '#111827',
     textSize: 'medium',
-    fontFamily: '\"Comic Sans MS\", \"Comic Sans\", cursive',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'chat-bubble',
@@ -88,16 +157,15 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: '#e0f2fe',
     textColor: '#0f172a',
     textSize: 'medium',
-    fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
-  // Extra templates with different font styles
   {
     id: 'elegant-script',
     name: 'Script',
     background: 'linear-gradient(135deg,#0f172a,#1e293b)',
     textColor: '#f9fafb',
     textSize: 'medium',
-    fontFamily: '\"Palatino Linotype\",\"Book Antiqua\",Palatino,serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'mono-terminal',
@@ -105,7 +173,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: '#020617',
     textColor: '#e5e7eb',
     textSize: 'small',
-    fontFamily: '\"Courier New\",Courier,monospace',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'playful-bubble',
@@ -113,7 +181,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: 'linear-gradient(135deg,#f97316,#ec4899)',
     textColor: '#ffffff',
     textSize: 'large',
-    fontFamily: '\"Trebuchet MS\",\"Lucida Grande\",\"Lucida Sans Unicode\",sans-serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'newspaper',
@@ -121,7 +189,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: '#f5f5f4',
     textColor: '#111827',
     textSize: 'small',
-    fontFamily: '\"Times New Roman\",Georgia,serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'marker',
@@ -129,7 +197,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: '#111827',
     textColor: '#facc15',
     textSize: 'medium',
-    fontFamily: '\"Comic Sans MS\",\"Comic Sans\",cursive',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'soft-pastel',
@@ -137,7 +205,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: 'linear-gradient(135deg,#fee2e2,#e0f2fe)',
     textColor: '#111827',
     textSize: 'medium',
-    fontFamily: '\"Verdana\",\"Geneva\",sans-serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'headline',
@@ -145,7 +213,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: '#111827',
     textColor: '#f9fafb',
     textSize: 'large',
-    fontFamily: '\"Impact\",\"Haettenschweiler\",\"Arial Narrow Bold\",sans-serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'neon',
@@ -153,7 +221,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: 'radial-gradient(circle at top,#22d3ee,#4c1d95)',
     textColor: '#f9fafb',
     textSize: 'medium',
-    fontFamily: '\"Gill Sans\",\"Gill Sans MT\",Calibri,\"Trebuchet MS\",sans-serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   // More styles
   {
@@ -162,7 +230,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: 'linear-gradient(135deg,#f97316,#dc2626,#7c2d12)',
     textColor: '#fef3c7',
     textSize: 'medium',
-    fontFamily: 'Georgia,\"Times New Roman\",serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'ocean',
@@ -170,7 +238,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: 'linear-gradient(180deg,#0e7490,#155e75,#0f172a)',
     textColor: '#e0f2fe',
     textSize: 'medium',
-    fontFamily: 'system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'forest',
@@ -178,7 +246,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: 'linear-gradient(135deg,#14532d,#166534,#15803d)',
     textColor: '#dcfce7',
     textSize: 'medium',
-    fontFamily: '\"Georgia\",\"Times New Roman\",serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'lavender',
@@ -186,7 +254,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: 'linear-gradient(135deg,#7c3aed,#a78bfa,#c4b5fd)',
     textColor: '#1e1b4b',
     textSize: 'medium',
-    fontFamily: '\"Palatino Linotype\",Palatino,serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'mint',
@@ -194,7 +262,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: 'linear-gradient(135deg,#ccfbf1,#99f6e4,#5eead4)',
     textColor: '#134e4a',
     textSize: 'medium',
-    fontFamily: 'system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'candy',
@@ -202,7 +270,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: 'linear-gradient(135deg,#fbcfe8,#f9a8d4,#ec4899)',
     textColor: '#831843',
     textSize: 'medium',
-    fontFamily: '\"Comic Sans MS\",\"Comic Sans\",cursive',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'slate',
@@ -210,7 +278,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: 'linear-gradient(135deg,#475569,#334155,#1e293b)',
     textColor: '#f1f5f9',
     textSize: 'medium',
-    fontFamily: '\"Segoe UI\",system-ui,sans-serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'amber',
@@ -218,7 +286,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: 'linear-gradient(135deg,#fef3c7,#fde68a,#fcd34d)',
     textColor: '#78350f',
     textSize: 'medium',
-    fontFamily: 'Georgia,\"Times New Roman\",serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'typewriter',
@@ -226,7 +294,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: '#1c1917',
     textColor: '#d6d3d1',
     textSize: 'small',
-    fontFamily: '\"Courier New\",Courier,monospace',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'retro',
@@ -234,7 +302,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: 'linear-gradient(135deg,#78716c,#57534e,#44403c)',
     textColor: '#fafaf9',
     textSize: 'medium',
-    fontFamily: '\"American Typewriter\",\"Lucida Console\",monospace',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'berry',
@@ -242,7 +310,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: 'linear-gradient(135deg,#881337,#9f1239,#be123c)',
     textColor: '#fecdd3',
     textSize: 'medium',
-    fontFamily: 'Georgia,\"Times New Roman\",serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'sky',
@@ -250,7 +318,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: 'linear-gradient(180deg,#0ea5e9,#38bdf8,#7dd3fc)',
     textColor: '#0c4a6e',
     textSize: 'medium',
-    fontFamily: 'system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'cream',
@@ -258,7 +326,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: '#fefce8',
     textColor: '#422006',
     textSize: 'medium',
-    fontFamily: '\"Times New Roman\",Georgia,serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'ink',
@@ -266,7 +334,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
     background: '#0c0a09',
     textColor: '#fafaf9',
     textSize: 'medium',
-    fontFamily: '\"Palatino Linotype\",\"Book Antiqua\",Palatino,serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   // Lightweight story-specific templates (24hr stories)
   {
@@ -276,7 +344,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
       'radial-gradient(circle at top, rgba(56,189,248,0.22), rgba(15,23,42,1))',
     textColor: '#f9fafb',
     textSize: 'medium',
-    fontFamily: 'system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'gradient-motion',
@@ -285,7 +353,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
       'linear-gradient(135deg,#22c55e,#06b6d4,#6366f1,#ec4899)',
     textColor: '#f9fafb',
     textSize: 'medium',
-    fontFamily: 'system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
   {
     id: 'glass-shimmer',
@@ -294,7 +362,7 @@ export const TEXT_STORY_TEMPLATES: TextStoryTemplate[] = [
       'linear-gradient(135deg,rgba(15,23,42,0.95),rgba(15,23,42,0.85))',
     textColor: '#e5e7eb',
     textSize: 'medium',
-    fontFamily: 'system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif',
+    fontFamily: TEXT_STORY_TEMPLATE_FONT,
   },
 ];
 

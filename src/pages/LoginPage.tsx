@@ -385,7 +385,7 @@ export default function LoginPage() {
         </div>
 
         {mode === 'login' ? (
-          <div className="max-w-md mx-auto rounded-2xl p-0.5 bg-[linear-gradient(90deg,#22d3ee,#06b6d4)] shadow-lg">
+          <div className="max-w-md mx-auto rounded-2xl p-0.5 bg-gradient-to-tr from-teal-400 via-sky-500 to-fuchsia-500 shadow-lg">
             {showForgotPassword ? (
               <div className="rounded-2xl bg-black px-8 py-8 flex flex-col">
                 <div className="text-center mb-6">
@@ -401,7 +401,7 @@ export default function LoginPage() {
                     <button
                       type="button"
                       onClick={() => { setShowForgotPassword(false); setForgotSent(false); setForgotEmail(''); }}
-                      className="w-full py-2 bg-gradient-to-r from-[#22d3ee] to-[#06b6d4] text-white rounded-sm hover:brightness-110 text-sm font-medium"
+                      className="w-full py-2 bg-gradient-to-r from-teal-400 via-sky-500 to-fuchsia-500 text-white rounded-sm hover:brightness-110 text-sm font-medium"
                     >
                       Back to login
                     </button>
@@ -432,7 +432,7 @@ export default function LoginPage() {
                             setForgotSent(true);
                           }
                         }}
-                        className="flex-1 py-2 bg-gradient-to-r from-[#22d3ee] to-[#06b6d4] text-white rounded-sm hover:brightness-110 text-sm font-medium"
+                        className="flex-1 py-2 bg-gradient-to-r from-teal-400 via-sky-500 to-fuchsia-500 text-white rounded-sm hover:brightness-110 text-sm font-medium"
                       >
                         Send link
                       </button>
@@ -492,7 +492,7 @@ export default function LoginPage() {
                 <button
                   type="submit"
                   disabled={loginLoading}
-                  className="w-full px-4 py-2 bg-gradient-to-r from-[#22d3ee] to-[#06b6d4] text-white rounded-sm hover:brightness-110 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full px-4 py-2 bg-gradient-to-r from-teal-400 via-sky-500 to-fuchsia-500 text-white rounded-sm hover:brightness-110 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {loginLoading ? 'Logging in…' : 'Log in'}
                 </button>
@@ -507,7 +507,7 @@ export default function LoginPage() {
             )}
           </div>
         ) : (
-        <div className="max-w-md mx-auto rounded-2xl p-[1.5px] bg-[linear-gradient(90deg,#22d3ee,#06b6d4)] shadow-lg flex-shrink-0">
+        <div className="max-w-md mx-auto rounded-2xl p-[1.5px] bg-gradient-to-tr from-teal-400 via-sky-500 to-fuchsia-500 shadow-lg flex-shrink-0">
         <form
           onSubmit={step === 1 ? handleAccountSubmit : handleLocationSubmit}
           className="rounded-2xl bg-black flex flex-col min-h-0"
@@ -544,8 +544,8 @@ export default function LoginPage() {
               
               {/* Step Indicators - two steps only */}
               <div className="flex justify-center items-center space-x-2 mb-4 sm:mb-6">
-                <div className={`h-1 rounded-full transition-all ${step >= 1 ? 'bg-gradient-to-r from-[#22d3ee] to-[#06b6d4]' : 'bg-gray-300'}`} style={{ width: step >= 1 ? '80px' : '40px' }}></div>
-                <div className={`h-1 rounded-full transition-all ${step >= 2 ? 'bg-gradient-to-r from-[#22d3ee] to-[#06b6d4]' : 'bg-gray-300'}`} style={{ width: step >= 2 ? '80px' : '40px' }}></div>
+                <div className={`h-1 rounded-full transition-all ${step >= 1 ? 'bg-gradient-to-r from-teal-400 via-sky-500 to-fuchsia-500' : 'bg-gray-300'}`} style={{ width: step >= 1 ? '80px' : '40px' }}></div>
+                <div className={`h-1 rounded-full transition-all ${step >= 2 ? 'bg-gradient-to-r from-teal-400 via-sky-500 to-fuchsia-500' : 'bg-gray-300'}`} style={{ width: step >= 2 ? '80px' : '40px' }}></div>
               </div>
             </div>
           </div>
@@ -811,7 +811,7 @@ export default function LoginPage() {
             <div className="pt-6 mt-4 border-t border-gray-700 space-y-3">
               <button
                 type="submit"
-                className="w-full px-4 py-2 bg-gradient-to-r from-[#22d3ee] to-[#06b6d4] text-white rounded-sm hover:brightness-110 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full px-4 py-2 bg-gradient-to-r from-teal-400 via-sky-500 to-fuchsia-500 text-white rounded-sm hover:brightness-110 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {step === 1 ? 'Continue' : 'Create account'}
               </button>

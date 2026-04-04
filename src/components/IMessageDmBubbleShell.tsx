@@ -12,6 +12,7 @@ export function IMessageDmBubbleShell({
   children,
   bubbleStyle,
   layout = 'dm',
+  showTail = true,
   ...bubbleProps
 }: {
   isFromMe: boolean;
@@ -23,6 +24,8 @@ export function IMessageDmBubbleShell({
   bubbleStyle?: CSSProperties;
   /** `feed`: bubble stays content-width (no flex-1 stretch). `dm`: received row can grow like Messages. */
   layout?: 'dm' | 'feed';
+  /** When false, render a flat card (no speech tail) — e.g. feed “news card” text posts. */
+  showTail?: boolean;
 } & HTMLAttributes<HTMLDivElement>) {
   const tailStickout = 9;
   const tailVert = 13;
@@ -35,29 +38,31 @@ export function IMessageDmBubbleShell({
 
   return (
     <div className={outerClass} data-dm-imessage-bubble="">
-      <div
-        aria-hidden
-        className={`absolute z-[5] pointer-events-none ${tailBackgroundColor ? '' : tailBgClassName}`}
-        style={{
-          ...(isFromMe
-            ? {
-                right: 0,
-                left: 'auto',
-                bottom: tailBottomOffset,
-                transform: 'translateX(100%)',
-                clipPath: 'polygon(0% 0%, 0% 100%, 100% 50%)',
-              }
-            : {
-                left: 0,
-                bottom: tailBottomOffset,
-                transform: 'translateX(-100%)',
-                clipPath: 'polygon(100% 0%, 100% 100%, 0% 100%)',
-              }),
-          width: tailStickout,
-          height: tailVert,
-          ...(tailBackgroundColor ? { backgroundColor: tailBackgroundColor } : {}),
-        }}
-      />
+      {showTail ? (
+        <div
+          aria-hidden
+          className={`absolute z-[5] pointer-events-none ${tailBackgroundColor ? '' : tailBgClassName}`}
+          style={{
+            ...(isFromMe
+              ? {
+                  right: 0,
+                  left: 'auto',
+                  bottom: tailBottomOffset,
+                  transform: 'translateX(100%)',
+                  clipPath: 'polygon(0% 0%, 0% 100%, 100% 50%)',
+                }
+              : {
+                  left: 0,
+                  bottom: tailBottomOffset,
+                  transform: 'translateX(-100%)',
+                  clipPath: 'polygon(100% 0%, 100% 100%, 0% 100%)',
+                }),
+            width: tailStickout,
+            height: tailVert,
+            ...(tailBackgroundColor ? { backgroundColor: tailBackgroundColor } : {}),
+          }}
+        />
+      ) : null}
       <div
         className={`relative z-10 overflow-visible rounded-[1.2rem] shadow-[0_1px_2px_rgba(0,0,0,0.55)] ring-0 ${bubbleClassName}`}
         style={bubbleStyle}

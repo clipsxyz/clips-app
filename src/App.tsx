@@ -59,7 +59,13 @@ import { bottomSheet } from './utils/swalBottomSheet';
 import { showToast } from './utils/toast';
 import { TEXT_STORY_TEMPLATES } from './textStoryTemplates';
 import { IMessageDmBubbleShell } from './components/IMessageDmBubbleShell';
-import { DM_RECEIVED_BG, getDmSentBubblePreference } from './constants/dmImessageTheme';
+import { DM_RECEIVED_BG } from './constants/dmImessageTheme';
+import {
+  extractHexColorsFromCss,
+  formatTextOnlyFeedByline,
+  isLikelyLightTextColor,
+  resolveTextCardTailFill,
+} from './utils/feedTextBubble';
 
 // Global map to store video playback times per post ID for seamless transitions
 const videoTimesMap = new Map<string, number>();
@@ -521,7 +527,8 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
       <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/50 to-transparent pointer-events-none z-0" />
 
       <div className="relative px-3 z-10">
-        <div className="absolute inset-x-1 -inset-y-2 rounded-2xl bg-gradient-to-r from-cyan-400/35 via-cyan-500/35 to-sky-400/30 blur-xl pointer-events-none" />
+        {/* Same palette as Avatar `storyRingStyle` (profile pic when user has stories): teal → sky → fuchsia */}
+        <div className="absolute inset-x-1 -inset-y-2 rounded-2xl bg-gradient-to-tr from-teal-400/35 via-sky-500/35 to-fuchsia-500/30 blur-xl pointer-events-none" />
         <div className={`relative grid ${showNotificationsTab ? 'grid-cols-[1fr_1fr_1fr_auto_auto]' : 'grid-cols-[1fr_1fr_1fr_auto]'} gap-1.5`}>
           {tabs.map(t => {
           const isNotificationsTab = t === '__notifications__';
@@ -905,6 +912,7 @@ function PostHeader({
   onMenuClick,
   variant = 'default',
   children,
+  textOnlyFooter,
 }: {
   post: Post;
   onFollow?: () => Promise<void>;
@@ -912,8 +920,10 @@ function PostHeader({
   isOverlaid?: boolean;
   onMenuClick?: () => void;
   variant?: 'default' | 'textOnlyFeed';
-  /** Bubble + extras (e.g. tagged avatars); only used with `textOnlyFeed`. */
+  /** Main text card; for `textOnlyFeed` use `textOnlyFooter` for tagged users etc. */
   children?: React.ReactNode;
+  /** Below the card row on text-only feed posts (e.g. tagged avatars). */
+  textOnlyFooter?: React.ReactNode;
 }) {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -1091,10 +1101,6 @@ function PostHeader({
     : "text-gray-500 dark:text-gray-400";
 
   if (variant === "textOnlyFeed" && children != null) {
-    const handleNorm = (h: string) => h.replace(/^@/, "").trim().toLowerCase();
-    const viewerIsAuthor = !!(
-      user?.handle && handleNorm(post.userHandle) === handleNorm(user.handle)
-    );
     const createdTs =
       post.createdAt != null
         ? typeof post.createdAt === "string"
@@ -1103,7 +1109,6 @@ function PostHeader({
         : null;
     const timeLabel =
       typeof createdTs === "number" && !Number.isNaN(createdTs) ? timeAgo(createdTs) : "";
-    const displayHandle = isReclippedPost ? post.originalUserHandle! : post.userHandle;
 
     const avatarBlock = (
       <div
@@ -1180,7 +1185,7 @@ function PostHeader({
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        {/* Match reference: display name left, clock + time top-right, ⋯ under time on the right */}
+        {/* News-style header: optional reclip, time + menu; author line lives inside the card */}
         <div className="flex items-start justify-between gap-3 pt-1">
           <div className="min-w-0 flex-1">
             {isReclippedPost && (
@@ -1189,30 +1194,6 @@ function PostHeader({
                 <span>{post.userHandle} reclipped</span>
               </div>
             )}
-            <button
-              id={titleId}
-              type="button"
-              className={`text-left w-full transition-opacity hover:opacity-90 ${textColorClass}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                setProfileMenuOpen((open) => !open);
-              }}
-            >
-              <h3
-                className="text-sm font-semibold flex items-center gap-1.5 leading-tight"
-                style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}
-              >
-                <span className="truncate">{displayHandle}</span>
-                <Flag
-                  value={
-                    isCurrentUser
-                      ? user?.countryFlag || ""
-                      : getFlagForHandle(isReclippedPost ? post.originalUserHandle! : post.userHandle) || ""
-                  }
-                  size={16}
-                />
-              </h3>
-            </button>
           </div>
           <div className="flex flex-col items-end shrink-0 gap-1 pt-0.5">
             {timeLabel ? (
@@ -1238,13 +1219,14 @@ function PostHeader({
           </div>
         </div>
 
-        {/* Always right-side layout: bubble tail + avatar on the right for all text-only posts */}
-        <div className="mt-1 flex w-full min-w-0 items-end justify-end gap-2">
-          <div className="min-w-0 flex flex-col gap-1 items-end max-w-[min(100%,30rem)]">
-            {children}
-          </div>
-          {avatarBlock}
+        {/* Card + profile pic: bottom-right row, avatar beside card (aligned to bottom) */}
+        <div className="mt-2 flex w-full min-w-0 items-end justify-end gap-2">
+          <div className="min-w-0 max-w-[min(100%,30rem)] shrink">{children}</div>
+          <div className="shrink-0 self-end z-30 pointer-events-auto pb-px">{avatarBlock}</div>
         </div>
+        {textOnlyFooter != null ? (
+          <div className="mt-2 flex w-full min-w-0 justify-end pr-0.5">{textOnlyFooter}</div>
+        ) : null}
 
         {profileMenuOpen && (
           <div className="absolute left-4 top-10 z-[200] w-56 rounded-2xl border border-white/20 bg-gradient-to-b from-[#0b1220] to-[#030712] shadow-[0_18px_45px_rgba(0,0,0,0.55)] backdrop-blur-sm overflow-hidden">
@@ -1581,36 +1563,19 @@ function TagRow({ tags }: { tags: string[] }) {
   );
 }
 
-/** Solid fill for speech tail — templates often use gradients; extract first hex (or rgb) or fall back to DM palette. */
-function resolveTextCardTailFill(backgroundCss: string, isFromViewer: boolean): string {
-  const trimmed = String(backgroundCss).trim();
-  if (/^#([0-9a-f]{3,8})$/i.test(trimmed)) {
-    return expandShortHex(trimmed);
-  }
-  const hexStops = trimmed.match(/#[0-9a-f]{3,8}\b/gi);
-  if (hexStops?.length) {
-    return expandShortHex(hexStops[0]);
-  }
-  const rgb = trimmed.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
-  if (rgb) {
-    const r = Math.min(255, parseInt(rgb[1], 10));
-    const g = Math.min(255, parseInt(rgb[2], 10));
-    const b = Math.min(255, parseInt(rgb[3], 10));
-    return `#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`;
-  }
-  return isFromViewer
-    ? getDmSentBubblePreference() === 'green'
-      ? '#34C759'
-      : '#0A84FF'
-    : '#3A3A3C';
-}
+/** X/Twitter web–like stack (Chirp is proprietary; this matches the public web feel). */
+const TEXT_CARD_TWITTER_FONT =
+  'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji", sans-serif';
 
-function expandShortHex(hex: string): string {
-  let h = hex.trim().replace(/^#/, '').toLowerCase();
-  if (h.length === 3) {
-    h = `${h[0]}${h[0]}${h[1]}${h[1]}${h[2]}${h[2]}`;
+function textCardTwitterMetrics(size: 'small' | 'medium' | 'large' | undefined): { fontSize: number; lineHeight: number } {
+  switch (size) {
+    case 'small':
+      return { fontSize: 13, lineHeight: 1.3 };
+    case 'large':
+      return { fontSize: 17, lineHeight: 1.35 };
+    default:
+      return { fontSize: 15, lineHeight: 1.3125 };
   }
-  return `#${h}`;
 }
 
 function TextCard({
@@ -1620,6 +1585,8 @@ function TextCard({
   textStyle,
   stickers,
   isFromViewer = false,
+  feedHeadlineByline,
+  feedCardTitleId,
 }: {
   text: string;
   onDoubleLike: () => Promise<void>;
@@ -1629,6 +1596,10 @@ function TextCard({
   stickers?: StickerOverlay[];
   /** Your post: iMessage “sent” bubble (blue/green) on the right; others: gray bubble on the left. */
   isFromViewer?: boolean;
+  /** Byline inside the card (feed “news card” layout). */
+  feedHeadlineByline?: string;
+  /** Set on the byline for `aria-labelledby` on the feed article. */
+  feedCardTitleId?: string;
 }) {
   const [tapPosition, setTapPosition] = React.useState<{ x: number; y: number } | null>(null);
   const [isExpanded, setIsExpanded] = React.useState(false);
@@ -1671,23 +1642,13 @@ function TextCard({
     textStyle?.background ||
     backgrounds[text.length % backgrounds.length];
 
-  const getTextSizeClass = () => {
-    const size = textStyle?.size || 'medium';
-    switch (size) {
-      case 'small':
-        return 'text-sm';
-      case 'large':
-        return 'text-xl';
-      case 'medium':
-      default:
-        return 'text-base';
-    }
-  };
-
   const textColor = textStyle?.color || 'white';
-  const textFontFamily =
-    textStyle?.fontFamily ||
-    'system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif';
+  const twMetrics = textCardTwitterMetrics(textStyle?.size);
+
+  const newsFeedCard = !!feedHeadlineByline?.trim();
+  const bylineColor = isLikelyLightTextColor(textColor)
+    ? 'rgba(15, 23, 42, 0.92)'
+    : 'rgba(30, 41, 55, 0.9)';
 
   /** Inline tail color — match template / gradient first color; else DM sent/received fallback. */
   const tailBgColor = resolveTextCardTailFill(selectedBackground, isFromViewer);
@@ -1769,14 +1730,21 @@ function TextCard({
         <div ref={containerRef} className="min-w-0 max-w-[min(100%,30rem)]">
         <IMessageDmBubbleShell
           layout="feed"
-          isFromMe={isFromViewer}
+          isFromMe
           tailBgClassName={DM_RECEIVED_BG}
           tailBackgroundColor={tailBgColor}
-          bubbleClassName={`break-words cursor-pointer select-none relative overflow-visible leading-relaxed font-normal antialiased ${getTextSizeClass()} px-4 py-3 min-w-0 text-left`}
+          showTail
+          bubbleClassName={`break-words cursor-pointer select-none relative overflow-visible font-normal antialiased min-w-0 text-left ${
+            newsFeedCard
+              ? 'px-4 pt-3.5 pb-3 rounded-2xl shadow-[0_14px_40px_rgba(0,0,0,0.35)] ring-1 ring-white/10'
+              : 'px-4 py-3'
+          }`}
           bubbleStyle={{
             background: selectedBackground,
             color: textColor,
-            fontFamily: textFontFamily,
+            fontFamily: TEXT_CARD_TWITTER_FONT,
+            fontSize: twMetrics.fontSize,
+            lineHeight: twMetrics.lineHeight,
             wordBreak: 'break-word',
             overflowWrap: 'anywhere',
             maxWidth: '100%',
@@ -1794,14 +1762,44 @@ function TextCard({
           onClick={handleClick}
           onTouchEnd={handleTouchEnd}
         >
-          <div className="whitespace-pre-wrap w-full">{displayText}</div>
+          {newsFeedCard ? (
+            <div className="whitespace-pre-wrap w-full">
+              <span
+                id={feedCardTitleId}
+                className="mb-1.5 block text-left"
+                style={{
+                  color: bylineColor,
+                  fontFamily: TEXT_CARD_TWITTER_FONT,
+                  fontWeight: 700,
+                  letterSpacing: 'normal',
+                }}
+              >
+                {feedHeadlineByline}
+              </span>
+              <div className="whitespace-pre-wrap" style={{ fontWeight: 400 }}>
+                {displayText}
+              </div>
+            </div>
+          ) : (
+            <div className="whitespace-pre-wrap w-full" style={{ fontWeight: 400 }}>
+              {displayText}
+            </div>
+          )}
           {shouldTruncate && (
             <div className="mt-2 flex justify-start">
               <button
                 type="button"
                 onClick={handleMoreClick}
-                className="text-sm font-medium transition-opacity hover:opacity-90 focus:outline-none focus:ring-0 underline underline-offset-2"
-                style={{ color: textColor, outline: 'none', border: 'none', background: 'none', opacity: 0.9 }}
+                className="font-semibold transition-opacity hover:opacity-90 focus:outline-none focus:ring-0 underline underline-offset-2"
+                style={{
+                  color: textColor,
+                  outline: 'none',
+                  border: 'none',
+                  background: 'none',
+                  opacity: 0.9,
+                  fontSize: twMetrics.fontSize,
+                  fontFamily: TEXT_CARD_TWITTER_FONT,
+                }}
                 aria-label={isExpanded ? 'Show less' : 'Show more'}
               >
                 {isExpanded ? 'Show less' : 'Show more'}
@@ -1922,7 +1920,7 @@ function TileTextCard({
   ];
   const selectedBackground = textStyle?.background || backgrounds[Math.abs(text.length) % backgrounds.length];
   const textColor = textStyle?.color || 'white';
-  const fontFamily = textStyle?.fontFamily || 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  const twMetrics = textCardTwitterMetrics(textStyle?.size);
 
   const shouldTruncate = text.length > 120;
   const displayText = shouldTruncate ? text.substring(0, 120) + '...' : text;
@@ -1965,12 +1963,14 @@ function TileTextCard({
       <div
         className="absolute inset-0 p-3 flex"
         style={{
-          fontFamily,
+          fontFamily: TEXT_CARD_TWITTER_FONT,
           color: textColor,
           alignItems: 'flex-start',
+          fontSize: twMetrics.fontSize,
+          lineHeight: twMetrics.lineHeight,
         }}
       >
-        <p className="text-[13px] font-semibold leading-snug line-clamp-4 drop-shadow-sm">
+        <p className="font-normal line-clamp-4 drop-shadow-sm" style={{ fontWeight: 400 }}>
           {displayText}
         </p>
       </div>
@@ -4260,6 +4260,16 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
     post.userHandle.replace(/^@/, '').trim().toLowerCase() ===
       user.handle.replace(/^@/, '').trim().toLowerCase();
 
+  const textOnlyFeedBylineRaw =
+    post.isReclipped &&
+    post.originalUserHandle &&
+    user?.handle &&
+    post.userHandle === user.handle &&
+    post.userReclipped === true
+      ? post.originalUserHandle
+      : post.userHandle;
+  const textOnlyFeedByline = formatTextOnlyFeedByline(textOnlyFeedBylineRaw || '', post.locationLabel);
+
   // If this is a text-only post with a templateId, derive style from TEXT_STORY_TEMPLATES
   const templateForText = post.templateId
     ? TEXT_STORY_TEMPLATES.find((t) => t.id === post.templateId)
@@ -4351,27 +4361,29 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             isOverlaid={true}
             onMenuClick={() => setMenuOpen(true)}
             variant="textOnlyFeed"
-          >
-            <>
-              <TextCard
-                text={post.text || ''}
-                onDoubleLike={onLike}
-                onHeartAnimation={(clientX, clientY) => {
-                  setTimeout(() => {
-                    setHeartAnimation({ startX: clientX, startY: clientY });
-                  }, 50);
-                }}
-                textStyle={effectiveTextStyle}
-                stickers={post.stickers}
-                isFromViewer={true}
-              />
-              {post.taggedUsers && post.taggedUsers.length > 0 && (
+            textOnlyFooter={
+              post.taggedUsers && post.taggedUsers.length > 0 ? (
                 <TaggedAvatars
                   taggedUserHandles={post.taggedUsers}
                   onShowTaggedUsers={() => setShowTaggedUsersModal(true)}
                 />
-              )}
-            </>
+              ) : undefined
+            }
+          >
+            <TextCard
+              text={post.text || ''}
+              onDoubleLike={onLike}
+              onHeartAnimation={(clientX, clientY) => {
+                setTimeout(() => {
+                  setHeartAnimation({ startX: clientX, startY: clientY });
+                }, 50);
+              }}
+              textStyle={effectiveTextStyle}
+              stickers={post.stickers}
+              isFromViewer={viewerIsAuthor}
+              feedHeadlineByline={textOnlyFeedByline}
+              feedCardTitleId={titleId}
+            />
           </PostHeader>
         )
         ) : (
@@ -4707,7 +4719,14 @@ const AdCard = React.memo(function AdCard({ ad, onImpression, onClick }: {
   );
 });
 
-type Stories24RailItem = { handle: string; title: string; thumb?: string; previewVideoUrl?: string };
+type Stories24RailItem = {
+  handle: string;
+  title: string;
+  /** `username@location` for rail caption (no extra @). */
+  subtitle?: string;
+  thumb?: string;
+  previewVideoUrl?: string;
+};
 
 const STORIES24_RAIL_RETURN_KEY = 'clips:stories24RailReturn';
 /** Persisted handle when opening /stories from feed rail — survives `location.state` loss on some mobile browsers. Keep in sync with StoriesPage. */
@@ -5054,7 +5073,10 @@ function Stories24FeedRail({
               ) : null}
               <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/45 to-transparent p-2">
                 <p className="text-[11px] text-white font-semibold leading-tight line-clamp-2">{storyItem.title}</p>
-                <p className="text-[10px] text-sky-200/90 mt-1 truncate">@{storyItem.handle}</p>
+                <p className="text-[10px] text-sky-200/90 mt-1 truncate">
+                  {storyItem.subtitle ||
+                    (storyItem.handle.startsWith('@') ? storyItem.handle : `@${storyItem.handle}`)}
+                </p>
               </div>
             </button>
           )
@@ -5172,7 +5194,7 @@ function FeedPageWrapper() {
     targetY: number;
     phase: 'start' | 'fly';
   } | null>(null);
-  const [storiesRailItems, setStoriesRailItems] = React.useState<Array<{ handle: string; title: string; thumb?: string; previewVideoUrl?: string }>>([]);
+  const [storiesRailItems, setStoriesRailItems] = React.useState<Stories24RailItem[]>([]);
 
   const readSuggestedPlacesPrefs = React.useCallback(() => {
     if (typeof window === 'undefined') {
@@ -6170,70 +6192,110 @@ function FeedPageWrapper() {
       .filter((p) => hasMedia(p));
   }, [flat]);
 
-  const generateTextStoryPreview = React.useCallback(async (text: string, color?: string): Promise<string | undefined> => {
-    const safeText = (text || '').trim();
-    if (!safeText) return undefined;
-    try {
-      const width = 360;
-      const height = 640;
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return undefined;
+  /** Canvas thumb for text-only stories — matches the ~112×156 rail card aspect so object-cover doesn’t crop badly. */
+  const generateTextStoryPreview = React.useCallback(
+    async (
+      text: string,
+      opts?: {
+        textStyle?: { color?: string; background?: string; size?: 'small' | 'medium' | 'large' };
+        byline?: string;
+      },
+    ): Promise<string | undefined> => {
+      const safeText = (text || '').trim();
+      if (!safeText) return undefined;
+      try {
+        const W = 448;
+        const H = 624; // 112:156 (Stories 24 rail card)
+        const canvas = document.createElement('canvas');
+        canvas.width = W;
+        canvas.height = H;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return undefined;
 
-      const grad = ctx.createLinearGradient(0, 0, width, height);
-      grad.addColorStop(0, '#0f172a');
-      grad.addColorStop(0.55, '#1d4ed8');
-      grad.addColorStop(1, '#7c3aed');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, width, height);
-
-      const textColor = color || '#ffffff';
-      ctx.fillStyle = textColor;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-
-      let fontSize = 28;
-      const maxWidth = width - 44;
-      const lines: string[] = [];
-      const words = safeText.slice(0, 140).split(/\s+/);
-
-      const buildLines = () => {
-        lines.length = 0;
-        ctx.font = `600 ${fontSize}px Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial`;
-        let line = '';
-        for (const word of words) {
-          const next = line ? `${line} ${word}` : word;
-          if (ctx.measureText(next).width > maxWidth) {
-            if (line) lines.push(line);
-            line = word;
-          } else {
-            line = next;
-          }
+        const bgCss = opts?.textStyle?.background || '';
+        const hexes = extractHexColorsFromCss(bgCss);
+        if (hexes.length >= 2) {
+          const g = ctx.createLinearGradient(0, 0, W, H);
+          const stops = hexes.slice(0, 6);
+          stops.forEach((hex, i) => {
+            g.addColorStop(i / Math.max(1, stops.length - 1), hex);
+          });
+          ctx.fillStyle = g;
+        } else if (hexes.length === 1) {
+          ctx.fillStyle = hexes[0];
+        } else {
+          const g = ctx.createLinearGradient(0, 0, W, H);
+          g.addColorStop(0, '#1e3a8a');
+          g.addColorStop(0.55, '#2563eb');
+          g.addColorStop(1, '#172554');
+          ctx.fillStyle = g;
         }
-        if (line) lines.push(line);
-      };
+        ctx.fillRect(0, 0, W, H);
 
-      buildLines();
-      while (lines.length > 7 && fontSize > 20) {
-        fontSize -= 2;
-        buildLines();
+        const bodyColor = opts?.textStyle?.color || '#ffffff';
+        const bylineStr = (opts?.byline || '').trim();
+        let contentTop = 32;
+        if (bylineStr) {
+          ctx.fillStyle = isLikelyLightTextColor(bodyColor)
+            ? 'rgba(15, 23, 42, 0.92)'
+            : 'rgba(30, 41, 55, 0.92)';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'top';
+          ctx.font = 'bold 11px system-ui, -apple-system, "Segoe UI", sans-serif';
+          const upper = bylineStr.toUpperCase();
+          const short = upper.length > 40 ? `${upper.slice(0, 38)}…` : upper;
+          ctx.fillText(short, W / 2, contentTop);
+          contentTop += 20;
+        }
+
+        ctx.fillStyle = bodyColor;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        const size = opts?.textStyle?.size || 'medium';
+        let fontSize = size === 'small' ? 17 : size === 'large' ? 24 : 20;
+        const maxWidth = W - 28;
+        const words = safeText.slice(0, 180).split(/\s+/);
+
+        const buildLines = (): string[] => {
+          const lines: string[] = [];
+          ctx.font = `600 ${fontSize}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+          let line = '';
+          for (const word of words) {
+            const next = line ? `${line} ${word}` : word;
+            if (ctx.measureText(next).width > maxWidth) {
+              if (line) lines.push(line);
+              line = word;
+            } else {
+              line = next;
+            }
+          }
+          if (line) lines.push(line);
+          return lines;
+        };
+
+        let lines = buildLines();
+        const maxLines = bylineStr ? 7 : 8;
+        while (lines.length > maxLines && fontSize > 13) {
+          fontSize -= 1;
+          lines = buildLines();
+        }
+
+        const lineHeight = fontSize * 1.3;
+        const totalH = lines.length * lineHeight;
+        const startY = Math.min(contentTop + 20, Math.max(contentTop + 12, (H - totalH) / 2));
+        let y = startY;
+        for (const line of lines) {
+          ctx.fillText(line, W / 2, y);
+          y += lineHeight;
+        }
+
+        return canvas.toDataURL('image/png');
+      } catch {
+        return undefined;
       }
-
-      const lineHeight = fontSize * 1.35;
-      const totalHeight = lines.length * lineHeight;
-      let y = height / 2 - totalHeight / 2;
-      for (const line of lines) {
-        ctx.fillText(line, width / 2, y);
-        y += lineHeight;
-      }
-
-      return canvas.toDataURL('image/png');
-    } catch {
-      return undefined;
-    }
-  }, []);
+    },
+    [],
+  );
 
   React.useEffect(() => {
     if (!user?.id || routerLocation.pathname !== '/feed') {
@@ -6249,7 +6311,7 @@ function FeedPageWrapper() {
         const groups = await fetchFollowedUsersStoryGroups(user.id, followedUserHandles || []);
         if (cancelled) return;
 
-        const nextItems: Array<{ handle: string; title: string; thumb?: string; previewVideoUrl?: string }> = [];
+        const nextItems: Stories24RailItem[] = [];
         for (const group of groups) {
           const sortedStories = [...(group.stories || [])].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
           const latest = sortedStories[0];
@@ -6264,10 +6326,18 @@ function FeedPageWrapper() {
             || (latest.poll?.question || '').trim()
             || (latest.sharedFromPost ? 'Shared a post' : 'New story');
           const title = text.length > 34 ? `${text.slice(0, 34)}...` : text;
+          const subtitle = formatTextOnlyFeedByline(group.userHandle, latest.location);
 
-          // Dedicated visual fallback for text-only stories in rail cards.
+          // Dedicated visual fallback for text-only stories — template background + byline + body (rail aspect).
           if (!thumb && latestMediaType !== 'video') {
-            thumb = await generateTextStoryPreview(text, latest.textStyle?.color);
+            thumb = await generateTextStoryPreview(text, {
+              textStyle: {
+                color: latest.textStyle?.color ?? latest.textColor,
+                background: latest.textStyle?.background,
+                size: latest.textStyle?.size ?? latest.textSize,
+              },
+              byline: subtitle,
+            });
           }
 
           // Collapse-back overlay uses a static <img> only; video URLs are not drawn during the transform animation.
@@ -6278,6 +6348,7 @@ function FeedPageWrapper() {
           nextItems.push({
             handle: group.userHandle,
             title,
+            subtitle,
             thumb,
             previewVideoUrl: latestMediaType === 'video' ? latestMediaUrl : undefined,
           });
@@ -6315,7 +6386,7 @@ function FeedPageWrapper() {
   const stories24Items = React.useMemo(() => {
     // Only real 24h stories belong here. Do NOT derive cards from feed posts — a newsfeed
     // post is not a story; showing it made the rail preview match the feed but /stories had nothing.
-    const mergedByHandle = new Map<string, { handle: string; title: string; thumb?: string; previewVideoUrl?: string }>();
+    const mergedByHandle = new Map<string, Stories24RailItem>();
     for (const item of storiesRailItems) mergedByHandle.set(item.handle.trim().toLowerCase(), item);
     const baseItems = Array.from(mergedByHandle.values());
     const normalizedUserHandle = (user?.handle || '').trim().toLowerCase();
