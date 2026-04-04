@@ -21,6 +21,7 @@ import {
     FiZap,
     FiRepeat,
     FiUsers,
+    FiUserPlus,
 } from 'react-icons/fi';
 import SavePostModal from './SavePostModal';
 import QRCodeModal from './QRCodeModal';
@@ -49,6 +50,8 @@ interface PostMenuModalProps {
     onOpenSave?: () => void;
     /** Opens community group creation (Gazetteer chat groups). */
     onCreateGroup?: () => void;
+    /** Open group picker to invite the post author into one of your group chats (other users’ posts only). */
+    onInviteToGroup?: () => void;
     isCurrentUser?: boolean;
     isFollowing?: boolean;
     isSaved?: boolean;
@@ -79,6 +82,7 @@ export default function PostMenuModal({
     onTurnOffNotifications,
     onOpenSave,
     onCreateGroup,
+    onInviteToGroup,
     isCurrentUser = false,
     isFollowing = false,
     isSaved = false,
@@ -180,6 +184,11 @@ export default function PostMenuModal({
                         onClose();
                         return;
                     }
+                    if (item.label === 'Invite to a group') {
+                        onInviteToGroup?.();
+                        onClose();
+                        return;
+                    }
                     // QR opens a higher z-index modal; closing the menu first would drop internal state
                     if (item.label === 'QR code') {
                         item.action();
@@ -245,6 +254,9 @@ export default function PostMenuModal({
                                         { icon: FiBookmark, label: isSaved ? 'Unsave' : 'Save', action: handleSave },
                                         { icon: FiShare2, label: 'Share', action: () => onShare && handleAction(onShare) },
                                         ...(onBoost ? [{ icon: FiZap, label: 'Boost', action: onBoost }] : []),
+                                        ...(onInviteToGroup
+                                            ? [{ icon: FiUserPlus, label: 'Invite to a group', action: onInviteToGroup }]
+                                            : []),
                                         { icon: FiMaximize, label: 'QR code', action: () => setShowQRCodeModal(true) },
                                     ].map((row, i) => (
                                         <React.Fragment key={i}>

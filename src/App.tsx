@@ -44,6 +44,7 @@ import BoostSelectionModal from './components/BoostSelectionModal';
 import SavePostModal from './components/SavePostModal';
 import PostMenuModal from './components/PostMenuModal';
 import CreateGroupModal from './components/CreateGroupModal';
+import PickGroupToInviteFeedUserModal from './components/PickGroupToInviteFeedUserModal';
 import EditPostModal from './components/EditPostModal';
 import ShareToStoriesModal from './components/ShareToStoriesModal';
 import { getCollectionsForPost } from './api/collections';
@@ -4137,6 +4138,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   const [saveModalOpen, setSaveModalOpen] = React.useState(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [createGroupOpen, setCreateGroupOpen] = React.useState(false);
+  const [inviteToGroupOpen, setInviteToGroupOpen] = React.useState(false);
   const [editModalOpen, setEditModalOpen] = React.useState(false);
   const [isSaved, setIsSaved] = React.useState(false);
   const [carouselIndex, setCarouselIndex] = React.useState(0);
@@ -4553,6 +4555,16 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
                   }
                 : undefined
             }
+            onInviteToGroup={
+              user?.id && user.handle !== post.userHandle
+                ? () => setInviteToGroupOpen(true)
+                : undefined
+            }
+          />
+          <PickGroupToInviteFeedUserModal
+            isOpen={inviteToGroupOpen}
+            onClose={() => setInviteToGroupOpen(false)}
+            inviteeHandle={post.userHandle}
           />
           <CreateGroupModal
             isOpen={createGroupOpen}

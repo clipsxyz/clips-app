@@ -5,6 +5,7 @@ import { FiX, FiThumbsUp, FiShare2, FiRepeat, FiMapPin, FiHome, FiClock, FiVolum
 import SavePostModal from './SavePostModal';
 import PostMenuModal from './PostMenuModal';
 import CreateGroupModal from './CreateGroupModal';
+import PickGroupToInviteFeedUserModal from './PickGroupToInviteFeedUserModal';
 import Avatar from './Avatar';
 import ShareModal from './ShareModal';
 import StickerOverlayComponent from './StickerOverlay';
@@ -252,6 +253,7 @@ export default function ScenesModal({
     const [isSaved, setIsSaved] = React.useState(false);
     const [menuOpen, setMenuOpen] = React.useState(false);
     const [createGroupOpen, setCreateGroupOpen] = React.useState(false);
+    const [inviteToGroupOpen, setInviteToGroupOpen] = React.useState(false);
     /** Bottom gradient + controls: hide while video plays idle (Reels-style); show on pause, sheet, or interaction. */
     const [scenesBottomChromeVisible, setScenesBottomChromeVisible] = React.useState(true);
     /** Vertical pull for swipe-down-to-dismiss (non-carousel, or carousel at first post). */
@@ -2644,8 +2646,16 @@ export default function ScenesModal({
                               }
                             : undefined
                     }
+                    onInviteToGroup={
+                        user?.id && user.handle !== post.userHandle ? () => setInviteToGroupOpen(true) : undefined
+                    }
                 />
             )}
+            <PickGroupToInviteFeedUserModal
+                isOpen={inviteToGroupOpen}
+                onClose={() => setInviteToGroupOpen(false)}
+                inviteeHandle={post.userHandle}
+            />
             <CreateGroupModal
                 isOpen={createGroupOpen}
                 onClose={() => setCreateGroupOpen(false)}
