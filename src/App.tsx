@@ -23,7 +23,7 @@ import { useOnline } from './hooks/useOnline';
 import { getUnreadTotal, appendMessage } from './api/messages';
 import { getUnreadNotificationCount } from './api/notifications';
 import { getStoryInsightsForUser } from './api/stories';
-import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost, getAvaNormalPost } from './api/posts';
+import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost, getAvaNormalPost, postMatchesLocationTab } from './api/posts';
 import { updatePost, checkFollowsMe } from './api/client';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory, fetchFollowedUsersStoryGroups } from './api/stories';
 import { enqueue, drain } from './utils/mutationQueue';
@@ -6062,14 +6062,16 @@ function FeedPageWrapper() {
     if (pagesLoadedForFilterRef.current !== currentFilter) return [];
     const flattened = pages.flat();
 
-    // Dev / explicit flag: show Ava's tall demo post in the feed UI even when Laravel + IndexedDB cache
-    // never inject it (e.g. Following tab, or cached first page). Bypasses API/follow rules for layout QA.
+    // Dev / explicit flag: optional layout QA tile — only for feeds where Ava's author location matches (e.g. Ireland/Galway), never London/Paris/Following.
     const showAvaFeedDemo =
       import.meta.env.DEV || import.meta.env.VITE_FEED_DEMO_AVA === 'true';
     const avaDemoId = 'ava-normal-ireland-demo';
+    const avaDemoPost = getAvaNormalPost();
     const withAvaDemo =
-      showAvaFeedDemo && !flattened.some((p) => String(p.id) === avaDemoId)
-        ? [getAvaNormalPost(), ...flattened]
+      showAvaFeedDemo &&
+      postMatchesLocationTab(avaDemoPost, currentFilter) &&
+      !flattened.some((p) => String(p.id) === avaDemoId)
+        ? [avaDemoPost, ...flattened]
         : flattened;
 
     // Dedupe by id (normalize to string so 123 and "123" are the same). Prefer the copy with isBoosted so "Sponsored" shows.

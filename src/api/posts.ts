@@ -908,7 +908,7 @@ function dedupeItemsById(items: Post[]): Post[] {
 }
 
 /** Returns true if the post's AUTHOR location matches the feed tab (for location feeds only). Same rule worldwide: author's local/regional/national must match the place. */
-function postMatchesLocationTab(p: Post, tab: string): boolean {
+export function postMatchesLocationTab(p: Post, tab: string): boolean {
   const t = tab.toLowerCase();
   const normalize = (v?: string) => (v || '').trim().toLowerCase();
   const isVenueFeed = t.startsWith('venue:');
@@ -1044,9 +1044,12 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       let items = [...dedupedUserCreated, ...dedupedMock, ...transformedItems];
       const itemIds = new Set(items.map(p => p.id));
 
-      // Dev/test: always inject Ava's normal post on first page of feed so sizing changes are visible immediately.
-      // (Keeps boosted/sponsored logic separate.)
-      if (isFirstPage && !itemIds.has('ava-normal-ireland-demo')) {
+      // Dev/test: inject Ava's Galway demo on first page only when this feed is actually Ireland/Galway (not London, Paris, etc.).
+      if (
+        isFirstPage &&
+        !itemIds.has('ava-normal-ireland-demo') &&
+        postMatchesLocationTab(getAvaNormalPost(), tab)
+      ) {
         const avaNormal = getAvaNormalPost();
         const stateUserId = userId || 'me';
         const decorated = decorateForUser(stateUserId, { ...avaNormal, isBoosted: false, boostFeedType: undefined });
@@ -1333,8 +1336,8 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
           : p
       );
     }
-    // Dev/test: always inject Ava's normal post on first page (mock path) so sizing changes are easy to verify.
-    if (isFirstPage) {
+    // Dev/test: inject Ava's Galway demo on first page only when this tab matches her author location (mock path).
+    if (isFirstPage && postMatchesLocationTab(getAvaNormalPost(), tab)) {
       const hasAvaNormalInItems = items.some(p => p.id.startsWith('ava-normal-') && p.userHandle === 'Ava@galway');
       if (!hasAvaNormalInItems) {
         const avaNormal = getAvaNormalPost();
