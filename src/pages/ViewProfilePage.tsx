@@ -2261,8 +2261,8 @@ export default function ViewProfilePage() {
                     onClick={closeGridPeek}
                 >
                     <div
-                        className="absolute inset-0 bg-black/45 backdrop-blur-2xl backdrop-saturate-150 transition-[opacity] duration-100"
-                        style={{ opacity: Math.max(0.22, 1 - Math.min(peekPullY / 360, 0.58)) }}
+                        className="absolute inset-0 bg-black/55 backdrop-blur-2xl backdrop-grayscale transition-[opacity] duration-100"
+                        style={{ opacity: Math.max(0.28, 1 - Math.min(peekPullY / 360, 0.58)) }}
                         aria-hidden
                     />
                     <div
@@ -2272,13 +2272,13 @@ export default function ViewProfilePage() {
                     >
                         <div
                             role="presentation"
-                            className="rounded-[14px] overflow-hidden bg-[#1c1c1c] border border-white/12 shadow-[0_24px_80px_rgba(0,0,0,0.65)] cursor-grab active:cursor-grabbing touch-pan-y"
+                            className="rounded-[14px] overflow-hidden bg-black border border-white/25 shadow-[0_24px_80px_rgba(0,0,0,0.75)] cursor-grab active:cursor-grabbing touch-pan-y"
                             onPointerDown={handlePeekPreviewPointerDown}
                             onPointerMove={handlePeekPreviewPointerMove}
                             onPointerUp={handlePeekPreviewPointerEnd}
                             onPointerCancel={handlePeekPreviewPointerEnd}
                         >
-                            <div className="flex items-center gap-2.5 px-3 py-2.5 border-b border-white/10 bg-[#1c1c1c]">
+                            <div className="flex items-center gap-2.5 px-3 py-2.5 border-b border-white/20 bg-black">
                                 <Avatar
                                     src={
                                         profileUser.avatarUrl ||
@@ -2286,6 +2286,7 @@ export default function ViewProfilePage() {
                                     }
                                     name={profileUser.name || profileUser.handle}
                                     size="sm"
+                                    className="grayscale contrast-[1.02]"
                                 />
                                 <div className="min-w-0 flex-1 flex items-center gap-1">
                                     <span className="font-semibold text-white text-[15px] truncate">
@@ -2295,11 +2296,11 @@ export default function ViewProfilePage() {
                                     </span>
                                     {profileUser.is_verified ? (
                                         <span
-                                            className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full bg-[#0095f6]"
+                                            className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full bg-white border border-white"
                                             title="Verified"
                                             aria-label="Verified"
                                         >
-                                            <svg className="h-2.5 w-2.5 text-white" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                                            <svg className="h-2.5 w-2.5 text-black" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                                                 <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" />
                                             </svg>
                                         </span>
@@ -2310,18 +2311,15 @@ export default function ViewProfilePage() {
                                 {!gridPeekPost.mediaUrl ? (
                                     (() => {
                                         const tStyle = getEffectiveTextStyleForPost(gridPeekPost);
-                                        const bg = getTextOnlyFallbackBackground(gridPeekPost);
-                                        const color = tStyle?.color || '#ffffff';
                                         const fontFamily = tStyle?.fontFamily;
                                         const sizeCls = `${getTextOnlyPreviewTextClass(tStyle?.size)} font-semibold`;
                                         return (
                                     <div
-                                        className="w-full min-h-[240px] flex items-center justify-center p-6"
-                                        style={{ background: bg, fontFamily: fontFamily || undefined }}
+                                        className="w-full min-h-[240px] flex items-center justify-center p-6 bg-white border-y border-white/10"
+                                        style={{ fontFamily: fontFamily || undefined }}
                                     >
                                         <p
-                                            className={`${sizeCls} leading-relaxed whitespace-pre-wrap text-center line-clamp-8`}
-                                            style={{ color }}
+                                            className={`${sizeCls} leading-relaxed whitespace-pre-wrap text-center line-clamp-8 text-black`}
                                         >
                                             {gridPeekPost.text || gridPeekPost.caption || 'Post'}
                                         </p>
@@ -2333,7 +2331,7 @@ export default function ViewProfilePage() {
                                         <video
                                             key={gridPeekPost.id}
                                             src={gridPeekPost.mediaUrl}
-                                            className="w-full max-h-[min(52vh,420px)] object-contain"
+                                            className="w-full max-h-[min(52vh,420px)] object-contain grayscale contrast-[1.05]"
                                             playsInline
                                             autoPlay
                                             muted={peekVideoMuted}
@@ -2343,7 +2341,7 @@ export default function ViewProfilePage() {
                                             type="button"
                                             data-no-peek-drag
                                             onClick={() => setPeekVideoMuted((m) => !m)}
-                                            className="absolute bottom-3 right-3 w-9 h-9 rounded-full bg-black/70 border border-white/20 flex items-center justify-center text-white hover:bg-black/90"
+                                            className="absolute bottom-3 right-3 w-9 h-9 rounded-full bg-white/95 border border-black/20 flex items-center justify-center text-black hover:bg-white"
                                             aria-label={peekVideoMuted ? 'Unmute' : 'Mute'}
                                         >
                                             {peekVideoMuted ? <FiVolumeX className="w-4 h-4" /> : <FiVolume2 className="w-4 h-4" />}
@@ -2353,27 +2351,27 @@ export default function ViewProfilePage() {
                                     <img
                                         src={gridPeekPost.mediaUrl}
                                         alt=""
-                                        className="w-full max-h-[min(52vh,420px)] object-contain"
+                                        className="w-full max-h-[min(52vh,420px)] object-contain grayscale contrast-[1.05]"
                                     />
                                 )}
                                 {(gridPeekPost.text || gridPeekPost.caption || gridPeekPost.imageText) &&
                                 gridPeekPost.mediaUrl ? (
-                                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-3 pb-3 pt-8">
-                                        <p className="text-white text-sm leading-snug line-clamp-4">
+                                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black via-black/70 to-transparent px-3 pb-3 pt-8">
+                                        <p className="text-white text-sm leading-snug line-clamp-4 font-medium">
                                             {gridPeekPost.text || gridPeekPost.caption || gridPeekPost.imageText}
                                         </p>
                                     </div>
                                 ) : null}
                             </div>
                             {gridPeekPost.mediaType === 'video' ? (
-                                <div className="px-3 py-2 border-t border-white/10 flex items-center justify-between bg-[#1c1c1c]">
-                                    <span className="text-[11px] text-white/50 truncate pr-2">Original audio</span>
+                                <div className="px-3 py-2 border-t border-white/20 flex items-center justify-between bg-black">
+                                    <span className="text-[11px] text-white/55 truncate pr-2">Original audio</span>
                                 </div>
                             ) : null}
                         </div>
 
                         <div
-                            className="relative z-20 rounded-[14px] overflow-hidden bg-[#262626] border border-white/10 divide-y divide-white/10 shadow-[0_16px_48px_rgba(0,0,0,0.5)] touch-manipulation pointer-events-auto"
+                            className="relative z-20 rounded-[14px] overflow-hidden bg-black border border-white/25 divide-y divide-white/15 shadow-[0_16px_48px_rgba(0,0,0,0.65)] touch-manipulation pointer-events-auto"
                             onPointerDown={(e) => e.stopPropagation()}
                             onClick={(e) => e.stopPropagation()}
                         >
@@ -2383,10 +2381,10 @@ export default function ViewProfilePage() {
                                     e.stopPropagation();
                                     void handlePeekLike();
                                 }}
-                                className="flex w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-white/[0.06] active:bg-white/10 transition-colors"
+                                className="flex w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-white/10 active:bg-white/[0.14] transition-colors"
                             >
                                 <FiHeart
-                                    className={`w-5 h-5 shrink-0 ${gridPeekPost.userLiked ? 'text-red-500' : 'text-white'}`}
+                                    className={`w-5 h-5 shrink-0 text-white ${gridPeekPost.userLiked ? 'fill-white' : ''}`}
                                     strokeWidth={gridPeekPost.userLiked ? 2.5 : 2}
                                 />
                                 <span className="text-[15px] font-medium text-white">Like</span>
@@ -2397,7 +2395,7 @@ export default function ViewProfilePage() {
                                     e.stopPropagation();
                                     handlePeekComment();
                                 }}
-                                className="flex w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-white/[0.06] active:bg-white/10 transition-colors"
+                                className="flex w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-white/10 active:bg-white/[0.14] transition-colors"
                             >
                                 <FiMessageSquare className="w-5 h-5 text-white shrink-0" />
                                 <span className="text-[15px] font-medium text-white">Comment</span>
@@ -2409,7 +2407,7 @@ export default function ViewProfilePage() {
                                     void handlePeekReclip();
                                 }}
                                 disabled={isOwnProfile}
-                                className="flex w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-white/[0.06] active:bg-white/10 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                                className="flex w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-white/10 active:bg-white/[0.14] transition-colors disabled:opacity-40 disabled:pointer-events-none"
                             >
                                 <FiRepeat className="w-5 h-5 text-white shrink-0" />
                                 <span className="text-[15px] font-medium text-white">Repost</span>
@@ -2420,7 +2418,7 @@ export default function ViewProfilePage() {
                                     e.stopPropagation();
                                     handlePeekShare();
                                 }}
-                                className="flex w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-white/[0.06] active:bg-white/10 transition-colors"
+                                className="flex w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-white/10 active:bg-white/[0.14] transition-colors"
                             >
                                 <FiShare2 className="w-5 h-5 text-white shrink-0" />
                                 <span className="text-[15px] font-medium text-white">Share</span>
@@ -2431,10 +2429,10 @@ export default function ViewProfilePage() {
                                     e.stopPropagation();
                                     void handlePeekReport();
                                 }}
-                                className="flex w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-red-500/10 active:bg-red-500/15 transition-colors"
+                                className="flex w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-white/10 active:bg-white/[0.14] transition-colors"
                             >
-                                <FiAlertCircle className="w-5 h-5 text-red-500 shrink-0" />
-                                <span className="text-[15px] font-medium text-red-500">Report</span>
+                                <FiAlertCircle className="w-5 h-5 text-white/80 shrink-0" />
+                                <span className="text-[15px] font-medium text-white/90">Report</span>
                             </button>
                         </div>
                     </div>
