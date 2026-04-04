@@ -1,7 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { FiX, FiThumbsUp, FiShare2, FiRepeat, FiMapPin, FiHome, FiClock, FiVolume2, FiVolumeX, FiMessageSquare, FiMessageCircle, FiChevronUp, FiChevronDown, FiBookmark, FiMoreHorizontal, FiSend, FiSmile } from 'react-icons/fi';
+import { FiX, FiThumbsUp, FiShare2, FiRepeat, FiMapPin, FiHome, FiClock, FiVolume2, FiVolumeX, FiMessageCircle, FiChevronUp, FiChevronDown, FiBookmark, FiMoreHorizontal, FiSend, FiSmile } from 'react-icons/fi';
 import SavePostModal from './SavePostModal';
 import PostMenuModal from './PostMenuModal';
 import CreateGroupModal from './CreateGroupModal';
@@ -252,6 +252,11 @@ export default function ScenesModal({
     const [isSaved, setIsSaved] = React.useState(false);
     const [menuOpen, setMenuOpen] = React.useState(false);
     const [createGroupOpen, setCreateGroupOpen] = React.useState(false);
+    /** Bottom gradient + controls: hide while video plays idle (Reels-style); show on pause, sheet, or interaction. */
+    const [scenesBottomChromeVisible, setScenesBottomChromeVisible] = React.useState(true);
+    /** Vertical pull for swipe-down-to-dismiss (non-carousel, or carousel at first post). */
+    const [dismissPullY, setDismissPullY] = React.useState(0);
+    const chromeHideTimerRef = React.useRef<number | null>(null);
 
     const effectivePosts = React.useMemo(() => (posts && posts.length > 0 ? posts : (post ? [post] : [])), [posts, post]);
     const isCarousel = Boolean(effectivePosts.length > 1);
@@ -269,6 +274,34 @@ export default function ScenesModal({
     const hasMultipleItems = items.length > 1;
     const currentItem = items[currentIndex];
     const isTextOnlyPost = !post.mediaUrl && !(post.mediaItems && post.mediaItems.length > 0) && !!post.text;
+
+    const clearChromeHideTimer = React.useCallback(() => {
+        if (chromeHideTimerRef.current !== null) {
+            window.clearTimeout(chromeHideTimerRef.current);
+            chromeHideTimerRef.current = null;
+        }
+    }, []);
+
+    React.useEffect(() => {
+        clearChromeHideTimer();
+        if (!isOpen || isCaptionExpanded || isTextOnlyPost) {
+            setScenesBottomChromeVisible(true);
+            return;
+        }
+        if (isPaused || currentItem?.type !== 'video') {
+            setScenesBottomChromeVisible(true);
+            return;
+        }
+        chromeHideTimerRef.current = window.setTimeout(() => {
+            setScenesBottomChromeVisible(false);
+            chromeHideTimerRef.current = null;
+        }, 3000);
+        return () => clearChromeHideTimer();
+    }, [isOpen, isPaused, isCaptionExpanded, currentItem?.type, currentIndex, post.id, isTextOnlyPost, clearChromeHideTimer]);
+
+    React.useEffect(() => {
+        if (isPaused) setScenesBottomChromeVisible(true);
+    }, [isPaused]);
 
     // Metadata carousel (location → venue → timestamp), same as newsfeed cards
     const scenesMetadataItems = React.useMemo(() => {
@@ -346,9 +379,13 @@ export default function ScenesModal({
         animateBorder(profileBorderOverlayRef2.current);
     }, [isOpen]);
 
-    // Reset carousel touch delta when closing
+    // Reset carousel / dismiss gestures when closing
     React.useEffect(() => {
-        if (!isOpen) setCarouselTouchDelta(0);
+        if (!isOpen) {
+            setCarouselTouchDelta(0);
+            setDismissPullY(0);
+            setScenesBottomChromeVisible(true);
+        }
     }, [isOpen]);
 
     // Don't auto-focus the comment input when the sheet opens — on mobile that opens the keyboard
@@ -904,21 +941,33 @@ export default function ScenesModal({
         }, 300);
     }, [handleMediaTap]);
 
-    // Carousel: vertical swipe - content follows finger (Reels/TikTok style)
-    // When comments sheet is open, do not respond to carousel touch so the video stays fixed
+    // Carousel: vertical swipe between posts; non-carousel (or first post): swipe-down to dismiss (Reels-style).
+    // When comments sheet is open, do not respond so the video stays fixed.
     const handleCarouselTouchStart = React.useCallback((e: React.TouchEvent) => {
         if (isCaptionExpanded) return;
-        if (isCarousel && e.touches.length > 0) {
+        if (e.touches.length > 0) {
             carouselTouchStart.current = e.touches[0].clientY;
             carouselTouchHandled.current = false;
             setCarouselAnimating(false);
             setCarouselTouchDelta(0);
+            setDismissPullY(0);
         }
-    }, [isCarousel, isCaptionExpanded]);
+    }, [isCaptionExpanded]);
 
     const handleCarouselTouchMove = React.useCallback((e: React.TouchEvent) => {
         if (isCaptionExpanded) return;
-        if (!isCarousel || effectivePosts.length === 0 || e.touches.length === 0) return;
+        if (e.touches.length === 0) return;
+        if (!isCarousel) {
+            e.preventDefault();
+            const deltaY = e.touches[0].clientY - carouselTouchStart.current;
+            if (deltaY > 0) {
+                setDismissPullY(Math.min(deltaY, vh * 0.45));
+            } else {
+                setDismissPullY(0);
+            }
+            return;
+        }
+        if (effectivePosts.length === 0) return;
         e.preventDefault();
         const idx = effectivePosts.findIndex((p) => p.id === post.id);
         if (idx < 0) return;
@@ -926,18 +975,51 @@ export default function ScenesModal({
         const maxDelta = vh * 0.5;
         let clamped = deltaY;
         if (deltaY < 0 && idx >= effectivePosts.length - 1) clamped = Math.max(deltaY, -40);
-        else if (deltaY > 0 && idx <= 0) clamped = Math.min(deltaY, 40);
+        else if (deltaY > 0 && idx <= 0) clamped = Math.min(deltaY, maxDelta);
         else clamped = Math.max(-maxDelta, Math.min(maxDelta, deltaY));
         setCarouselTouchDelta(clamped);
     }, [isCarousel, isCaptionExpanded, effectivePosts, post.id, vh]);
 
     const handleCarouselTouchEnd = React.useCallback((e: React.TouchEvent) => {
         if (isCaptionExpanded) return;
-        if (!isCarousel || effectivePosts.length === 0 || e.changedTouches.length === 0) return;
+        if (e.changedTouches.length === 0) return;
+
+        if (!isCarousel) {
+            const deltaY = e.changedTouches[0].clientY - carouselTouchStart.current;
+            const threshold = vh * 0.12;
+            if (deltaY > 12) {
+                carouselTouchHandled.current = true;
+                touchHandledRef.current = true;
+            }
+            if (deltaY > threshold) {
+                let savedTime: number | undefined;
+                if (videoRef.current && currentItem?.type === 'video') {
+                    savedTime = videoRef.current.currentTime;
+                }
+                onClose(savedTime);
+            }
+            setDismissPullY(0);
+            return;
+        }
+
+        if (effectivePosts.length === 0) return;
         const deltaY = e.changedTouches[0].clientY - carouselTouchStart.current;
         const threshold = vh * 0.12;
         const idx = effectivePosts.findIndex((p) => p.id === post.id);
         if (idx < 0) return;
+
+        if (idx === 0 && deltaY > threshold) {
+            carouselTouchHandled.current = true;
+            touchHandledRef.current = true;
+            const savedTime = videoRef.current && currentItem?.type === 'video' ? videoRef.current.currentTime : undefined;
+            setCarouselAnimating(true);
+            setCarouselTouchDelta(0);
+            window.setTimeout(() => {
+                onClose(savedTime);
+                setCarouselAnimating(false);
+            }, 50);
+            return;
+        }
 
         let newIndex: number | null = null;
         if (deltaY < -threshold && idx < effectivePosts.length - 1) {
@@ -964,7 +1046,7 @@ export default function ScenesModal({
             setCarouselTouchDelta(0);
             setTimeout(() => setCarouselAnimating(false), 320);
         }
-    }, [isCarousel, isCaptionExpanded, effectivePosts, post.id, onPostChange, currentItem?.type, vh]);
+    }, [isCarousel, isCaptionExpanded, effectivePosts, post.id, onPostChange, currentItem?.type, vh, onClose]);
 
     async function handleFollow() {
         if (followBusy) return;
@@ -1024,6 +1106,7 @@ export default function ScenesModal({
             setShowCommentEmojiPicker(false);
             setExpandedReplyThreads({});
         } else {
+            setScenesBottomChromeVisible(true);
             setIsCaptionExpanded(true);
             // Fetch comments when expanding
             if (commentsList.length === 0 && !isLoadingComments) {
@@ -1286,10 +1369,14 @@ export default function ScenesModal({
                             className="fixed left-0 right-0 top-0 overflow-hidden touch-none"
                             style={{
                                 touchAction: 'none',
-                                // Smoothly animate between full-screen and top-half when comments sheet opens/closes
                                 height: isCaptionExpanded ? '50vh' : '100vh',
                                 zIndex: isCaptionExpanded ? 105 : undefined,
-                                transition: 'height 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+                                transition: 'height 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+                                transform: !isCaptionExpanded && dismissPullY > 0 ? `translateY(${dismissPullY}px)` : undefined,
+                                opacity:
+                                    !isCaptionExpanded && dismissPullY > 0
+                                        ? Math.max(0.5, 1 - (dismissPullY / (vh * 0.5)) * 0.45)
+                                        : 1,
                             }}
                             onTouchStart={handleCarouselTouchStart}
                             onTouchMove={handleCarouselTouchMove}
@@ -1330,33 +1417,72 @@ export default function ScenesModal({
                                             </div>
                                         ) : (
                                             <>
-                                    {/* Top Left - Metadata carousel (same as newsfeed cards): gradient border + shimmer text */}
-                                    {scenesMetadataItems.length > 0 && (
-                                        <div className="absolute top-4 left-3 z-10 flex items-center min-h-[1.5rem] overflow-visible">
-                                            <div
-                                                key={scenesMetadataIndex}
-                                                className="flex items-center gap-0.5 justify-start min-w-0 max-w-[140px] rounded-lg p-[1px] bg-gradient-to-r from-blue-500 to-purple-600 animate-chyron-emerge origin-left"
-                                                title={scenesMetadataItems.map((m) => m.label).join(' · ')}
-                                            >
-                                                <div className="flex items-center gap-0.5 justify-start min-w-0 max-w-[138px] rounded-[7px] bg-black/75 px-2 py-1">
+                                    {/* Top edge — segmented progress (multi-clip) or single bar (video) */}
+                                    {(hasMultipleItems || currentItem?.type === 'video') && (
+                                        <div
+                                            className="absolute left-0 right-0 z-[38] flex gap-1 px-2.5 pointer-events-none"
+                                            style={{ top: 'max(8px, env(safe-area-inset-top, 0px))' }}
+                                        >
+                                            {hasMultipleItems ? (
+                                                items.map((it, i) => {
+                                                    let pct = 0;
+                                                    if (i < currentIndex) pct = 100;
+                                                    else if (i === currentIndex) {
+                                                        pct = it.type === 'video' ? videoProgress * 100 : 100;
+                                                    }
+                                                    return (
+                                                        <div key={i} className="flex-1 min-w-0 h-[2.5px] rounded-full bg-white/35 overflow-hidden">
+                                                            <div
+                                                                className="h-full rounded-full bg-white"
+                                                                style={{ width: `${pct}%` }}
+                                                            />
+                                                        </div>
+                                                    );
+                                                })
+                                            ) : (
+                                                <div className="w-full h-[2.5px] rounded-full bg-white/35 overflow-hidden">
+                                                    <div
+                                                        className="h-full rounded-full bg-white"
+                                                        style={{ width: `${videoProgress * 100}%` }}
+                                                    />
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* Top left — carousel index + feed you’re in (below progress bar) */}
+                                    <div className="absolute left-4 z-30 flex flex-col items-start gap-2 max-w-[min(100%,16rem)]" style={{ top: 'max(2.75rem, calc(env(safe-area-inset-top, 0px) + 1.25rem))' }}>
+                                        {hasMultipleItems && (
+                                            <div className="px-2 py-1 bg-black/50 text-white text-xs rounded-full">
+                                                {currentIndex + 1} / {items.length}
+                                            </div>
+                                        )}
+                                        {feedLabel && (
+                                            <div className="inline-flex items-center gap-1.5 rounded-full border border-white/80 bg-black/60 px-3 py-1.5 text-white">
+                                                <FiMapPin className="w-4 h-4 flex-shrink-0" />
+                                                <span className="text-xs font-semibold uppercase tracking-wider">
+                                                    {feedLabel}
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Top right — white metadata chip, then close (with video ring) underneath */}
+                                    <div className="absolute right-4 z-30 flex flex-col items-end gap-2" style={{ top: 'max(2.75rem, calc(env(safe-area-inset-top, 0px) + 1.25rem))' }}>
+                                        {scenesMetadataItems.length > 0 && (
+                                            <div className="flex items-center min-h-[1.5rem] overflow-visible animate-chyron-emerge origin-right">
+                                                <div
+                                                    key={scenesMetadataIndex}
+                                                    className="flex items-center gap-1 justify-start min-w-0 max-w-[140px] rounded-lg border border-gray-200/90 bg-white px-2 py-1 shadow-md"
+                                                    title={scenesMetadataItems.map((m) => m.label).join(' · ')}
+                                                >
                                                     {(() => {
                                                         const current = scenesMetadataItems[scenesMetadataIndex];
                                                         const Icon = current.type === 'location' ? FiMapPin : current.type === 'venue' ? FiHome : FiClock;
                                                         return (
                                                             <>
-                                                                <Icon className="w-2.5 h-2.5 flex-shrink-0 text-white/95" />
-                                                                <span
-                                                                    className="text-[10px] font-medium whitespace-nowrap truncate min-w-0 tracking-tight inline-block"
-                                                                    style={{
-                                                                        background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
-                                                                        backgroundSize: '200% 100%',
-                                                                        WebkitBackgroundClip: 'text',
-                                                                        backgroundClip: 'text',
-                                                                        WebkitTextFillColor: 'transparent',
-                                                                        color: 'transparent',
-                                                                        animation: 'shimmer 3s linear infinite',
-                                                                    }}
-                                                                >
+                                                                <Icon className="w-2.5 h-2.5 flex-shrink-0 text-gray-700" />
+                                                                <span className="text-[10px] font-medium whitespace-nowrap truncate min-w-0 tracking-tight text-gray-900">
                                                                     {current.label}
                                                                 </span>
                                                             </>
@@ -1364,48 +1490,25 @@ export default function ScenesModal({
                                                     })()}
                                                 </div>
                                             </div>
-                                        </div>
-                                    )}
-
-                                    {/* Top Bar - Feed label (centre), Counter, Close Button */}
-                                    <div className="absolute top-4 left-0 right-0 z-30 flex items-center justify-between px-4">
-                                        <div className="flex-1 flex justify-start">
-                                            {hasMultipleItems && (
-                                                <div className="px-2 py-1 bg-black/50 text-white text-xs rounded-full">
-                                                    {currentIndex + 1} / {items.length}
-                                                </div>
-                                            )}
-                                        </div>
-                                        <div className="absolute left-0 right-0 top-0 bottom-0 flex items-center justify-center pointer-events-none">
-                                            {feedLabel && (
-                                                <div className="inline-flex items-center gap-1.5 rounded-full border border-white/80 bg-black/60 px-3 py-1.5 text-white">
-                                                    <FiMapPin className="w-4 h-4 flex-shrink-0" />
-                                                    <span className="text-xs font-semibold uppercase tracking-wider">
-                                                        {feedLabel}
-                                                    </span>
-                                                </div>
-                                            )}
-                                        </div>
-                                        <div className="flex-1 flex justify-end">
-                                            <div className="relative w-10 h-10 flex items-center justify-center">
-                                                <svg className="absolute inset-0 w-10 h-10 transform -rotate-90" viewBox="0 0 48 48">
-                                                    <circle cx="24" cy="24" r="18" stroke="rgba(255,255,255,0.25)" strokeWidth="3" fill="none" />
-                                                    <circle cx="24" cy="24" r="18" stroke="rgba(255,255,255,0.95)" strokeWidth="3" fill="none" strokeDasharray={`${2 * Math.PI * 18}`} strokeDashoffset={`${2 * Math.PI * 18 * (1 - Math.max(0, Math.min(1, videoProgress)))}`} strokeLinecap="round" />
-                                                </svg>
-                                                <button
-                                                    onClick={() => {
-                                                        let savedTime: number | undefined;
-                                                        if (videoRef.current && currentItem?.type === 'video') {
-                                                            savedTime = videoRef.current.currentTime;
-                                                        }
-                                                        onClose(savedTime);
-                                                    }}
-                                                    aria-label="Close scenes"
-                                                    className="relative z-10 p-1.5 rounded-full bg-black/40 hover:bg-black/60 text-white transition-colors"
-                                                >
-                                                    <FiX size={16} />
-                                                </button>
-                                            </div>
+                                        )}
+                                        <div className="relative w-10 h-10 flex items-center justify-center shrink-0">
+                                            <svg className="absolute inset-0 w-10 h-10 transform -rotate-90" viewBox="0 0 48 48">
+                                                <circle cx="24" cy="24" r="18" stroke="rgba(255,255,255,0.25)" strokeWidth="3" fill="none" />
+                                                <circle cx="24" cy="24" r="18" stroke="rgba(255,255,255,0.95)" strokeWidth="3" fill="none" strokeDasharray={`${2 * Math.PI * 18}`} strokeDashoffset={`${2 * Math.PI * 18 * (1 - Math.max(0, Math.min(1, videoProgress)))}`} strokeLinecap="round" />
+                                            </svg>
+                                            <button
+                                                onClick={() => {
+                                                    let savedTime: number | undefined;
+                                                    if (videoRef.current && currentItem?.type === 'video') {
+                                                        savedTime = videoRef.current.currentTime;
+                                                    }
+                                                    onClose(savedTime);
+                                                }}
+                                                aria-label="Close scenes"
+                                                className="relative z-10 p-1.5 rounded-full bg-black/40 hover:bg-black/60 text-white transition-colors"
+                                            >
+                                                <FiX size={16} />
+                                            </button>
                                         </div>
                                     </div>
                                             </>
@@ -1848,7 +1951,11 @@ export default function ScenesModal({
 
                     {/* Bottom Section with Profile, Caption, and Bottom Action Bar (Bluesky-style) - hidden for text-only fullscreen */}
                     {!isCaptionExpanded && (post.mediaUrl || (post.mediaItems && post.mediaItems.length) || !post.text) && (
-                        <div className="absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black/90 via-black/70 to-transparent">
+                        <div
+                            className={`absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black/90 via-black/70 to-transparent transition-opacity duration-300 ease-out ${
+                                scenesBottomChromeVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                            }`}
+                        >
                             <div className="max-w-md mx-auto px-4 pb-safe">
                                 {/* Profile & Caption Section */}
                                 <div className="pt-12 pb-4">
@@ -2006,17 +2113,21 @@ export default function ScenesModal({
                                         <button
                                             type="button"
                                             onClick={handleCaptionClick}
-                                            className="text-white text-xs opacity-80 hover:opacity-100 mb-3"
+                                            className="text-white text-xs opacity-80 hover:opacity-100 mb-3 inline-flex items-center gap-1.5"
                                         >
-                                            💬 View all {comments} {comments === 1 ? 'comment' : 'comments'}
+                                            <FiMessageCircle className="w-3.5 h-3.5 shrink-0" aria-hidden />
+                                            <span>
+                                                View all {comments} {comments === 1 ? 'comment' : 'comments'}
+                                            </span>
                                         </button>
                                     ) : (
                                         <button
                                             type="button"
                                             onClick={handleCaptionClick}
-                                            className="text-white text-xs opacity-80 hover:opacity-100 mb-3"
+                                            className="text-white text-xs opacity-80 hover:opacity-100 mb-3 inline-flex items-center gap-1.5"
                                         >
-                                            💬 Add the first comment
+                                            <FiMessageCircle className="w-3.5 h-3.5 shrink-0" aria-hidden />
+                                            <span>Add the first comment</span>
                                         </button>
                                     )}
 

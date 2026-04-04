@@ -1563,21 +1563,6 @@ function TagRow({ tags }: { tags: string[] }) {
   );
 }
 
-/** X/Twitter web–like stack (Chirp is proprietary; this matches the public web feel). */
-const TEXT_CARD_TWITTER_FONT =
-  'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji", sans-serif';
-
-function textCardTwitterMetrics(size: 'small' | 'medium' | 'large' | undefined): { fontSize: number; lineHeight: number } {
-  switch (size) {
-    case 'small':
-      return { fontSize: 13, lineHeight: 1.3 };
-    case 'large':
-      return { fontSize: 17, lineHeight: 1.35 };
-    default:
-      return { fontSize: 15, lineHeight: 1.3125 };
-  }
-}
-
 function TextCard({
   text,
   onDoubleLike,
@@ -1642,8 +1627,23 @@ function TextCard({
     textStyle?.background ||
     backgrounds[text.length % backgrounds.length];
 
+  const getTextSizeClass = () => {
+    const size = textStyle?.size || 'medium';
+    switch (size) {
+      case 'small':
+        return 'text-sm';
+      case 'large':
+        return 'text-xl';
+      case 'medium':
+      default:
+        return 'text-base';
+    }
+  };
+
   const textColor = textStyle?.color || 'white';
-  const twMetrics = textCardTwitterMetrics(textStyle?.size);
+  const textFontFamily =
+    textStyle?.fontFamily ||
+    'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
   const newsFeedCard = !!feedHeadlineByline?.trim();
   const bylineColor = isLikelyLightTextColor(textColor)
@@ -1734,7 +1734,7 @@ function TextCard({
           tailBgClassName={DM_RECEIVED_BG}
           tailBackgroundColor={tailBgColor}
           showTail
-          bubbleClassName={`break-words cursor-pointer select-none relative overflow-visible font-normal antialiased min-w-0 text-left ${
+          bubbleClassName={`break-words cursor-pointer select-none relative overflow-visible leading-relaxed font-normal antialiased ${getTextSizeClass()} min-w-0 text-left ${
             newsFeedCard
               ? 'px-4 pt-3.5 pb-3 rounded-2xl shadow-[0_14px_40px_rgba(0,0,0,0.35)] ring-1 ring-white/10'
               : 'px-4 py-3'
@@ -1742,9 +1742,7 @@ function TextCard({
           bubbleStyle={{
             background: selectedBackground,
             color: textColor,
-            fontFamily: TEXT_CARD_TWITTER_FONT,
-            fontSize: twMetrics.fontSize,
-            lineHeight: twMetrics.lineHeight,
+            fontFamily: textFontFamily,
             wordBreak: 'break-word',
             overflowWrap: 'anywhere',
             maxWidth: '100%',
@@ -1766,40 +1764,23 @@ function TextCard({
             <div className="whitespace-pre-wrap w-full">
               <span
                 id={feedCardTitleId}
-                className="mb-1.5 block text-left"
-                style={{
-                  color: bylineColor,
-                  fontFamily: TEXT_CARD_TWITTER_FONT,
-                  fontWeight: 700,
-                  letterSpacing: 'normal',
-                }}
+                className="mb-2 block text-left font-extrabold uppercase tracking-[0.12em] text-[10px] leading-tight sm:text-[11px]"
+                style={{ color: bylineColor, fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}
               >
                 {feedHeadlineByline}
               </span>
-              <div className="whitespace-pre-wrap" style={{ fontWeight: 400 }}>
-                {displayText}
-              </div>
+              <div className="whitespace-pre-wrap font-semibold leading-snug sm:leading-relaxed">{displayText}</div>
             </div>
           ) : (
-            <div className="whitespace-pre-wrap w-full" style={{ fontWeight: 400 }}>
-              {displayText}
-            </div>
+            <div className="whitespace-pre-wrap w-full">{displayText}</div>
           )}
           {shouldTruncate && (
             <div className="mt-2 flex justify-start">
               <button
                 type="button"
                 onClick={handleMoreClick}
-                className="font-semibold transition-opacity hover:opacity-90 focus:outline-none focus:ring-0 underline underline-offset-2"
-                style={{
-                  color: textColor,
-                  outline: 'none',
-                  border: 'none',
-                  background: 'none',
-                  opacity: 0.9,
-                  fontSize: twMetrics.fontSize,
-                  fontFamily: TEXT_CARD_TWITTER_FONT,
-                }}
+                className="text-sm font-medium transition-opacity hover:opacity-90 focus:outline-none focus:ring-0 underline underline-offset-2"
+                style={{ color: textColor, outline: 'none', border: 'none', background: 'none', opacity: 0.9 }}
                 aria-label={isExpanded ? 'Show less' : 'Show more'}
               >
                 {isExpanded ? 'Show less' : 'Show more'}
@@ -1920,7 +1901,7 @@ function TileTextCard({
   ];
   const selectedBackground = textStyle?.background || backgrounds[Math.abs(text.length) % backgrounds.length];
   const textColor = textStyle?.color || 'white';
-  const twMetrics = textCardTwitterMetrics(textStyle?.size);
+  const fontFamily = textStyle?.fontFamily || 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
   const shouldTruncate = text.length > 120;
   const displayText = shouldTruncate ? text.substring(0, 120) + '...' : text;
@@ -1963,14 +1944,12 @@ function TileTextCard({
       <div
         className="absolute inset-0 p-3 flex"
         style={{
-          fontFamily: TEXT_CARD_TWITTER_FONT,
+          fontFamily,
           color: textColor,
           alignItems: 'flex-start',
-          fontSize: twMetrics.fontSize,
-          lineHeight: twMetrics.lineHeight,
         }}
       >
-        <p className="font-normal line-clamp-4 drop-shadow-sm" style={{ fontWeight: 400 }}>
+        <p className="text-[13px] font-semibold leading-snug line-clamp-4 drop-shadow-sm">
           {displayText}
         </p>
       </div>
