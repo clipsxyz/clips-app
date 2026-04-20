@@ -185,6 +185,7 @@ export async function createPost(postData: {
     location?: string;
     venue?: string;
     landmark?: string;
+    socialFormat?: 'youtube_shorts' | 'tiktok' | 'instagram_reels';
     mediaUrl?: string;
     mediaType?: 'image' | 'video';
     caption?: string;

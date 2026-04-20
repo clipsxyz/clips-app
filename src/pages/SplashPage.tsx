@@ -1,7 +1,8 @@
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { FiMapPin } from 'react-icons/fi';
 import { useAuth } from '../context/Auth';
-import logoOrbit from '../assets/g + orbit.png';
+import splashLogo from '../assets/gazetteer-splash-logo.png';
 
 export default function SplashPage() {
     const navigate = useNavigate();
@@ -21,24 +22,16 @@ export default function SplashPage() {
     }, [user, navigate]);
 
     return (
-        <div className="min-h-screen w-full flex flex-col items-center justify-center bg-black">
+        <div className="relative min-h-screen min-h-[100dvh] w-full flex flex-col items-center justify-center bg-black px-6">
             <img
-                src={logoOrbit}
+                src={splashLogo}
                 alt="Gazetteer"
-                className="w-[220px] h-auto mb-6 splash-logo-animate"
+                className="w-[min(280px,72vw)] max-w-[320px] h-auto object-contain splash-logo-animate"
             />
-            <p
-                className="text-lg font-semibold tracking-wide"
-                style={{
-                    background: 'linear-gradient(90deg, #3b82f6, #a855f7)',
-                    WebkitBackgroundClip: 'text',
-                    backgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
-                    color: 'transparent',
-                }}
-            >
-                Gazetteer
-            </p>
+            <div className="mt-5 inline-flex items-center gap-2 text-base font-semibold tracking-[0.24em] uppercase text-white">
+                <FiMapPin className="w-4 h-4" />
+                <span>Gazetteer</span>
+            </div>
         </div>
     );
 }

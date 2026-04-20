@@ -48,7 +48,7 @@ export default function Avatar({
 
     const body = hasStory ? (
         <LinearGradient
-            colors={['#2dd4bf', '#0ea5e9', '#d946ef']}
+            colors={['#f6e27a', '#d4af37', '#f4f4f4', '#bfc5cc', '#ffe8a3', '#d4af37']}
             start={{ x: 0, y: 1 }}
             end={{ x: 1, y: 0 }}
             style={[

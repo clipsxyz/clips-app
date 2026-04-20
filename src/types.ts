@@ -42,6 +42,11 @@ export type Post = {
   venue?: string;
   /** Named landmark (e.g. Eiffel Tower, River Liffey); optional; carousel + landmark feeds */
   landmark?: string;
+  /**
+   * When the user created the post via Create → Shorts / TikTok / Reels gallery flow.
+   * Shown as a small label on the feed card (not the same as posting to those apps).
+   */
+  socialFormat?: 'youtube_shorts' | 'tiktok' | 'instagram_reels';
   tags: string[];
   mediaUrl?: string; // Optional for text-only posts (deprecated, use mediaItems for carousel)
   finalVideoUrl?: string; // Final rendered video URL from backend (after processing)

@@ -1594,15 +1594,30 @@ export default function CreatePage() {
                                     style={{
                                         scrollSnapAlign: 'center',
                                         transform: `scale(${isCentered ? (isPulsing ? 1.15 : 1.10) : 0.86})`,
-                                        opacity: isCentered ? 1 : 0.62,
+                                        opacity: isCentered ? 1 : 0.45,
                                     }}
                                 >
                                     <div
-                                        className={`p-[2px] rounded-full transition-shadow duration-200 ${isCentered ? (isPulsing ? 'shadow-[0_0_30px_rgba(255,255,255,0.35)]' : 'shadow-[0_0_24px_rgba(255,255,255,0.22)]') : ''}`}
-                                        style={{ background: isCentered ? '#ffffff' : 'rgba(255,255,255,0.78)' }}
+                                        className={`${isCentered ? 'p-[4px]' : 'p-[2px]'} rounded-full transition-all duration-200 ${
+                                            isCentered
+                                                ? (isPulsing
+                                                    ? 'shadow-[0_0_40px_rgba(212,175,55,0.75)]'
+                                                    : 'shadow-[0_0_30px_rgba(212,175,55,0.55)]')
+                                                : ''
+                                        }`}
+                                        style={{
+                                            background: isCentered
+                                                ? 'linear-gradient(135deg, #f6e27a 0%, #d4af37 38%, #f2f2f2 70%, #c0c6cd 100%)'
+                                                : 'rgba(120,120,120,0.55)'
+                                        }}
                                     >
-                                        <div className={`${isCentered ? 'w-11 h-11' : 'w-10 h-10'} rounded-full bg-black flex items-center justify-center transition-all duration-200`}>
-                                            <Icon className="w-5 h-5 text-white" />
+                                        <div
+                                            className={`${isCentered ? 'w-12 h-12' : 'w-10 h-10'} rounded-full flex items-center justify-center transition-all duration-200`}
+                                            style={{
+                                                background: '#000000'
+                                            }}
+                                        >
+                                            <Icon className={`${isCentered ? 'w-5.5 h-5.5 text-[#f6e27a]' : 'w-5 h-5 text-white'}`} />
                                         </div>
                                     </div>
                                 </button>
@@ -1801,7 +1816,7 @@ export default function CreatePage() {
                             }}
                             className="flex-1 px-4 py-3 rounded-xl bg-white/10 font-semibold hover:bg-white/20 transition-colors backdrop-blur-sm border border-white/20"
                             style={{
-                                backgroundImage: 'linear-gradient(90deg, #87ceeb, #ffb6c1, #87cefa, #c084fc, #34d399, #f59e0b, #ef4444, #dc2626, #fca5a5, #60a5fa, #fb7185, #87ceeb)',
+                                backgroundImage: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 22%, #f4f4f4 44%, #bfc5cc 66%, #ffe8a3 82%, #d4af37 100%)',
                                 backgroundSize: '200% 100%',
                                 WebkitBackgroundClip: 'text',
                                 backgroundClip: 'text',
@@ -1816,7 +1831,7 @@ export default function CreatePage() {
                             onClick={() => setShowFilters(false)}
                             className="flex-1 px-4 py-3 rounded-xl bg-brand-500/80 font-semibold hover:bg-brand-500 transition-colors backdrop-blur-sm border border-white/20"
                             style={{
-                                backgroundImage: 'linear-gradient(90deg, #87ceeb, #ffb6c1, #87cefa, #c084fc, #34d399, #f59e0b, #ef4444, #dc2626, #fca5a5, #60a5fa, #fb7185, #87ceeb)',
+                                backgroundImage: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 22%, #f4f4f4 44%, #bfc5cc 66%, #ffe8a3 82%, #d4af37 100%)',
                                 backgroundSize: '200% 100%',
                                 WebkitBackgroundClip: 'text',
                                 backgroundClip: 'text',

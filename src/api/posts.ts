@@ -707,6 +707,7 @@ export function transformLaravelPost(response: any): Post {
     locationLabel: response.location_label || response.locationLabel || 'Unknown Location',
     venue: existing?.venue || response.venue || undefined,
     landmark: existing?.landmark || response.landmark || undefined,
+    socialFormat: (response.social_format || response.socialFormat) as Post['socialFormat'] | undefined,
     tags: response.tags || [],
     // Use final_video_url if available, else media_url, else first media_items item (for still-image posts)
     mediaUrl: resolvedMediaUrl,
@@ -1933,7 +1934,8 @@ export async function createPost(
   editTimeline?: any, // Edit timeline for hybrid editing pipeline (clips, trims, transitions, etc.)
   musicTrackId?: number, // Library music track ID
   venue?: string, // Venue / place name for metadata carousel
-  landmark?: string // Named landmark (e.g. River Liffey) for carousel + landmark feeds
+  landmark?: string, // Named landmark (e.g. River Liffey) for carousel + landmark feeds
+  socialFormat?: 'youtube_shorts' | 'tiktok' | 'instagram_reels' // Create → Shorts / TikTok / Reels upload flow
 ): Promise<Post> {
   // Use real Laravel API
   const { createPost: createPostAPI } = await import('./client');
@@ -1944,6 +1946,7 @@ export async function createPost(
       location: location || undefined,
       venue: venue || undefined,
       landmark: landmark || undefined,
+      socialFormat: socialFormat || undefined,
       mediaUrl: imageUrl || undefined,
       mediaType: mediaType || undefined,
       caption: caption || undefined,
@@ -1976,6 +1979,7 @@ export async function createPost(
       userNational: userNational ?? transformed.userNational,
       venue: venue || transformed.venue,
       landmark: landmark || transformed.landmark,
+      socialFormat: socialFormat ?? transformed.socialFormat,
     };
 
     // Also store newly created posts in the local in-memory array + localStorage
@@ -2242,6 +2246,7 @@ export async function createPost(
       videoCaptionText: videoCaptionText || undefined, // Store video caption text
       subtitlesEnabled: subtitlesEnabled || undefined, // Store video subtitles enabled state
       subtitleText: subtitleText || undefined, // Store video subtitle text
+      socialFormat: socialFormat || undefined,
       ...locationData
     };
 

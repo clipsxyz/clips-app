@@ -1,12 +1,18 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiArrowLeft, FiCircle, FiX, FiPlay, FiPause, FiRotateCw, FiMic, FiMicOff, FiImage, FiLayers, FiZap, FiGrid, FiUser, FiFilter, FiRefreshCw, FiEdit3, FiBookmark, FiUpload, FiSliders, FiDroplet, FiVideo, FiVideoOff, FiCopy, FiSave, FiPlus, FiType, FiCamera } from 'react-icons/fi';
+import { FiArrowLeft, FiCircle, FiX, FiPlay, FiPause, FiRotateCw, FiMic, FiMicOff, FiImage, FiLayers, FiZap, FiGrid, FiUser, FiUsers, FiFilter, FiRefreshCw, FiEdit3, FiBookmark, FiUpload, FiSliders, FiDroplet, FiVideo, FiVideoOff, FiCopy, FiSave, FiPlus, FiType, FiCamera } from 'react-icons/fi';
 import { saveDraft } from '../api/drafts';
 import { getTemplate } from '../api/templates';
 import { TEMPLATE_IDS } from '../constants';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 import { setGalleryPreviewMedia } from '../utils/galleryPreviewCache';
+import CreateGroupModal from '../components/CreateGroupModal';
+
+/** Same gradient as `Avatar` story ring (profile picture story border). */
+const PROFILE_STORY_RING_GRADIENT = 'linear-gradient(135deg, #f6e27a 0%, #d4af37 22%, #f4f4f4 44%, #bfc5cc 66%, #ffe8a3 82%, #d4af37 100%)';
+
+type SocialUploadTarget = 'youtube_shorts' | 'tiktok' | 'instagram_reels';
 
 export default function InstantCreatePage() {
     const navigate = useNavigate();
@@ -29,7 +35,7 @@ export default function InstantCreatePage() {
     const controlsTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const [facingMode, setFacingMode] = React.useState<'user' | 'environment'>('user');
     const [micOn, setMicOn] = React.useState(true);
-    const [cameraOn, setCameraOn] = React.useState(true);
+    const [cameraOn, setCameraOn] = React.useState(false);
     const [dualCamera, setDualCamera] = React.useState(false);
     const dualCameraRef = React.useRef<HTMLVideoElement | null>(null);
     const dualStreamRef = React.useRef<MediaStream | null>(null);
@@ -95,19 +101,18 @@ export default function InstantCreatePage() {
     const presetIdxRef = React.useRef(0);
     const MAX_VIDEO_SECONDS = 60;
 
-    // Recording mode selector (TikTok-style): 60s, 30s, 15s, Photo
-    type RecordingMode = '60' | '30' | '15' | 'photo';
-    type FooterAction = 'mode-60' | 'mode-30' | 'mode-15' | 'mode-photo' | 'gallery' | 'story' | 'text';
+    type CreateModeAction = 'community' | 'text' | 'gallery' | 'story' | 'youtube' | 'tiktok' | 'instagram_reels';
     type StoryAudience = 'public' | 'close_friends' | 'only_me';
     type StoryPreviewAction = 'filters' | 'audience' | 'save' | 'next';
-    const [recordingMode, setRecordingMode] = React.useState<RecordingMode>('60');
-    const [currentRecordingLimit, setCurrentRecordingLimit] = React.useState<number>(MAX_VIDEO_SECONDS);
-    const [recordingTime, setRecordingTime] = React.useState(MAX_VIDEO_SECONDS); // Countdown from selected limit to 0
+    const [showCreateModePicker, setShowCreateModePicker] = React.useState(true);
+    const [createGroupOpen, setCreateGroupOpen] = React.useState(false);
+    const pendingSocialUploadRef = React.useRef<SocialUploadTarget | null>(null);
+    const [recordingTime, setRecordingTime] = React.useState(MAX_VIDEO_SECONDS);
     const recordingTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
-    const footerRailRef = React.useRef<HTMLDivElement | null>(null);
-    const footerRafRef = React.useRef<number | null>(null);
-    const [isFooterDragging, setIsFooterDragging] = React.useState(false);
-    const [centeredFooterAction, setCenteredFooterAction] = React.useState<FooterAction>('text');
+    const verticalPickerRef = React.useRef<HTMLDivElement | null>(null);
+    const verticalPickerRafRef = React.useRef<number | null>(null);
+    const [isVerticalPickerDragging, setIsVerticalPickerDragging] = React.useState(false);
+    const [centeredCreateMode, setCenteredCreateMode] = React.useState<CreateModeAction>('gallery');
     const [isStoryMode, setIsStoryMode] = React.useState(false);
     const [storyAudience, setStoryAudience] = React.useState<StoryAudience>('public');
     const [showStoryAudienceSheet, setShowStoryAudienceSheet] = React.useState(false);
@@ -116,21 +121,7 @@ export default function InstantCreatePage() {
     const [isStoryPreviewDragging, setIsStoryPreviewDragging] = React.useState(false);
     const [centeredStoryPreviewAction, setCenteredStoryPreviewAction] = React.useState<StoryPreviewAction>('next');
 
-    const getSecondsForMode = (mode: RecordingMode): number => {
-        switch (mode) {
-            case '30':
-                return 30;
-            case '15':
-                return 15;
-            case 'photo':
-                return 0;
-            case '60':
-            default:
-                return MAX_VIDEO_SECONDS;
-        }
-    };
-
-    const recordingLimitForDisplay = currentRecordingLimit || getSecondsForMode(recordingMode) || MAX_VIDEO_SECONDS;
+    const recordingLimitForDisplay = MAX_VIDEO_SECONDS;
     const TIMER_CIRCUMFERENCE = 2 * Math.PI * 20;
 
     const centerRailItem = React.useCallback((rail: HTMLDivElement | null, selector: string, smooth = true) => {
@@ -141,25 +132,75 @@ export default function InstantCreatePage() {
         rail.scrollTo({ left: Math.max(0, desiredLeft), behavior: smooth ? 'smooth' : 'auto' });
     }, []);
 
-    const updateCenteredFooterAction = React.useCallback(() => {
-        const rail = footerRailRef.current;
+    const centerVerticalPickerItem = React.useCallback((rail: HTMLDivElement | null, actionId: CreateModeAction, smooth = true) => {
         if (!rail) return;
-        const rect = rail.getBoundingClientRect();
-        const centerX = rect.left + rect.width / 2;
-        let closestId: FooterAction | null = null;
+        const target = rail.querySelector<HTMLElement>(`[data-create-mode="${actionId}"]`);
+        if (!target) return;
+        const desiredTop = target.offsetTop - (rail.clientHeight / 2) + (target.clientHeight / 2);
+        rail.scrollTo({ top: Math.max(0, desiredTop), behavior: smooth ? 'smooth' : 'auto' });
+    }, []);
+
+    const updateVerticalPickerVisuals = React.useCallback(() => {
+        const rail = verticalPickerRef.current;
+        if (!rail) return;
+        const railRect = rail.getBoundingClientRect();
+        if (railRect.height < 32) return;
+        const centerY = railRect.top + railRect.height / 2;
+        let closestId: CreateModeAction | null = null;
         let closestDist = Number.POSITIVE_INFINITY;
-        rail.querySelectorAll<HTMLButtonElement>('[data-footer-action]').forEach((node) => {
-            const id = node.dataset.footerAction as FooterAction | undefined;
-            if (!id) return;
-            const nRect = node.getBoundingClientRect();
-            const dist = Math.abs((nRect.left + nRect.width / 2) - centerX);
-            if (dist < closestDist) {
+        rail.querySelectorAll<HTMLElement>('[data-create-mode]').forEach((el) => {
+            const rect = el.getBoundingClientRect();
+            const icy = rect.top + rect.height / 2;
+            const dist = Math.abs(icy - centerY);
+            const id = el.dataset.createMode as CreateModeAction | undefined;
+            if (id && dist < closestDist) {
                 closestDist = dist;
                 closestId = id;
             }
+            // Subtle vertical tilt only (no rotateY — that read as “crooked”). No translateZ — avoids skew with scroll clipping.
+            const denom = Math.max(260, railRect.height * 0.45);
+            const raw = (icy - centerY) / denom;
+            const t = Math.max(-1, Math.min(1, raw));
+            const absT = Math.abs(t);
+            const rotateX = -t * 34;
+            const scale = Math.max(0.82, 1.28 - absT * 0.42);
+            const opacity = Math.max(0.55, 1 - absT * 0.32);
+            el.style.transformOrigin = '50% 50%';
+            el.style.transform = `rotateX(${rotateX}deg) scale(${scale})`;
+            el.style.opacity = String(opacity);
         });
-        if (closestId) setCenteredFooterAction(closestId);
+        if (closestId) setCenteredCreateMode(closestId);
     }, []);
+
+    const handleInstantBack = React.useCallback(() => {
+        if (previewUrl) {
+            navigate('/feed');
+            return;
+        }
+        if (!showCreateModePicker) {
+            setShowCreateModePicker(true);
+            setCameraOn(false);
+            pendingSocialUploadRef.current = null;
+            if (streamRef.current) {
+                streamRef.current.getTracks().forEach(t => t.stop());
+                streamRef.current = null;
+            }
+            if (videoRef.current) {
+                videoRef.current.pause();
+                videoRef.current.srcObject = null;
+            }
+            if (dualStreamRef.current) {
+                dualStreamRef.current.getTracks().forEach(t => t.stop());
+                dualStreamRef.current = null;
+            }
+            if (dualCameraRef.current) {
+                dualCameraRef.current.srcObject = null;
+            }
+            setDualCamera(false);
+            return;
+        }
+        navigate('/feed');
+    }, [previewUrl, showCreateModePicker, navigate]);
 
     const updateCenteredStoryPreviewAction = React.useCallback(() => {
         const rail = storyPreviewRailRef.current;
@@ -184,37 +225,35 @@ export default function InstantCreatePage() {
     }, []);
 
     React.useEffect(() => {
+        if (!showCreateModePicker) return;
         const t = window.setTimeout(() => {
-            const rail = footerRailRef.current;
+            const rail = verticalPickerRef.current;
             if (rail) {
-                const firstItem = rail.querySelector<HTMLElement>('[data-footer-action="text"]');
-                if (firstItem) {
-                    // Start with the first icon visible on the left, while keeping enough left runway
-                    // so users can still drag it back into center to select.
-                    const startLeft = Math.max(0, firstItem.offsetLeft - 14);
-                    rail.scrollTo({ left: startLeft, behavior: 'auto' });
-                } else {
-                    rail.scrollTo({ left: 0, behavior: 'auto' });
+                const galleryItem = rail.querySelector<HTMLElement>('[data-create-mode="gallery"]');
+                if (galleryItem) {
+                    const desiredTop = galleryItem.offsetTop - (rail.clientHeight / 2) + (galleryItem.clientHeight / 2);
+                    rail.scrollTo({ top: Math.max(0, desiredTop), behavior: 'auto' });
                 }
+                updateVerticalPickerVisuals();
             }
-            updateCenteredFooterAction();
         }, 0);
         return () => window.clearTimeout(t);
-    }, [updateCenteredFooterAction]);
+    }, [showCreateModePicker, updateVerticalPickerVisuals]);
 
     React.useEffect(() => {
-        const rail = footerRailRef.current;
+        if (!showCreateModePicker) return;
+        const rail = verticalPickerRef.current;
         if (!rail) return;
         const onScroll = () => {
-            if (footerRafRef.current != null) cancelAnimationFrame(footerRafRef.current);
-            footerRafRef.current = requestAnimationFrame(updateCenteredFooterAction);
+            if (verticalPickerRafRef.current != null) cancelAnimationFrame(verticalPickerRafRef.current);
+            verticalPickerRafRef.current = requestAnimationFrame(updateVerticalPickerVisuals);
         };
         rail.addEventListener('scroll', onScroll, { passive: true });
         return () => {
             rail.removeEventListener('scroll', onScroll);
-            if (footerRafRef.current != null) cancelAnimationFrame(footerRafRef.current);
+            if (verticalPickerRafRef.current != null) cancelAnimationFrame(verticalPickerRafRef.current);
         };
-    }, [updateCenteredFooterAction]);
+    }, [showCreateModePicker, updateVerticalPickerVisuals]);
 
     React.useEffect(() => {
         const rail = storyPreviewRailRef.current;
@@ -254,6 +293,7 @@ export default function InstantCreatePage() {
             setVideoDuration(duration);
             setTrimStart(start);
             setTrimEnd(end);
+            setShowCreateModePicker(false);
         }
         if (state?.storyMode) {
             setIsStoryMode(true);
@@ -611,8 +651,8 @@ export default function InstantCreatePage() {
     React.useEffect(() => {
         isMountedRef.current = true;
         
-        // Only initialize stream if camera is enabled and we don't have a preview
-        if (cameraOn && !previewUrl) {
+        // Only initialize stream after user leaves the mode picker (no instant camera on entry)
+        if (cameraOn && !previewUrl && !showCreateModePicker) {
             initStream(facingMode, micOn, cameraOn);
         } else if (previewUrl) {
             // If preview is showing, stop the camera stream
@@ -672,67 +712,9 @@ export default function InstantCreatePage() {
                 recordingTimerRef.current = null;
             }
         };
-    }, [facingMode, micOn, cameraOn, previewUrl]);
-
-    async function capturePhoto() {
-        try {
-            // Prefer composited green-screen canvas when enabled
-            let canvas: HTMLCanvasElement | null = null;
-            if (greenEnabled && greenCanvasRef.current) {
-                canvas = greenCanvasRef.current;
-            } else if (videoRef.current) {
-                const video = videoRef.current;
-                const width = video.videoWidth || video.clientWidth || 720;
-                const height = video.videoHeight || video.clientHeight || 1280;
-                const offscreen = document.createElement('canvas');
-                offscreen.width = width;
-                offscreen.height = height;
-                const ctx = offscreen.getContext('2d');
-                if (!ctx) return;
-                ctx.drawImage(video, 0, 0, offscreen.width, offscreen.height);
-                canvas = offscreen;
-            }
-
-            if (!canvas) return;
-
-            const blob: Blob = await new Promise((resolve) => {
-                canvas!.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.9);
-            });
-
-            if (!blob || blob.size === 0) return;
-
-            // Stop camera stream before navigating
-            if (streamRef.current) {
-                streamRef.current.getTracks().forEach(t => t.stop());
-                streamRef.current = null;
-            }
-            if (videoRef.current) {
-                videoRef.current.pause();
-                videoRef.current.srcObject = null;
-            }
-
-            const galleryItems = [{ blob, mediaType: 'image' as const, videoDuration: 0 }];
-            setGalleryPreviewMedia(galleryItems);
-            navigate('/create/gallery-preview', {
-                state: {
-                    mediaUrl: undefined,
-                    mediaType: 'image' as const,
-                    videoDuration: 0,
-                    fromInstantRecording: true
-                }
-            });
-        } catch (error) {
-            console.error('Error capturing photo frame:', error);
-        }
-    }
+    }, [facingMode, micOn, cameraOn, previewUrl, showCreateModePicker]);
 
     function startRecording() {
-        // Photo mode: capture single frame instead of recording video
-        if (recordingMode === 'photo') {
-            capturePhoto();
-            return;
-        }
-
         const cameraStream = videoRef.current?.srcObject as MediaStream | null;
         if (!cameraStream) return;
         recordedChunksRef.current = [];
@@ -970,10 +952,8 @@ export default function InstantCreatePage() {
         };
         mr.start(100); // Request data every 100ms
 
-        const limit = getSecondsForMode(recordingMode) || MAX_VIDEO_SECONDS;
         setRecording(true);
-        setCurrentRecordingLimit(limit);
-        setRecordingTime(limit); // Reset to selected limit
+        setRecordingTime(MAX_VIDEO_SECONDS);
 
         // Start countdown timer
         recordingTimerRef.current = setInterval(() => {
@@ -998,9 +978,7 @@ export default function InstantCreatePage() {
             clearInterval(recordingTimerRef.current);
             recordingTimerRef.current = null;
         }
-        // Reset timer to current mode's limit
-        const resetLimit = getSecondsForMode(recordingMode) || MAX_VIDEO_SECONDS;
-        setRecordingTime(resetLimit);
+        setRecordingTime(MAX_VIDEO_SECONDS);
         
         if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
             mediaRecorderRef.current.stop();
@@ -1427,7 +1405,7 @@ export default function InstantCreatePage() {
 
     const Grid3x3Icon = ({ className, selected }: { className?: string; selected?: boolean }) => (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
-            {/* 3x3 grid */}
+                      {/* 3x3 grid */}
             <rect x="4" y="4" width="4.5" height="4.5" fill={selected ? "currentColor" : "none"} stroke="currentColor" />
             <rect x="9.75" y="4" width="4.5" height="4.5" fill={selected ? "currentColor" : "none"} stroke="currentColor" />
             <rect x="15.5" y="4" width="4.5" height="4.5" fill={selected ? "currentColor" : "none"} stroke="currentColor" />
@@ -1440,239 +1418,388 @@ export default function InstantCreatePage() {
         </svg>
     );
 
+    const YoutubeShortsMark = ({ className }: { className?: string }) => (
+        <svg viewBox="0 0 24 24" className={className} aria-hidden>
+            <path fill="currentColor" d="M23.5 6.2s-.2-1.7-1-2.4c-.9-1-2-1-2.4-1.1C17 2.5 12 2.5 12 2.5h0s-5 0-8.1.2c-.4 0-1.5.1-2.4 1.1-.7.7-1 2.4-1 2.4S.5 8.1.5 10v1.9c0 1.9.2 3.8.2 3.8s.2 1.7 1 2.4c.9 1 2.1.9 2.6 1 1.9.2 7.7.2 7.7.2s5 0 8.1-.2c.4 0 1.5-.1 2.4-1.1.7-.7 1-2.4 1-2.4s.2-1.9.2-3.8V10c0-1.9-.2-3.8-.2-3.8z" />
+            {/* Knock-out play on black button = reads as white frame + play */}
+            <path fill="#000000" d="M9.8 15.5V8.5L15.5 12l-5.7 3.5z" />
+        </svg>
+    );
+
+    const TikTokMark = ({ className }: { className?: string }) => (
+        <svg viewBox="0 0 24 24" className={className} aria-hidden>
+            <path
+                fill="currentColor"
+                d="M19.32 8.28v3.38a8.3 8.3 0 0 1-4.76-1.48v6.7a6.38 6.38 0 1 1-6.38-6.38c.34 0 .67.03 1 .09v3.5a2.9 2.9 0 1 0 2.03 2.76V2h3.45v.45a4.82 4.82 0 0 0 4.66 4.53z"
+            />
+            <path
+                fill="currentColor"
+                d="M19.32 8.28a4.8 4.8 0 0 1-2.93-1v3.9a8.3 8.3 0 0 0 4.76 1.48V8.59a4.85 4.85 0 0 1-1.83-.31z"
+            />
+        </svg>
+    );
+
+    /** Instagram Reels–style mark (white frame + play cutout). */
+    const ReelsMark = ({ className }: { className?: string }) => (
+        <svg viewBox="0 0 24 24" className={className} aria-hidden>
+            <rect x="3" y="5" width="18" height="15" rx="2.5" fill="currentColor" />
+            <path fill="#000000" d="M11.2 12.2l4.2 2.4a.6.6 0 0 1 0 1.04l-4.2 2.4A.6.6 0 0 1 10.3 17V13a.6.6 0 0 1 .9-.52z" />
+        </svg>
+    );
+
         return (
-        <div className="fixed inset-0 bg-black z-50 flex flex-col">
-            {/* Top bar: Back + camera controls (6 icons spaced from left to right) */}
+        <div className="fixed inset-0 z-50 flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden bg-black">
+            {/* Profile story-ring palette (Avatar hasStory), soft corners ~20% viewport */}
+            <div
+                className="pointer-events-none absolute left-0 top-0 z-[6] h-[20vh] w-[20vw] min-h-[120px] min-w-[120px] max-h-[320px] max-w-[320px]"
+                style={{ background: PROFILE_STORY_RING_GRADIENT, opacity: 0.38, maskImage: 'radial-gradient(ellipse 90% 90% at 0% 0%, black 38%, transparent 72%)', WebkitMaskImage: 'radial-gradient(ellipse 90% 90% at 0% 0%, black 38%, transparent 72%)' }}
+                aria-hidden
+            />
+            <div
+                className="pointer-events-none absolute bottom-0 right-0 z-[6] h-[20vh] w-[20vw] min-h-[120px] min-w-[120px] max-h-[320px] max-w-[320px]"
+                style={{ background: PROFILE_STORY_RING_GRADIENT, opacity: 0.38, maskImage: 'radial-gradient(ellipse 90% 90% at 100% 100%, black 38%, transparent 72%)', WebkitMaskImage: 'radial-gradient(ellipse 90% 90% at 100% 100%, black 38%, transparent 72%)' }}
+                aria-hidden
+            />
+            {/* Top bar: mode picker (simple) vs camera controls */}
             <div className="absolute top-0 left-0 right-0 z-50 bg-gradient-to-b from-black/80 to-transparent px-4 py-3">
-                <div className="flex items-center justify-between gap-3 w-full">
-                    <button
-                        onClick={() => navigate('/feed')}
-                        className="p-1.5 bg-black/60 backdrop-blur-sm text-white rounded-full hover:bg-black/80 active:scale-95 transition-colors"
-                        aria-label="Back to feed"
-                    >
-                        <FiArrowLeft className="w-4 h-4" />
-                    </button>
-                    <button 
-                        title="Flip camera" 
-                        className="p-2 rounded-lg bg-black/60 text-white hover:bg-black/80 active:scale-95 transition-all duration-200" 
-                        onClick={() => { 
-                            const next = facingMode === 'user' ? 'environment' : 'user'; 
-                            setFacingMode(next); 
-                            initStream(next, micOn, cameraOn);
-                            // If dual camera is on, update the dual camera stream
-                            if (dualCamera && dualStreamRef.current) {
-                                dualStreamRef.current.getTracks().forEach(t => t.stop());
-                                toggleDualCamera(); // Turn off and on to get new camera
-                                setTimeout(() => toggleDualCamera(), 100);
-                            }
-                        }}
-                    >
-                        <FiRotateCw className="w-4 h-4" />
-                    </button>
-                    <button 
-                        title={dualCamera ? 'Disable dual camera' : 'Enable dual camera'} 
-                        className={`p-2 rounded-lg ${dualCamera ? 'bg-white/25' : 'bg-black/60'} text-white hover:bg-black/80 active:scale-95 transition-all duration-200`}
-                        onClick={toggleDualCamera}
-                    >
-                        <FiCopy className="w-4 h-4" />
-                    </button>
-                    <button 
-                        title={cameraOn ? 'Turn camera off' : 'Turn camera on'} 
-                        className={`p-2 rounded-lg ${cameraOn ? 'bg-black/60' : 'bg-red-600/80'} text-white hover:bg-black/80 active:scale-95 transition-all duration-200`}
-                        onClick={toggleCamera}
-                    >
-                        {cameraOn ? <FiVideo className="w-4 h-4" /> : <FiVideoOff className="w-4 h-4" />}
-                    </button>
-                    <button 
-                        title={micOn ? 'Mute mic' : 'Unmute mic'} 
-                        className={`p-2 rounded-lg ${micOn ? 'bg-black/60' : 'bg-red-600/80'} text-white hover:bg-black/80 active:scale-95 transition-all duration-200`}
-                        onClick={() => { 
-                            const next = !micOn; 
-                            setMicOn(next); 
-                            if (streamRef.current) {
-                                const audioTrack = streamRef.current.getAudioTracks()[0];
-                                if (audioTrack) {
-                                    audioTrack.enabled = next;
-                                }
-                            } else if (next) {
-                                initStream(facingMode, true, cameraOn);
-                            }
-                        }}
-                    >
-                        {micOn ? <FiMic className="w-4 h-4" /> : <FiMicOff className="w-4 h-4" />}
-                    </button>
-                    <button
-                        title={showGuides ? 'Hide guides' : 'Show guides'}
-                        className={`p-2 rounded-lg ${showGuides ? 'bg-white/70 text-black' : 'bg-black/60 text-white'} hover:bg-black/80 active:scale-95 transition-all duration-200`}
-                        onClick={() => setShowGuides(!showGuides)}
-                    >
-                        <span className="text-xs font-semibold">G</span>
-                    </button>
-                </div>
-
-                {/* Right: Next (when preview) + timer */}
-                <div className="flex items-center gap-3">
-                    {previewUrl && (
+                {showCreateModePicker && !previewUrl ? (
+                    <div className="flex items-center justify-between w-full">
                         <button
-                            onClick={handleNext}
-                            className="px-3 py-1.5 rounded-full bg-white text-black text-xs font-semibold hover:bg-gray-100 transition-colors"
+                            type="button"
+                            onClick={handleInstantBack}
+                            className="p-1.5 bg-black/60 backdrop-blur-sm text-white rounded-full hover:bg-black/80 active:scale-95 transition-colors"
+                            aria-label="Back"
                         >
-                            {isStoryMode ? 'Share story' : 'Next'}
+                            <FiArrowLeft className="w-4 h-4" />
                         </button>
-                    )}
-                    {/* 60 Second Timer - Circular Progress Bar when recording */}
-                    {recording && (
-                        <div className="relative w-8 h-8">
-                            <svg className="w-8 h-8 transform -rotate-90" viewBox="0 0 48 48">
-                                <circle cx="24" cy="24" r="20" stroke="rgba(255, 255, 255, 0.2)" strokeWidth="4" fill="none" />
-                                <circle
-                                    cx="24" cy="24" r="20"
-                                    stroke="rgba(255, 255, 255, 0.9)" strokeWidth="4" fill="none"
-                                    strokeDasharray={`${TIMER_CIRCUMFERENCE}`}
-                                    strokeDashoffset={`${TIMER_CIRCUMFERENCE * (1 - ((recordingLimitForDisplay - recordingTime) / recordingLimitForDisplay))}`}
-                                    strokeLinecap="round"
-                                />
-                            </svg>
-                            <div className="absolute inset-0 flex items-center justify-center">
-                                <span className="text-white text-[10px] font-bold">{recordingTime}</span>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            {/* Video Preview - Full Screen */}
-            <div className="flex-1 flex items-center justify-center bg-black relative">
-                {!previewUrl ? (
+                        <span className="text-white text-sm font-semibold tracking-wide">Create</span>
+                        <div className="w-8" aria-hidden />
+                    </div>
+                ) : (
                     <>
-                        <video
-                            ref={videoRef}
-                            playsInline
-                            muted
-                            className={`w-full h-full ${greenEnabled ? 'hidden' : 'block'} object-cover`}
-                            style={getFilterStyle(selectedFilter)}
-                        />
-                        {/* Green screen composited canvas */}
-                        <canvas
-                            ref={greenCanvasRef}
-                            className={`${greenEnabled ? 'block' : 'hidden'} absolute inset-0 w-full h-full object-cover`}
-                            style={{ zIndex: greenEnabled ? 10 : 0, ...getFilterStyle(selectedFilter) }}
-                        />
-                        {/* Dual Camera - Picture in Picture */}
-                        {dualCamera && !greenEnabled && (
-                            <video
-                                ref={dualCameraRef}
-                                playsInline
-                                muted
-                                className="absolute bottom-20 right-4 w-32 h-48 rounded-xl border-2 border-white/30 shadow-2xl object-cover z-20"
-                            />
-                        )}
+                        <div className="flex items-center justify-between gap-3 w-full">
+                            <button
+                                type="button"
+                                onClick={handleInstantBack}
+                                className="p-1.5 bg-black/60 backdrop-blur-sm text-white rounded-full hover:bg-black/80 active:scale-95 transition-colors"
+                                aria-label="Back"
+                            >
+                                <FiArrowLeft className="w-4 h-4" />
+                            </button>
+                            <button
+                                type="button"
+                                title="Flip camera"
+                                className="p-2 rounded-lg bg-black/60 text-white hover:bg-black/80 active:scale-95 transition-all duration-200"
+                                onClick={() => {
+                                    const next = facingMode === 'user' ? 'environment' : 'user';
+                                    setFacingMode(next);
+                                    initStream(next, micOn, cameraOn);
+                                    if (dualCamera && dualStreamRef.current) {
+                                        dualStreamRef.current.getTracks().forEach(t => t.stop());
+                                        toggleDualCamera();
+                                        setTimeout(() => toggleDualCamera(), 100);
+                                    }
+                                }}
+                            >
+                                <FiRotateCw className="w-4 h-4" />
+                            </button>
+                            <button
+                                type="button"
+                                title={dualCamera ? 'Disable dual camera' : 'Enable dual camera'}
+                                className={`p-2 rounded-lg ${dualCamera ? 'bg-white/25' : 'bg-black/60'} text-white hover:bg-black/80 active:scale-95 transition-all duration-200`}
+                                onClick={toggleDualCamera}
+                            >
+                                <FiCopy className="w-4 h-4" />
+                            </button>
+                            <button
+                                type="button"
+                                title={cameraOn ? 'Turn camera off' : 'Turn camera on'}
+                                className={`p-2 rounded-lg ${cameraOn ? 'bg-black/60' : 'bg-red-600/80'} text-white hover:bg-black/80 active:scale-95 transition-all duration-200`}
+                                onClick={toggleCamera}
+                            >
+                                {cameraOn ? <FiVideo className="w-4 h-4" /> : <FiVideoOff className="w-4 h-4" />}
+                            </button>
+                            <button
+                                type="button"
+                                title={micOn ? 'Mute mic' : 'Unmute mic'}
+                                className={`p-2 rounded-lg ${micOn ? 'bg-black/60' : 'bg-red-600/80'} text-white hover:bg-black/80 active:scale-95 transition-all duration-200`}
+                                onClick={() => {
+                                    const next = !micOn;
+                                    setMicOn(next);
+                                    if (streamRef.current) {
+                                        const audioTrack = streamRef.current.getAudioTracks()[0];
+                                        if (audioTrack) {
+                                            audioTrack.enabled = next;
+                                        }
+                                    } else if (next) {
+                                        initStream(facingMode, true, cameraOn);
+                                    }
+                                }}
+                            >
+                                {micOn ? <FiMic className="w-4 h-4" /> : <FiMicOff className="w-4 h-4" />}
+                            </button>
+                            <button
+                                type="button"
+                                title={showGuides ? 'Hide guides' : 'Show guides'}
+                                className={`p-2 rounded-lg ${showGuides ? 'bg-white/70 text-black' : 'bg-black/60 text-white'} hover:bg-black/80 active:scale-95 transition-all duration-200`}
+                                onClick={() => setShowGuides(!showGuides)}
+                            >
+                                <span className="text-xs font-semibold">G</span>
+                            </button>
+                        </div>
 
-                        {/* Footer action snap rail: Gallery / Story / Text */}
-                        <div className="absolute bottom-0 left-0 right-0 z-30">
-                            <div
-                                aria-hidden
-                                className="pointer-events-none absolute inset-x-0 -top-16 h-24 bg-gradient-to-t from-black/72 via-black/38 to-transparent"
-                            />
-                            <div className="bg-black/25 backdrop-blur-[1px] border-t border-white/20 shadow-lg">
-                                <div className="px-3 py-2" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0) + 0.4rem)' }}>
-                                    <div
-                                        ref={footerRailRef}
-                                        className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide py-1"
-                                        style={{ scrollSnapType: 'x mandatory' }}
-                                        onPointerDown={() => setIsFooterDragging(true)}
-                                        onPointerUp={() => window.setTimeout(() => setIsFooterDragging(false), 80)}
-                                        onPointerCancel={() => setIsFooterDragging(false)}
-                                        onPointerLeave={() => setIsFooterDragging(false)}
-                                    >
-                                        <div className="shrink-0 w-[38%]" aria-hidden />
-                                        {([
-                                            { id: 'text' as const, title: 'Text', icon: FiType },
-                                            { id: 'story' as const, title: '24h Story', icon: FiCamera },
-                                            { id: 'gallery' as const, title: 'Gallery', icon: FiUpload },
-                                            { id: 'mode-60' as const, title: '60s', icon: FiCircle },
-                                            { id: 'mode-30' as const, title: '30s', icon: FiCircle },
-                                            { id: 'mode-15' as const, title: '15s', icon: FiCircle },
-                                            { id: 'mode-photo' as const, title: 'Photo', icon: FiImage },
-                                        ]).map((item) => {
-                                            const Icon = item.icon;
-                                            const isCentered = centeredFooterAction === item.id;
-                                            return (
-                                                <button
-                                                    key={item.id}
-                                                    data-footer-action={item.id}
-                                                    onClick={() => {
-                                                        if (isFooterDragging) return;
-                                                        if (!isCentered) {
-                                                            centerRailItem(footerRailRef.current, `[data-footer-action="${item.id}"]`, true);
-                                                            return;
-                                                        }
-                                                        if (item.id === 'mode-60' || item.id === 'mode-30' || item.id === 'mode-15' || item.id === 'mode-photo') {
-                                                            if (recording) return;
-                                                            const nextMode = item.id === 'mode-photo'
-                                                                    ? 'photo'
-                                                                    : item.id === 'mode-15'
-                                                                    ? '15'
-                                                                    : item.id === 'mode-30'
-                                                                        ? '30'
-                                                                        : '60';
-                                                            setRecordingMode(nextMode);
-                                                            const limit = getSecondsForMode(nextMode) || MAX_VIDEO_SECONDS;
-                                                            setRecordingTime(limit || MAX_VIDEO_SECONDS);
-                                                            setCurrentRecordingLimit(limit || MAX_VIDEO_SECONDS);
-                                                            return;
-                                                        }
-                                                        if (item.id === 'gallery') {
-                                                            setIsStoryMode(false);
-                                                            cameraRollInputRef.current?.click();
-                                                            return;
-                                                        }
-                                                        if (item.id === 'story') {
-                                                            setIsStoryMode(true);
-                                                            navigate('/clip', { state: { storyMode: true, storyAudience } });
-                                                            return;
-                                                        }
-                                                        setIsStoryMode(false);
-                                                        navigate('/create/text-only');
-                                                    }}
-                                                    title={item.title}
-                                                    aria-label={item.title}
-                                                    className="relative shrink-0 w-[72px] h-[76px] flex items-center justify-center transition-transform duration-200"
-                                                    style={{
-                                                        scrollSnapAlign: 'center',
-                                                        transform: `scale(${isCentered ? 1.10 : 0.86})`,
-                                                        opacity: isCentered ? 1 : 0.62,
-                                                    }}
-                                                >
-                                                    <div className="flex flex-col items-center gap-1">
-                                                        <div
-                                                            className={`p-[2px] rounded-full transition-shadow duration-200 ${isCentered ? 'shadow-[0_0_24px_rgba(255,255,255,0.22)]' : ''}`}
-                                                            style={{ background: isCentered ? '#ffffff' : 'rgba(255,255,255,0.78)' }}
-                                                        >
-                                                            <div className={`${isCentered ? 'w-11 h-11' : 'w-10 h-10'} rounded-full bg-black flex items-center justify-center transition-all duration-200`}>
-                                                                {(item.id === 'mode-60' || item.id === 'mode-30' || item.id === 'mode-15') ? (
-                                                                    <span className="text-[11px] font-semibold text-white">{item.title}</span>
-                                                                ) : (
-                                                                    <Icon className="w-5 h-5 text-white" />
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                        <span className={`text-[10px] leading-none font-medium text-white ${isCentered ? 'opacity-95' : 'opacity-75'}`}>
-                                                            {item.title}
-                                                        </span>
-                                                    </div>
-                                                </button>
-                                            );
-                                        })}
-                                        <div className="shrink-0 w-[38%]" aria-hidden />
+                        <div className="flex items-center gap-3">
+                            {previewUrl && (
+                                <button
+                                    type="button"
+                                    onClick={handleNext}
+                                    className="px-3 py-1.5 rounded-full bg-white text-black text-xs font-semibold hover:bg-gray-100 transition-colors"
+                                >
+                                    {isStoryMode ? 'Share story' : 'Next'}
+                                </button>
+                            )}
+                            {recording && (
+                                <div className="relative w-8 h-8">
+                                    <svg className="w-8 h-8 transform -rotate-90" viewBox="0 0 48 48">
+                                        <circle cx="24" cy="24" r="20" stroke="rgba(255, 255, 255, 0.2)" strokeWidth="4" fill="none" />
+                                        <circle
+                                            cx="24" cy="24" r="20"
+                                            stroke="rgba(255, 255, 255, 0.9)" strokeWidth="4" fill="none"
+                                            strokeDasharray={`${TIMER_CIRCUMFERENCE}`}
+                                            strokeDashoffset={`${TIMER_CIRCUMFERENCE * (1 - ((recordingLimitForDisplay - recordingTime) / recordingLimitForDisplay))}`}
+                                            strokeLinecap="round"
+                                        />
+                                    </svg>
+                                    <div className="absolute inset-0 flex items-center justify-center">
+                                        <span className="text-white text-[10px] font-bold">{recordingTime}</span>
                                     </div>
                                 </div>
-                            </div>
+                            )}
                         </div>
+                    </>
+                )}
+            </div>
+
+            {/* Video preview / vertical mode picker — picker stays in-flow so flex-1 gets real height */}
+            <div className="relative z-10 flex min-h-0 flex-1 flex-col bg-black">
+                {!previewUrl ? (
+                    <>
+                        {!showCreateModePicker && (
+                            <div className="relative flex min-h-0 flex-1">
+                                <video
+                                    ref={videoRef}
+                                    playsInline
+                                    muted
+                                    className={`h-full min-h-0 w-full flex-1 ${greenEnabled ? 'hidden' : 'block'} object-cover`}
+                                    style={getFilterStyle(selectedFilter)}
+                                />
+                                <canvas
+                                    ref={greenCanvasRef}
+                                    className={`${greenEnabled ? 'block' : 'hidden'} absolute inset-0 h-full w-full object-cover`}
+                                    style={{ zIndex: greenEnabled ? 10 : 0, ...getFilterStyle(selectedFilter) }}
+                                />
+                                {dualCamera && !greenEnabled && (
+                                    <video
+                                        ref={dualCameraRef}
+                                        playsInline
+                                        muted
+                                        className="absolute bottom-20 right-4 z-20 h-48 w-32 rounded-xl border-2 border-white/30 object-cover shadow-2xl"
+                                    />
+                                )}
+                            </div>
+                        )}
+
+                        {showCreateModePicker && (
+                            <div
+                                className="relative flex min-h-0 flex-1 flex-col bg-gradient-to-b from-zinc-950 via-neutral-950 to-black"
+                                style={{
+                                    perspective: '1400px',
+                                    perspectiveOrigin: '50% 50%',
+                                }}
+                            >
+                                {/* Narrow side rails: white → grey, centre stays dark */}
+                                <div
+                                    className="pointer-events-none absolute inset-y-0 left-0 z-[18] w-[min(15vw,80px)] bg-gradient-to-r from-white/30 via-neutral-400/22 to-transparent"
+                                    aria-hidden
+                                />
+                                <div
+                                    className="pointer-events-none absolute inset-y-0 right-0 z-[18] w-[min(15vw,80px)] bg-gradient-to-l from-white/30 via-neutral-400/22 to-transparent"
+                                    aria-hidden
+                                />
+                                <div className="relative z-[20] min-h-0 w-full flex-1 pt-14 opacity-[0.98]">
+                                    <div
+                                        ref={verticalPickerRef}
+                                        className="scrollbar-hide relative z-[20] h-full min-h-0 touch-pan-y overflow-x-hidden overflow-y-auto"
+                                        style={{ scrollSnapType: 'y mandatory', WebkitOverflowScrolling: 'touch' }}
+                                        onPointerDown={() => setIsVerticalPickerDragging(true)}
+                                        onPointerUp={() => window.setTimeout(() => setIsVerticalPickerDragging(false), 70)}
+                                        onPointerCancel={() => setIsVerticalPickerDragging(false)}
+                                        onPointerLeave={() => setIsVerticalPickerDragging(false)}
+                                    >
+                                        <div className="min-h-[28vh] shrink-0" aria-hidden />
+                                        {([
+                                            { id: 'community' as const, title: 'Community', icon: 'community' as const },
+                                            { id: 'text' as const, title: 'Text only', icon: 'type' as const },
+                                            { id: 'story' as const, title: '24h Story', icon: 'story' as const },
+                                            { id: 'gallery' as const, title: 'Gallery', icon: 'gallery' as const },
+                                            { id: 'youtube' as const, title: 'YouTube Shorts', icon: 'youtube' as const },
+                                            { id: 'tiktok' as const, title: 'TikTok', icon: 'tiktok' as const },
+                                            { id: 'instagram_reels' as const, title: 'Instagram Reels', icon: 'reels' as const },
+                                        ]).map((item) => {
+                                            const isCentered = centeredCreateMode === item.id;
+                                            return (
+                                                <div
+                                                    key={item.id}
+                                                    className="flex shrink-0 min-h-[136px] items-center justify-center px-6"
+                                                    style={{ scrollSnapAlign: 'center' }}
+                                                >
+                                                    <button
+                                                        type="button"
+                                                        data-create-mode={item.id}
+                                                        title={item.title}
+                                                        aria-label={item.title}
+                                                        className={`relative flex w-full max-w-[240px] flex-col items-center gap-2 rounded-2xl py-1 outline-none will-change-transform transition-all duration-300 ${
+                                                            isCentered ? 'drop-shadow-[0_0_40px_rgba(255,255,255,0.55)]' : ''
+                                                        }`}
+                                                        onClick={() => {
+                                                            if (isVerticalPickerDragging) return;
+                                                            if (!isCentered) {
+                                                                centerVerticalPickerItem(verticalPickerRef.current, item.id, true);
+                                                                return;
+                                                            }
+                                                            if (item.id === 'gallery') {
+                                                                setIsStoryMode(false);
+                                                                pendingSocialUploadRef.current = null;
+                                                                cameraRollInputRef.current?.click();
+                                                                return;
+                                                            }
+                                                            if (item.id === 'community') {
+                                                                (async () => {
+                                                                    const res = await Swal.fire(bottomSheet({
+                                                                        title: 'Create a community',
+                                                                        message:
+                                                                            'Communities let members chat in one group space. Create a community, then invite people with the + button in the group chat.',
+                                                                        icon: 'info',
+                                                                        confirmButtonText: 'Continue',
+                                                                        cancelButtonText: 'Not now',
+                                                                        showCancelButton: true,
+                                                                    }));
+                                                                    if (res.isConfirmed) {
+                                                                        setCreateGroupOpen(true);
+                                                                    }
+                                                                })();
+                                                                return;
+                                                            }
+                                                            if (item.id === 'story') {
+                                                                pendingSocialUploadRef.current = null;
+                                                                setIsStoryMode(true);
+                                                                navigate('/clip', { state: { storyMode: true, storyAudience } });
+                                                                return;
+                                                            }
+                                                            if (item.id === 'text') {
+                                                                pendingSocialUploadRef.current = null;
+                                                                setIsStoryMode(false);
+                                                                navigate('/create/text-only');
+                                                                return;
+                                                            }
+                                                            if (item.id === 'youtube') {
+                                                                setIsStoryMode(false);
+                                                                pendingSocialUploadRef.current = 'youtube_shorts';
+                                                                cameraRollInputRef.current?.click();
+                                                                return;
+                                                            }
+                                                            if (item.id === 'tiktok') {
+                                                                setIsStoryMode(false);
+                                                                pendingSocialUploadRef.current = 'tiktok';
+                                                                cameraRollInputRef.current?.click();
+                                                                return;
+                                                            }
+                                                            if (item.id === 'instagram_reels') {
+                                                                setIsStoryMode(false);
+                                                                pendingSocialUploadRef.current = 'instagram_reels';
+                                                                cameraRollInputRef.current?.click();
+                                                                return;
+                                                            }
+                                                        }}
+                                                    >
+                                                        <div
+                                                            className={`relative rounded-full p-[3px] transition-[box-shadow,background-color] duration-300 ${
+                                                                isCentered
+                                                                    ? 'shadow-[0_0_0_1px_rgba(246,226,122,0.9),0_0_26px_rgba(212,175,55,0.75),0_0_54px_rgba(212,175,55,0.5),0_0_92px_rgba(192,198,205,0.35)]'
+                                                                    : 'shadow-none'
+                                                            }`}
+                                                            style={{
+                                                                background: isCentered
+                                                                    ? 'linear-gradient(135deg, #f5f6f8 0%, #d7dce2 26%, #c0c6cd 52%, #f0f2f5 78%, #d4af37 100%)'
+                                                                    : 'rgba(255,255,255,0.75)'
+                                                            }}
+                                                        >
+                                                            {(item.id === 'youtube' || item.id === 'tiktok' || item.id === 'instagram_reels') && (
+                                                                <span
+                                                                    className="absolute -right-1 -top-1 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white text-black shadow-lg ring-2 ring-black/50"
+                                                                    title="Upload from your gallery"
+                                                                    aria-hidden
+                                                                >
+                                                                    <FiUpload className="h-4 w-4" strokeWidth={2.25} />
+                                                                </span>
+                                                            )}
+                                                            <div
+                                                                className={`${isCentered ? 'h-[76px] w-[76px]' : 'h-[48px] w-[48px]'} flex items-center justify-center rounded-full bg-black transition-[width,height,box-shadow] duration-300 ${
+                                                                    isCentered
+                                                                        ? 'shadow-[0_0_22px_rgba(192,198,205,0.55),inset_0_0_0_1px_rgba(240,242,245,0.55)]'
+                                                                        : ''
+                                                                }`}
+                                                            >
+                                                                {item.icon === 'community' && <FiUsers className={isCentered ? 'h-8 w-8 text-[#eef1f4]' : 'h-6 w-6 text-white'} />}
+                                                                {item.icon === 'type' && <FiType className={isCentered ? 'h-8 w-8 text-[#eef1f4]' : 'h-6 w-6 text-white'} />}
+                                                                {item.icon === 'gallery' && <FiUpload className={isCentered ? 'h-8 w-8 text-[#eef1f4]' : 'h-6 w-6 text-white'} />}
+                                                                {item.icon === 'story' && <FiCamera className={isCentered ? 'h-8 w-8 text-[#eef1f4]' : 'h-6 w-6 text-white'} />}
+                                                                {item.icon === 'youtube' && <YoutubeShortsMark className={isCentered ? 'h-9 w-9 text-[#eef1f4]' : 'h-6 w-6 text-white'} />}
+                                                                {item.icon === 'tiktok' && <TikTokMark className={isCentered ? 'h-9 w-9 text-[#eef1f4]' : 'h-6 w-6 text-white'} />}
+                                                                {item.icon === 'reels' && <ReelsMark className={isCentered ? 'h-9 w-9 text-[#eef1f4]' : 'h-6 w-6 text-white'} />}
+                                                            </div>
+                                                        </div>
+                                                        <span
+                                                            className={`max-w-[220px] text-center text-[13px] font-semibold leading-tight text-white ${isCentered ? 'opacity-100' : 'opacity-70'}`}
+                                                        >
+                                                            {item.title}
+                                                            {(item.id === 'youtube' || item.id === 'tiktok' || item.id === 'instagram_reels') && (
+                                                                <span className="mt-0.5 block text-[10px] font-medium text-white/65">Upload for this format</span>
+                                                            )}
+                                                        </span>
+                                                    </button>
+                                                </div>
+                                            );
+                                        })}
+                                        <div className="min-h-[28vh] shrink-0" aria-hidden />
+                                    </div>
+                                </div>
+                                <p
+                                    className="shrink-0 px-4 pb-4 text-center text-[11px] text-white/55"
+                                    style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0) + 0.75rem)' }}
+                                >
+                                    Scroll to choose · tap the highlighted option
+                                </p>
+                            </div>
+                        )}
+                        <CreateGroupModal
+                            isOpen={createGroupOpen}
+                            onClose={() => setCreateGroupOpen(false)}
+                            onCreated={(g) => {
+                                setCreateGroupOpen(false);
+                                navigate(`/messages/group/${encodeURIComponent(g.id)}`);
+                                void Swal.fire(bottomSheet({
+                                    title: 'Community created',
+                                    message: `You are in "${g.name}". Use + in the header to invite members.`,
+                                    icon: 'success',
+                                    confirmButtonText: 'Open chat',
+                                }));
+                            }}
+                        />
                     </>
                 ) : (
                     <div
-                        className="relative w-full h-full flex items-center justify-center"
+                        className="relative flex h-full min-h-0 w-full flex-1 items-center justify-center"
                         onMouseEnter={() => {
                             setShowControls(true);
                             if (controlsTimeoutRef.current) {
@@ -1922,7 +2049,7 @@ export default function InstantCreatePage() {
             </div>
 
             {/* Record Button */}
-            {!previewUrl && (
+            {!previewUrl && !showCreateModePicker && (
                 <div className="absolute bottom-28 left-0 right-0 z-50 flex flex-col items-center justify-center gap-3">
                     {/* Main record button */}
                     {!recording && countdown === null ? (
@@ -1935,7 +2062,7 @@ export default function InstantCreatePage() {
                                 const t3 = setTimeout(() => { setCountdown(null); startRecording(); }, 3000);
                             }}
                             className="w-20 h-20 rounded-full bg-gradient-to-br from-neutral-200 to-neutral-500 border-4 border-white shadow-2xl flex items-center justify-center hover:scale-105 transition-all duration-300 active:scale-95"
-                            aria-label={recordingMode === 'photo' ? 'Take photo' : 'Record video'}
+                            aria-label="Record video"
                         >
                             <FiCircle className="w-10 h-10 text-black" fill="currentColor" />
                         </button>
@@ -2562,13 +2689,7 @@ export default function InstantCreatePage() {
 
                                 tempVideo.onloadedmetadata = () => {
                                     const dur = tempVideo.duration && isFinite(tempVideo.duration) ? tempVideo.duration : 5;
-                                    if (dur > MAX_VIDEO_SECONDS) {
-                                        Swal.fire(bottomSheet({
-                                            title: 'Video Too Long',
-                                            message: `Video "${file.name}" is ${Math.round(dur)}s. Maximum is ${MAX_VIDEO_SECONDS}s. It will be trimmed in the editor.`,
-                                            icon: 'alert',
-                                        }));
-                                    }
+                                    // Cap stored duration for UI/limits; do not block import or show a scary alert (full file is kept; no trim step here).
                                     finalize(Math.min(dur, MAX_VIDEO_SECONDS));
                                 };
 
@@ -2619,11 +2740,14 @@ export default function InstantCreatePage() {
                     setGalleryPreviewMedia(galleryItems);
 
                     const firstItem = galleryItems[0];
+                    const socialUploadTarget = pendingSocialUploadRef.current;
+                    pendingSocialUploadRef.current = null;
                     navigate('/create/gallery-preview', {
                         state: {
                             mediaUrl: undefined,
                             mediaType: firstItem.mediaType,
                             videoDuration: firstItem.videoDuration,
+                            socialUploadTarget: socialUploadTarget ?? undefined,
                         },
                     });
 
@@ -2635,7 +2759,7 @@ export default function InstantCreatePage() {
             />
 
             {/* Left Action Rail - Layout Options or Green Screen Options */}
-            {!previewUrl && (
+            {!previewUrl && !showCreateModePicker && (
                 <>
                     {showLayoutOptions ? (
                         /* Layout Options */

@@ -56,9 +56,9 @@ export default function Avatar({
         ? (e: React.MouseEvent<HTMLButtonElement>) => onClick(e)
         : undefined;
 
-    // Match Inbox / Notifications stories row: `bg-gradient-to-tr from-teal-400 via-sky-500 to-fuchsia-500` + black inner gap
+    // Gold + silver metallic palette for "has story" ring.
     const storyRingStyle = {
-        background: 'linear-gradient(to top right, #2dd4bf, #0ea5e9, #d946ef)',
+        background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 22%, #f4f4f4 44%, #bfc5cc 66%, #ffe8a3 82%, #d4af37 100%)',
     };
 
     const inner = hasStory ? (

@@ -269,7 +269,9 @@ export default function App() {
   const isLoginPage = loc.pathname === '/login';
   const isClipPage = loc.pathname === '/clip';
   const isFeedPage = loc.pathname === '/feed';
-  const isFullViewportPage = isLoginPage || isClipPage; // No scroll, no bottom nav
+  const isCreateFullscreen =
+    loc.pathname === '/create/instant' || loc.pathname === '/create/gallery-preview';
+  const isFullViewportPage = isLoginPage || isClipPage || isCreateFullscreen; // No scroll, no bottom nav
 
   // Feed uses an inner scroll area; lock document scroll so iOS rubber-band doesn’t shift fixed chrome
   React.useEffect(() => {
@@ -308,6 +310,8 @@ export default function App() {
           && loc.pathname !== '/search'
           && !loc.pathname.startsWith('/user/')
           && !loc.pathname.startsWith('/create/text-only')
+          && loc.pathname !== '/create/instant'
+          && loc.pathname !== '/create/gallery-preview'
           && <TopBar activeTab={currentFilter} onLocationChange={setCustomLocation} />}
         <div
           className={
@@ -364,22 +368,24 @@ function BoostPromoteBadge({ size = 'sm', active }: { size?: 'sm' | 'lg'; active
       aria-hidden
     >
       <span
-        className={`relative z-[1] flex shrink-0 items-center justify-center rounded-full border-2 border-white bg-[#FE2C55] ${
+        className={`relative z-[1] flex shrink-0 items-center justify-center rounded-full border-2 border-white ${
           isLg
-            ? 'h-[4.5rem] w-[4.5rem] shadow-[0_8px_36px_rgba(254,44,85,0.55)]'
-            : 'h-7 w-7 shadow-[0_2px_8px_rgba(254,44,85,0.45)]'
+            ? 'h-[4.5rem] w-[4.5rem] shadow-[0_8px_36px_rgba(212,175,55,0.55)]'
+            : 'h-7 w-7 shadow-[0_2px_8px_rgba(212,175,55,0.45)]'
         }`}
+        style={{ background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 24%, #f4f4f4 48%, #bfc5cc 72%, #ffe8a3 100%)' }}
       >
-        <LuFlame className="text-white" size={isLg ? 34 : 16} strokeWidth={isLg ? 2.2 : 2.4} aria-hidden />
+        <LuFlame className="text-[#111111]" size={isLg ? 34 : 16} strokeWidth={isLg ? 2.2 : 2.4} aria-hidden />
       </span>
       <span
-        className={`relative z-[2] flex shrink-0 items-center justify-center rounded-full border-2 border-white bg-[#FE2C55] ${
+        className={`relative z-[2] flex shrink-0 items-center justify-center rounded-full border-2 border-white ${
           isLg
-            ? '-mt-4 h-10 w-10 shadow-[0_4px_20px_rgba(254,44,85,0.45)]'
+            ? '-mt-4 h-10 w-10 shadow-[0_4px_20px_rgba(191,197,204,0.45)]'
             : '-mt-2 h-4 w-4'
         }`}
+        style={{ background: 'linear-gradient(135deg, #f4f4f4 0%, #d5d9de 45%, #bfc5cc 100%)' }}
       >
-        <LuPlus className="text-white" size={isLg ? 20 : 10} strokeWidth={3} aria-hidden />
+        <LuPlus className="text-[#111111]" size={isLg ? 20 : 10} strokeWidth={3} aria-hidden />
       </span>
     </span>
   );
@@ -1087,6 +1093,15 @@ function PostHeader({
   }, [isFollowingThisUser, authorFollowsYou, post.userHandle]);
   const isMutualFollow = isFollowingThisUser && (authorFollowsYou || followsMeFromApi === true);
 
+  const socialSourceLabel =
+    post.socialFormat === 'youtube_shorts'
+      ? 'YouTube Shorts'
+      : post.socialFormat === 'tiktok'
+        ? 'TikTok'
+        : post.socialFormat === 'instagram_reels'
+          ? 'Instagram Reels'
+          : null;
+
   // Text colors based on whether header is overlaid on media
   const textColorClass = isOverlaid
     ? "text-white drop-shadow-md"
@@ -1208,6 +1223,17 @@ function PostHeader({
                   />
                 </span>
               </button>
+              {socialSourceLabel ? (
+                <span
+                  className={`inline-flex self-start text-[10px] font-semibold tracking-tight rounded-md px-1.5 py-0.5 mt-0.5 ${
+                    isOverlaid
+                      ? 'bg-white/15 text-white/95 border border-white/25'
+                      : 'bg-gray-100 dark:bg-white/10 text-gray-700 dark:text-gray-200 border border-gray-200/80 dark:border-white/15'
+                  }`}
+                >
+                  {socialSourceLabel}
+                </span>
+              ) : null}
             </div>
             <div className="flex flex-col items-end shrink-0 gap-0.5 pt-0.5">
               {metadataItems.length > 0 && (() => {
@@ -1471,6 +1497,17 @@ function PostHeader({
                 />
               </h3>
             </button>
+            {socialSourceLabel ? (
+              <span
+                className={`inline-flex self-start text-[10px] font-semibold tracking-tight rounded-md px-1.5 py-0.5 mt-0.5 ${
+                  isOverlaid
+                    ? 'bg-white/15 text-white/95 border border-white/25'
+                    : 'bg-gray-100 dark:bg-white/10 text-gray-700 dark:text-gray-200 border border-gray-200/80 dark:border-white/15'
+                }`}
+              >
+                {socialSourceLabel}
+              </span>
+            ) : null}
           </div>
         </div>
         <div className="relative z-10 flex flex-col items-end gap-0.5 flex-shrink-0">
@@ -4372,8 +4409,11 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         {/* Boost icon corner (boost feed tile mode) */}
         {showBoostIcon && isTileBoostMode && (
           <div className="absolute top-3 right-3 z-30 pointer-events-none">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-white bg-[#FE2C55] shadow-[0_6px_18px_rgba(254,44,85,0.45)]">
-              <LuFlame className="text-white" size={22} strokeWidth={2.4} aria-hidden />
+            <div
+              className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-white shadow-[0_6px_18px_rgba(212,175,55,0.45)]"
+              style={{ background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 24%, #f4f4f4 48%, #bfc5cc 72%, #ffe8a3 100%)' }}
+            >
+              <LuFlame className="text-[#111111]" size={22} strokeWidth={2.4} aria-hidden />
             </div>
           </div>
         )}

@@ -33,6 +33,7 @@ class Post extends Model
         'location_label',
         'venue',
         'landmark',
+        'social_format',
         'tags',
         'likes_count',
         'views_count',

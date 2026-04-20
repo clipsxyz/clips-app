@@ -1,9 +1,8 @@
 /**
- * Gallery upload preview: top = media preview, bottom = Swal-style pull-up card
- * with Filters | Stickers | Save to drafts | Post. No music, no trim/edits.
+ * Gallery upload preview: media in a flex-grown region, caption/tools in a bottom panel
+ * (same column, no overlap). Filters | Stickers | Save to drafts | Post.
  */
-import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useCallback, useMemo, useRef, useState, useEffect, useLayoutEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import { FiFilter, FiSmile, FiBookmark, FiSend, FiArrowLeft, FiUser, FiLayers, FiPlus, FiX, FiType, FiVolume2, FiVolumeX } from 'react-icons/fi';
@@ -18,13 +17,34 @@ import StickerOverlayComponent from '../components/StickerOverlay';
 import UserTaggingModal from '../components/UserTaggingModal';
 import { getStickers, STICKER_CATEGORIES } from '../api/stickers';
 import { getGalleryPreviewMedia, clearGalleryPreviewMedia } from '../utils/galleryPreviewCache';
-import { motion } from 'framer-motion';
 import { showUploadOverlay } from '../utils/uploadOverlay';
 
 const FILTER_NAMES = ['None', 'B&W', 'Sepia', 'Vivid', 'Cool', 'Vignette', 'Beauty'];
 const CAROUSEL_MAX = 10;
 
+/** Same gold + silver palette as `Avatar` story ring. */
+const PROFILE_STORY_RING_GRADIENT = 'linear-gradient(135deg, #f6e27a 0%, #d4af37 22%, #f4f4f4 44%, #bfc5cc 66%, #ffe8a3 82%, #d4af37 100%)';
+
 type CarouselItem = { id: string; url: string; type: 'image' | 'video'; duration: number };
+
+/** Read module cache once per mount so the first paint already has blob URLs (effect-only hydration stayed black until a later interaction). */
+function readModuleCacheSeed(): { items: CarouselItem[]; revokeUrls: string[] } | null {
+    const cached = getGalleryPreviewMedia();
+    if (!cached?.length) return null;
+    const revokeUrls: string[] = [];
+    const t = Date.now();
+    const items: CarouselItem[] = cached.map((item, index) => {
+        const url = URL.createObjectURL(item.blob);
+        revokeUrls.push(url);
+        return {
+            id: `cache-${t}-${index}`,
+            url,
+            type: item.mediaType,
+            duration: item.videoDuration || (item.mediaType === 'image' ? 3 : 0),
+        };
+    });
+    return { items, revokeUrls };
+}
 
 function getFilterStyle(filterName: string, brightness: number, contrast: number, saturation: number, hue: number): React.CSSProperties {
     let baseFilter = '';
@@ -67,57 +87,55 @@ export default function GalleryPreviewPage() {
         draftVideoDuration?: number;
         draftId?: string;
         draftMediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>;
+        /** Set when uploading from Create → Shorts / TikTok / Reels picker */
+        socialUploadTarget?: 'youtube_shorts' | 'tiktok' | 'instagram_reels';
     } | null) || {};
 
+    const socialUploadTarget = state.socialUploadTarget;
+
     const isFromDraft = !!(state.fromDraft && state.draftMediaUrl);
-    const [resolvedMediaUrl, setResolvedMediaUrl] = useState(isFromDraft ? state.draftMediaUrl! : (state.mediaUrl ?? ''));
-    const [resolvedMediaType, setResolvedMediaType] = useState<'image' | 'video'>(
-        isFromDraft ? (state.draftMediaType ?? 'image') : (state.mediaType ?? 'video')
-    );
-    const [resolvedVideoDuration, setResolvedVideoDuration] = useState(
-        state.draftVideoDuration ?? state.videoDuration ?? 0
-    );
+    const moduleSeed = useMemo(() => readModuleCacheSeed(), []);
+    const blobUrlsToRevokeRef = useRef<string[]>(moduleSeed?.revokeUrls ?? []);
+
+    const [resolvedMediaUrl, setResolvedMediaUrl] = useState(() => {
+        if (isFromDraft) return state.draftMediaUrl!;
+        if (state.mediaUrl) return state.mediaUrl;
+        return moduleSeed?.items[0]?.url ?? '';
+    });
+    const [resolvedMediaType, setResolvedMediaType] = useState<'image' | 'video'>(() => {
+        if (isFromDraft) return state.draftMediaType ?? 'image';
+        if (moduleSeed?.items[0]) return moduleSeed.items[0].type;
+        return state.mediaType ?? 'video';
+    });
+    const [resolvedVideoDuration, setResolvedVideoDuration] = useState(() => {
+        if (isFromDraft) return state.draftVideoDuration ?? state.videoDuration ?? 0;
+        if (moduleSeed?.items[0]) return moduleSeed.items[0].duration;
+        return state.videoDuration ?? 0;
+    });
     const [hasCheckedCache, setHasCheckedCache] = useState(false);
-    const blobUrlsToRevokeRef = useRef<string[]>([]);
 
-    useEffect(() => {
-        const cached = getGalleryPreviewMedia();
-        if (cached && cached.length > 0) {
-            const urls: string[] = [];
-            const initialItems: CarouselItem[] = cached.map((item, index) => {
-                const url = URL.createObjectURL(item.blob);
-                urls.push(url);
-                return {
-                    id: `item-${Date.now()}-${index}-${Math.random()}`,
-                    url,
-                    type: item.mediaType,
-                    duration: item.videoDuration || (item.mediaType === 'image' ? 3 : 0),
-                };
-            });
-
-            blobUrlsToRevokeRef.current = urls;
-
-            // Seed carousel with cached items (up to CAROUSEL_MAX handled in cache)
-            setCarouselItems(initialItems);
-            // Also seed resolved media for preview fallbacks
-            const first = initialItems[0];
-            setResolvedMediaUrl(first.url);
-            setResolvedMediaType(first.type);
-            setResolvedVideoDuration(first.duration);
-
-            clearGalleryPreviewMedia();
-        }
+    useLayoutEffect(() => {
         setHasCheckedCache(true);
         return () => {
-            if (blobUrlsToRevokeRef.current.length > 0) {
-                blobUrlsToRevokeRef.current.forEach((url) => URL.revokeObjectURL(url));
-                blobUrlsToRevokeRef.current = [];
-            }
-            clearGalleryPreviewMedia();
+            blobUrlsToRevokeRef.current.forEach((url) => URL.revokeObjectURL(url));
+            blobUrlsToRevokeRef.current = [];
         };
     }, []);
 
-    const [carouselItems, setCarouselItems] = useState<CarouselItem[]>([]);
+    useLayoutEffect(() => {
+        const html = document.documentElement;
+        const body = document.body;
+        const prevHtml = html.style.overflow;
+        const prevBody = body.style.overflow;
+        html.style.overflow = 'hidden';
+        body.style.overflow = 'hidden';
+        return () => {
+            html.style.overflow = prevHtml;
+            body.style.overflow = prevBody;
+        };
+    }, []);
+
+    const [carouselItems, setCarouselItems] = useState<CarouselItem[]>(() => moduleSeed?.items ?? []);
     const [currentCarouselIndex, setCurrentCarouselIndex] = useState(0);
     const carouselInitializedRef = useRef(false);
 
@@ -178,6 +196,9 @@ export default function GalleryPreviewPage() {
     const [isUploading, setIsUploading] = useState(false);
     const [isSavingDraft, setIsSavingDraft] = useState(false);
     const [cardBodyExpanded, setCardBodyExpanded] = useState(false);
+    /** Pixel offset from viewport bottom so media sits above the bottom sheet (sheet is z-stacked on top). */
+    const [previewBottomInset, setPreviewBottomInset] = useState(148);
+    const bottomSheetRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
     const videoRef = useRef<HTMLVideoElement>(null);
@@ -265,6 +286,7 @@ export default function GalleryPreviewPage() {
 
     useEffect(() => {
         if (hasCheckedCache && !mediaUrl) {
+            clearGalleryPreviewMedia();
             navigate('/create/instant', { replace: true });
         }
     }, [hasCheckedCache, mediaUrl, navigate]);
@@ -280,7 +302,7 @@ export default function GalleryPreviewPage() {
             ro.observe(containerRef.current);
             return () => ro.disconnect();
         }
-    }, [mediaUrl]);
+    }, [mediaUrl, cardBodyExpanded]);
 
     // Keep muted state in sync with video element
     useEffect(() => {
@@ -509,6 +531,7 @@ export default function GalleryPreviewPage() {
                 icon: 'success',
                 confirmButtonText: 'Done',
             }));
+            clearGalleryPreviewMedia();
             navigate('/feed');
         } catch (e) {
             console.error(e);
@@ -617,8 +640,10 @@ export default function GalleryPreviewPage() {
                 undefined, // editTimeline
                 undefined, // reserved optional slot
                 venue.trim() || undefined,
-                landmark.trim() || undefined
+                landmark.trim() || undefined,
+                socialUploadTarget
             );
+            clearGalleryPreviewMedia();
             showToast('Post created successfully!');
             window.dispatchEvent(new CustomEvent('postCreated'));
             if (overlay) {
@@ -633,29 +658,41 @@ export default function GalleryPreviewPage() {
         } finally {
             setIsUploading(false);
         }
-    }, [user, mediaUrl, mediaType, carouselItems, stickers, storyLocation, venue, landmark, taggedUsers, navigate, videoFrameDataUrl]);
-
-    if (hasCheckedCache && !mediaUrl) return null;
+    }, [user, mediaUrl, mediaType, carouselItems, stickers, storyLocation, venue, landmark, taggedUsers, navigate, videoFrameDataUrl, socialUploadTarget]);
 
     const content = (
         <div
-            className="fixed inset-0 bg-black w-full"
-            style={{
-                zIndex: 99999,
-                width: '100vw',
-                left: 0,
-                right: 0,
-                minHeight: '100dvh',
-            }}
+            className="fixed inset-0 z-[100] flex h-[100dvh] max-h-[100dvh] w-full min-h-0 flex-col overflow-hidden bg-black"
         >
-            {/* Full-screen preview - fills viewport */}
+            <div
+                className="pointer-events-none absolute left-0 top-0 z-0 h-[20vh] w-[20vw] min-h-[120px] min-w-[120px] max-h-[320px] max-w-[320px]"
+                style={{ background: PROFILE_STORY_RING_GRADIENT, opacity: 0.38, maskImage: 'radial-gradient(ellipse 90% 90% at 0% 0%, black 38%, transparent 72%)', WebkitMaskImage: 'radial-gradient(ellipse 90% 90% at 0% 0%, black 38%, transparent 72%)' }}
+                aria-hidden
+            />
+            <div
+                className="pointer-events-none absolute bottom-0 right-0 z-0 h-[20vh] w-[20vw] min-h-[120px] min-w-[120px] max-h-[320px] max-w-[320px]"
+                style={{ background: PROFILE_STORY_RING_GRADIENT, opacity: 0.38, maskImage: 'radial-gradient(ellipse 90% 90% at 100% 100%, black 38%, transparent 72%)', WebkitMaskImage: 'radial-gradient(ellipse 90% 90% at 100% 100%, black 38%, transparent 72%)' }}
+                aria-hidden
+            />
+            {/* Same pattern as Instant Create: flex column inside route (no portal). Preview must keep min-height or mobile collapses it to black until scroll. */}
+            <div className="relative z-10 flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
+            <div
+                className={`relative w-full min-w-0 overflow-hidden bg-black ${
+                    cardBodyExpanded
+                        ? 'h-[45dvh] max-h-[45dvh] shrink-0'
+                        : 'min-h-[52vh] flex-1'
+                }`}
+            >
             <section
                 aria-label="Preview"
-                className="absolute inset-0 bg-black"
+                className="absolute inset-0 min-h-0 bg-black"
             >
                 <div className="absolute top-0 left-0 right-0 z-10 p-4 flex items-center justify-between">
                     <button
-                        onClick={() => navigate('/create/instant')}
+                        onClick={() => {
+                            clearGalleryPreviewMedia();
+                            navigate('/create/instant');
+                        }}
                         className="p-2 bg-black/50 backdrop-blur-sm text-white rounded-full hover:bg-black/70"
                         aria-label="Back"
                     >
@@ -713,15 +750,33 @@ export default function GalleryPreviewPage() {
                         </button>
                     </div>
                 </div>
-                <motion.div
+                {socialUploadTarget && (
+                    <div className="absolute top-[4.25rem] left-0 right-0 z-10 px-4 flex justify-center pointer-events-none">
+                        <p className="text-center text-[11px] leading-snug text-white/90 bg-black/55 backdrop-blur-md rounded-full px-3 py-2 max-w-sm border border-white/15 shadow-lg">
+                            {socialUploadTarget === 'youtube_shorts' && (
+                                <>
+                                    You&rsquo;re uploading to Gazetteer &mdash; <strong className="font-semibold text-white">location</strong> is what surfaces your post to people nearby.
+                                    When you&rsquo;re ready, share this clip to <strong className="font-semibold text-white">YouTube Shorts</strong> from your device the same way.
+                                </>
+                            )}
+                            {socialUploadTarget === 'tiktok' && (
+                                <>
+                                    You&rsquo;re uploading to Gazetteer &mdash; <strong className="font-semibold text-white">location</strong> is what surfaces your post to people nearby.
+                                    When you&rsquo;re ready, share this clip to <strong className="font-semibold text-white">TikTok</strong> from your device the same way.
+                                </>
+                            )}
+                            {socialUploadTarget === 'instagram_reels' && (
+                                <>
+                                    You&rsquo;re uploading to Gazetteer &mdash; <strong className="font-semibold text-white">location</strong> is what surfaces your post to people nearby.
+                                    When you&rsquo;re ready, share this clip to <strong className="font-semibold text-white">Instagram</strong> from your device the same way.
+                                </>
+                            )}
+                        </p>
+                    </div>
+                )}
+                <div
                     ref={containerRef}
-                    layout
-                    transition={{ duration: 0.35, ease: 'easeInOut' }}
-                    className="absolute left-0 right-0 flex items-center justify-center bg-black overflow-hidden"
-                    style={{
-                        top: 0,
-                        height: cardBodyExpanded ? '50vh' : '100vh',
-                    }}
+                    className="absolute inset-0 flex min-h-0 items-center justify-center bg-black overflow-hidden"
                     onClick={(e) => {
                         if (e.target === e.currentTarget || (e.target as HTMLElement).tagName === 'VIDEO' || (e.target as HTMLElement).tagName === 'IMG')
                             setSelectedStickerId(null);
@@ -729,24 +784,20 @@ export default function GalleryPreviewPage() {
                 >
                     {mediaType === 'video'
                         ? (mediaUrl && mediaUrl.trim()) ? (
-                            <>
-                                <motion.video
-                                    layoutId="gallery-media"
-                                    ref={videoRef}
-                                    src={mediaUrl}
-                                    playsInline
-                                    loop
-                                    autoPlay
-                                    preload="auto"
-                                    muted={isMuted}
-                                    className="absolute inset-0 w-full h-full object-contain"
-                                    style={filterStyle}
-                                />
-                            </>
+                            <video
+                                ref={videoRef}
+                                src={mediaUrl}
+                                playsInline
+                                loop
+                                autoPlay
+                                preload="auto"
+                                muted={isMuted}
+                                className="absolute inset-0 w-full h-full object-contain"
+                                style={filterStyle}
+                            />
                         ) : null
                         : (mediaUrl && mediaUrl.trim()) ? (
-                            <motion.img
-                                layoutId="gallery-media"
+                            <img
                                 src={mediaUrl}
                                 alt="Preview"
                                 className="absolute inset-0 w-full h-full object-contain"
@@ -766,12 +817,16 @@ export default function GalleryPreviewPage() {
                             containerHeight={containerSize.height || 400}
                         />
                     ))}
-                </motion.div>
+                </div>
             </section>
+            </div>
 
-            {/* Card overlay - black card, white icons, grayscale accent borders on inputs */}
             <div
-                className="absolute bottom-0 left-0 right-0 z-20 flex flex-col max-h-[85dvh] rounded-t-[24px] overflow-hidden overflow-y-auto bg-black"
+                className={`flex flex-col rounded-t-[24px] bg-black ${
+                    cardBodyExpanded
+                        ? 'min-h-0 flex-1 overflow-y-auto'
+                        : 'max-h-[min(48vh,28rem)] shrink-0 overflow-x-hidden overflow-y-auto'
+                }`}
                 style={{
                     paddingBottom: 'env(safe-area-inset-bottom, 0)',
                     borderWidth: '1.5px 0 0 0',
@@ -780,10 +835,10 @@ export default function GalleryPreviewPage() {
                 }}
             >
                 <div className="relative">
-                    {/* Scrim: makes picker area feel like it glides over image */}
+                    {/* Light scrim inside sheet only (avoid overlapping media above; preview is a flex sibling, not under the sheet). */}
                     <div
                         aria-hidden
-                        className="pointer-events-none absolute inset-x-0 -top-16 h-24 bg-gradient-to-t from-black/72 via-black/38 to-transparent"
+                        className="pointer-events-none absolute inset-x-0 top-0 h-14 bg-gradient-to-b from-black/45 to-transparent rounded-t-[24px]"
                     />
                     <div
                         role="button"
@@ -892,7 +947,7 @@ export default function GalleryPreviewPage() {
                 </div>
                 {/* Card body - collapses so header icons stay reachable */}
                 <div
-                    className="overflow-hidden transition-[max-height] duration-300 ease-out overflow-y-auto px-4 py-4"
+                    className="min-h-0 overflow-hidden transition-[max-height] duration-300 ease-out overflow-y-auto px-4 py-4"
                     style={{ maxHeight: cardBodyExpanded ? '40vh' : 0 }}
                 >
                     {cardTab === 'caption' && (
@@ -1145,6 +1200,7 @@ export default function GalleryPreviewPage() {
                     )}
                 </div>
             </div>
+            </div>
             <UserTaggingModal
                 isOpen={showTagUserModal}
                 onClose={() => setShowTagUserModal(false)}
@@ -1154,5 +1210,5 @@ export default function GalleryPreviewPage() {
         </div>
     );
 
-    return createPortal(content, document.body);
+    return content;
 }
