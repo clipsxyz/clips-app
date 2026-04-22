@@ -235,10 +235,11 @@ export default function ScenesModal({
     const [showCommentEmojiPicker, setShowCommentEmojiPicker] = React.useState(false);
     const [sheetDragY, setSheetDragY] = React.useState(0);
     const [isDragging, setIsDragging] = React.useState(false);
-    // Height of the comments sheet. Keep it to about half the screen so video stays visible above.
-    const [sheetHeight, setSheetHeight] = React.useState('56dvh'); // shrinks when keyboard opens
     const sheetRef = React.useRef<HTMLDivElement>(null);
     const dragStartY = React.useRef<number>(0);
+    const dragLastY = React.useRef<number>(0);
+    const dragLastTs = React.useRef<number>(0);
+    const dragVelocityY = React.useRef<number>(0);
     const [tapPosition, setTapPosition] = React.useState<{ x: number; y: number } | null>(null);
     const videoRef = React.useRef<HTMLVideoElement>(null);
     const lastTapRef = React.useRef<number>(0);
@@ -275,8 +276,22 @@ export default function ScenesModal({
     const [carouselTouchDelta, setCarouselTouchDelta] = React.useState(0);
     const [carouselAnimating, setCarouselAnimating] = React.useState(false);
     const vh = typeof window !== 'undefined' ? window.innerHeight : 768;
-    const commentsPreviewHeightPx = Math.round(vh * 0.48);
-    const commentsPreviewHeight = `${commentsPreviewHeightPx}px`;
+    // Match TikTok-like comments-open mini player sizing.
+    const commentsPreviewHeightPx = Math.round(vh * 0.40);
+    const commentsSheetTopPx = Math.min(
+        vh,
+        Math.max(0, commentsPreviewHeightPx + (isCaptionExpanded ? Math.max(0, sheetDragY) : 0))
+    );
+    const scenesViewportHeightPx = isCaptionExpanded ? commentsSheetTopPx : vh;
+    const scenesCommentsEase = 'cubic-bezier(0.16, 1, 0.3, 1)';
+    const commentsSheetRangePx = Math.max(1, vh - commentsPreviewHeightPx);
+    const commentsSheetProgress = isCaptionExpanded
+        ? Math.max(0, Math.min(1, (vh - commentsSheetTopPx) / commentsSheetRangePx))
+        : 0;
+    const commentsBackdropOpacity = 0.18 + (0.42 * commentsSheetProgress);
+    const commentsCloseDistancePx = 88;
+    const commentsCloseFlickVelocity = 0.62;
+    const commentsFlickMinDragPx = 18;
 
     // Determine if we have multiple media items (carousel)
     const items: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }> = post.mediaItems && post.mediaItems.length > 0
@@ -323,15 +338,16 @@ export default function ScenesModal({
         if (isPaused) setScenesBottomChromeVisible(true);
     }, [isPaused]);
 
-    // Metadata carousel (location → venue → timestamp), same as newsfeed cards
+    // Metadata carousel (feed → location → venue → timestamp), same as newsfeed cards
     const scenesMetadataItems = React.useMemo(() => {
-        const out: Array<{ label: string; type: 'location' | 'venue' | 'timestamp' }> = [];
+        const out: Array<{ label: string; type: 'feed' | 'location' | 'venue' | 'timestamp' }> = [];
+        if (feedLabel) out.push({ label: feedLabel.toUpperCase(), type: 'feed' });
         if (post.locationLabel && post.locationLabel !== 'Unknown Location') out.push({ label: post.locationLabel, type: 'location' });
         if (post.venue) out.push({ label: post.venue, type: 'venue' });
         const ts = post.createdAt != null ? (typeof post.createdAt === 'string' ? parseInt(post.createdAt, 10) : post.createdAt) : null;
         if (typeof ts === 'number' && !Number.isNaN(ts)) out.push({ label: timeAgo(ts), type: 'timestamp' });
         return out;
-    }, [post.locationLabel, post.venue, post.createdAt]);
+    }, [feedLabel, post.locationLabel, post.venue, post.createdAt]);
     const [scenesMetadataIndex, setScenesMetadataIndex] = React.useState(0);
     React.useEffect(() => {
         if (scenesMetadataItems.length <= 1) return;
@@ -417,28 +433,6 @@ export default function ScenesModal({
         const prev = document.body.style.overflow;
         document.body.style.overflow = 'hidden';
         return () => { document.body.style.overflow = prev; };
-    }, [isCaptionExpanded]);
-
-    // Shrink sheet when keyboard opens (Visual Viewport API) so video stays visible
-    React.useEffect(() => {
-        if (!isCaptionExpanded) return;
-        const vv = window.visualViewport;
-        if (!vv) return;
-        const update = () => {
-            const visible = vv.height;
-            const full = window.innerHeight;
-            const keyboardOpen = visible < full * 0.85;
-            // Keep comments dominant like Reels while preserving a clear top video preview.
-            const maxPx = keyboardOpen ? Math.round(visible * 0.56) : Math.round(full * 0.56);
-            setSheetHeight(`${maxPx}px`);
-        };
-        update();
-        vv.addEventListener('resize', update);
-        vv.addEventListener('scroll', update);
-        return () => {
-            vv.removeEventListener('resize', update);
-            vv.removeEventListener('scroll', update);
-        };
     }, [isCaptionExpanded]);
 
     // Reset video state when switching items
@@ -1250,7 +1244,12 @@ export default function ScenesModal({
         if (!target.closest('[data-sheet-drag-handle]')) return;
         if (target.closest('button, input, textarea')) return;
         setIsDragging(true);
-        dragStartY.current = e.touches[0].clientY;
+        const y = e.touches[0].clientY;
+        const now = performance.now();
+        dragStartY.current = y;
+        dragLastY.current = y;
+        dragLastTs.current = now;
+        dragVelocityY.current = 0;
         e.stopPropagation();
     };
 
@@ -1259,6 +1258,11 @@ export default function ScenesModal({
         e.preventDefault();
         e.stopPropagation();
         const currentY = e.touches[0].clientY;
+        const now = performance.now();
+        const dt = Math.max(1, now - dragLastTs.current);
+        dragVelocityY.current = (currentY - dragLastY.current) / dt;
+        dragLastY.current = currentY;
+        dragLastTs.current = now;
         const deltaY = currentY - dragStartY.current;
         if (deltaY > 0) {
             setSheetDragY(deltaY);
@@ -1269,11 +1273,14 @@ export default function ScenesModal({
         if (isDragging) {
             e.stopPropagation();
         }
-        if (sheetDragY > 100) {
+        const shouldCloseByDistance = sheetDragY > commentsCloseDistancePx;
+        const shouldCloseByVelocity = dragVelocityY.current > commentsCloseFlickVelocity && sheetDragY > commentsFlickMinDragPx;
+        if (shouldCloseByDistance || shouldCloseByVelocity) {
             setIsCaptionExpanded(false);
         }
         setSheetDragY(0);
         setIsDragging(false);
+        dragVelocityY.current = 0;
     };
 
     async function handleAddComment(textOrEvent?: string | React.FormEvent) {
@@ -1490,9 +1497,9 @@ export default function ScenesModal({
                             className="fixed left-0 right-0 top-0 overflow-hidden touch-none"
                             style={{
                                 touchAction: 'none',
-                                height: isCaptionExpanded ? commentsPreviewHeight : `${vh}px`,
+                                height: isCaptionExpanded ? `${commentsSheetTopPx}px` : `${vh}px`,
                                 zIndex: isCaptionExpanded ? 105 : undefined,
-                                transition: 'height 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+                                transition: isDragging ? 'none' : `height 0.64s ${scenesCommentsEase}`,
                                 transform: !isCaptionExpanded && dismissPullY > 0 ? `translateY(${dismissPullY}px)` : undefined,
                                 opacity:
                                     !isCaptionExpanded && dismissPullY > 0
@@ -1511,18 +1518,21 @@ export default function ScenesModal({
                             <div
                                 className="w-full"
                                 style={{
-                                    transform: `translate3d(0, ${(carouselIdx > 0 ? -vh : 0) + carouselTouchDelta}px, 0)`,
-                                    transition: carouselAnimating ? 'transform 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94)' : 'none',
+                                    transform: `translate3d(0, ${(carouselIdx > 0 ? -scenesViewportHeightPx : 0) + carouselTouchDelta}px, 0)`,
+                                    transformOrigin: 'top center',
+                                    transition: (carouselAnimating || isCaptionExpanded) && !isDragging
+                                        ? `transform 0.56s ${scenesCommentsEase}`
+                                        : 'none',
                                     willChange: carouselAnimating ? 'transform' : undefined,
                                     backfaceVisibility: 'hidden' as const
                                 }}
                             >
                                 {carouselPrevPost && (
-                                    <div className="w-full flex items-center justify-center bg-black" style={{ height: vh }}>
+                                    <div className="w-full flex items-center justify-center bg-black" style={{ height: scenesViewportHeightPx }}>
                                         <CarouselSlidePreview p={carouselPrevPost} />
                                     </div>
                                 )}
-                                <div className="w-full relative" style={{ height: vh }}>
+                                <div className="w-full relative" style={{ height: scenesViewportHeightPx }}>
                                     {/* Text-only posts: minimal UI – only X to close */}
                                     {(() => {
                                         const isTextOnlyPost = !post.mediaUrl && !post.mediaItems?.length && !!post.text;
@@ -1571,39 +1581,34 @@ export default function ScenesModal({
                                         </div>
                                     )}
 
-                                    {/* Top left — carousel index + feed you’re in (below progress bar) */}
+                                    {/* Top left — carousel index + metadata display */}
                                     <div className="absolute left-4 z-30 flex flex-col items-start gap-2 max-w-[min(100%,16rem)]" style={{ top: 'max(2.75rem, calc(env(safe-area-inset-top, 0px) + 1.25rem))' }}>
                                         {hasMultipleItems && (
                                             <div className="px-2 py-1 bg-black/50 text-white text-xs rounded-full">
                                                 {currentIndex + 1} / {items.length}
                                             </div>
                                         )}
-                                        {feedLabel && (
-                                            <div className="inline-flex items-center gap-1.5 rounded-full border-2 border-white bg-[linear-gradient(135deg,#f6e27a_0%,#d4af37_24%,#f4f4f4_48%,#bfc5cc_72%,#ffe8a3_100%)] shadow-[0_8px_20px_rgba(212,175,55,0.35)] px-3 py-1.5">
-                                                <FiMapPin className="w-4 h-4 flex-shrink-0 text-[#111111]" />
-                                                <span className="text-xs font-semibold uppercase tracking-wider text-[#111111]">
-                                                    {feedLabel}
-                                                </span>
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {/* Top right — white metadata chip, then close (with video ring) underneath */}
-                                    <div className="absolute right-4 z-30 flex flex-col items-end gap-2" style={{ top: 'max(2.75rem, calc(env(safe-area-inset-top, 0px) + 1.25rem))' }}>
                                         {scenesMetadataItems.length > 0 && (
-                                            <div className="flex items-center min-h-[1.5rem] overflow-visible animate-chyron-emerge origin-right">
+                                            <div className="flex items-center min-h-[1.5rem] overflow-visible animate-chyron-emerge origin-left">
                                                 <div
                                                     key={scenesMetadataIndex}
-                                                    className="flex items-center gap-1 justify-start min-w-0 max-w-[140px] rounded-lg border border-gray-200/90 bg-white px-2 py-1 shadow-md"
+                                                    className="flex items-center gap-1 justify-start min-w-0 max-w-[140px] rounded-lg border border-[#d4af37]/80 bg-[linear-gradient(135deg,#f6e27a_0%,#d4af37_24%,#f4f4f4_48%,#bfc5cc_72%,#ffe8a3_100%)] px-2 py-1 shadow-[0_8px_20px_rgba(212,175,55,0.35)]"
                                                     title={scenesMetadataItems.map((m) => m.label).join(' · ')}
                                                 >
                                                     {(() => {
                                                         const current = scenesMetadataItems[scenesMetadataIndex];
-                                                        const Icon = current.type === 'location' ? FiMapPin : current.type === 'venue' ? FiHome : FiClock;
+                                                        const Icon =
+                                                            current.type === 'feed'
+                                                                ? FiMapPin
+                                                                : current.type === 'location'
+                                                                    ? FiMapPin
+                                                                    : current.type === 'venue'
+                                                                        ? FiHome
+                                                                        : FiClock;
                                                         return (
                                                             <>
-                                                                <Icon className="w-2.5 h-2.5 flex-shrink-0 text-gray-700" />
-                                                                <span className="text-[10px] font-medium whitespace-nowrap truncate min-w-0 tracking-tight text-gray-900">
+                                                                <Icon className="w-2.5 h-2.5 flex-shrink-0 text-[#111111]" />
+                                                                <span className="text-[10px] font-medium whitespace-nowrap truncate min-w-0 tracking-tight text-[#111111]">
                                                                     {current.label}
                                                                 </span>
                                                             </>
@@ -1612,8 +1617,12 @@ export default function ScenesModal({
                                                 </div>
                                             </div>
                                         )}
-                                        <div className="relative w-10 h-10 flex items-center justify-center shrink-0">
-                                            <svg className="absolute inset-0 w-10 h-10 transform -rotate-90" viewBox="0 0 48 48">
+                                    </div>
+
+                                    {/* Top right — close (with video ring) */}
+                                    <div className="absolute right-4 z-30 flex flex-col items-end gap-2" style={{ top: 'max(2.75rem, calc(env(safe-area-inset-top, 0px) + 1.25rem))' }}>
+                                        <div className="relative w-9 h-9 flex items-center justify-center shrink-0">
+                                            <svg className="absolute inset-0 w-9 h-9 transform -rotate-90" viewBox="0 0 48 48">
                                                 <circle cx="24" cy="24" r="18" stroke="rgba(255,255,255,0.25)" strokeWidth="3" fill="none" />
                                                 <circle cx="24" cy="24" r="18" stroke="rgba(255,255,255,0.95)" strokeWidth="3" fill="none" strokeDasharray={`${2 * Math.PI * 18}`} strokeDashoffset={`${2 * Math.PI * 18 * (1 - Math.max(0, Math.min(1, videoProgress)))}`} strokeLinecap="round" />
                                             </svg>
@@ -1626,9 +1635,9 @@ export default function ScenesModal({
                                                     onClose(savedTime);
                                                 }}
                                                 aria-label="Close scenes"
-                                                className="relative z-10 p-1.5 rounded-full bg-black/40 hover:bg-black/60 text-white transition-colors"
+                                                className="relative z-10 p-1.25 rounded-full bg-black/40 hover:bg-black/60 text-white transition-colors"
                                             >
-                                                <FiX size={16} />
+                                                <FiX size={14} />
                                             </button>
                                         </div>
                                     </div>
@@ -2157,53 +2166,53 @@ export default function ScenesModal({
                                 </div>
 
                                 {/* Floating action rail (always visible) */}
-                                <div className="absolute right-3 bottom-24 sm:bottom-20 flex flex-col items-center gap-2 z-20">
-                                    <div className="flex flex-col items-center gap-1">
+                                <div className="absolute right-3 bottom-24 sm:bottom-20 flex flex-col items-center gap-1.5 z-20">
+                                    <div className="flex flex-col items-center gap-0.5">
                                         <button
                                             ref={likeButtonRef}
                                             onClick={handleLike}
                                             aria-label={liked ? 'Unlike' : 'Like'}
-                                            className="w-11 h-11 rounded-2xl border-2 border-white bg-[linear-gradient(135deg,#f6e27a_0%,#d4af37_24%,#f4f4f4_48%,#bfc5cc_72%,#ffe8a3_100%)] shadow-[0_8px_20px_rgba(212,175,55,0.35)] hover:scale-[1.02] transition-transform flex items-center justify-center"
+                                            className="w-12 h-12 rounded-[14px] border border-black/10 bg-white shadow-[0_6px_16px_rgba(0,0,0,0.26)] hover:scale-[1.02] transition-transform flex items-center justify-center"
                                         >
-                                            <FiThumbsUp className="w-5 h-5 text-[#111111]" />
+                                            <FiThumbsUp className="w-[22px] h-[22px] text-black" />
                                         </button>
-                                        <span className="text-[10px] font-semibold text-white/90">{likes}</span>
+                                        <span className="text-[11px] font-bold text-white/90">{likes}</span>
                                     </div>
 
-                                    <div className="flex flex-col items-center gap-1">
+                                    <div className="flex flex-col items-center gap-0.5">
                                         <button
                                             onClick={openCommentsSheet}
                                             aria-label="Open comments"
-                                            className="w-11 h-11 rounded-2xl border-2 border-white bg-[linear-gradient(135deg,#f6e27a_0%,#d4af37_24%,#f4f4f4_48%,#bfc5cc_72%,#ffe8a3_100%)] shadow-[0_8px_20px_rgba(212,175,55,0.35)] hover:scale-[1.02] transition-transform flex items-center justify-center"
+                                            className="w-12 h-12 rounded-[14px] border border-black/10 bg-white shadow-[0_6px_16px_rgba(0,0,0,0.26)] hover:scale-[1.02] transition-transform flex items-center justify-center"
                                         >
-                                            <FiMessageCircle className="w-5 h-5 text-[#111111]" />
+                                            <FiMessageCircle className="w-[22px] h-[22px] text-black" />
                                         </button>
-                                        <span className="text-[10px] font-semibold text-white/90">{comments}</span>
+                                        <span className="text-[11px] font-bold text-white/90">{comments}</span>
                                     </div>
 
-                                    <div className="flex flex-col items-center gap-1">
+                                    <div className="flex flex-col items-center gap-0.5">
                                         <button
                                             onClick={handleShare}
                                             aria-label="Share"
-                                            className="w-11 h-11 rounded-2xl border-2 border-white bg-[linear-gradient(135deg,#f6e27a_0%,#d4af37_24%,#f4f4f4_48%,#bfc5cc_72%,#ffe8a3_100%)] shadow-[0_8px_20px_rgba(212,175,55,0.35)] hover:scale-[1.02] transition-transform flex items-center justify-center"
+                                            className="w-12 h-12 rounded-[14px] border border-black/10 bg-white shadow-[0_6px_16px_rgba(0,0,0,0.26)] hover:scale-[1.02] transition-transform flex items-center justify-center"
                                         >
-                                            <FiShare2 className="w-5 h-5 text-[#111111]" />
+                                            <FiShare2 className="w-[22px] h-[22px] text-black" />
                                         </button>
-                                        <span className="text-[10px] font-semibold text-white/90">{shares}</span>
+                                        <span className="text-[11px] font-bold text-white/90">{shares}</span>
                                     </div>
 
-                                    <div className="flex flex-col items-center gap-1">
+                                    <div className="flex flex-col items-center gap-0.5">
                                         <button
                                             onClick={() => setSaveModalOpen(true)}
                                             aria-label="Save to collection"
-                                            className="w-11 h-11 rounded-2xl border-2 border-white bg-[linear-gradient(135deg,#f6e27a_0%,#d4af37_24%,#f4f4f4_48%,#bfc5cc_72%,#ffe8a3_100%)] shadow-[0_8px_20px_rgba(212,175,55,0.35)] hover:scale-[1.02] transition-transform flex items-center justify-center"
+                                            className="w-12 h-12 rounded-[14px] border border-black/10 bg-white shadow-[0_6px_16px_rgba(0,0,0,0.26)] hover:scale-[1.02] transition-transform flex items-center justify-center"
                                         >
-                                            <FiBookmark className={`w-5 h-5 ${isSaved ? 'text-[#7A5A00] fill-[#7A5A00]' : 'text-[#111111]'}`} />
+                                            <FiBookmark className={`w-[22px] h-[22px] ${isSaved ? 'text-black fill-black' : 'text-black'}`} />
                                         </button>
-                                        <span className="text-[10px] font-semibold text-white/90">{isSaved ? 'Saved' : 'Save'}</span>
+                                        <span className="text-[11px] font-bold text-white/90">{isSaved ? 'Saved' : 'Save'}</span>
                                     </div>
 
-                                    <div className="flex flex-col items-center gap-1">
+                                    <div className="flex flex-col items-center gap-0.5">
                                         <button
                                             onClick={(e) => {
                                                 e.stopPropagation();
@@ -2217,15 +2226,15 @@ export default function ScenesModal({
                                                         ? "Post already reclipped"
                                                         : "Reclip"
                                             }
-                                            className={`w-11 h-11 rounded-2xl border-2 border-white bg-[linear-gradient(135deg,#f6e27a_0%,#d4af37_24%,#f4f4f4_48%,#bfc5cc_72%,#ffe8a3_100%)] shadow-[0_8px_20px_rgba(212,175,55,0.35)] transition-transform flex items-center justify-center ${
+                                            className={`w-12 h-12 rounded-[14px] border border-black/10 bg-white shadow-[0_6px_16px_rgba(0,0,0,0.26)] transition-transform flex items-center justify-center ${
                                                 post.userHandle === user?.handle || reclipBusy
                                                     ? 'opacity-40 cursor-not-allowed'
                                                     : 'hover:scale-[1.02]'
                                             }`}
                                         >
-                                            <FiRepeat className={`w-5 h-5 ${userReclipped ? 'text-[#2E7D32]' : 'text-[#111111]'}`} />
+                                            <FiRepeat className={`w-[22px] h-[22px] ${userReclipped ? 'text-black' : 'text-black'}`} />
                                         </button>
-                                        <span className="text-[10px] font-semibold text-white/90">{reclips}</span>
+                                        <span className="text-[11px] font-bold text-white/90">{reclips}</span>
                                     </div>
                                 </div>
 
@@ -2284,17 +2293,17 @@ export default function ScenesModal({
                                             onClose();
                                         }}
                                         disabled={!user || post.userHandle === user?.handle}
-                                        className="w-11 h-11 rounded-2xl border-2 border-white bg-[linear-gradient(135deg,#f6e27a_0%,#d4af37_24%,#f4f4f4_48%,#bfc5cc_72%,#ffe8a3_100%)] shadow-[0_8px_20px_rgba(212,175,55,0.35)] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
+                                        className="w-12 h-12 rounded-[14px] border border-black/10 bg-white shadow-[0_6px_16px_rgba(0,0,0,0.26)] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
                                         aria-label="Send direct message"
                                     >
-                                        <FiSend className="w-5 h-5 text-[#111111]" />
+                                        <FiSend className="w-[22px] h-[22px] text-black" />
                                     </button>
                                     <button
                                         onClick={() => setMenuOpen(true)}
-                                        className="w-11 h-11 rounded-2xl border-2 border-white bg-[linear-gradient(135deg,#f6e27a_0%,#d4af37_24%,#f4f4f4_48%,#bfc5cc_72%,#ffe8a3_100%)] shadow-[0_8px_20px_rgba(212,175,55,0.35)] flex items-center justify-center"
+                                        className="w-12 h-12 rounded-[14px] border border-black/10 bg-white shadow-[0_6px_16px_rgba(0,0,0,0.26)] flex items-center justify-center"
                                         aria-label="More options"
                                     >
-                                        <FiMoreHorizontal className="w-5 h-5 text-[#111111]" />
+                                        <FiMoreHorizontal className="w-[22px] h-[22px] text-black" />
                                     </button>
                                 </div>
                             </div>
@@ -2306,9 +2315,13 @@ export default function ScenesModal({
                         <>
                             {/* Backdrop - only from 30vh down, so video stays visible at top */}
                             <div
-                                className="fixed left-0 right-0 bottom-0 z-[110] bg-black/50"
+                                className="fixed left-0 right-0 bottom-0 z-[110]"
                                 // Leave more space for the video at the top when comments sheet is open.
-                                style={{ top: commentsPreviewHeight }}
+                                style={{
+                                    top: `${commentsSheetTopPx}px`,
+                                    backgroundColor: `rgba(0, 0, 0, ${commentsBackdropOpacity})`,
+                                    transition: isDragging ? 'none' : `top 0.64s ${scenesCommentsEase}, background-color 0.32s linear`,
+                                }}
                                 onClick={closeCommentsSheet}
                             />
                             {/* Comments sheet - TikTok style: white card, fixed to viewport; only handle bar triggers drag */}
@@ -2316,11 +2329,11 @@ export default function ScenesModal({
                                 ref={sheetRef}
                                 className="fixed left-0 right-0 bottom-0 z-[120] bg-white rounded-t-2xl flex flex-col shadow-[0_-4px_24px_rgba(0,0,0,0.2)]"
                                 style={{
-                                    transform: `translateY(${Math.max(0, sheetDragY)}px)`,
-                                    top: commentsPreviewHeight,
+                                    top: `${commentsSheetTopPx}px`,
                                     bottom: 0,
-                                    height: sheetDragY > 0 ? `calc((100dvh - ${commentsPreviewHeight}) - ${sheetDragY}px)` : `calc(100dvh - ${commentsPreviewHeight})`,
-                                    paddingBottom: 'env(safe-area-inset-bottom, 0px)'
+                                    height: `calc(100dvh - ${commentsSheetTopPx}px)`,
+                                    paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+                                    transition: isDragging ? 'none' : `top 0.64s ${scenesCommentsEase}, height 0.64s ${scenesCommentsEase}`,
                                 }}
                                 onTouchStart={handleSheetTouchStart}
                                 onTouchMove={handleSheetTouchMove}
@@ -2582,7 +2595,7 @@ export default function ScenesModal({
                     )}
                                 </div>
                                 {carouselNextPost && (
-                                    <div className="w-full flex items-center justify-center bg-black" style={{ height: vh }}>
+                                    <div className="w-full flex items-center justify-center bg-black" style={{ height: scenesViewportHeightPx }}>
                                         <CarouselSlidePreview p={carouselNextPost} />
                                     </div>
                                 )}
