@@ -280,8 +280,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('messages')->group(function () {
         Route::get('/conversations', [MessageController::class, 'getConversations']);
         Route::get('/group/{groupId}', [MessageController::class, 'getGroupConversation']);
+        Route::get('/group/{groupId}/paged', [MessageController::class, 'getGroupConversationPaged']);
         Route::post('/group/{groupId}/read', [MessageController::class, 'markGroupRead']);
         Route::get('/conversation/{otherHandle}', [MessageController::class, 'getConversation']);
+        Route::get('/conversation/{otherHandle}/paged', [MessageController::class, 'getConversationPaged']);
         Route::post('/send', [MessageController::class, 'sendMessage']);
         Route::post('/conversation/{otherHandle}/read', [MessageController::class, 'markConversationRead']);
     });
@@ -301,6 +303,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Stories routes
     Route::prefix('stories')->group(function () {
         Route::get('/', [StoryController::class, 'index']);
+        Route::get('/paged', [StoryController::class, 'paged']);
         Route::get('/user/{handle}', [StoryController::class, 'getUserStories']);
         Route::post('/', [StoryController::class, 'store']);
         Route::post('/{id}/view', [StoryController::class, 'view']);

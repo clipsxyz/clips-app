@@ -13,8 +13,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import * as ImagePicker from 'react-native-image-picker';
+import ImageCropPicker from 'react-native-image-crop-picker';
 import { useAuth } from '../context/Auth';
 import { createPost } from '../api/posts';
+import { prepareMediaForPostNative } from '../utils/prepareMediaForPostNative';
 
 export default function CreateScreen({ navigation, route }: any) {
     const { user } = useAuth();
@@ -27,34 +29,71 @@ export default function CreateScreen({ navigation, route }: any) {
     const [isUploading, setIsUploading] = useState(false);
 
     const handleSelectMedia = () => {
-        ImagePicker.launchImageLibrary(
+        Alert.alert('Choose media type', 'How would you like to add media?', [
             {
-                mediaType: 'mixed',
-                quality: 0.8,
+                text: 'Photo',
+                onPress: async () => {
+                    try {
+                        const image = await ImageCropPicker.openPicker({
+                            mediaType: 'photo',
+                            cropping: true,
+                            width: 1080,
+                            height: 1350,
+                            cropperToolbarTitle: 'Adjust photo',
+                            cropperChooseText: 'Use Photo',
+                            cropperCancelText: 'Cancel',
+                            compressImageQuality: 0.9,
+                        });
+                        setSelectedMedia(image.path || null);
+                        setMediaType('image');
+                    } catch (err: any) {
+                        if (err?.code !== 'E_PICKER_CANCELLED') {
+                            console.error('Photo picker error:', err);
+                        }
+                    }
+                },
             },
-            (response) => {
-                if (response.assets && response.assets[0]) {
-                    const asset = response.assets[0];
-                    setSelectedMedia(asset.uri || null);
-                    setMediaType(asset.type?.startsWith('video') ? 'video' : 'image');
-                }
-            }
-        );
+            {
+                text: 'Video',
+                onPress: () => {
+                    ImagePicker.launchImageLibrary(
+                        {
+                            mediaType: 'video',
+                            quality: 0.8,
+                        },
+                        (response) => {
+                            if (response.assets && response.assets[0]) {
+                                const asset = response.assets[0];
+                                setSelectedMedia(asset.uri || null);
+                                setMediaType('video');
+                            }
+                        }
+                    );
+                },
+            },
+            { text: 'Cancel', style: 'cancel' },
+        ]);
     };
 
-    const handleTakePhoto = () => {
-        ImagePicker.launchCamera(
-            {
+    const handleTakePhoto = async () => {
+        try {
+            const image = await ImageCropPicker.openCamera({
                 mediaType: 'photo',
-                quality: 0.8,
-            },
-            (response) => {
-                if (response.assets && response.assets[0]) {
-                    setSelectedMedia(response.assets[0].uri || null);
-                    setMediaType('image');
-                }
+                cropping: true,
+                width: 1080,
+                height: 1350,
+                cropperToolbarTitle: 'Adjust photo',
+                cropperChooseText: 'Use Photo',
+                cropperCancelText: 'Cancel',
+                compressImageQuality: 0.9,
+            });
+            setSelectedMedia(image.path || null);
+            setMediaType('image');
+        } catch (err: any) {
+            if (err?.code !== 'E_PICKER_CANCELLED') {
+                console.error('Camera picker error:', err);
             }
-        );
+        }
     };
 
     const handlePost = async () => {
@@ -70,18 +109,41 @@ export default function CreateScreen({ navigation, route }: any) {
 
         setIsUploading(true);
         try {
-            const postData: any = {
-                text: text.trim() || undefined,
-                locationLabel: location.trim() || user.regional || 'Unknown',
-                tags: [],
-            };
+            const preparedMedia = await prepareMediaForPostNative({
+                mediaUrl: selectedMedia,
+                mediaType,
+            });
 
-            if (selectedMedia) {
-                postData.mediaUrl = selectedMedia;
-                postData.mediaType = mediaType;
-            }
-
-            await createPost(user.id, postData);
+            await createPost(
+                user.id,
+                user.handle,
+                text.trim(),
+                location.trim() || user.regional || 'Unknown',
+                preparedMedia.mediaUrl,
+                preparedMedia.mediaType,
+                undefined,
+                preparedMedia.mediaUrl ? text.trim() || undefined : undefined,
+                user.local,
+                user.regional,
+                user.national,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                preparedMedia.videoPosterUrl,
+            );
             Alert.alert('Success', 'Post created successfully!', [
                 { text: 'OK', onPress: () => navigation.goBack() },
             ]);

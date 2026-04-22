@@ -123,10 +123,68 @@ function getConversationId(a: string, b: string): ConversationId {
     return [a, b].sort((x, y) => x.localeCompare(y)).join('|');
 }
 
+export type ConversationMessagesPage = {
+    items: ChatMessage[];
+    nextCursor: string | null;
+    hasMore: boolean;
+};
+
+export async function fetchConversationMessagesPage(
+    a: string,
+    b: string,
+    cursor: string | null = null,
+    limit: number = 50,
+): Promise<ConversationMessagesPage> {
+    if (isLaravelApiEnabled() && hasAuthToken()) {
+        try {
+            const apiClient = await import('./client');
+            const page = await apiClient.fetchConversationPage(b, cursor, limit);
+            const items: ChatMessage[] = Array.isArray(page?.items) ? page.items.map((m: any) => laravelMsgToChatMessage(m)) : [];
+            const nextCursor = typeof page?.nextCursor === 'string' ? page.nextCursor : null;
+            const hasMore = Boolean(page?.hasMore) || nextCursor !== null;
+            return {
+                items: items.sort((m1, m2) => m1.timestamp - m2.timestamp),
+                nextCursor,
+                hasMore,
+            };
+        } catch (e) {
+            if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
+            console.warn('Laravel fetchConversationMessagesPage failed, using full conversation fallback:', e);
+        }
+    }
+
+    const full = await fetchConversation(a, b);
+    return {
+        items: full,
+        nextCursor: null,
+        hasMore: false,
+    };
+}
+
 export async function fetchConversation(a: string, b: string): Promise<ChatMessage[]> {
     if (isLaravelApiEnabled() && hasAuthToken()) {
         try {
             const apiClient = await import('./client');
+            // Prefer paged endpoint; stitch all pages to preserve current full-history behavior.
+            let cursor: string | null = null;
+            const stitched: ChatMessage[] = [];
+            let pages = 0;
+            const maxPages = 20;
+
+            do {
+                const page = await apiClient.fetchConversationPage(b, cursor, 100);
+                const items = Array.isArray(page?.items) ? page.items.map((m: any) => laravelMsgToChatMessage(m)) : [];
+                stitched.push(...items);
+                cursor = typeof page?.nextCursor === 'string' ? page.nextCursor : null;
+                pages += 1;
+                if (!page?.hasMore) break;
+            } while (cursor && pages < maxPages);
+
+            if (stitched.length > 0) {
+                return stitched.sort((m1, m2) => m1.timestamp - m2.timestamp);
+            }
+
+            // Fallback for older backend nodes that don't have /paged yet.
             const raw = await apiClient.fetchConversation(b); // b = other handle (Laravel uses auth user + other)
             const list = Array.isArray(raw) ? raw.map(laravelMsgToChatMessage) : [];
             return list.sort((m1, m2) => m1.timestamp - m2.timestamp); // oldest first for chat UI
@@ -317,6 +375,52 @@ export interface ConversationSummary {
     isMuted?: boolean;
 }
 
+export type GroupThreadMessagesPage = {
+    groupName: string;
+    items: ChatMessage[];
+    nextCursor: string | null;
+    hasMore: boolean;
+};
+
+export async function fetchGroupThreadMessagesPage(
+    groupId: string,
+    cursor: string | null = null,
+    limit: number = 50,
+): Promise<GroupThreadMessagesPage> {
+    if (isLaravelApiEnabled() && hasAuthToken()) {
+        try {
+            const apiClient = await import('./client');
+            const page = (await apiClient.fetchGroupConversationPage(groupId, cursor, limit)) as {
+                group?: { id?: string; name?: string };
+                items?: unknown[];
+                nextCursor?: string | null;
+                hasMore?: boolean;
+            };
+            const groupName = page?.group?.name?.trim() || 'Group';
+            const items = Array.isArray(page?.items) ? page.items.map((m) => laravelMsgToChatMessage(m as any)) : [];
+            const nextCursor = typeof page?.nextCursor === 'string' ? page.nextCursor : null;
+            const hasMore = Boolean(page?.hasMore) || nextCursor !== null;
+            return {
+                groupName,
+                items: items.sort((m1, m2) => m1.timestamp - m2.timestamp),
+                nextCursor,
+                hasMore,
+            };
+        } catch (e) {
+            if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
+            console.warn('Laravel fetchGroupThreadMessagesPage failed, using full thread fallback:', e);
+        }
+    }
+
+    const fallback = await fetchGroupThread(groupId);
+    return {
+        groupName: fallback.groupName,
+        items: fallback.messages,
+        nextCursor: null,
+        hasMore: false,
+    };
+}
+
 /** Load messages for a group thread (Laravel API). */
 export async function fetchGroupChatMessages(_viewerHandle: string, groupId: string): Promise<ChatMessage[]> {
     const { messages } = await fetchGroupThread(groupId);
@@ -328,11 +432,38 @@ export async function fetchGroupThread(groupId: string): Promise<{ groupName: st
     if (isLaravelApiEnabled() && hasAuthToken()) {
         try {
             const apiClient = await import('./client');
+            // Prefer paged endpoint; stitch all pages to preserve current full-history behavior.
+            let cursor: string | null = null;
+            const stitched: ChatMessage[] = [];
+            let groupName = 'Group';
+            let pages = 0;
+            const maxPages = 20;
+
+            do {
+                const page = await apiClient.fetchGroupConversationPage(groupId, cursor, 100) as {
+                    group?: { id?: string; name?: string };
+                    items?: unknown[];
+                    nextCursor?: string | null;
+                    hasMore?: boolean;
+                };
+                groupName = page?.group?.name?.trim() || groupName;
+                const items = Array.isArray(page?.items) ? page.items.map((m) => laravelMsgToChatMessage(m as any)) : [];
+                stitched.push(...items);
+                cursor = typeof page?.nextCursor === 'string' ? page.nextCursor : null;
+                pages += 1;
+                if (!page?.hasMore) break;
+            } while (cursor && pages < maxPages);
+
+            if (stitched.length > 0) {
+                return { groupName, messages: stitched.sort((m1, m2) => m1.timestamp - m2.timestamp) };
+            }
+
+            // Fallback for older backend nodes that don't have /paged yet.
             const raw = (await apiClient.fetchGroupConversation(groupId)) as {
                 group?: { id?: string; name?: string };
                 messages?: unknown[];
             };
-            const groupName = raw?.group?.name?.trim() || 'Group';
+            groupName = raw?.group?.name?.trim() || 'Group';
             const list = Array.isArray(raw?.messages) ? raw.messages.map((m) => laravelMsgToChatMessage(m as any)) : [];
             return { groupName, messages: list.sort((m1, m2) => m1.timestamp - m2.timestamp) };
         } catch (e) {

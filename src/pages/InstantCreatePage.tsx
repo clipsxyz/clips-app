@@ -8,6 +8,7 @@ import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 import { setGalleryPreviewMedia } from '../utils/galleryPreviewCache';
 import CreateGroupModal from '../components/CreateGroupModal';
+import { prepareMediaForPost } from '../utils/prepareMediaForPost';
 
 /** Same gradient as `Avatar` story ring (profile picture story border). */
 const PROFILE_STORY_RING_GRADIENT = 'linear-gradient(135deg, #f6e27a 0%, #d4af37 22%, #f4f4f4 44%, #bfc5cc 66%, #ffe8a3 82%, #d4af37 100%)';
@@ -765,19 +766,23 @@ export default function InstantCreatePage() {
                 // Upload video to backend immediately
                 try {
                     console.log('📤 Uploading video to backend...', { size: blob.size, type: blobType });
-                    const file = new File([blob], `video-${Date.now()}.webm`, { type: blobType });
-                    const { uploadFile } = await import('../api/client');
-                    const uploadResult = await uploadFile(file);
-                    
-                    if (uploadResult && uploadResult.success && uploadResult.fileUrl) {
-                        persistentUrl = uploadResult.fileUrl;
+                    const prepared = await prepareMediaForPost({
+                        mediaUrl: blobUrl,
+                        mediaType: 'video',
+                        useBackendUpload: true,
+                        appOrigin: window.location.origin,
+                        generatePoster: false,
+                    });
+
+                    if (prepared.mediaUrl && prepared.mediaUrl !== blobUrl) {
+                        persistentUrl = prepared.mediaUrl;
                         console.log('✅ Video uploaded to backend:', persistentUrl);
                         // Revoke the blob URL since we now have a backend URL
                         URL.revokeObjectURL(blobUrl);
                         // Clear blob reference since we have backend URL
                         blobRef.current = null;
                     } else {
-                        throw new Error('Upload failed - invalid response: ' + JSON.stringify(uploadResult));
+                        throw new Error('Upload did not return a persistent media URL');
                     }
                 } catch (error) {
                     console.error('❌ Failed to upload video to backend:', error);

@@ -3,7 +3,7 @@ import { FiX, FiSend, FiMessageSquare, FiThumbsUp, FiChevronDown, FiChevronUp, F
 import { useAuth } from '../context/Auth';
 import { useOnline } from '../hooks/useOnline';
 import {
-    fetchComments,
+    fetchCommentsPage,
     addComment,
     addReply,
     toggleCommentLike,
@@ -318,9 +318,13 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
     const online = useOnline();
     const [post, setPost] = React.useState<Post | null>(null);
     const [comments, setComments] = React.useState<Comment[]>([]);
+    const [commentsCursor, setCommentsCursor] = React.useState<string | null>(null);
+    const [commentsHasMore, setCommentsHasMore] = React.useState(false);
+    const [commentsLoadingMore, setCommentsLoadingMore] = React.useState(false);
     const [loading, setLoading] = React.useState(false);
     const [submitting, setSubmitting] = React.useState(false);
     const [followBusy, setFollowBusy] = React.useState(false);
+    const commentsScrollRef = React.useRef<HTMLDivElement | null>(null);
 
     // Load post (author, caption) + comments when modal opens
     React.useEffect(() => {
@@ -329,14 +333,19 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
         (async () => {
             setLoading(true);
             setPost(null);
+            setCommentsCursor(null);
+            setCommentsHasMore(false);
+            setCommentsLoadingMore(false);
             try {
-                const [fetchedPost, fetchedComments] = await Promise.all([
+                const [fetchedPost, fetchedCommentsPage] = await Promise.all([
                     getPostById(postId, user?.id),
-                    fetchComments(postId),
+                    fetchCommentsPage(postId, null, 30, 5, user?.id),
                 ]);
                 if (cancelled) return;
                 setPost(fetchedPost);
-                setComments(fetchedComments);
+                setComments(fetchedCommentsPage.items);
+                setCommentsCursor(fetchedCommentsPage.nextCursor);
+                setCommentsHasMore(fetchedCommentsPage.hasMore);
             } catch (error) {
                 console.error('Failed to load comments sheet:', error);
                 if (!cancelled) {
@@ -351,6 +360,41 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
             cancelled = true;
         };
     }, [isOpen, postId, user?.id]);
+
+    const handleLoadMoreComments = React.useCallback(async () => {
+        if (commentsLoadingMore || !commentsHasMore || !commentsCursor) return;
+        setCommentsLoadingMore(true);
+        try {
+            const page = await fetchCommentsPage(postId, commentsCursor, 30, 5, user?.id);
+            if (page.items.length > 0) {
+                setComments((prev) => {
+                    const seen = new Set(prev.map((c) => String(c.id)));
+                    const merged = [...prev];
+                    page.items.forEach((c) => {
+                        if (!seen.has(String(c.id))) {
+                            merged.push(c);
+                            seen.add(String(c.id));
+                        }
+                    });
+                    return merged;
+                });
+            }
+            setCommentsCursor(page.nextCursor);
+            setCommentsHasMore(page.hasMore);
+        } catch (error) {
+            console.error('Failed to load more comments:', error);
+        } finally {
+            setCommentsLoadingMore(false);
+        }
+    }, [commentsCursor, commentsHasMore, commentsLoadingMore, postId, user?.id]);
+
+    const handleCommentsScroll = React.useCallback((el: HTMLDivElement) => {
+        if (loading || commentsLoadingMore || !commentsHasMore || !commentsCursor) return;
+        const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
+        if (remaining <= 180) {
+            void handleLoadMoreComments();
+        }
+    }, [commentsCursor, commentsHasMore, commentsLoadingMore, handleLoadMoreComments, loading]);
 
     const handleFollowAuthor = async () => {
         if (!user?.id || !post || user.handle === post.userHandle) return;
@@ -611,7 +655,11 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                 </div>
 
                 {/* Scrollable: author row → story text → comments (Instagram-style order) */}
-                <div className="flex-1 overflow-y-auto min-h-0 bg-white">
+                <div
+                    ref={commentsScrollRef}
+                    onScroll={(e) => handleCommentsScroll(e.currentTarget)}
+                    className="flex-1 overflow-y-auto min-h-0 bg-white"
+                >
                     {loading ? (
                         <div className="flex items-center justify-center py-12">
                             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
@@ -682,6 +730,18 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                                                 postId={postId}
                                             />
                                         ))}
+                                        {commentsHasMore && (
+                                            <div className="pt-1">
+                                                <button
+                                                    type="button"
+                                                    onClick={handleLoadMoreComments}
+                                                    disabled={commentsLoadingMore}
+                                                    className="w-full min-h-[40px] rounded-lg border border-gray-300 bg-gray-50 text-sm text-gray-700 disabled:opacity-60"
+                                                >
+                                                    {commentsLoadingMore ? 'Loading...' : 'Load more comments'}
+                                                </button>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>

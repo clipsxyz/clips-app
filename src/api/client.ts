@@ -147,9 +147,9 @@ export async function updateAuthProfile(data: {
 }
 
 // Posts API (6s timeout for faster fallback on slow mobile networks)
-export async function fetchPostsPage(cursor: number = 0, limit: number = 10, filter: string = 'Dublin', userId?: string) {
+export async function fetchPostsPage(cursor: number | string | null = 0, limit: number = 10, filter: string = 'Dublin', userId?: string) {
     const params = new URLSearchParams({
-        cursor: cursor.toString(),
+        cursor: String(cursor ?? 0),
         limit: limit.toString(),
         filter,
         ...(userId && { userId }),
@@ -163,6 +163,15 @@ export async function fetchPost(postId: string, userId?: string) {
     if (userId) params.append('userId', userId);
 
     return apiRequest(`/posts/${postId}?${params}`);
+}
+
+export async function fetchStoriesPage(cursor: string | null = null, limit: number = 20, userId?: string) {
+    const params = new URLSearchParams({
+        limit: limit.toString(),
+        ...(cursor ? { cursor } : {}),
+        ...(userId ? { userId } : {}),
+    });
+    return apiRequest(`/stories/paged?${params}`);
 }
 
 /** Check if the user with the given handle follows the current viewer (for mutual-follow DM icon). Requires auth. */
@@ -188,6 +197,8 @@ export async function createPost(postData: {
     socialFormat?: 'youtube_shorts' | 'tiktok' | 'instagram_reels';
     mediaUrl?: string;
     mediaType?: 'image' | 'video';
+    videoFrameMode?: 'crop' | 'fit' | 'original';
+    videoPosterUrl?: string;
     caption?: string;
     imageText?: string;
     bannerText?: string;
@@ -265,6 +276,23 @@ export async function fetchComments(postId: string, userId?: string) {
     return apiRequest(`/comments/post/${postId}?${params}`);
 }
 
+export async function fetchCommentsPage(
+    postId: string,
+    cursor: string | null = null,
+    limit: number = 30,
+    userId?: string,
+    repliesLimit: number = 5,
+) {
+    const params = new URLSearchParams({
+        paged: 'true',
+        limit: String(limit),
+        repliesLimit: String(repliesLimit),
+    });
+    if (cursor) params.append('cursor', cursor);
+    if (userId) params.append('userId', userId);
+    return apiRequest(`/comments/post/${postId}?${params}`);
+}
+
 export async function addComment(postId: string, text: string) {
     return apiRequest(`/comments/post/${postId}`, {
         method: 'POST',
@@ -286,9 +314,16 @@ export async function toggleCommentLike(commentId: string) {
 }
 
 // Users API
-export async function fetchUserProfile(handle: string, userId?: string) {
+export async function fetchUserProfile(
+    handle: string,
+    userId?: string,
+    postsCursor?: string | number | null,
+    postsLimit?: number,
+) {
     const params = new URLSearchParams();
     if (userId) params.append('userId', userId);
+    if (postsCursor != null) params.append('postsCursor', String(postsCursor));
+    if (postsLimit != null) params.append('postsLimit', String(postsLimit));
     const encoded = encodeURIComponent(handle);
     return apiRequest(`/users/${encoded}?${params}`);
 }
@@ -301,18 +336,18 @@ export async function toggleFollow(handle: string) {
     });
 }
 
-export async function fetchFollowers(handle: string, cursor: number = 0, limit: number = 20) {
+export async function fetchFollowers(handle: string, cursor: number | string | null = 0, limit: number = 20) {
     const params = new URLSearchParams({
-        cursor: cursor.toString(),
+        cursor: String(cursor ?? 0),
         limit: limit.toString(),
     });
     const encoded = encodeURIComponent(handle);
     return apiRequest(`/users/${encoded}/followers?${params}`);
 }
 
-export async function fetchFollowing(handle: string, cursor: number = 0, limit: number = 20) {
+export async function fetchFollowing(handle: string, cursor: number | string | null = 0, limit: number = 20) {
     const params = new URLSearchParams({
-        cursor: cursor.toString(),
+        cursor: String(cursor ?? 0),
         limit: limit.toString(),
     });
     const encoded = encodeURIComponent(handle);
@@ -340,17 +375,50 @@ export async function denyFollowRequest(handle: string) {
 }
 
 // Messages API (DMs)
-export async function fetchConversations(cursor: number = 0, limit: number = 20) {
+export async function fetchConversations(cursor: number | string | null = 0, limit: number = 20) {
     const params = new URLSearchParams({
-        cursor: cursor.toString(),
+        cursor: String(cursor ?? 0),
         limit: limit.toString(),
     });
     return apiRequest(`/messages/conversations?${params}`);
 }
 
+export async function fetchNotifications(cursor: number | string | null = 0, limit: number = 20) {
+    const params = new URLSearchParams({
+        cursor: String(cursor ?? 0),
+        limit: limit.toString(),
+    });
+    return apiRequest(`/notifications?${params}`);
+}
+
+export async function fetchUnreadNotificationCount() {
+    return apiRequest('/notifications/unread-count');
+}
+
+export async function markNotificationReadApi(notificationId: string) {
+    return apiRequest(`/notifications/${encodeURIComponent(notificationId)}/read`, {
+        method: 'POST',
+    });
+}
+
+export async function markAllNotificationsReadApi() {
+    return apiRequest('/notifications/mark-all-read', {
+        method: 'POST',
+    });
+}
+
 export async function fetchConversation(otherHandle: string) {
     const encoded = encodeURIComponent(otherHandle);
     return apiRequest(`/messages/conversation/${encoded}`);
+}
+
+export async function fetchConversationPage(otherHandle: string, cursor: string | null = null, limit: number = 50) {
+    const encoded = encodeURIComponent(otherHandle);
+    const params = new URLSearchParams({
+        limit: limit.toString(),
+        ...(cursor ? { cursor } : {}),
+    });
+    return apiRequest(`/messages/conversation/${encoded}/paged?${params}`);
 }
 
 export async function sendMessage(recipientHandle: string, payload: { text?: string; image_url?: string; is_system_message?: boolean }) {
@@ -375,6 +443,14 @@ export async function markConversationRead(otherHandle: string) {
 /** Group thread: metadata + messages array */
 export async function fetchGroupConversation(groupId: string) {
     return apiRequest(`/messages/group/${encodeURIComponent(groupId)}`);
+}
+
+export async function fetchGroupConversationPage(groupId: string, cursor: string | null = null, limit: number = 50) {
+    const params = new URLSearchParams({
+        limit: limit.toString(),
+        ...(cursor ? { cursor } : {}),
+    });
+    return apiRequest(`/messages/group/${encodeURIComponent(groupId)}/paged?${params}`);
 }
 
 export async function sendGroupMessage(

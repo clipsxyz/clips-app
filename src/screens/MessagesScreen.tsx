@@ -14,10 +14,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
-import { fetchConversation, appendMessage, markConversationRead, type ChatMessage } from '../api/messages';
+import { fetchConversationMessagesPage, appendMessage, markConversationRead, type ChatMessage } from '../api/messages';
 import { getAvatarForHandle } from '../api/users';
 import { timeAgo } from '../utils/timeAgo';
 import Avatar from '../components/Avatar';
+
+const DEBUG_MESSAGE_PAGING =
+    __DEV__ && (globalThis as { __CLIPS_DEBUG_MESSAGE_PAGING__?: boolean }).__CLIPS_DEBUG_MESSAGE_PAGING__ === true;
 
 export default function MessagesScreen({ route, navigation }: any) {
     const { handle } = route.params;
@@ -25,10 +28,14 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [messageText, setMessageText] = useState('');
     const [loading, setLoading] = useState(true);
+    const [threadCursor, setThreadCursor] = useState<string | null>(null);
+    const [threadHasMore, setThreadHasMore] = useState(false);
+    const [loadingOlder, setLoadingOlder] = useState(false);
     const flatListRef = useRef<FlatList>(null);
+    const shouldAutoScrollRef = useRef(true);
 
     useEffect(() => {
-        loadMessages();
+        loadMessages(true);
     }, [handle]);
 
     useEffect(() => {
@@ -37,16 +44,61 @@ export default function MessagesScreen({ route, navigation }: any) {
         }
     }, [messages, handle, user?.handle]);
 
-    const loadMessages = async () => {
+    const loadMessages = async (reset: boolean = false) => {
         if (!user?.handle) return;
-        setLoading(true);
+        if (reset) {
+            setThreadCursor(null);
+            setThreadHasMore(false);
+            shouldAutoScrollRef.current = true;
+            setLoading(true);
+        }
         try {
-            const conversation = await fetchConversation(user.handle, handle);
-            setMessages(conversation);
+            const page = await fetchConversationMessagesPage(user.handle, handle, null, 50);
+            if (DEBUG_MESSAGE_PAGING) {
+                console.info('[RN Messages][dm][initial-page]', {
+                    handle,
+                    count: page.items.length,
+                    nextCursor: page.nextCursor,
+                    hasMore: page.hasMore,
+                });
+            }
+            setMessages(page.items);
+            setThreadCursor(page.nextCursor);
+            setThreadHasMore(page.hasMore);
         } catch (error) {
             console.error('Error loading messages:', error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const loadOlderMessages = async () => {
+        if (!user?.handle || !threadHasMore || !threadCursor || loadingOlder) return;
+        setLoadingOlder(true);
+        try {
+            const page = await fetchConversationMessagesPage(user.handle, handle, threadCursor, 50);
+            if (DEBUG_MESSAGE_PAGING) {
+                console.info('[RN Messages][dm][older-page]', {
+                    handle,
+                    count: page.items.length,
+                    requestCursor: threadCursor,
+                    nextCursor: page.nextCursor,
+                    hasMore: page.hasMore,
+                });
+            }
+            if (page.items.length > 0) {
+                setMessages((prev) => {
+                    const seen = new Set(prev.map((m) => m.id));
+                    const merged = [...page.items.filter((m) => !seen.has(m.id)), ...prev];
+                    return merged.sort((a, b) => a.timestamp - b.timestamp);
+                });
+            }
+            setThreadCursor(page.nextCursor);
+            setThreadHasMore(page.hasMore);
+        } catch (error) {
+            console.error('Error loading older messages:', error);
+        } finally {
+            setLoadingOlder(false);
         }
     };
 
@@ -55,27 +107,26 @@ export default function MessagesScreen({ route, navigation }: any) {
 
         const newMessage: ChatMessage = {
             id: Date.now().toString(),
-            fromHandle: user.handle,
-            toHandle: handle,
+            senderHandle: user.handle,
             text: messageText.trim(),
             timestamp: Date.now(),
-            read: false,
         };
 
+        shouldAutoScrollRef.current = true;
         setMessages(prev => [...prev, newMessage]);
         setMessageText('');
 
         try {
             await appendMessage(user.handle, handle, { text: newMessage.text });
-            loadMessages(); // Reload to get server response
+            await loadMessages(true); // Reload latest page to get server ids/timestamps
         } catch (error) {
             console.error('Error sending message:', error);
         }
     };
 
     const renderMessage = ({ item }: { item: ChatMessage }) => {
-        const isFromMe = item.fromHandle === user?.handle;
-        const senderAvatar = getAvatarForHandle(item.fromHandle);
+        const isFromMe = item.senderHandle === user?.handle;
+        const senderAvatar = getAvatarForHandle(item.senderHandle);
 
         return (
             <View style={[
@@ -85,7 +136,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                 {!isFromMe && (
                     <Avatar
                         src={senderAvatar}
-                        name={item.fromHandle.split('@')[0]}
+                        name={item.senderHandle.split('@')[0]}
                         size={32}
                     />
                 )}
@@ -154,7 +205,28 @@ export default function MessagesScreen({ route, navigation }: any) {
                     keyExtractor={(item) => item.id}
                     style={styles.messagesList}
                     contentContainerStyle={styles.messagesContent}
-                    onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+                    maintainVisibleContentPosition={{
+                        minIndexForVisible: 0,
+                        autoscrollToTopThreshold: 12,
+                    }}
+                    onContentSizeChange={() => {
+                        if (shouldAutoScrollRef.current) {
+                            flatListRef.current?.scrollToEnd({ animated: true });
+                            shouldAutoScrollRef.current = false;
+                        }
+                    }}
+                    onScroll={(e) => {
+                        if (e.nativeEvent.contentOffset.y <= 120) {
+                            loadOlderMessages();
+                        }
+                    }}
+                    scrollEventThrottle={16}
+                    ListHeaderComponent={loadingOlder ? (
+                        <View style={styles.loadingOlderWrap}>
+                            <ActivityIndicator size="small" color="#8B5CF6" />
+                            <Text style={styles.loadingOlderText}>Loading older messages...</Text>
+                        </View>
+                    ) : null}
                 />
 
                 <View style={styles.inputContainer}>
@@ -223,6 +295,17 @@ const styles = StyleSheet.create({
     },
     messagesContent: {
         padding: 16,
+    },
+    loadingOlderWrap: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        paddingVertical: 8,
+    },
+    loadingOlderText: {
+        color: '#9CA3AF',
+        fontSize: 12,
     },
     messageContainer: {
         flexDirection: 'row',

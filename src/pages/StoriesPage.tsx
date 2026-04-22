@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { FiX, FiChevronRight, FiChevronLeft, FiChevronDown, FiChevronUp, FiMessageCircle, FiThumbsUp, FiVolume2, FiVolumeX, FiMaximize2, FiMapPin, FiSend, FiLink, FiCopy, FiPlus, FiHome, FiClock } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
-import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle, voteOnPoll, sortStoriesNewestFirst } from '../api/stories';
+import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle, voteOnPoll, sortStoriesNewestFirst, getLastStoriesLoadSource } from '../api/stories';
 import { appendMessage } from '../api/messages';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
@@ -362,6 +362,13 @@ export default function StoriesPage() {
                         groups[existingGroupIndex] = storyGroup;
                     }
                 }
+            }
+
+            if (import.meta.env.DEV) {
+                console.info('[Stories] load source:', getLastStoriesLoadSource(), {
+                    groups: groups.length,
+                    requestedHandles: requestedHandles.length,
+                });
             }
 
             // Add avatar URLs to all story groups

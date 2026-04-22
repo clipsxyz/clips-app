@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Laravel\Sanctum\PersonalAccessToken;
 use Illuminate\Support\Str;
+use Carbon\Carbon;
 
 class PostController extends Controller
 {
@@ -24,17 +25,36 @@ class PostController extends Controller
     public static function toApiArray(Post $post, ?User $viewer): array
     {
         $postData = $post->toArray();
+        $attrs = $post->getAttributes();
         $postData['venue'] = $post->venue;
         $postData['landmark'] = $post->landmark;
         $postData['taggedUsers'] = $post->relationLoaded('taggedUsers')
             ? $post->taggedUsers->pluck('handle')->toArray()
             : [];
         if ($viewer) {
-            $postData['user_liked'] = $post->isLikedBy($viewer);
-            $postData['is_bookmarked'] = $post->isBookmarkedBy($viewer);
-            $postData['is_following'] = $post->isFollowingAuthor($viewer);
-            $postData['author_follows_you'] = $post->authorFollowsViewer($viewer);
-            $postData['user_reclipped'] = $post->isReclippedBy($viewer);
+            $postData['user_liked'] = array_key_exists('user_liked', $attrs)
+                ? (bool) $attrs['user_liked']
+                : ($post->relationLoaded('likes')
+                ? $post->likes->isNotEmpty()
+                : $post->isLikedBy($viewer));
+            $postData['is_bookmarked'] = array_key_exists('is_bookmarked', $attrs)
+                ? (bool) $attrs['is_bookmarked']
+                : ($post->relationLoaded('bookmarks')
+                ? $post->bookmarks->isNotEmpty()
+                : $post->isBookmarkedBy($viewer));
+            $postData['is_following'] = array_key_exists('is_following', $attrs)
+                ? (bool) $attrs['is_following']
+                : ($post->relationLoaded('user') && $post->user && $post->user->relationLoaded('followers')
+                ? $post->user->followers->isNotEmpty()
+                : $post->isFollowingAuthor($viewer));
+            $postData['author_follows_you'] = array_key_exists('author_follows_you', $attrs)
+                ? (bool) $attrs['author_follows_you']
+                : $post->authorFollowsViewer($viewer);
+            $postData['user_reclipped'] = array_key_exists('user_reclipped', $attrs)
+                ? (bool) $attrs['user_reclipped']
+                : ($post->relationLoaded('reclips')
+                ? $post->reclips->isNotEmpty()
+                : $post->isReclippedBy($viewer));
         } else {
             $postData['user_liked'] = false;
             $postData['is_bookmarked'] = false;
@@ -52,7 +72,7 @@ class PostController extends Controller
     public function index(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'cursor' => 'integer|min:0',
+            'cursor' => 'nullable|string',
             'limit' => 'integer|min:1|max:50',
             'filter' => 'string|in:Finglas,Dublin,Ireland,Following',
             'userId' => 'nullable|string'
@@ -63,7 +83,7 @@ class PostController extends Controller
         }
 
         try {
-            $cursor = $request->get('cursor', 0);
+            $cursor = (string) $request->get('cursor', '');
             $limit = $request->get('limit', 10);
             $filter = $request->get('filter', 'Dublin');
             $userId = $request->get('userId');
@@ -80,15 +100,16 @@ class PostController extends Controller
                     // ignore
                 }
             }
-            $offset = $cursor * $limit;
+            $cursorState = $this->decodeFeedCursor($cursor);
 
             // Include feed version so cache is invalidated when any post is updated (e.g. edit location/venue)
             $feedVersion = Cache::get('feed_version', 0);
-            $cacheKey = 'feed:v' . $feedVersion . ':' . ($filter ?? 'all') . ':' . ($userId ?? 'guest') . ':' . $cursor . ':' . $limit;
+            $cacheCursor = $cursor !== '' ? $cursor : 'start';
+            $cacheKey = 'feed:v' . $feedVersion . ':' . ($filter ?? 'all') . ':' . ($userId ?? 'guest') . ':' . $cacheCursor . ':' . $limit;
             $ttlSeconds = 300; // 5 minutes
 
-            $response = Cache::remember($cacheKey, $ttlSeconds, function () use ($request, $cursor, $limit, $filter, $userId, $offset) {
-                return $this->buildFeedResponse($cursor, $limit, $filter, $userId, $offset);
+            $response = Cache::remember($cacheKey, $ttlSeconds, function () use ($limit, $filter, $userId, $cursorState) {
+                return $this->buildFeedResponse($cursorState, $limit, $filter, $userId);
             });
 
             return response()->json($response);
@@ -105,8 +126,9 @@ class PostController extends Controller
     /**
      * Build feed items and nextCursor (used by index with Laravel Cache).
      */
-    private function buildFeedResponse($cursor, $limit, $filter, $userId, $offset): array
+    private function buildFeedResponse(array $cursorState, int $limit, string $filter, ?string $userId): array
     {
+            $hasViewer = !empty($userId);
             // Following feed: include both original and reclipped posts from people you follow (reclips appear for your followers).
             // Location feeds: only original posts from that location.
             $query = Post::query()
@@ -123,38 +145,105 @@ class PostController extends Controller
                 $query->notReclipped();
             }
 
-            if ($userId) {
-                $query->with(['likes' => function ($q) use ($userId) {
-                    $q->where('user_id', $userId);
-                }])
-                ->with(['bookmarks' => function ($q) use ($userId) {
-                    $q->where('user_id', $userId);
-                }])
-                ->with(['reclips' => function ($q) use ($userId) {
-                    $q->where('user_id', $userId);
-                }])
-                ->with(['user.followers' => function ($q) use ($userId) {
-                    $q->where('follower_id', $userId);
-                }]);
+            if ($hasViewer) {
+                $query->withExists([
+                    'likes as user_liked' => function ($q) use ($userId) {
+                        $q->where('user_id', $userId);
+                    },
+                    'bookmarks as is_bookmarked' => function ($q) use ($userId) {
+                        $q->where('user_id', $userId);
+                    },
+                    'reclips as user_reclipped' => function ($q) use ($userId) {
+                        $q->where('user_id', $userId);
+                    },
+                ])
+                ->selectRaw(
+                    "exists(select 1 from user_follows uf where uf.following_id = posts.user_id and uf.follower_id = ? and uf.status = 'accepted') as is_following",
+                    [$userId]
+                )
+                ->selectRaw(
+                    "exists(select 1 from user_follows uf where uf.follower_id = posts.user_id and uf.following_id = ? and uf.status = 'accepted') as author_follows_you",
+                    [$userId]
+                );
+            }
+
+            if ($cursorState['created_at'] && $cursorState['id']) {
+                $query->where(function ($q) use ($cursorState) {
+                    $q->where('created_at', '<', $cursorState['created_at'])
+                      ->orWhere(function ($q2) use ($cursorState) {
+                          $q2->where('created_at', '=', $cursorState['created_at'])
+                             ->where('id', '<', $cursorState['id']);
+                      });
+                });
+            } elseif ($cursorState['page'] > 0) {
+                // Backward compatibility for old numeric page cursors.
+                $query->offset($cursorState['page'] * $limit);
             }
 
             $posts = $query->orderBy('created_at', 'desc')
-                ->offset($offset)
+                ->orderBy('id', 'desc')
                 ->limit($limit)
                 ->get()
                 ->unique('id')
                 ->values();
 
-            $userModel = $userId ? User::find($userId) : null;
+            $userModel = $hasViewer ? User::find($userId) : null;
             $transformedPosts = $posts->map(fn (Post $post) => self::toApiArray($post, $userModel));
 
-            $nextCursor = $posts->count() === $limit ? $cursor + 1 : null;
+            $lastPost = $posts->last();
+            $nextCursor = null;
+            if ($posts->count() === $limit && $lastPost) {
+                $nextCursor = $this->encodeFeedCursor($lastPost->created_at, (string) $lastPost->id);
+            }
 
             return [
                 'items' => $transformedPosts,
                 'nextCursor' => $nextCursor,
                 'hasMore' => $nextCursor !== null
             ];
+    }
+
+    private function decodeFeedCursor(?string $cursor): array
+    {
+        $cursorValue = trim((string) ($cursor ?? ''));
+        if ($cursorValue === '' || $cursorValue === '0') {
+            return ['created_at' => null, 'id' => null, 'page' => 0];
+        }
+
+        if (ctype_digit($cursorValue)) {
+            return ['created_at' => null, 'id' => null, 'page' => (int) $cursorValue];
+        }
+
+        $encoded = strtr($cursorValue, '-_', '+/');
+        $padding = strlen($encoded) % 4;
+        if ($padding > 0) {
+            $encoded .= str_repeat('=', 4 - $padding);
+        }
+        $decoded = base64_decode($encoded, true);
+        if ($decoded === false || !str_contains($decoded, '|')) {
+            return ['created_at' => null, 'id' => null, 'page' => 0];
+        }
+
+        [$createdAtRaw, $id] = explode('|', $decoded, 2);
+        if (!$id || !Str::isUuid($id)) {
+            return ['created_at' => null, 'id' => null, 'page' => 0];
+        }
+
+        try {
+            $createdAt = Carbon::parse($createdAtRaw)->toDateTimeString();
+        } catch (\Throwable $e) {
+            return ['created_at' => null, 'id' => null, 'page' => 0];
+        }
+
+        return ['created_at' => $createdAt, 'id' => $id, 'page' => 0];
+    }
+
+    private function encodeFeedCursor($createdAt, string $id): string
+    {
+        $createdAtString = $createdAt instanceof \DateTimeInterface
+            ? $createdAt->format('Y-m-d H:i:s')
+            : Carbon::parse((string) $createdAt)->format('Y-m-d H:i:s');
+        return rtrim(strtr(base64_encode($createdAtString . '|' . $id), '+/', '-_'), '=');
     }
 
     /**
@@ -171,48 +260,36 @@ class PostController extends Controller
         }
 
         $userId = $request->get('userId');
+        $hasViewer = !empty($userId);
         
         $query = Post::with(['user:id,handle,display_name,avatar_url', 'taggedUsers:id,handle,display_name,avatar_url'])
             ->withCount(['likes', 'comments', 'shares', 'views', 'reclips']);
 
-        if ($userId) {
-            $query->with(['likes' => function ($q) use ($userId) {
-                $q->where('user_id', $userId);
-            }])
-            ->with(['bookmarks' => function ($q) use ($userId) {
-                $q->where('user_id', $userId);
-            }])
-            ->with(['reclips' => function ($q) use ($userId) {
-                $q->where('user_id', $userId);
-            }])
-            ->with(['user.followers' => function ($q) use ($userId) {
-                $q->where('follower_id', $userId);
-            }]);
+        if ($hasViewer) {
+            $query->withExists([
+                'likes as user_liked' => function ($q) use ($userId) {
+                    $q->where('user_id', $userId);
+                },
+                'bookmarks as is_bookmarked' => function ($q) use ($userId) {
+                    $q->where('user_id', $userId);
+                },
+                'reclips as user_reclipped' => function ($q) use ($userId) {
+                    $q->where('user_id', $userId);
+                },
+            ])
+            ->selectRaw(
+                "exists(select 1 from user_follows uf where uf.following_id = posts.user_id and uf.follower_id = ? and uf.status = 'accepted') as is_following",
+                [$userId]
+            )
+            ->selectRaw(
+                "exists(select 1 from user_follows uf where uf.follower_id = posts.user_id and uf.following_id = ? and uf.status = 'accepted') as author_follows_you",
+                [$userId]
+            );
         }
 
         $post = $query->findOrFail($id);
-        $userModel = $userId ? User::find($userId) : null;
-
-        $postData = $post->toArray();
-        
-        // Transform taggedUsers relationship to array of handles for frontend compatibility
-        $postData['taggedUsers'] = $post->taggedUsers->pluck('handle')->toArray();
-        
-        if ($userModel) {
-            $postData['user_liked'] = $post->isLikedBy($userModel);
-            $postData['is_bookmarked'] = $post->isBookmarkedBy($userModel);
-            $postData['is_following'] = $post->isFollowingAuthor($userModel);
-            $postData['author_follows_you'] = $post->authorFollowsViewer($userModel);
-            $postData['user_reclipped'] = $post->isReclippedBy($userModel);
-        } else {
-            $postData['user_liked'] = false;
-            $postData['is_bookmarked'] = false;
-            $postData['is_following'] = false;
-            $postData['author_follows_you'] = false;
-            $postData['user_reclipped'] = false;
-        }
-
-        return response()->json($postData);
+        $userModel = $hasViewer ? User::find($userId) : null;
+        return response()->json(self::toApiArray($post, $userModel));
     }
 
     /**

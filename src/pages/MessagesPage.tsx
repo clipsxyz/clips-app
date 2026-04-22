@@ -10,6 +10,7 @@ import { IMessageDmBubbleShell } from '../components/IMessageDmBubbleShell';
 import { useAuth } from '../context/Auth';
 import {
     fetchConversation,
+    fetchConversationMessagesPage,
     appendMessage,
     appendGroupChatMessage,
     editMessage,
@@ -21,6 +22,7 @@ import {
     unmuteConversation,
     isConversationMuted,
     fetchGroupThread,
+    fetchGroupThreadMessagesPage,
     markGroupConversationReadById,
 } from '../api/messages';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
@@ -46,6 +48,8 @@ import {
     setDmSentBubblePreference,
     dmSentBubbleBgClass,
 } from '../constants/dmImessageTheme';
+
+const DEBUG_MESSAGE_PAGING = import.meta.env.DEV && import.meta.env.VITE_DEBUG_MESSAGE_PAGING === 'true';
 
 interface MessageUI extends ChatMessage {
     isFromMe: boolean;
@@ -549,6 +553,9 @@ export default function MessagesPage() {
         })();
     }, [location.state, handle, groupId, user?.handle, location.pathname, navigate]);
     const [loading, setLoading] = useState(true);
+    const [threadCursor, setThreadCursor] = useState<string | null>(null);
+    const [threadHasMore, setThreadHasMore] = useState(false);
+    const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
     const [otherUserAvatar, setOtherUserAvatar] = useState<string | undefined>(undefined);
     const [hasUnviewedStories, setHasUnviewedStories] = useState(false);
     const [isFollowing, setIsFollowing] = useState(false);
@@ -1088,11 +1095,22 @@ export default function MessagesPage() {
     // Load conversation from API
     React.useEffect(() => {
         if (!user?.handle) return;
+        setThreadCursor(null);
+        setThreadHasMore(false);
+        setLoadingOlderMessages(false);
 
         if (groupId) {
             setLoading(true);
-            fetchGroupThread(groupId)
-                .then(({ groupName, messages: items }) => {
+            fetchGroupThreadMessagesPage(groupId, null, 50)
+                .then(({ groupName, items, nextCursor, hasMore }) => {
+                    if (DEBUG_MESSAGE_PAGING) {
+                        console.info('[Messages][group][initial-page]', {
+                            groupId,
+                            count: items.length,
+                            nextCursor,
+                            hasMore,
+                        });
+                    }
                     setGroupDisplayName(groupName);
                     const sorted = [...items].sort((a, b) => a.timestamp - b.timestamp);
                     const mapped: MessageUI[] = sorted.map((m) => ({
@@ -1105,6 +1123,8 @@ export default function MessagesPage() {
                         replyTo: m.replyTo,
                     }));
                     setMessages(mapped);
+                    setThreadCursor(nextCursor);
+                    setThreadHasMore(hasMore);
                     setLoading(false);
                     lastMessageCountRef.current = mapped.length;
                     lastMessageIdRef.current = mapped.length > 0 ? mapped[mapped.length - 1].id : null;
@@ -1166,7 +1186,7 @@ export default function MessagesPage() {
                     });
                     return;
                 }
-                fetchGroupThread(groupId).then(({ messages: items }) => {
+                fetchGroupThreadMessagesPage(groupId, null, 50).then(({ items, nextCursor, hasMore }) => {
                     const sorted = [...items].sort((a, b) => a.timestamp - b.timestamp);
                     setMessages((prev) => {
                         const replyToMap = new Map(prev.map((m) => [m.id, m.replyTo]));
@@ -1180,6 +1200,8 @@ export default function MessagesPage() {
                             replyTo: m.replyTo || replyToMap.get(m.id),
                         }));
                     });
+                    setThreadCursor(nextCursor);
+                    setThreadHasMore(hasMore);
                     setTimeout(scrollToBottom, 80);
                 });
             };
@@ -1189,7 +1211,15 @@ export default function MessagesPage() {
 
         if (!handle) return;
 
-        fetchConversation(user.handle, handle).then((items) => {
+        fetchConversationMessagesPage(user.handle, handle, null, 50).then(({ items, nextCursor, hasMore }) => {
+            if (DEBUG_MESSAGE_PAGING) {
+                console.info('[Messages][dm][initial-page]', {
+                    handle,
+                    count: items.length,
+                    nextCursor,
+                    hasMore,
+                });
+            }
             // Ensure ascending order by timestamp so latest is at the bottom
             const sorted = [...items].sort((a, b) => a.timestamp - b.timestamp);
             const mapped: MessageUI[] = sorted.map(m => ({
@@ -1216,6 +1246,8 @@ export default function MessagesPage() {
             console.log('=== END LOADED MESSAGES ===');
             
             setMessages(mapped);
+            setThreadCursor(nextCursor);
+            setThreadHasMore(hasMore);
             setLoading(false);
             // Initialize refs
             lastMessageCountRef.current = mapped.length;
@@ -1360,7 +1392,7 @@ export default function MessagesPage() {
             }
 
             // For other people's messages, do full reload
-            fetchConversation(user!.handle!, handle!).then(items => {
+            fetchConversationMessagesPage(user!.handle!, handle!, null, 50).then(({ items, nextCursor, hasMore }) => {
                 const sorted = [...items].sort((a, b) => a.timestamp - b.timestamp);
                 
                 // Preserve replyTo from existing messages in state
@@ -1398,6 +1430,8 @@ export default function MessagesPage() {
                 }, 10);
                 
                 // Detect and fetch shared posts in new messages (outside setState to avoid blocking)
+                setThreadCursor(nextCursor);
+                setThreadHasMore(hasMore);
                 const postIds = new Set<string>();
                 sorted.forEach(msg => {
                     // Check postId field first (most reliable)
@@ -2093,6 +2127,88 @@ export default function MessagesPage() {
         return () => clearTimeout(timer);
     }, [stickerReactionAnimation?.phase, stickerReactionAnimation?.messageId]);
 
+    const loadOlderMessages = React.useCallback(async () => {
+        if (loadingOlderMessages || !threadHasMore || !threadCursor || !user?.handle) return;
+        if (!groupId && !handle) return;
+        const listEl = listRef.current;
+        const beforeHeight = listEl?.scrollHeight ?? 0;
+        setLoadingOlderMessages(true);
+        try {
+            let olderItems: ChatMessage[] = [];
+            let nextCursor: string | null = null;
+            let hasMore = false;
+            if (groupId) {
+                const page = await fetchGroupThreadMessagesPage(groupId, threadCursor, 50);
+                olderItems = page.items;
+                nextCursor = page.nextCursor;
+                hasMore = page.hasMore;
+                if (DEBUG_MESSAGE_PAGING) {
+                    console.info('[Messages][group][older-page]', {
+                        groupId,
+                        count: olderItems.length,
+                        requestCursor: threadCursor,
+                        nextCursor,
+                        hasMore,
+                    });
+                }
+            } else if (handle) {
+                const page = await fetchConversationMessagesPage(user.handle, handle, threadCursor, 50);
+                olderItems = page.items;
+                nextCursor = page.nextCursor;
+                hasMore = page.hasMore;
+                if (DEBUG_MESSAGE_PAGING) {
+                    console.info('[Messages][dm][older-page]', {
+                        handle,
+                        count: olderItems.length,
+                        requestCursor: threadCursor,
+                        nextCursor,
+                        hasMore,
+                    });
+                }
+            }
+
+            if (olderItems.length > 0) {
+                setMessages((prev) => {
+                    const mappedOlder: MessageUI[] = olderItems.map((m) => ({
+                        ...m,
+                        isFromMe: m.senderHandle === user.handle,
+                        senderAvatar:
+                            m.senderHandle === user.handle
+                                ? (user.avatarUrl || getAvatarForHandle(user.handle))
+                                : getAvatarForHandle(groupId ? m.senderHandle : (handle as string)),
+                        replyTo: m.replyTo,
+                    }));
+                    const seen = new Set(prev.map((m) => m.id));
+                    const merged = [...mappedOlder.filter((m) => !seen.has(m.id)), ...prev];
+                    return merged.sort((a, b) => a.timestamp - b.timestamp);
+                });
+                setThreadCursor(nextCursor);
+                setThreadHasMore(hasMore);
+                setTimeout(() => {
+                    if (!listEl) return;
+                    const afterHeight = listEl.scrollHeight;
+                    const delta = Math.max(0, afterHeight - beforeHeight);
+                    listEl.scrollTop = listEl.scrollTop + delta;
+                }, 0);
+            } else {
+                setThreadCursor(nextCursor);
+                setThreadHasMore(hasMore);
+            }
+        } finally {
+            setLoadingOlderMessages(false);
+        }
+    }, [groupId, handle, loadingOlderMessages, threadHasMore, threadCursor, user?.handle, user?.avatarUrl]);
+
+    const handleListScroll = React.useCallback(
+        (el: HTMLDivElement) => {
+            if (loading || loadingOlderMessages || !threadHasMore || !threadCursor) return;
+            if (el.scrollTop <= 120) {
+                loadOlderMessages();
+            }
+        },
+        [loadOlderMessages, loading, loadingOlderMessages, threadHasMore, threadCursor],
+    );
+
     if (loading) {
         return (
             <div className="min-h-screen bg-black text-white flex items-center justify-center">
@@ -2285,8 +2401,18 @@ export default function MessagesPage() {
             </div>
 
             {/* Messages */}
-            <div ref={listRef} className={`flex-1 overflow-y-auto ${compactPhone ? 'px-2.5 py-3 pb-36' : 'px-4 py-4 pb-40'}`} style={{ minHeight: 0, maxHeight: 'calc(100vh - 120px)' }}>
+            <div
+                ref={listRef}
+                onScroll={(e) => handleListScroll(e.currentTarget)}
+                className={`flex-1 overflow-y-auto ${compactPhone ? 'px-2.5 py-3 pb-36' : 'px-4 py-4 pb-40'}`}
+                style={{ minHeight: 0, maxHeight: 'calc(100vh - 120px)' }}
+            >
                 <div className="space-y-1">
+                    {loadingOlderMessages && (
+                        <div className="flex items-center justify-center py-2">
+                            <span className="text-xs text-gray-400">Loading older messages...</span>
+                        </div>
+                    )}
                     {messages.map((msg, idx) => {
                         const showTimestamp = idx === 0 ||
                             (msg.timestamp - messages[idx - 1].timestamp) > 60000; // gap > 1 minute

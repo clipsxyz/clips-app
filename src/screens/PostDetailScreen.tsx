@@ -5,6 +5,7 @@ import {
     StyleSheet,
     ScrollView,
     Image,
+    Dimensions,
     TouchableOpacity,
     ActivityIndicator,
 } from 'react-native';
@@ -13,6 +14,8 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
 import { getPostById, toggleLike, toggleBookmark, incrementViews } from '../api/posts';
 import { timeAgo } from '../utils/timeAgo';
+import { getInstagramImageDimensions } from '../utils/imageDimensions';
+import { FEED_UI } from '../constants/feedUiTokens';
 import type { Post } from '../types';
 import Avatar from '../components/Avatar';
 
@@ -20,13 +23,31 @@ export default function PostDetailScreen({ route, navigation }: any) {
     const { postId } = route.params;
     const { user } = useAuth();
     const userId = user?.id ?? 'anon';
+    const screenWidth = Dimensions.get('window').width;
     
     const [post, setPost] = useState<Post | null>(null);
     const [loading, setLoading] = useState(true);
+    const [mediaHeight, setMediaHeight] = useState(screenWidth * FEED_UI.media.maxAspect);
 
     useEffect(() => {
         loadPost();
     }, [postId]);
+
+    useEffect(() => {
+        if (!post?.mediaUrl) return;
+        Image.getSize(
+            post.mediaUrl,
+            (width, height) => {
+                const dimensions = getInstagramImageDimensions(width, height, screenWidth);
+                const minHeight = screenWidth * FEED_UI.media.minAspect;
+                const maxHeight = screenWidth * FEED_UI.media.maxAspect;
+                setMediaHeight(Math.min(Math.max(dimensions.height, minHeight), maxHeight));
+            },
+            () => {
+                setMediaHeight(screenWidth * FEED_UI.media.maxAspect);
+            },
+        );
+    }, [post?.mediaUrl, screenWidth]);
 
     const loadPost = async () => {
         try {
@@ -102,7 +123,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                 </View>
 
                 {post.mediaUrl && (
-                    <Image source={{ uri: post.mediaUrl }} style={styles.media} />
+                    <Image source={{ uri: post.mediaUrl }} style={[styles.media, { height: mediaHeight }]} />
                 )}
 
                 {post.text && (
@@ -114,21 +135,17 @@ export default function PostDetailScreen({ route, navigation }: any) {
                 <View style={styles.engagementBar}>
                     <View style={styles.actionButtons}>
                         <TouchableOpacity onPress={handleLike} style={styles.actionButton}>
-                            <Icon
-                                name={post.userLiked ? "heart" : "heart-outline"}
-                                size={24}
-                                color={post.userLiked ? "#EF4444" : "#FFFFFF"}
-                            />
+                            <Icon name={post.userLiked ? "heart" : "heart-outline"} size={FEED_UI.icon.action} color={post.userLiked ? "#EF4444" : "#FFFFFF"} />
                             <Text style={styles.actionText}>{post.stats.likes}</Text>
                         </TouchableOpacity>
 
                         <TouchableOpacity style={styles.actionButton}>
-                            <Icon name="chatbubble-outline" size={24} color="#FFFFFF" />
+                            <Icon name="chatbubble-outline" size={FEED_UI.icon.action} color="#FFFFFF" />
                             <Text style={styles.actionText}>{post.stats.comments}</Text>
                         </TouchableOpacity>
 
                         <TouchableOpacity style={styles.actionButton}>
-                            <Icon name="share-outline" size={24} color="#FFFFFF" />
+                            <Icon name="share-outline" size={FEED_UI.icon.action} color="#FFFFFF" />
                             <Text style={styles.actionText}>{post.stats.shares}</Text>
                         </TouchableOpacity>
                     </View>
@@ -136,7 +153,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                     <TouchableOpacity onPress={handleBookmark}>
                         <Icon
                             name={post.isBookmarked ? "bookmark" : "bookmark-outline"}
-                            size={24}
+                            size={FEED_UI.icon.action}
                             color={post.isBookmarked ? "#8B5CF6" : "#FFFFFF"}
                         />
                     </TouchableOpacity>
@@ -176,8 +193,9 @@ const styles = StyleSheet.create({
     postHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 16,
-        gap: 12,
+        paddingHorizontal: FEED_UI.spacing.inset,
+        paddingVertical: FEED_UI.spacing.normalV,
+        gap: FEED_UI.spacing.groupGapTight,
     },
     postHeaderInfo: {
         flex: 1,
@@ -194,11 +212,11 @@ const styles = StyleSheet.create({
     },
     media: {
         width: '100%',
-        height: 400,
         backgroundColor: '#111827',
     },
     textContainer: {
-        padding: 16,
+        paddingHorizontal: FEED_UI.spacing.inset,
+        paddingVertical: FEED_UI.spacing.normalV,
     },
     textContent: {
         fontSize: 16,
@@ -209,24 +227,26 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        padding: 16,
+        paddingHorizontal: FEED_UI.spacing.inset,
+        paddingVertical: FEED_UI.spacing.compactV,
     },
     actionButtons: {
         flexDirection: 'row',
-        gap: 24,
+        gap: FEED_UI.spacing.groupGap,
     },
     actionButton: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
+        gap: 4,
     },
     actionText: {
-        fontSize: 16,
+        fontSize: FEED_UI.type.actionCount,
         fontWeight: '600',
         color: '#FFFFFF',
     },
     statsContainer: {
-        padding: 16,
+        paddingHorizontal: FEED_UI.spacing.inset,
+        paddingVertical: FEED_UI.spacing.normalV,
         paddingTop: 0,
     },
     statsText: {

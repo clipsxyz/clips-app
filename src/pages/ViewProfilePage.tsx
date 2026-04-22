@@ -6,7 +6,7 @@ import { getAvatarForHandle, getFlagForHandle } from '../api/users';
 import { MOCK_FOLLOWING_GRAPH } from '../api/mockFollowGraph';
 import Flag from '../components/Flag';
 import { useAuth } from '../context/Auth';
-import { fetchPostsPage, toggleFollowForPost, getFollowedUsers, getFollowState, setFollowState, setReclipState, posts as allPosts, toggleLike, reclipPost, incrementViews, deletePost } from '../api/posts';
+import { fetchPostsPage, toggleFollowForPost, getFollowedUsers, getFollowState, setFollowState, setReclipState, posts as allPosts, toggleLike, reclipPost, incrementViews, deletePost, transformLaravelPost } from '../api/posts';
 import { enqueue } from '../utils/mutationQueue';
 import { useOnline } from '../hooks/useOnline';
 import { FeedCard } from '../App';
@@ -31,6 +31,9 @@ import InviteToGroupModal from '../components/InviteToGroupModal';
 import { getStableUserId } from '../utils/userId';
 import { followRequestSentBottomSheet, accountIsPrivateBottomSheet, bottomSheet } from '../utils/swalBottomSheet';
 import { parsePlacesFromBio } from '../utils/suggestedPlaces';
+
+const DEBUG_PROFILE_GRID_PAGING =
+    import.meta.env.DEV && import.meta.env.VITE_DEBUG_PROFILE_GRID_PAGING === 'true';
 
 /** Resolve places for the location icon. Uses Travel Info lists first, then parses BOTH profile and auth bios so "places in my bio" always counts. */
 function getEffectivePlacesTraveled(profileUser: any, authUser: any): string[] {
@@ -200,6 +203,10 @@ export default function ViewProfilePage() {
     const { user } = useAuth();
     const [profileUser, setProfileUser] = React.useState<any>(null);
     const [posts, setPosts] = React.useState<Post[]>([]);
+    const [profilePostsCursor, setProfilePostsCursor] = React.useState<string | null>(null);
+    const [profilePostsHasMore, setProfilePostsHasMore] = React.useState(false);
+    const [profilePostsLoadingMore, setProfilePostsLoadingMore] = React.useState(false);
+    const profilePostsLoadMoreRef = React.useRef<HTMLDivElement | null>(null);
     const [loading, setLoading] = React.useState(true);
     const [isFollowing, setIsFollowing] = React.useState(false);
     const [stats, setStats] = React.useState({ following: 0, followers: 0, likes: 0, views: 0 });
@@ -249,8 +256,8 @@ export default function ViewProfilePage() {
     const [connectionRequestMap, setConnectionRequestMap] = React.useState<Record<string, boolean>>({});
     const [connectionActionLoadingMap, setConnectionActionLoadingMap] = React.useState<Record<string, boolean>>({});
     const [connectionActionSuccessMap, setConnectionActionSuccessMap] = React.useState<Record<string, boolean>>({});
-    const [followersCursor, setFollowersCursor] = React.useState(0);
-    const [followingCursor, setFollowingCursor] = React.useState(0);
+    const [followersCursor, setFollowersCursor] = React.useState<string | number | null>(0);
+    const [followingCursor, setFollowingCursor] = React.useState<string | number | null>(0);
     const [followersHasMore, setFollowersHasMore] = React.useState(true);
     const [followingHasMore, setFollowingHasMore] = React.useState(true);
     const [viewerFollowedSet, setViewerFollowedSet] = React.useState<Set<string>>(new Set());
@@ -260,6 +267,68 @@ export default function ViewProfilePage() {
     const [dismissUndo, setDismissUndo] = React.useState<{ handleNoAt: string; expiresAt: number } | null>(null);
     /** Suggested tab: optional horizontal cards; default is vertical list (same as other connection tabs). */
     const [suggestedConnectionsLayout, setSuggestedConnectionsLayout] = React.useState<'carousel' | 'list'>('list');
+
+    const loadMoreProfilePosts = React.useCallback(async () => {
+        if (!handle || !profilePostsHasMore || !profilePostsCursor || profilePostsLoadingMore) return;
+        const decodedHandle = decodeURIComponent(handle);
+        setProfilePostsLoadingMore(true);
+        try {
+            const userProfileData = await fetchUserProfile(decodedHandle, user?.id, profilePostsCursor, 20);
+            const rawItems = Array.isArray((userProfileData as any)?.posts) ? (userProfileData as any).posts : [];
+            const nextItems: Post[] = rawItems.map((p: any) => transformLaravelPost(p));
+            if (DEBUG_PROFILE_GRID_PAGING) {
+                console.info('[ProfileGrid][older-page]', {
+                    handle: decodedHandle,
+                    count: nextItems.length,
+                    requestCursor: profilePostsCursor,
+                    nextCursor: (userProfileData as any)?.postsNextCursor ?? null,
+                    hasMore: !!(userProfileData as any)?.postsHasMore,
+                });
+            }
+            if (nextItems.length > 0) {
+                setPosts((prev) => {
+                    const seen = new Set(prev.map((p) => String(p.id)));
+                    const appended = nextItems.filter((p) => !seen.has(String(p.id)));
+                    return [...prev, ...appended];
+                });
+            }
+            setProfilePostsCursor((userProfileData as any)?.postsNextCursor ?? null);
+            setProfilePostsHasMore(!!(userProfileData as any)?.postsHasMore);
+        } catch (error) {
+            console.error('Error loading more profile posts:', error);
+        } finally {
+            setProfilePostsLoadingMore(false);
+        }
+    }, [handle, profilePostsHasMore, profilePostsCursor, profilePostsLoadingMore, user?.id]);
+
+    React.useEffect(() => {
+        const sentinel = profilePostsLoadMoreRef.current;
+        if (!sentinel) return;
+        if (!profilePostsHasMore || profilePostsLoadingMore || contentTab !== 'all') return;
+
+        const observer = new IntersectionObserver(
+            (entries) => {
+                const [entry] = entries;
+                if (!entry?.isIntersecting) return;
+                if (profilePostsLoadingMore || !profilePostsHasMore || !profilePostsCursor) return;
+                void loadMoreProfilePosts();
+            },
+            {
+                root: null,
+                rootMargin: '250px 0px 300px 0px',
+                threshold: 0.01,
+            },
+        );
+
+        observer.observe(sentinel);
+        return () => observer.disconnect();
+    }, [
+        contentTab,
+        loadMoreProfilePosts,
+        profilePostsCursor,
+        profilePostsHasMore,
+        profilePostsLoadingMore,
+    ]);
 
     const flashConnectionActionSuccess = React.useCallback((key: string) => {
         setConnectionActionSuccessMap((prev) => ({ ...prev, [key]: true }));
@@ -812,7 +881,9 @@ export default function ViewProfilePage() {
             setConnectionFollowMap((prev) => ({ ...prev, ...followMapPatch }));
             setConnectionRequestMap((prev) => ({ ...prev, ...requestMapPatch }));
             const hasMore = !!response?.hasMore || response?.nextCursor != null;
-            const nextCursor = typeof response?.nextCursor === 'number' ? response.nextCursor : (cursor + (hasMore ? 1 : 0));
+            const nextCursor = response?.nextCursor != null
+                ? response.nextCursor
+                : (typeof cursor === 'number' && hasMore ? cursor + 1 : null);
             if (tab === 'followers') {
                 setFollowersList((prev) => {
                     if (reset) return normalized;
@@ -1458,6 +1529,9 @@ export default function ViewProfilePage() {
             // Decode the handle from URL (in case it was encoded)
             const decodedHandle = decodeURIComponent(handle);
             setLoading(true);
+            setProfilePostsCursor(null);
+            setProfilePostsHasMore(false);
+            setProfilePostsLoadingMore(false);
             try {
                 // Check privacy using localStorage
                 const profilePrivate = isProfilePrivate(decodedHandle);
@@ -1612,10 +1686,12 @@ export default function ViewProfilePage() {
                 // Fetch user profile data from API only when Laravel is enabled (avoids long timeouts when backend is off)
                 let followingCount = 0;
                 let followersCount = 0;
+                let apiProfileData: any = null;
                 const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
                 if (useLaravelApi) {
                     try {
-                        const userProfileData = await fetchUserProfile(decodedHandle, user?.id);
+                        const userProfileData = await fetchUserProfile(decodedHandle, user?.id, null, 20);
+                        apiProfileData = userProfileData;
                         followingCount = userProfileData.following_count || 0;
                         followersCount = userProfileData.followers_count || 0;
 
@@ -1704,8 +1780,25 @@ export default function ViewProfilePage() {
                     likes: profileData.stats.likes,
                     views: profileData.stats.views
                 });
-
-                setPosts(uniquePosts);
+                const apiPostsRaw = Array.isArray(apiProfileData?.posts) ? apiProfileData.posts : [];
+                if (apiPostsRaw.length > 0) {
+                    const transformedApiPosts = apiPostsRaw.map((p: any) => transformLaravelPost(p));
+                    if (DEBUG_PROFILE_GRID_PAGING) {
+                        console.info('[ProfileGrid][initial-page]', {
+                            handle: decodedHandle,
+                            count: transformedApiPosts.length,
+                            nextCursor: apiProfileData?.postsNextCursor ?? null,
+                            hasMore: !!apiProfileData?.postsHasMore,
+                        });
+                    }
+                    setPosts(transformedApiPosts);
+                    setProfilePostsCursor(apiProfileData?.postsNextCursor ?? null);
+                    setProfilePostsHasMore(!!apiProfileData?.postsHasMore);
+                } else {
+                    setPosts(uniquePosts);
+                    setProfilePostsCursor(null);
+                    setProfilePostsHasMore(false);
+                }
 
             } catch (error) {
                 console.error('Error loading profile:', error);
@@ -2250,6 +2343,13 @@ export default function ViewProfilePage() {
                         </div>
                     )}
                 </div>
+                {contentTab === 'all' && profilePostsHasMore && (
+                    <div ref={profilePostsLoadMoreRef} className="flex items-center justify-center py-4">
+                        {profilePostsLoadingMore && (
+                            <span className="text-sm text-gray-400">Loading more posts...</span>
+                        )}
+                    </div>
+                )}
             </div>
 
             {/* Instagram-style long-press peek: blurred backdrop, preview card, action sheet */}

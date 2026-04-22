@@ -18,6 +18,7 @@ import UserTaggingModal from '../components/UserTaggingModal';
 import { getStickers, STICKER_CATEGORIES } from '../api/stickers';
 import { getGalleryPreviewMedia, clearGalleryPreviewMedia } from '../utils/galleryPreviewCache';
 import { showUploadOverlay } from '../utils/uploadOverlay';
+import { prepareMediaForPost } from '../utils/prepareMediaForPost';
 
 const FILTER_NAMES = ['None', 'B&W', 'Sepia', 'Vivid', 'Cool', 'Vignette', 'Beauty'];
 const CAROUSEL_MAX = 10;
@@ -572,48 +573,18 @@ export default function GalleryPreviewPage() {
         setIsUploading(true);
         try {
             let persistentMediaUrl = mediaUrl;
+            let videoPosterUrl: string | undefined;
             const isVideo = mediaType === 'video';
             if (mediaUrl.startsWith('blob:')) {
-                if (isVideo) {
-                    // When not using Laravel API or in dev mode, skip upload and keep blob URL so mock post works without backend.
-                    const useBackend = import.meta.env.VITE_USE_LARAVEL_API !== 'false' && import.meta.env.VITE_DEV_MODE !== 'true';
-                    if (useBackend) {
-                        try {
-                            const res = await fetch(mediaUrl);
-                            if (!res.ok) throw new Error('Failed to fetch video');
-                            const blob = await res.blob();
-                            const file = new File([blob], `video-${Date.now()}.webm`, { type: blob.type || 'video/webm' });
-                            const { uploadFile } = await import('../api/client');
-                            const up = await uploadFile(file);
-                            if (up.success && up.fileUrl) {
-                                persistentMediaUrl = up.fileUrl;
-                            } else {
-                                throw new Error(up.error || 'Upload failed');
-                            }
-                        } catch (uploadError: any) {
-                            const msg = uploadError?.message || '';
-                            const isConnectionError =
-                                msg.includes('CONNECTION_REFUSED') ||
-                                msg.includes('Failed to fetch') ||
-                                msg.includes('Network error');
-                            if (isConnectionError) {
-                                console.warn('Video upload failed (backend offline); using blob URL.', uploadError);
-                            } else {
-                                throw uploadError;
-                            }
-                        }
-                    }
-                    // else: persistentMediaUrl stays as blob URL for mock
-                } else {
-                    const res = await fetch(mediaUrl);
-                    const blob = await res.blob();
-                    persistentMediaUrl = await new Promise<string>((resolve, reject) => {
-                        const r = new FileReader();
-                        r.onloadend = () => resolve(r.result as string);
-                        r.onerror = reject;
-                        r.readAsDataURL(blob);
-                    });
-                }
+                const useBackend = import.meta.env.VITE_USE_LARAVEL_API !== 'false' && import.meta.env.VITE_DEV_MODE !== 'true';
+                const prepared = await prepareMediaForPost({
+                    mediaUrl,
+                    mediaType,
+                    useBackendUpload: isVideo ? useBackend : false,
+                    appOrigin: window.location.origin,
+                });
+                persistentMediaUrl = prepared.mediaUrl;
+                videoPosterUrl = prepared.videoPosterUrl;
             }
             await createPost(
                 user.id,
@@ -641,7 +612,9 @@ export default function GalleryPreviewPage() {
                 undefined, // reserved optional slot
                 venue.trim() || undefined,
                 landmark.trim() || undefined,
-                socialUploadTarget
+                socialUploadTarget,
+                undefined, // videoFrameMode
+                videoPosterUrl
             );
             clearGalleryPreviewMedia();
             showToast('Post created successfully!');

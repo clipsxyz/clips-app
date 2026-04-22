@@ -39,14 +39,69 @@ class MessageController extends Controller
     }
 
     /**
+     * Get conversation messages page (newest window) using keyset cursor.
+     * Returns ascending items for chat UI rendering.
+     */
+    public function getConversationPaged(Request $request, string $otherHandle): JsonResponse
+    {
+        $validator = Validator::make(array_merge($request->all(), ['otherHandle' => $otherHandle]), [
+            'otherHandle' => 'required|string|exists:users,handle',
+            'cursor' => 'nullable|string',
+            'limit' => 'integer|min:1|max:100',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $user = Auth::user();
+        $conversationId = Message::getConversationId($user->handle, $otherHandle);
+        $limit = (int) $request->get('limit', 50);
+        $cursorState = $this->decodeThreadCursor((string) $request->get('cursor', ''));
+
+        $query = Message::query()
+            ->where('conversation_id', $conversationId)
+            ->whereNull('chat_group_id');
+
+        if ($cursorState['created_at'] && $cursorState['id']) {
+            $query->where(function ($q) use ($cursorState) {
+                $q->where('created_at', '<', $cursorState['created_at'])
+                    ->orWhere(function ($q2) use ($cursorState) {
+                        $q2->where('created_at', '=', $cursorState['created_at'])
+                            ->where('id', '<', $cursorState['id']);
+                    });
+            });
+        }
+
+        $rows = $query->orderBy('created_at', 'desc')
+            ->orderBy('id', 'desc')
+            ->limit($limit)
+            ->get();
+
+        $last = $rows->last();
+        $nextCursor = null;
+        if ($rows->count() === $limit && $last) {
+            $nextCursor = $this->encodeThreadCursor(
+                $last->created_at->format('Y-m-d H:i:s'),
+                (string) $last->id
+            );
+        }
+
+        return response()->json([
+            'items' => $rows->sortBy('created_at')->values(),
+            'nextCursor' => $nextCursor,
+            'hasMore' => $nextCursor !== null,
+        ]);
+    }
+
+    /**
      * Get all conversations for authenticated user
      */
     public function getConversations(Request $request): JsonResponse
     {
         $user = Auth::user();
-        $cursor = $request->get('cursor', 0);
-        $limit = $request->get('limit', 20);
-        $offset = $cursor * $limit;
+        $cursorState = $this->decodeConversationCursor((string) $request->get('cursor', ''));
+        $limit = (int) $request->get('limit', 20);
 
         // Direct messages only (exclude group rows where recipient is null)
         $conversationIds = Message::query()
@@ -88,6 +143,7 @@ class MessageController extends Controller
                         ->whereNull('read_at')
                         ->count(),
                     'group_updated_at' => null,
+                    '_cursor_key' => 'dm:' . $conversationId,
                 ];
             }
         }
@@ -126,6 +182,7 @@ class MessageController extends Controller
                 'latest_message' => $latestMessage,
                 'unread_count' => $unreadCount,
                 'group_updated_at' => $group->updated_at,
+                '_cursor_key' => 'group:' . $group->id,
             ];
         }
 
@@ -137,23 +194,115 @@ class MessageController extends Controller
                 ? $b['latest_message']->created_at->getTimestamp()
                 : ($b['group_updated_at'] ? $b['group_updated_at']->getTimestamp() : 0);
 
-            return $bTs <=> $aTs;
+            $cmp = $bTs <=> $aTs;
+            if ($cmp !== 0) {
+                return $cmp;
+            }
+
+            return strcmp((string) $b['_cursor_key'], (string) $a['_cursor_key']);
         });
 
-        $conversations = array_map(static function (array $row) {
+        if ($cursorState['ts'] !== null && $cursorState['key'] !== null) {
+            $conversations = array_values(array_filter($conversations, function (array $row) use ($cursorState) {
+                $rowTs = $row['latest_message']
+                    ? $row['latest_message']->created_at->getTimestamp()
+                    : ($row['group_updated_at'] ? $row['group_updated_at']->getTimestamp() : 0);
+                $rowKey = (string) ($row['_cursor_key'] ?? '');
+                if ($rowTs < $cursorState['ts']) return true;
+                if ($rowTs > $cursorState['ts']) return false;
+                return strcmp($rowKey, $cursorState['key']) < 0;
+            }));
+        }
+
+        $slice = array_slice($conversations, 0, $limit);
+        $hasMore = count($conversations) > $limit;
+        $nextCursor = null;
+        if ($hasMore && !empty($slice)) {
+            $last = $slice[count($slice) - 1];
+            $lastTs = $last['latest_message']
+                ? $last['latest_message']->created_at->getTimestamp()
+                : ($last['group_updated_at'] ? $last['group_updated_at']->getTimestamp() : 0);
+            $lastKey = (string) ($last['_cursor_key'] ?? '');
+            $nextCursor = $this->encodeConversationCursor($lastTs, $lastKey);
+        }
+
+        $paginated = array_map(static function (array $row) {
             unset($row['group_updated_at']);
+            unset($row['_cursor_key']);
 
             return $row;
-        }, $conversations);
-
-        $paginated = array_slice($conversations, $offset, $limit);
-        $nextCursor = count($conversations) > ($offset + $limit) ? $cursor + 1 : null;
+        }, $slice);
 
         return response()->json([
             'items' => $paginated,
             'nextCursor' => $nextCursor,
-            'hasMore' => $nextCursor !== null
+            'hasMore' => $hasMore
         ]);
+    }
+
+    private function decodeConversationCursor(?string $cursor): array
+    {
+        $cursorValue = trim((string) ($cursor ?? ''));
+        if ($cursorValue === '' || $cursorValue === '0') {
+            return ['ts' => null, 'key' => null];
+        }
+
+        if (ctype_digit($cursorValue)) {
+            // Legacy numeric cursor support.
+            return ['ts' => null, 'key' => null];
+        }
+
+        $encoded = strtr($cursorValue, '-_', '+/');
+        $padding = strlen($encoded) % 4;
+        if ($padding > 0) {
+            $encoded .= str_repeat('=', 4 - $padding);
+        }
+        $decoded = base64_decode($encoded, true);
+        if ($decoded === false || !str_contains($decoded, '|')) {
+            return ['ts' => null, 'key' => null];
+        }
+
+        [$tsRaw, $key] = explode('|', $decoded, 2);
+        if (!is_numeric($tsRaw) || $key === '') {
+            return ['ts' => null, 'key' => null];
+        }
+
+        return ['ts' => (int) $tsRaw, 'key' => $key];
+    }
+
+    private function encodeConversationCursor(int $timestamp, string $key): string
+    {
+        return rtrim(strtr(base64_encode($timestamp . '|' . $key), '+/', '-_'), '=');
+    }
+
+    private function decodeThreadCursor(?string $cursor): array
+    {
+        $cursorValue = trim((string) ($cursor ?? ''));
+        if ($cursorValue === '' || $cursorValue === '0') {
+            return ['created_at' => null, 'id' => null];
+        }
+
+        $encoded = strtr($cursorValue, '-_', '+/');
+        $padding = strlen($encoded) % 4;
+        if ($padding > 0) {
+            $encoded .= str_repeat('=', 4 - $padding);
+        }
+        $decoded = base64_decode($encoded, true);
+        if ($decoded === false || !str_contains($decoded, '|')) {
+            return ['created_at' => null, 'id' => null];
+        }
+
+        [$createdAt, $id] = explode('|', $decoded, 2);
+        if (!$createdAt || !$id) {
+            return ['created_at' => null, 'id' => null];
+        }
+
+        return ['created_at' => $createdAt, 'id' => $id];
+    }
+
+    private function encodeThreadCursor(string $createdAt, string $id): string
+    {
+        return rtrim(strtr(base64_encode($createdAt . '|' . $id), '+/', '-_'), '=');
     }
 
     /**
@@ -184,6 +333,75 @@ class MessageController extends Controller
                 'creator_id' => $group->creator_id,
             ],
             'messages' => $messages,
+        ]);
+    }
+
+    /**
+     * Get group thread messages page (newest window) using keyset cursor.
+     * Returns ascending items for chat UI rendering.
+     */
+    public function getGroupConversationPaged(Request $request, string $groupId): JsonResponse
+    {
+        $validator = Validator::make(array_merge($request->all(), ['groupId' => $groupId]), [
+            'groupId' => 'required|uuid|exists:chat_groups,id',
+            'cursor' => 'nullable|string',
+            'limit' => 'integer|min:1|max:100',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $user = Auth::user();
+        $group = ChatGroup::whereNull('deleted_at')->find($groupId);
+
+        if (! $group) {
+            return response()->json(['error' => 'Group not found'], 404);
+        }
+
+        if (! $group->hasActiveMember($user)) {
+            return response()->json(['error' => 'Not a member of this group'], 403);
+        }
+
+        $limit = (int) $request->get('limit', 50);
+        $cursorState = $this->decodeThreadCursor((string) $request->get('cursor', ''));
+
+        $query = Message::query()->where('chat_group_id', $group->id);
+
+        if ($cursorState['created_at'] && $cursorState['id']) {
+            $query->where(function ($q) use ($cursorState) {
+                $q->where('created_at', '<', $cursorState['created_at'])
+                    ->orWhere(function ($q2) use ($cursorState) {
+                        $q2->where('created_at', '=', $cursorState['created_at'])
+                            ->where('id', '<', $cursorState['id']);
+                    });
+            });
+        }
+
+        $rows = $query->orderBy('created_at', 'desc')
+            ->orderBy('id', 'desc')
+            ->limit($limit)
+            ->get();
+
+        $last = $rows->last();
+        $nextCursor = null;
+        if ($rows->count() === $limit && $last) {
+            $nextCursor = $this->encodeThreadCursor(
+                $last->created_at->format('Y-m-d H:i:s'),
+                (string) $last->id
+            );
+        }
+
+        return response()->json([
+            'group' => [
+                'id' => $group->id,
+                'name' => $group->name,
+                'conversation_id' => $group->conversation_id,
+                'creator_id' => $group->creator_id,
+            ],
+            'items' => $rows->sortBy('created_at')->values(),
+            'nextCursor' => $nextCursor,
+            'hasMore' => $nextCursor !== null,
         ]);
     }
 

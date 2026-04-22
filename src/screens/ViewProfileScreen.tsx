@@ -20,6 +20,7 @@ import { fetchPostsByUser, toggleFollowForPost, getFollowedUsers } from '../api/
 import { fetchUserProfile, toggleFollow } from '../api/client';
 import { userHasStoriesByHandle } from '../api/stories';
 import { isProfilePrivate, canViewProfile, hasPendingFollowRequest } from '../api/privacy';
+import { FEED_UI } from '../constants/feedUiTokens';
 import type { Post } from '../types';
 import Avatar from '../components/Avatar';
 
@@ -76,8 +77,9 @@ export default function ViewProfileScreen({ route, navigation }: any) {
             }
 
             // Fetch profile data
+            let profileData: any = null;
             try {
-                const profileData = await fetchUserProfile(decodedHandle, user?.id);
+                profileData = await fetchUserProfile(decodedHandle, user?.id, null, 50);
                 const pt =
                     (profileData as any).placesTraveled ?? (profileData as any).places_traveled;
                 const placesTraveled =
@@ -90,14 +92,16 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 setStats({
                     following: profileData.following_count || 0,
                     followers: profileData.followers_count || 0,
-                    posts: profileData.posts_count || 0,
+                    posts: profileData.posts_count || (Array.isArray(profileData.posts) ? profileData.posts.length : 0),
                 });
             } catch (err) {
                 console.error('Error fetching profile:', err);
             }
 
-            // Fetch posts (second arg is limit, not user id)
-            const userPosts = await fetchPostsByUser(decodedHandle, 50);
+            // Prefer backend profile posts when available; fallback to local mock lookup.
+            const userPosts = Array.isArray(profileData?.posts)
+                ? profileData.posts
+                : await fetchPostsByUser(decodedHandle, 50);
             setPosts(userPosts);
 
             // Check for stories
@@ -487,8 +491,9 @@ const styles = StyleSheet.create({
     profileHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 16,
-        gap: 32,
+        paddingHorizontal: FEED_UI.spacing.inset,
+        paddingVertical: FEED_UI.spacing.inset,
+        gap: 24,
     },
     statsContainer: {
         flex: 1,
@@ -509,7 +514,8 @@ const styles = StyleSheet.create({
         marginTop: 4,
     },
     userInfo: {
-        padding: 16,
+        paddingHorizontal: FEED_UI.spacing.inset,
+        paddingVertical: FEED_UI.spacing.normalV,
         paddingTop: 0,
     },
     userHandle: {
@@ -525,13 +531,13 @@ const styles = StyleSheet.create({
     },
     actionButtons: {
         flexDirection: 'row',
-        paddingHorizontal: 16,
-        gap: 12,
-        marginBottom: 16,
+        paddingHorizontal: FEED_UI.spacing.inset,
+        gap: FEED_UI.spacing.groupGapTight,
+        marginBottom: FEED_UI.spacing.normalV,
     },
     followButton: {
         flex: 1,
-        paddingVertical: 10,
+        paddingVertical: FEED_UI.spacing.compactV,
         borderRadius: 8,
         backgroundColor: '#3B82F6',
         alignItems: 'center',
@@ -551,7 +557,7 @@ const styles = StyleSheet.create({
     },
     messageButton: {
         flex: 1,
-        paddingVertical: 10,
+        paddingVertical: FEED_UI.spacing.compactV,
         borderRadius: 8,
         backgroundColor: '#1F2937',
         borderWidth: 1,
@@ -564,12 +570,14 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     postsContainer: {
-        padding: 16,
+        paddingHorizontal: FEED_UI.spacing.inset,
+        paddingTop: 4,
+        paddingBottom: FEED_UI.spacing.inset,
     },
     postThumbnail: {
         width: '33.33%',
         aspectRatio: 1,
-        padding: 1,
+        padding: FEED_UI.spacing.hairlineGap,
     },
     thumbnailImage: {
         width: '100%',

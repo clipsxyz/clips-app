@@ -7,7 +7,6 @@ use App\Models\User;
 use App\Models\Post;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\DB;
 
 class SearchController extends Controller
 {
@@ -81,69 +80,79 @@ class SearchController extends Controller
 
             $start = $locationsCursor * $locationsLimit;
             $slice = array_slice($scored, $start, $locationsLimit);
-            $nextCursor = ($start + count($slice) < count($scored)) ? $locationsCursor + 1 : null;
+            $hasMore = ($start + count($slice) < count($scored));
+            $nextCursor = $hasMore ? $locationsCursor + 1 : null;
 
             $sections['locations'] = [
                 'items' => $slice,
-                'nextCursor' => $nextCursor
+                'nextCursor' => $nextCursor,
+                'hasMore' => $hasMore,
             ];
         }
 
         // Users section (from DB)
         if (in_array('users', $types)) {
             $offset = $usersCursor * $usersLimit;
-            
-            // Prefix-first ranking
-            $prefixUsers = User::where(function ($query) use ($q) {
-                $query->whereRaw("LOWER(handle) LIKE ?", ["$q%"])
-                      ->orWhereRaw("LOWER(display_name) LIKE ?", ["$q%"]);
-            })
-            ->select('id', 'username', 'display_name', 'handle', 'avatar_url')
-            ->limit($usersLimit)
-            ->offset($offset)
-            ->get();
-
-            $remainingLimit = $usersLimit - $prefixUsers->count();
-            
-            $substringUsers = collect();
-            if ($remainingLimit > 0) {
-                $substringUsers = User::where(function ($query) use ($q) {
-                    $query->whereRaw("(LOWER(handle) LIKE ? OR LOWER(display_name) LIKE ?)", ["%$q%", "%$q%"])
-                          ->whereRaw("NOT (LOWER(handle) LIKE ? OR LOWER(display_name) LIKE ?)", ["$q%", "$q%"]);
+            $users = User::query()
+                ->where(function ($query) use ($q) {
+                    $query->whereRaw("LOWER(handle) LIKE ?", ["%$q%"])
+                        ->orWhereRaw("LOWER(display_name) LIKE ?", ["%$q%"]);
                 })
                 ->select('id', 'username', 'display_name', 'handle', 'avatar_url')
-                ->limit($remainingLimit)
+                ->orderByRaw(
+                    "CASE WHEN LOWER(handle) LIKE ? OR LOWER(display_name) LIKE ? THEN 0 ELSE 1 END",
+                    ["$q%", "$q%"]
+                )
+                ->orderByRaw(
+                    "CASE WHEN LOWER(handle) = ? THEN 0 WHEN LOWER(display_name) = ? THEN 1 ELSE 2 END",
+                    [$q, $q]
+                )
+                ->orderBy('handle')
+                ->offset($offset)
+                ->limit($usersLimit + 1)
                 ->get();
-            }
 
-            $users = $prefixUsers->concat($substringUsers);
-            $nextCursor = $users->count() === $usersLimit ? $usersCursor + 1 : null;
+            $hasMore = $users->count() > $usersLimit;
+            if ($hasMore) {
+                $users = $users->take($usersLimit)->values();
+            }
+            $nextCursor = $hasMore ? $usersCursor + 1 : null;
 
             $sections['users'] = [
                 'items' => $users->values(),
-                'nextCursor' => $nextCursor
+                'nextCursor' => $nextCursor,
+                'hasMore' => $hasMore,
             ];
         }
 
         // Posts section (from DB)
         if (in_array('posts', $types)) {
             $offset = $postsCursor * $postsLimit;
-            
-            $posts = Post::where(function ($query) use ($q) {
-                $query->whereRaw("LOWER(COALESCE(text_content, '')) LIKE ?", ["%$q%"])
-                      ->orWhereRaw("LOWER(COALESCE(location_label, '')) LIKE ?", ["%$q%"]);
-            })
-            ->select('id', 'user_id', 'user_handle', 'text_content', 'media_url', 'media_type', 'location_label', 'created_at')
-            ->orderBy('created_at', 'desc')
-            ->limit($postsLimit)
-            ->offset($offset)
-            ->get();
+            $posts = Post::query()
+                ->where(function ($query) use ($q) {
+                    $query->whereRaw("LOWER(COALESCE(text_content, '')) LIKE ?", ["%$q%"])
+                        ->orWhereRaw("LOWER(COALESCE(location_label, '')) LIKE ?", ["%$q%"]);
+                })
+                ->select('id', 'user_id', 'user_handle', 'text_content', 'media_url', 'media_type', 'location_label', 'created_at')
+                ->orderByRaw(
+                    "CASE WHEN LOWER(COALESCE(text_content, '')) LIKE ? OR LOWER(COALESCE(location_label, '')) LIKE ? THEN 0 ELSE 1 END",
+                    ["$q%", "$q%"]
+                )
+                ->orderBy('created_at', 'desc')
+                ->offset($offset)
+                ->limit($postsLimit + 1)
+                ->get();
 
-            $nextCursor = $posts->count() === $postsLimit ? $postsCursor + 1 : null;
+            $hasMore = $posts->count() > $postsLimit;
+            if ($hasMore) {
+                $posts = $posts->take($postsLimit)->values();
+            }
+            $nextCursor = $hasMore ? $postsCursor + 1 : null;
 
             $sections['posts'] = [
                 'items' => $posts,
-                'nextCursor' => $nextCursor
+                'nextCursor' => $nextCursor,
+                'hasMore' => $hasMore,
             ];
         }
 

@@ -14,7 +14,7 @@ import Flag from './Flag';
 import type { EffectConfig } from '../utils/effects';
 import { useAuth } from '../context/Auth';
 import { useOnline } from '../hooks/useOnline';
-import { addComment, addReply, fetchComments, toggleCommentLike, toggleReplyLike } from '../api/posts';
+import { addComment, addReply, fetchCommentsPage, toggleCommentLike, toggleReplyLike } from '../api/posts';
 import { getCollectionsForPost } from '../api/collections';
 import { isProfilePrivate, canSendMessage, hasPendingFollowRequest, createFollowRequest } from '../api/privacy';
 import { getFollowedUsers, setFollowState } from '../api/posts';
@@ -220,6 +220,9 @@ export default function ScenesModal({
     const [isPaused, setIsPaused] = React.useState(false);
     const [isCaptionExpanded, setIsCaptionExpanded] = React.useState(false);
     const [commentsList, setCommentsList] = React.useState<Comment[]>([]);
+    const [commentsCursor, setCommentsCursor] = React.useState<string | null>(null);
+    const [commentsHasMore, setCommentsHasMore] = React.useState(false);
+    const [commentsLoadingMore, setCommentsLoadingMore] = React.useState(false);
     // Which comment threads have their replies expanded in the Scenes comments sheet
     const [expandedReplyThreads, setExpandedReplyThreads] = React.useState<Record<string, boolean>>({});
     const [isLoadingComments, setIsLoadingComments] = React.useState(false);
@@ -246,6 +249,7 @@ export default function ScenesModal({
     const profileBorderOverlayRef = React.useRef<HTMLDivElement>(null);
     const profileBorderOverlayRef2 = React.useRef<HTMLDivElement>(null);
     const expandedCommentInputRef = React.useRef<HTMLInputElement>(null);
+    const commentsSheetScrollRef = React.useRef<HTMLDivElement | null>(null);
     const { user } = useAuth();
     const online = useOnline();
     const navigate = useNavigate();
@@ -657,8 +661,10 @@ export default function ScenesModal({
             // Refresh comments list if sheet is open
             if (isCaptionExpanded) {
                 try {
-                    const fetchedComments = await fetchComments(post.id);
-                    setCommentsList(fetchedComments);
+                    const page = await fetchCommentsPage(post.id, null, 30, 5, user?.id);
+                    setCommentsList(page.items);
+                    setCommentsCursor(page.nextCursor);
+                    setCommentsHasMore(page.hasMore);
                 } catch (error) {
                     console.error('Failed to refresh comments:', error);
                 }
@@ -697,12 +703,15 @@ export default function ScenesModal({
             window.removeEventListener(`shareAdded-${post.id}`, handleShareAdded);
             window.removeEventListener(`reclipAdded-${post.id}`, handleReclipAdded as EventListener);
         };
-    }, [post.id, isCaptionExpanded]);
+    }, [post.id, isCaptionExpanded, user?.id]);
 
     // When the underlying post changes (e.g. swipe from post 1 to post 4),
     // reset the comments UI so we never show comments from the previous post.
     React.useEffect(() => {
         setCommentsList([]);
+        setCommentsCursor(null);
+        setCommentsHasMore(false);
+        setCommentsLoadingMore(false);
         setIsLoadingComments(false);
         setReplyingToCommentId(null);
         setReplyInputText('');
@@ -1114,8 +1123,10 @@ export default function ScenesModal({
             if (commentsList.length === 0 && !isLoadingComments) {
                 setIsLoadingComments(true);
                 try {
-                    const fetchedComments = await fetchComments(post.id);
-                    setCommentsList(fetchedComments);
+                    const page = await fetchCommentsPage(post.id, null, 30, 5, user?.id);
+                    setCommentsList(page.items);
+                    setCommentsCursor(page.nextCursor);
+                    setCommentsHasMore(page.hasMore);
                 } catch (error) {
                     console.error('Failed to load comments:', error);
                 } finally {
@@ -1124,6 +1135,41 @@ export default function ScenesModal({
             }
         }
     };
+
+    const handleLoadMoreComments = React.useCallback(async () => {
+        if (commentsLoadingMore || !commentsHasMore || !commentsCursor) return;
+        setCommentsLoadingMore(true);
+        try {
+            const page = await fetchCommentsPage(post.id, commentsCursor, 30, 5, user?.id);
+            if (page.items.length > 0) {
+                setCommentsList((prev) => {
+                    const seen = new Set(prev.map((c) => String(c.id)));
+                    const merged = [...prev];
+                    page.items.forEach((c) => {
+                        if (!seen.has(String(c.id))) {
+                            merged.push(c);
+                            seen.add(String(c.id));
+                        }
+                    });
+                    return merged;
+                });
+            }
+            setCommentsCursor(page.nextCursor);
+            setCommentsHasMore(page.hasMore);
+        } catch (error) {
+            console.error('Failed to load more comments:', error);
+        } finally {
+            setCommentsLoadingMore(false);
+        }
+    }, [commentsCursor, commentsHasMore, commentsLoadingMore, post.id, user?.id]);
+
+    const handleCommentsSheetScroll = React.useCallback((el: HTMLDivElement) => {
+        if (isLoadingComments || commentsLoadingMore || !commentsHasMore || !commentsCursor) return;
+        const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
+        if (remaining <= 180) {
+            void handleLoadMoreComments();
+        }
+    }, [commentsCursor, commentsHasMore, commentsLoadingMore, handleLoadMoreComments, isLoadingComments]);
 
     // Drag handlers for bottom sheet - TikTok style: only drag when touch starts on the handle bar so comments list can scroll
     const handleSheetTouchStart = (e: React.TouchEvent) => {
@@ -2335,7 +2381,11 @@ export default function ScenesModal({
                                 </div>
 
                                 {/* Scrollable Comments */}
-                                <div className="flex-1 overflow-y-auto min-h-0">
+                                <div
+                                    ref={commentsSheetScrollRef}
+                                    onScroll={(e) => handleCommentsSheetScroll(e.currentTarget)}
+                                    className="flex-1 overflow-y-auto min-h-0"
+                                >
                                     {(post.caption || post.text) && (
                                         <div className="px-4 py-3 border-b border-gray-100">
                                             <p className="text-gray-900 text-sm whitespace-pre-line break-words">
@@ -2477,6 +2527,18 @@ export default function ScenesModal({
                                                     </div>
                                                 </div>
                                             ))}
+                                            {commentsHasMore && (
+                                                <div className="pt-1">
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleLoadMoreComments}
+                                                        disabled={commentsLoadingMore}
+                                                        className="w-full min-h-[40px] rounded-lg border border-gray-300 bg-gray-50 text-sm text-gray-700 disabled:opacity-60"
+                                                    >
+                                                        {commentsLoadingMore ? 'Loading...' : 'Load more comments'}
+                                                    </button>
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </div>

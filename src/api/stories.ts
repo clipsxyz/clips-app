@@ -1,4 +1,10 @@
 import type { Story, StoryGroup, StickerOverlay } from '../types';
+import { isLaravelApiEnabled } from '../config/runtimeEnv';
+
+let lastStoriesLoadSource: 'api-paged' | 'api-user' | 'mock' = 'mock';
+export function getLastStoriesLoadSource(): 'api-paged' | 'api-user' | 'mock' {
+    return lastStoriesLoadSource;
+}
 
 // Mock stories data – tuned to showcase the new Instagram-style story types
 let stories: Story[] = [
@@ -584,6 +590,37 @@ export function sortStoriesNewestFirst(stories: Story[]): Story[] {
     return [...stories].sort((a, b) => b.createdAt - a.createdAt);
 }
 
+export type StoriesPage = {
+    items: Story[];
+    nextCursor: string | null;
+    hasMore: boolean;
+};
+
+function mapLaravelStoryToStory(story: any): Story {
+    return {
+        id: story.id,
+        userId: story.user_id,
+        userHandle: story.user_handle,
+        mediaUrl: story.media_url || undefined,
+        mediaType: story.media_type || undefined,
+        text: story.text || undefined,
+        textColor: story.text_color || undefined,
+        textSize: story.text_size || undefined,
+        location: story.location || undefined,
+        venue: story.venue || undefined,
+        createdAt: story.created_at ? new Date(story.created_at).getTime() : Date.now(),
+        expiresAt: story.expires_at ? new Date(story.expires_at).getTime() : Date.now(),
+        views: story.views_count || 0,
+        hasViewed: !!story.has_viewed,
+        reactions: [],
+        replies: [],
+        userReaction: story.user_reaction || undefined,
+        textStyle: story.text_style || undefined,
+        stickers: story.stickers || undefined,
+        taggedUsers: story.tagged_users || undefined,
+    };
+}
+
 function sortGroupStoriesNewestFirst(groups: StoryGroup[]): StoryGroup[] {
     return groups.map((g) => ({ ...g, stories: sortStoriesNewestFirst(g.stories) }));
 }
@@ -623,8 +660,37 @@ export async function fetchStoryGroups(userId: string): Promise<StoryGroup[]> {
     return sortGroupStoriesNewestFirst(groups);
 }
 
+/**
+ * Optional paged stories endpoint for large accounts/feeds.
+ * Returns flat story items in newest-first order with a keyset cursor.
+ */
+export async function fetchStoriesPage(cursor: string | null, limit = 20, userId?: string): Promise<StoriesPage> {
+    const { fetchStoriesPage: fetchStoriesPageApi } = await import('./client');
+    const response = await fetchStoriesPageApi(cursor, limit, userId);
+    const rawItems = Array.isArray(response?.items) ? response.items : [];
+    const items: Story[] = rawItems.map((story: any) => mapLaravelStoryToStory(story));
+
+    return {
+        items,
+        nextCursor: typeof response?.nextCursor === 'string' ? response.nextCursor : null,
+        hasMore: !!response?.hasMore,
+    };
+}
+
 // Get stories for a specific user
 export async function fetchUserStories(viewerUserId: string, targetUserId: string, followedUserHandles: string[] = []): Promise<Story[]> {
+    if (isLaravelApiEnabled()) {
+        try {
+            const allGroups = await fetchFollowedUsersStoryGroups(viewerUserId, followedUserHandles);
+            const targetGroup = allGroups.find((group) => group.userId === targetUserId);
+            lastStoriesLoadSource = 'api-user';
+            return targetGroup ? sortStoriesNewestFirst(targetGroup.stories) : [];
+        } catch (error) {
+            console.warn('Failed to fetch user stories from API, falling back to mock:', error);
+        }
+    }
+
+    lastStoriesLoadSource = 'mock';
     await delay();
 
     const now = Date.now();
@@ -643,6 +709,28 @@ export async function fetchUserStories(viewerUserId: string, targetUserId: strin
 
 // Get story group for a specific user by handle
 export async function fetchStoryGroupByHandle(userHandle: string): Promise<StoryGroup | null> {
+    if (isLaravelApiEnabled()) {
+        try {
+            const { apiRequest } = await import('./client');
+            const encoded = encodeURIComponent(userHandle);
+            const response = await apiRequest(`/stories/user/${encoded}`);
+            const rawStories = Array.isArray(response) ? response : [];
+            if (rawStories.length === 0) return null;
+            const stories = rawStories.map((story: any) => mapLaravelStoryToStory(story));
+            lastStoriesLoadSource = 'api-user';
+            return {
+                userId: stories[0].userId,
+                userHandle: stories[0].userHandle,
+                name: stories[0].userHandle.split('@')[0],
+                avatarUrl: undefined,
+                stories: sortStoriesNewestFirst(stories),
+            };
+        } catch (error) {
+            console.warn('Failed to fetch story group by handle from API, falling back to mock:', error);
+        }
+    }
+
+    lastStoriesLoadSource = 'mock';
     await delay();
 
     const now = Date.now();
@@ -1026,6 +1114,49 @@ export async function userHasUnviewedStoriesByHandle(userHandle: string): Promis
 
 // Get stories for followed users only
 export async function fetchFollowedUsersStoryGroups(userId: string, followedUserHandles: string[]): Promise<StoryGroup[]> {
+    if (isLaravelApiEnabled()) {
+        try {
+            const collected: Story[] = [];
+            let cursor: string | null = null;
+            let pages = 0;
+            const maxPages = 5;
+
+            do {
+                const page = await fetchStoriesPage(cursor, 50, userId);
+                collected.push(...page.items);
+                cursor = page.nextCursor;
+                pages += 1;
+                if (!page.hasMore) break;
+            } while (cursor && pages < maxPages);
+
+            const filtered = collected.filter((story) =>
+                story.userId === userId || followedUserHandles.includes(story.userHandle),
+            );
+
+            const byUser = new Map<string, StoryGroup>();
+            for (const story of filtered) {
+                const existing = byUser.get(story.userId);
+                if (existing) {
+                    existing.stories.push(story);
+                } else {
+                    byUser.set(story.userId, {
+                        userId: story.userId,
+                        userHandle: story.userHandle,
+                        name: story.userHandle.split('@')[0],
+                        avatarUrl: undefined,
+                        stories: [story],
+                    });
+                }
+            }
+
+            lastStoriesLoadSource = 'api-paged';
+            return sortGroupStoriesNewestFirst(Array.from(byUser.values()));
+        } catch (error) {
+            console.warn('Failed to fetch followed users stories from API, falling back to mock:', error);
+        }
+    }
+
+    lastStoriesLoadSource = 'mock';
     await delay();
 
     // Filter out expired stories

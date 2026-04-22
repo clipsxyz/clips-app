@@ -15,6 +15,7 @@ import EffectWrapper from '../components/EffectWrapper';
 import type { EffectConfig } from '../utils/effects';
 import { pickFiles, filterFilesByPlatform, type PlatformType } from '../utils/filePicker';
 import { isWeb } from '../utils/platform';
+import { prepareMediaItemsForPost } from '../utils/prepareMediaForPost';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 
@@ -896,11 +897,15 @@ export default function TemplateEditorPage() {
                 allStickers.push(...clipStickers);
             });
 
+            const preparedMedia = await prepareMediaItemsForPost(allMediaItems);
+            const normalizedMediaItems = preparedMedia.items;
+            const videoPosterUrl = preparedMedia.videoPosterUrl;
+
             // Create post with all clips' media as a carousel
             const taggedUsersToPass = taggedUsers && Array.isArray(taggedUsers) && taggedUsers.length > 0 ? taggedUsers : undefined;
 
             // Find first non-text item for backward compatibility (mediaUrl/mediaType)
-            const firstMediaItem = allMediaItems.find(item => item.type !== 'text');
+            const firstMediaItem = normalizedMediaItems.find(item => item.type !== 'text');
             
             await createPost(
                 user.id,
@@ -916,14 +921,21 @@ export default function TemplateEditorPage() {
                 user.national,
                 allStickers.length > 0 ? allStickers : undefined, // Pass all stickers
                 template?.id || undefined, // templateId
-                allMediaItems.filter(item => item !== null) as Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>, // Pass all media items for carousel (including text-only clips)
+                normalizedMediaItems.filter(item => item !== null) as Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>, // Pass all media items for carousel (including text-only clips)
                 bannerText.trim() || undefined, // bannerText
                 undefined, // textStyle
                 taggedUsersToPass, // taggedUsers
                 captionsEnabled, // videoCaptionsEnabled
                 videoCaptionText.trim() || undefined, // videoCaptionText
                 subtitlesEnabled, // subtitlesEnabled
-                subtitleText.trim() || undefined // subtitleText
+                subtitleText.trim() || undefined, // subtitleText
+                undefined, // editTimeline
+                undefined, // musicTrackId
+                undefined, // venue
+                undefined, // landmark
+                undefined, // socialFormat
+                undefined, // videoFrameMode
+                videoPosterUrl
             );
 
             // Dispatch event to refresh feed

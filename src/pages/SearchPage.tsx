@@ -120,6 +120,21 @@ export default function SearchPage() {
     const { user } = useAuth();
     const [searchQuery, setSearchQuery] = React.useState('');
     const [sections, setSections] = React.useState<SearchSections>({});
+    const [sectionCursors, setSectionCursors] = React.useState<{
+        users: number | string | null;
+        locations: number | string | null;
+        posts: number | string | null;
+    }>({ users: 0, locations: 0, posts: 0 });
+    const [sectionHasMore, setSectionHasMore] = React.useState<{ users: boolean; locations: boolean; posts: boolean }>({
+        users: false,
+        locations: false,
+        posts: false,
+    });
+    const [sectionLoadingMore, setSectionLoadingMore] = React.useState<{ users: boolean; locations: boolean; posts: boolean }>({
+        users: false,
+        locations: false,
+        posts: false,
+    });
     const [preloadPosts, setPreloadPosts] = React.useState<Post[] | null>(null);
     const [showSearchMode, setShowSearchMode] = React.useState(false);
     const [isFocused, setIsFocused] = React.useState(false);
@@ -149,6 +164,8 @@ export default function SearchPage() {
         const id = setTimeout(() => {
             if (!q) {
                 setSections({});
+                setSectionCursors({ users: 0, locations: 0, posts: 0 });
+                setSectionHasMore({ users: false, locations: false, posts: false });
                 return;
             }
 
@@ -172,11 +189,77 @@ export default function SearchPage() {
             }
 
             unifiedSearch({ q, types, usersLimit: 10, locationsLimit: 10, postsLimit: 12 })
-                .then(r => setSections(r.sections))
+                .then(r => {
+                    setSections(r.sections);
+                    setSectionCursors({
+                        users: r.sections?.users?.nextCursor ?? null,
+                        locations: r.sections?.locations?.nextCursor ?? null,
+                        posts: r.sections?.posts?.nextCursor ?? null,
+                    });
+                    setSectionHasMore({
+                        users: !!r.sections?.users?.hasMore || r.sections?.users?.nextCursor != null,
+                        locations: !!r.sections?.locations?.hasMore || r.sections?.locations?.nextCursor != null,
+                        posts: !!r.sections?.posts?.hasMore || r.sections?.posts?.nextCursor != null,
+                    });
+                })
                 .catch(() => setSections({}));
         }, 250);
         return () => clearTimeout(id);
     }, [searchQuery, searchMode]);
+
+    const loadMoreSection = React.useCallback(async (section: 'users' | 'locations' | 'posts') => {
+        const q = searchQuery.trim();
+        if (!q) return;
+        if (!sectionHasMore[section] || sectionLoadingMore[section]) return;
+        const cursor = sectionCursors[section];
+        if (cursor == null) return;
+
+        setSectionLoadingMore((prev) => ({ ...prev, [section]: true }));
+        try {
+            const params: any = {
+                q,
+                types: section,
+                usersLimit: section === 'users' ? 10 : undefined,
+                locationsLimit: section === 'locations' ? 10 : undefined,
+                postsLimit: section === 'posts' ? 12 : undefined,
+            };
+            if (section === 'users') params.usersCursor = cursor;
+            if (section === 'locations') params.locationsCursor = cursor;
+            if (section === 'posts') params.postsCursor = cursor;
+            const r = await unifiedSearch(params);
+            const incoming = r.sections?.[section];
+            const incomingItems = Array.isArray(incoming?.items) ? incoming.items : [];
+
+            setSections((prev) => {
+                const prevItems = Array.isArray(prev?.[section]?.items) ? prev[section]!.items : [];
+                const merged = [...prevItems];
+                const seen = new Set(prevItems.map((i: any) => String(i?.id ?? i?.handle ?? i?.name ?? JSON.stringify(i))));
+                incomingItems.forEach((item: any) => {
+                    const key = String(item?.id ?? item?.handle ?? item?.name ?? JSON.stringify(item));
+                    if (!seen.has(key)) {
+                        merged.push(item);
+                        seen.add(key);
+                    }
+                });
+                return {
+                    ...prev,
+                    [section]: {
+                        items: merged,
+                        nextCursor: incoming?.nextCursor ?? null,
+                        hasMore: incoming?.hasMore ?? false,
+                    },
+                };
+            });
+
+            setSectionCursors((prev) => ({ ...prev, [section]: incoming?.nextCursor ?? null }));
+            setSectionHasMore((prev) => ({
+                ...prev,
+                [section]: !!incoming?.hasMore || incoming?.nextCursor != null,
+            }));
+        } finally {
+            setSectionLoadingMore((prev) => ({ ...prev, [section]: false }));
+        }
+    }, [searchQuery, sectionCursors, sectionHasMore, sectionLoadingMore]);
 
     // Preload a user's posts on first open (Sarah@Artane for now)
     React.useEffect(() => {
@@ -868,22 +951,34 @@ export default function SearchPage() {
                             {!(filteredLocations?.length) ? (
                                 <div className="text-sm text-gray-500 dark:text-gray-400">No matching locations</div>
                             ) : (
-                                <div className="divide-y divide-white/10 rounded-xl border border-white/10 overflow-hidden bg-[#08080b]">
-                                    {filteredLocations.map((loc: any) => (
+                                <div className="space-y-2">
+                                    <div className="divide-y divide-white/10 rounded-xl border border-white/10 overflow-hidden bg-[#08080b]">
+                                        {filteredLocations.map((loc: any) => (
+                                            <button
+                                                key={`${loc.name}-${loc.country || ''}`}
+                                                onClick={() => goToLocation(loc.name)}
+                                                className="w-full min-h-[52px] text-left flex items-center gap-3 p-3.5 hover:bg-white/5 transition-colors"
+                                            >
+                                                <div className="h-8 w-8 rounded-full bg-white/10 border border-white/10 flex items-center justify-center">
+                                                    <FiMapPin className="text-white/90" />
+                                                </div>
+                                                <div>
+                                                    <div className="font-medium text-gray-100">{loc.name}</div>
+                                                    <div className="text-xs text-gray-500">{loc.type}{loc.country ? ` • ${loc.country}` : ''}</div>
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                    {sectionHasMore.locations && (
                                         <button
-                                            key={`${loc.name}-${loc.country || ''}`}
-                                            onClick={() => goToLocation(loc.name)}
-                                            className="w-full min-h-[52px] text-left flex items-center gap-3 p-3.5 hover:bg-white/5 transition-colors"
+                                            type="button"
+                                            onClick={() => loadMoreSection('locations')}
+                                            disabled={sectionLoadingMore.locations}
+                                            className="w-full min-h-[40px] rounded-lg border border-white/20 bg-white/[0.04] text-sm text-gray-200 disabled:opacity-60"
                                         >
-                                            <div className="h-8 w-8 rounded-full bg-white/10 border border-white/10 flex items-center justify-center">
-                                                <FiMapPin className="text-white/90" />
-                                            </div>
-                                            <div>
-                                                <div className="font-medium text-gray-100">{loc.name}</div>
-                                                <div className="text-xs text-gray-500">{loc.type}{loc.country ? ` • ${loc.country}` : ''}</div>
-                                            </div>
+                                            {sectionLoadingMore.locations ? 'Loading...' : 'Load more locations'}
                                         </button>
-                                    ))}
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -949,22 +1044,34 @@ export default function SearchPage() {
                             {!(filteredUsers?.length) ? (
                                 <div className="text-sm text-gray-500 dark:text-gray-400">No users found</div>
                             ) : (
-                                <div className="divide-y divide-white/10 rounded-xl border border-white/10 overflow-hidden bg-[#08080b]">
-                                    {filteredUsers.map((u: any) => (
+                                <div className="space-y-2">
+                                    <div className="divide-y divide-white/10 rounded-xl border border-white/10 overflow-hidden bg-[#08080b]">
+                                        {filteredUsers.map((u: any) => (
+                                            <button
+                                                key={u.handle}
+                                                onClick={() => goToUser(u.handle)}
+                                                className="w-full min-h-[52px] text-left flex items-center gap-3 p-3.5 hover:bg-white/5 transition-colors"
+                                            >
+                                                <div className="h-8 w-8 rounded-full bg-white/10 border border-white/10 flex items-center justify-center">
+                                                    <FiUsers className="text-white/90" />
+                                                </div>
+                                                <div>
+                                                    <div className="font-medium text-gray-100">{u.handle}</div>
+                                                    {u.display_name && <div className="text-xs text-gray-500">{u.display_name}</div>}
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                    {sectionHasMore.users && (
                                         <button
-                                            key={u.handle}
-                                            onClick={() => goToUser(u.handle)}
-                                            className="w-full min-h-[52px] text-left flex items-center gap-3 p-3.5 hover:bg-white/5 transition-colors"
+                                            type="button"
+                                            onClick={() => loadMoreSection('users')}
+                                            disabled={sectionLoadingMore.users}
+                                            className="w-full min-h-[40px] rounded-lg border border-white/20 bg-white/[0.04] text-sm text-gray-200 disabled:opacity-60"
                                         >
-                                            <div className="h-8 w-8 rounded-full bg-white/10 border border-white/10 flex items-center justify-center">
-                                                <FiUsers className="text-white/90" />
-                                            </div>
-                                            <div>
-                                                <div className="font-medium text-gray-100">{u.handle}</div>
-                                                {u.display_name && <div className="text-xs text-gray-500">{u.display_name}</div>}
-                                            </div>
+                                            {sectionLoadingMore.users ? 'Loading...' : 'Load more users'}
                                         </button>
-                                    ))}
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -1005,35 +1112,47 @@ export default function SearchPage() {
                             {!(sections.posts?.items?.length) ? (
                                 <div className="text-sm text-gray-500 dark:text-gray-400">No posts found</div>
                             ) : (
-                                <div className="grid grid-cols-3 gap-1">
-                                    {sections.posts!.items!.map((p: any) => (
-                                        <div key={p.id} className="aspect-square relative bg-gray-900">
-                                            {p.media_url ? (
-                                                p.media_type === 'video' ? (
-                                                    <>
-                                                        <video src={p.media_url} className="w-full h-full object-cover" muted playsInline preload="metadata" />
-                                                        <div className="absolute inset-0 flex items-center justify-center">
-                                                            <div className="w-10 h-10 bg-black/60 rounded-full flex items-center justify-center">
-                                                                <FiPlayCircle className="w-5 h-5 text-white" />
+                                <div className="space-y-2">
+                                    <div className="grid grid-cols-3 gap-1">
+                                        {sections.posts!.items!.map((p: any) => (
+                                            <div key={p.id} className="aspect-square relative bg-gray-900">
+                                                {p.media_url ? (
+                                                    p.media_type === 'video' ? (
+                                                        <>
+                                                            <video src={p.media_url} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                                                            <div className="absolute inset-0 flex items-center justify-center">
+                                                                <div className="w-10 h-10 bg-black/60 rounded-full flex items-center justify-center">
+                                                                    <FiPlayCircle className="w-5 h-5 text-white" />
+                                                                </div>
                                                             </div>
-                                                        </div>
-                                                    </>
+                                                        </>
+                                                    ) : (
+                                                        <img src={p.media_url} alt="" className="w-full h-full object-cover" />
+                                                    )
                                                 ) : (
-                                                    <img src={p.media_url} alt="" className="w-full h-full object-cover" />
-                                                )
-                                            ) : (
-                                                <div className="w-full h-full relative flex items-center justify-center p-3" style={{ background: '#0f172a' }}>
-                                                    <p className="text-white text-xs font-semibold text-center line-clamp-6">{p.text_content || 'No preview'}</p>
-                                                </div>
-                                            )}
-                                            {p.location_label && (
-                                                <div className="absolute top-2 left-2 px-2 py-0.5 bg-black/70 rounded flex items-center gap-1">
-                                                    <FiMapPin className="w-3 h-3 text-white" />
-                                                    <span className="text-[10px] text-white font-medium">{p.location_label}</span>
-                                                </div>
-                                            )}
-                                        </div>
-                                    ))}
+                                                    <div className="w-full h-full relative flex items-center justify-center p-3" style={{ background: '#0f172a' }}>
+                                                        <p className="text-white text-xs font-semibold text-center line-clamp-6">{p.text_content || 'No preview'}</p>
+                                                    </div>
+                                                )}
+                                                {p.location_label && (
+                                                    <div className="absolute top-2 left-2 px-2 py-0.5 bg-black/70 rounded flex items-center gap-1">
+                                                        <FiMapPin className="w-3 h-3 text-white" />
+                                                        <span className="text-[10px] text-white font-medium">{p.location_label}</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    {sectionHasMore.posts && (
+                                        <button
+                                            type="button"
+                                            onClick={() => loadMoreSection('posts')}
+                                            disabled={sectionLoadingMore.posts}
+                                            className="w-full min-h-[40px] rounded-lg border border-white/20 bg-white/[0.04] text-sm text-gray-200 disabled:opacity-60"
+                                        >
+                                            {sectionLoadingMore.posts ? 'Loading...' : 'Load more posts'}
+                                        </button>
+                                    )}
                                 </div>
                             )}
                         </div>

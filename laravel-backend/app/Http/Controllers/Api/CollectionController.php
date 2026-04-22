@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Collection;
 use App\Models\Post;
-use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -20,28 +19,30 @@ class CollectionController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = Auth::user();
-        
+
         $collections = Collection::where('user_id', $user->id)
             ->withCount('posts')
+            ->with(['posts' => function ($query) {
+                $query->select('posts.id', 'posts.media_url');
+            }])
             ->orderBy('updated_at', 'desc')
             ->get()
             ->map(function ($collection) {
-                // Update thumbnail from first post if needed
-                if (!$collection->thumbnail_url && $collection->posts_count > 0) {
-                    $firstPost = $collection->posts()->first();
-                    if ($firstPost && $firstPost->media_url) {
-                        $collection->thumbnail_url = $firstPost->media_url;
-                        $collection->save();
-                    }
+                $thumbnailUrl = $collection->thumbnail_url;
+                if (!$thumbnailUrl && $collection->posts->isNotEmpty()) {
+                    $firstPostWithMedia = $collection->posts->first(function ($post) {
+                        return !empty($post->media_url);
+                    });
+                    $thumbnailUrl = $firstPostWithMedia?->media_url;
                 }
-                
+
                 return [
                     'id' => (string) $collection->id,
                     'userId' => $collection->user_id,
                     'name' => $collection->name,
                     'isPrivate' => $collection->is_private,
-                    'thumbnailUrl' => $collection->thumbnail_url,
-                    'postIds' => $collection->posts()->pluck('posts.id')->toArray(),
+                    'thumbnailUrl' => $thumbnailUrl,
+                    'postIds' => $collection->posts->pluck('id')->values()->all(),
                     'createdAt' => $collection->created_at->timestamp * 1000, // Epoch in milliseconds
                     'updatedAt' => $collection->updated_at->timestamp * 1000,
                 ];
@@ -335,12 +336,14 @@ class CollectionController extends Controller
         }
 
         $user = Auth::user();
-        $post = Post::findOrFail($postId);
 
         $collections = Collection::where('user_id', $user->id)
             ->whereHas('posts', function ($query) use ($postId) {
                 $query->where('posts.id', $postId);
             })
+            ->with(['posts' => function ($query) {
+                $query->select('posts.id');
+            }])
             ->orderBy('updated_at', 'desc')
             ->get()
             ->map(function ($collection) {
@@ -350,7 +353,7 @@ class CollectionController extends Controller
                     'name' => $collection->name,
                     'isPrivate' => $collection->is_private,
                     'thumbnailUrl' => $collection->thumbnail_url,
-                    'postIds' => $collection->posts()->pluck('posts.id')->toArray(),
+                    'postIds' => $collection->posts->pluck('id')->values()->all(),
                     'updatedAt' => $collection->updated_at->timestamp * 1000,
                 ];
             });

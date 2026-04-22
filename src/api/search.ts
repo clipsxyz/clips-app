@@ -1,7 +1,7 @@
 export type SearchSections = {
-    users?: { items: any[]; nextCursor: number | null };
-    locations?: { items: any[]; nextCursor: number | null };
-    posts?: { items: any[]; nextCursor: number | null };
+    users?: { items: any[]; nextCursor: number | string | null; hasMore?: boolean };
+    locations?: { items: any[]; nextCursor: number | string | null; hasMore?: boolean };
+    posts?: { items: any[]; nextCursor: number | string | null; hasMore?: boolean };
 };
 
 // Mock users for testing (Sarah, Bob, Ava, Clips24)

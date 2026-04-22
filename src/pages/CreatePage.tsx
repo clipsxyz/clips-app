@@ -10,6 +10,7 @@ import StickerOverlayComponent from '../components/StickerOverlay';
 import TextStickerModal from '../components/TextStickerModal';
 import UserTaggingModal from '../components/UserTaggingModal';
 import { showToast } from '../utils/toast';
+import { prepareMediaForPost } from '../utils/prepareMediaForPost';
 
 // Debounce hook for performance
 function useDebounce<T>(value: T, delay: number): T {
@@ -691,93 +692,22 @@ export default function CreatePage() {
             // - Videos: upload the blob to the backend (/upload/single) and use the returned fileUrl.
             // - Images: convert blob URL to a data URL BEFORE calling createPost.
             let persistentMediaUrl = selectedMedia;
-            const isVideo = mediaType === 'video' || !mediaType;
+            let videoPosterUrl: string | undefined;
             if (selectedMedia) {
-                // Case 1: blob: URL – upload to backend for videos
-                if (selectedMedia.startsWith('blob:') && isVideo) {
-                    console.log('📤 Attempting to upload video blob to backend...', selectedMedia.substring(0, 50));
-                    try {
-                        const response = await fetch(selectedMedia);
-                        if (!response.ok) {
-                            throw new Error(`Failed to fetch blob: ${response.status} ${response.statusText}`);
-                        }
-                        const blob = await response.blob();
-                        const file = new File([blob], `video-${Date.now()}.webm`, { type: blob.type || 'video/webm' });
-                        const { uploadFile } = await import('../api/client');
-                        const uploadResult = await uploadFile(file);
-                        
-                        if (uploadResult.success && uploadResult.fileUrl) {
-                            persistentMediaUrl = uploadResult.fileUrl;
-                            console.log('✅ Video uploaded to backend:', persistentMediaUrl);
-                        } else {
-                            throw new Error('Upload failed: ' + (uploadResult.error || 'Unknown error'));
-                        }
-                    } catch (error: any) {
-                        const isConnectionError = 
-                            error?.name === 'ConnectionRefused' ||
-                            error?.message?.includes('CONNECTION_REFUSED') ||
-                            error?.message?.includes('Failed to fetch') ||
-                            error?.message?.includes('NetworkError') ||
-                            (error?.name === 'TypeError' && error?.message?.includes('fetch'));
-                        
-                        if (isConnectionError) {
-                            console.log('⚠️ Backend not accessible, using blob URL (mock fallback will handle it)');
-                            persistentMediaUrl = selectedMedia;
-                        } else {
-                            console.error('❌ Failed to upload video to backend:', error);
-                            showToast('Failed to upload video. Please try again.');
-                            setIsUploading(false);
-                            return;
-                        }
-                    }
-                }
-                // Case 2: video URL still pointing at dev server (e.g. http://192.168.1.7:5173/...)
-                else if (isVideo && selectedMedia.startsWith(window.location.origin)) {
-                    console.log('📤 Uploading dev-server video URL to backend...', selectedMedia);
-                    try {
-                        const response = await fetch(selectedMedia);
-                        if (!response.ok) {
-                            throw new Error(`Failed to fetch video from dev server: ${response.status} ${response.statusText}`);
-                        }
-                        const blob = await response.blob();
-                        const file = new File([blob], `video-${Date.now()}.webm`, { type: blob.type || 'video/webm' });
-                        const { uploadFile } = await import('../api/client');
-                        const uploadResult = await uploadFile(file);
-                        
-                        if (uploadResult.success && uploadResult.fileUrl) {
-                            persistentMediaUrl = uploadResult.fileUrl;
-                            console.log('✅ Dev-server video uploaded to backend:', persistentMediaUrl);
-                        } else {
-                            throw new Error('Upload failed: ' + (uploadResult.error || 'Unknown error'));
-                        }
-                    } catch (error: any) {
-                        console.error('❌ Failed to upload dev-server video URL to backend:', error);
-                        showToast('Failed to upload video. Please try again.');
-                        setIsUploading(false);
-                        return;
-                    }
-                }
-                // Case 3: image blob – convert to data URL
-                else if (selectedMedia.startsWith('blob:') && !isVideo) {
-                    console.log('Converting image blob URL to data URL before upload...');
-                    try {
-                        const response = await fetch(selectedMedia);
-                        const blob = await response.blob();
-                        const reader = new FileReader();
-                        const dataUrl = await new Promise<string>((resolve, reject) => {
-                            reader.onloadend = () => resolve(reader.result as string);
-                            reader.onerror = reject;
-                            reader.readAsDataURL(blob);
-                        });
-                        persistentMediaUrl = dataUrl;
-                        console.log('✅ Converted image blob URL to data URL', {
-                            originalSize: blob.size,
-                            dataUrlSize: dataUrl.length,
-                            isDataUrl: dataUrl.startsWith('data:')
-                        });
-                    } catch (error) {
-                        console.error('❌ Failed to convert blob URL to data URL:', error);
-                    }
+                try {
+                    const prepared = await prepareMediaForPost({
+                        mediaUrl: selectedMedia,
+                        mediaType,
+                        useBackendUpload: true,
+                        appOrigin: window.location.origin,
+                    });
+                    persistentMediaUrl = prepared.mediaUrl;
+                    videoPosterUrl = prepared.videoPosterUrl;
+                } catch (error) {
+                    console.error('❌ Failed to prepare media for post:', error);
+                    showToast('Failed to prepare media. Please try again.');
+                    setIsUploading(false);
+                    return;
                 }
             }
 
@@ -806,7 +736,10 @@ export default function CreatePage() {
                 editTimeline, // Pass editTimeline for hybrid pipeline
                 undefined, // reserved optional slot
                 venue.trim() || undefined, // Venue for metadata carousel
-                landmark.trim() || undefined // Named landmark for carousel + landmark feeds
+                landmark.trim() || undefined, // Named landmark for carousel + landmark feeds
+                undefined, // socialFormat
+                undefined, // videoFrameMode
+                videoPosterUrl
             );
 
             // Dispatch event to refresh feed with render job info if available
@@ -1282,7 +1215,7 @@ export default function CreatePage() {
                                         }}
                                         style={{
                                             ...(videoFilterStyle.filter ? videoFilterStyle : currentFilterStyle),
-                                            objectFit: 'contain',
+                                            objectFit: 'cover',
                                             width: '100%',
                                             height: '100%',
                                             minWidth: '100%',
@@ -1674,7 +1607,7 @@ export default function CreatePage() {
                                         className="w-full h-full"
                                         style={{
                                             ...currentFilterStyle,
-                                            objectFit: 'contain',
+                                            objectFit: 'cover',
                                             width: '100%',
                                             height: '100%',
                                             display: 'block'

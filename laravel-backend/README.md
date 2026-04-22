@@ -139,3 +139,143 @@ To use Redis for sessions:
 
 If Redis is not available, set `SESSION_DRIVER=file` (or `database` / `cookie`) in `.env` so the app still runs.
 
+---
+
+## Query Profiler (Dev)
+
+API responses include query profiling headers in `local` / `testing` by default (or when `QUERY_PROFILER_ENABLED=true`).
+
+### Response headers
+
+- `X-Query-Count`: number of SQL queries executed
+- `X-Query-Time-Ms`: total SQL time in milliseconds
+- `X-Request-Time-Ms`: total request duration in milliseconds
+- `X-Slowest-Query-Ms`: slowest single SQL query time in milliseconds
+- `X-Slowest-Query`: truncated SQL text for the slowest query
+
+### Environment variables
+
+Add/tune these in `.env`:
+
+```env
+QUERY_PROFILER_ENABLED=false
+QUERY_PROFILER_LOG_QUERY_COUNT_THRESHOLD=25
+QUERY_PROFILER_LOG_SLOWEST_MS_THRESHOLD=50
+QUERY_PROFILER_LOG_TOTAL_MS_THRESHOLD=120
+QUERY_PROFILER_LOG_REQUEST_MS_THRESHOLD=500
+```
+
+When any threshold is exceeded, the backend logs a warning with request path, query stats, and slowest SQL preview.
+
+### Quick check
+
+```powershell
+curl -i "http://127.0.0.1:8000/api/posts?limit=10"
+curl -i "http://127.0.0.1:8000/api/users/Ava@galway"
+curl -i "http://127.0.0.1:8000/api/posts/{POST_ID}/comments"
+```
+
+Inspect the `X-Query-*` headers and compare endpoints before/after changes.
+
+---
+
+## Feed Cursor Pagination
+
+`GET /api/posts` uses keyset cursor pagination.
+
+- Send `cursor` as an opaque token returned by `nextCursor`.
+- `nextCursor` can be a string token (new keyset mode) or numeric value (legacy compatibility).
+- Treat `nextCursor` as opaque and pass it back exactly as received.
+
+Example:
+
+```http
+GET /api/posts?filter=Dublin&limit=10&cursor=MjAyNi0wNC0yMiAxMTozNjo1OXwzZjQw...
+```
+
+```json
+{
+  "items": [/* ... */],
+  "nextCursor": "MjAyNi0wNC0yMiAxMTozNToyNXxhYjEy...",
+  "hasMore": true
+}
+```
+
+## Stories Cursor Pagination (Optional)
+
+For large story datasets, use:
+
+```http
+GET /api/stories/paged?limit=20&cursor=<opaque-token>&userId=<viewer-id>
+```
+
+Response:
+
+```json
+{
+  "items": [/* flat stories, newest first */],
+  "nextCursor": "MjAyNi0wNC0yMiAxMTozNToyNXxhYjEy...",
+  "hasMore": true
+}
+```
+
+The legacy grouped endpoint `GET /api/stories` is unchanged for existing UI flows.
+
+## Notifications Cursor Pagination
+
+`GET /api/notifications` supports keyset cursor pagination:
+
+```http
+GET /api/notifications?limit=20&cursor=<opaque-token>
+```
+
+Response:
+
+```json
+{
+  "items": [/* ... */],
+  "nextCursor": "MjAyNi0wNC0yMiAxMTozNToyNXxhYjEy...",
+  "hasMore": true
+}
+```
+
+`GET /api/notifications/unread-count`, `POST /api/notifications/{id}/read`, and `POST /api/notifications/mark-all-read` are also available.
+
+## Followers / Following Cursor Pagination
+
+Both endpoints support keyset cursor pagination with opaque `nextCursor` tokens:
+
+- `GET /api/users/{handle}/followers?limit=40&cursor=<opaque-token>`
+- `GET /api/users/{handle}/following?limit=40&cursor=<opaque-token>`
+
+Response shape remains:
+
+```json
+{
+  "items": [/* ... */],
+  "nextCursor": "MjAyNi0wNC0yMiAxMTozNToyNXxhYjEy...",
+  "hasMore": true
+}
+```
+
+## Message Thread Cursor Pagination (Optional)
+
+Conversation list uses cursor pagination at `GET /api/messages/conversations`.
+
+For large thread histories, use:
+
+- `GET /api/messages/conversation/{otherHandle}/paged?limit=50&cursor=<opaque-token>`
+- `GET /api/messages/group/{groupId}/paged?limit=50&cursor=<opaque-token>`
+
+Each returns:
+
+```json
+{
+  "items": [/* messages, ascending by time */],
+  "nextCursor": "MjAyNi0wNC0yMiAxMTozNToyNXxhYjEy...",
+  "hasMore": true
+}
+```
+
+Legacy endpoints (`/messages/conversation/{otherHandle}` and `/messages/group/{groupId}`) remain unchanged.
+

@@ -7,6 +7,7 @@ import { fetchFile } from '@ffmpeg/util';
 import { createPost } from '../api/posts';
 import { uploadFile } from '../api/client';
 import { useAuth } from '../context/Auth';
+import { prepareMediaForPost } from '../utils/prepareMediaForPost';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 
@@ -538,6 +539,14 @@ export default function CanvaVideoEditor() {
                 console.log('Backend upload failed, using data URL:', error);
             }
 
+            const preparedMedia = await prepareMediaForPost({
+                mediaUrl: finalUrl,
+                mediaType: 'video',
+                useBackendUpload: false,
+                appOrigin: window.location.origin,
+            });
+            const videoPosterUrl = preparedMedia.videoPosterUrl;
+
             // Create post
             await createPost(
                 user?.id || 'test user',
@@ -550,7 +559,17 @@ export default function CanvaVideoEditor() {
                 undefined,
                 'Finglas',
                 'Dublin',
-                'Ireland'
+                'Ireland',
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                videoPosterUrl
             );
 
             Swal.fire(bottomSheet({

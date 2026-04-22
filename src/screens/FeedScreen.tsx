@@ -46,6 +46,7 @@ import { timeAgo } from '../utils/timeAgo';
 import { enqueue, drain } from '../utils/mutationQueue';
 import type { Post, Comment } from '../types';
 import { getInstagramImageDimensions } from '../utils/imageDimensions';
+import { FEED_UI } from '../constants/feedUiTokens';
 import { Dimensions } from 'react-native';
 
 type Tab = string;
@@ -636,12 +637,15 @@ const FeedCard = React.memo(function FeedCard({
                 (width, height) => {
                     // Calculate Instagram-style dimensions with clamping
                     const dimensions = getInstagramImageDimensions(width, height, screenWidth);
-                    setImageDimensions({ width: dimensions.width, height: dimensions.height });
+                    const minHeight = screenWidth * FEED_UI.media.minAspect;
+                    const maxHeight = screenWidth * FEED_UI.media.maxAspect;
+                    const portraitFirstHeight = Math.min(Math.max(dimensions.height, minHeight), maxHeight);
+                    setImageDimensions({ width: dimensions.width, height: portraitFirstHeight });
                 },
                 (error) => {
                     console.error('Error getting image size:', error);
                     // Fallback to default dimensions
-                    setImageDimensions({ width: screenWidth, height: screenWidth * (4 / 5) });
+                    setImageDimensions({ width: screenWidth, height: screenWidth * FEED_UI.media.maxAspect });
                 }
             );
         }
@@ -659,7 +663,7 @@ const FeedCard = React.memo(function FeedCard({
         // Default while loading
         return {
             width: screenWidth,
-            height: screenWidth * (4 / 5), // Default to max portrait aspect ratio
+            height: screenWidth * FEED_UI.media.maxAspect, // Default to max portrait aspect ratio
             backgroundColor: '#111827',
         };
     }, [imageDimensions, screenWidth]);
@@ -715,26 +719,26 @@ const FeedCard = React.memo(function FeedCard({
                     <TouchableOpacity onPress={onLike} style={styles.actionButton}>
                         <Icon
                             name={post.userLiked ? "heart" : "heart-outline"}
-                            size={18}
+                            size={FEED_UI.icon.action}
                             color={post.userLiked ? "#EF4444" : "#6B7280"}
                         />
                         <Text style={styles.actionText}>{post.stats.likes}</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity onPress={onComment} style={styles.actionButton}>
-                        <Icon name="chatbubble-outline" size={18} color="#6B7280" />
+                        <Icon name="chatbubble-outline" size={FEED_UI.icon.action} color="#6B7280" />
                         <Text style={styles.actionText}>{post.stats.comments}</Text>
                     </TouchableOpacity>
 
                     {!isCurrentUser && (
                         <TouchableOpacity onPress={onReclip} style={styles.actionButton}>
-                            <Icon name="repeat" size={18} color={post.userReclipped ? "#8B5CF6" : "#6B7280"} />
+                            <Icon name="repeat" size={FEED_UI.icon.action} color={post.userReclipped ? "#8B5CF6" : "#6B7280"} />
                             <Text style={styles.actionText}>{post.stats.reclips}</Text>
                         </TouchableOpacity>
                     )}
 
                     <TouchableOpacity onPress={onShare} style={styles.actionButton}>
-                        <Icon name="share-outline" size={18} color="#6B7280" />
+                        <Icon name="share-outline" size={FEED_UI.icon.action} color="#6B7280" />
                     </TouchableOpacity>
 
                     <View style={styles.viewsContainer}>
@@ -751,7 +755,7 @@ const FeedCard = React.memo(function FeedCard({
                         >
                             <Icon
                                 name="notifications"
-                                size={18}
+                                size={FEED_UI.icon.action}
                                 color={hasInbox ? "#3B82F6" : "#6B7280"}
                             />
                             {hasInbox && unreadCount && unreadCount > 0 && (
@@ -766,7 +770,7 @@ const FeedCard = React.memo(function FeedCard({
                     <TouchableOpacity onPress={onBookmark}>
                         <Icon
                             name={post.isBookmarked ? "bookmark" : "bookmark-outline"}
-                            size={18}
+                            size={FEED_UI.icon.action}
                             color={post.isBookmarked ? "#8B5CF6" : "#6B7280"}
                         />
                     </TouchableOpacity>
@@ -832,7 +836,7 @@ function FeedScreen({ navigation }: { navigation?: any }) {
 
     const [active, setActive] = useState<Tab>(defaultNational);
     const [pages, setPages] = useState<Post[][]>([]);
-    const [cursor, setCursor] = useState<number | null>(0);
+    const [cursor, setCursor] = useState<string | number | null>(0);
     const [loading, setLoading] = useState(false);
     const [end, setEnd] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -1323,7 +1327,7 @@ const styles = StyleSheet.create({
     },
     feedCard: {
         backgroundColor: '#030712',
-        marginBottom: 16,
+        marginBottom: FEED_UI.spacing.cardGap,
     },
     sponsoredBadge: {
         flexDirection: 'row',
@@ -1349,9 +1353,9 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
-        paddingHorizontal: 16,
-        paddingTop: 16,
-        paddingBottom: 12,
+        paddingHorizontal: FEED_UI.spacing.inset,
+        paddingTop: FEED_UI.spacing.inset,
+        paddingBottom: FEED_UI.spacing.compactV,
     },
     postHeaderLeft: {
         flexDirection: 'row',
@@ -1506,18 +1510,18 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
+        paddingHorizontal: FEED_UI.spacing.inset,
+        paddingVertical: FEED_UI.spacing.compactV,
     },
     actionButtons: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 16,
+        gap: FEED_UI.spacing.groupGap,
     },
     rightActions: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        gap: FEED_UI.spacing.groupGapTight,
     },
     actionButton: {
         flexDirection: 'row',
@@ -1525,7 +1529,7 @@ const styles = StyleSheet.create({
         gap: 4,
     },
     actionText: {
-        fontSize: 14,
+        fontSize: FEED_UI.type.actionCount,
         fontWeight: '600',
         color: '#FFFFFF',
     },

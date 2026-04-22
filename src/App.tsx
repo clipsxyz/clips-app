@@ -71,6 +71,10 @@ import {
 // Global map to store video playback times per post ID for seamless transitions
 const videoTimesMap = new Map<string, number>();
 const videoMutedMap = new Map<string, boolean>();
+const FEED_ACTIVE_VIDEO_EVENT = 'feedActiveVideoChanged';
+const FEED_AUTOPLAY_PREF_KEY = 'clips:feedAutoplayPref';
+const FEED_AUTOPLAY_PREF_EVENT = 'feedAutoplayPrefChanged';
+let lastFeedAutoplayAtMs = 0;
 
 type Tab = string; // Dynamic based on user location
 
@@ -1395,10 +1399,10 @@ function PostHeader({
   }
 
   return (
-    <div className="relative flex items-start justify-between px-4 pt-4 pb-3">
+    <div className="relative flex items-start justify-between px-3 pt-3 pb-2">
       {/* Scrim effect - only show when overlaid on media */}
       {isOverlaid && (
-        <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/50 to-transparent pointer-events-none z-0" />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/35 to-transparent pointer-events-none z-0" />
       )}
 
       {/* Content layer - above scrim */}
@@ -2067,27 +2071,19 @@ function TileTextCard({
 
 function CaptionText({ caption }: { caption: string }) {
   const [isExpanded, setIsExpanded] = React.useState(false);
-  const maxLength = 100;
-
-  if (caption.length <= maxLength) {
-    return (
-      <div className="text-gray-900 dark:text-gray-100 text-sm leading-relaxed">
-        {caption}
-      </div>
-    );
-  }
-
-  const displayText = isExpanded ? caption : caption.substring(0, maxLength) + '...';
+  const hasMore = caption.length > 120 || caption.includes('\n');
 
   return (
-    <div className="text-gray-900 dark:text-gray-100 text-sm leading-relaxed">
-      {displayText}
-      <button
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="mt-2 text-white text-xs font-medium hover:underline focus:outline-none focus:ring-0 focus:border-0 ml-2"
-      >
-        {isExpanded ? 'Show less' : 'Show more'}
-      </button>
+    <div className="text-gray-100 text-[13px] leading-snug">
+      <p className={isExpanded ? 'whitespace-pre-wrap' : 'whitespace-pre-wrap line-clamp-2'}>{caption}</p>
+      {hasMore && (
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="mt-1.5 text-white/90 text-[11px] font-medium hover:underline focus:outline-none focus:ring-0 focus:border-0"
+        >
+          {isExpanded ? 'Show less' : 'Show more'}
+        </button>
+      )}
     </div>
   );
 }
@@ -2107,12 +2103,12 @@ function BottomCaptionOverlay({ caption, onExpand }: { caption: string; onExpand
   return (
     <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none">
       {/* Scrim effect - gradient overlay for better readability */}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/60 to-transparent pointer-events-none z-0" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/45 to-transparent pointer-events-none z-0" />
 
       {/* Content layer - above scrim */}
-      <div className="relative z-10 px-4 pb-4 pt-6 pointer-events-auto">
+      <div className="relative z-10 px-3 pb-3 pt-5 pointer-events-auto">
         <div className="flex items-start gap-2">
-          <p className="text-white text-sm leading-relaxed line-clamp-1 flex-1 drop-shadow-md">
+          <p className="text-white text-[13px] leading-snug line-clamp-1 flex-1 drop-shadow-md">
             {displayText}
           </p>
           {hasMore && (
@@ -2179,7 +2175,7 @@ function ShortsLikeBurstLines() {
   );
 }
 
-function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onCarouselIndexChange, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled: _videoCaptionsEnabled, videoCaptionText: _videoCaptionText, subtitlesEnabled, subtitleText: _subtitleText, postUserHandle, postLocationLabel: _postLocationLabel, postCreatedAt, postId, priority = false, tileMode = false }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onCarouselIndexChange?: (index: number) => void; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string; postId?: string; priority?: boolean; tileMode?: boolean }) {
+function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onCarouselIndexChange, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled: _videoCaptionsEnabled, videoCaptionText: _videoCaptionText, subtitlesEnabled, subtitleText: _subtitleText, postUserHandle, postLocationLabel: _postLocationLabel, postCreatedAt, postId, videoPosterUrl, priority = false, tileMode = false }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onCarouselIndexChange?: (index: number) => void; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string; postId?: string; videoPosterUrl?: string; priority?: boolean; tileMode?: boolean }) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [burst, setBurst] = React.useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -2192,8 +2188,10 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   const [isPaused, setIsPaused] = React.useState(false);
   const [showMuteButton, setShowMuteButton] = React.useState(true); // show when scroll onto card, hide after 2s; one tap brings back
   const muteButtonHideTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoplayTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [progress, setProgress] = React.useState(0); // 0..1 for video progress
   const [aspectRatio, setAspectRatio] = React.useState<number | null>(null); // width/height ratio
+  const [carouselFrameAspectRatio, setCarouselFrameAspectRatio] = React.useState<number | null>(null); // lock frame to first carousel item
   const [tapPosition, setTapPosition] = React.useState<{ x: number; y: number } | null>(null);
   const lastTap = React.useRef<number>(0);
   const touchHandled = React.useRef<boolean>(false);
@@ -2234,6 +2232,67 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   const [currentIndex, setCurrentIndex] = React.useState(0);
   const hasMultipleItems = items.length > 1;
   const currentItem = items[currentIndex];
+  const [lowBandwidthMode, setLowBandwidthMode] = React.useState(false);
+  const [autoplayPref, setAutoplayPref] = React.useState<'always' | 'wifi' | 'never'>(() => {
+    try {
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(FEED_AUTOPLAY_PREF_KEY) : null;
+      if (raw === 'always' || raw === 'wifi' || raw === 'never') return raw;
+    } catch {
+      /* ignore */
+    }
+    return 'wifi';
+  });
+
+  React.useEffect(() => {
+    setCarouselFrameAspectRatio(null);
+  }, [items.length, items[0]?.url, items[0]?.type]);
+
+  React.useEffect(() => {
+    const conn = (typeof navigator !== 'undefined'
+      ? (navigator as Navigator & { connection?: { effectiveType?: string; saveData?: boolean; addEventListener?: (type: string, cb: () => void) => void; removeEventListener?: (type: string, cb: () => void) => void } }).connection
+      : undefined);
+    const readLowBandwidth = () => {
+      const et = conn?.effectiveType || '';
+      const saveData = !!conn?.saveData;
+      const slowNetwork = et === 'slow-2g' || et === '2g';
+      setLowBandwidthMode(saveData || slowNetwork);
+    };
+    readLowBandwidth();
+    if (conn?.addEventListener) {
+      conn.addEventListener('change', readLowBandwidth);
+      return () => conn.removeEventListener?.('change', readLowBandwidth);
+    }
+    return;
+  }, []);
+
+  React.useEffect(() => {
+    const handlePrefChanged = (ev: Event) => {
+      const next = (ev as CustomEvent<{ pref?: string }>).detail?.pref;
+      if (next === 'always' || next === 'wifi' || next === 'never') {
+        setAutoplayPref(next);
+      }
+    };
+    window.addEventListener(FEED_AUTOPLAY_PREF_EVENT, handlePrefChanged as EventListener);
+    return () => window.removeEventListener(FEED_AUTOPLAY_PREF_EVENT, handlePrefChanged as EventListener);
+  }, []);
+
+  // Preload adjacent carousel media so swipe transitions feel instant.
+  React.useEffect(() => {
+    if (!hasMultipleItems) return;
+    const next = items[currentIndex + 1];
+    const prev = items[currentIndex - 1];
+    [next, prev].forEach((candidate) => {
+      if (!candidate?.url) return;
+      if (candidate.type === 'image') {
+        const img = new Image();
+        img.src = candidate.url;
+      } else if (candidate.type === 'video') {
+        const v = document.createElement('video');
+        v.preload = 'metadata';
+        v.src = candidate.url;
+      }
+    });
+  }, [hasMultipleItems, currentIndex, items]);
 
   // Notify parent of carousel index changes
   React.useEffect(() => {
@@ -2390,6 +2449,30 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     };
   }, [postId, currentItem?.type]);
 
+  // Keep only one feed video actively playing at a time.
+  React.useEffect(() => {
+    if (!postId || currentItem?.type !== 'video') return;
+    const handleActiveVideoChange = (ev: Event) => {
+      const activePostId = (ev as CustomEvent<{ postId?: string }>).detail?.postId;
+      if (!activePostId || String(activePostId) === String(postId)) return;
+      const v = videoRef.current;
+      if (!v || v.paused) return;
+      try {
+        if (postId && videoTimesMap) {
+          videoTimesMap.set(postId, v.currentTime);
+        }
+        v.pause();
+        setIsPlaying(false);
+      } catch (err) {
+        console.warn('Error pausing non-active feed video:', err);
+      }
+    };
+    window.addEventListener(FEED_ACTIVE_VIDEO_EVENT, handleActiveVideoChange as EventListener);
+    return () => {
+      window.removeEventListener(FEED_ACTIVE_VIDEO_EVENT, handleActiveVideoChange as EventListener);
+    };
+  }, [postId, currentItem?.type]);
+
   // Intersection Observer for auto-play (wrapped in try/catch for mobile – avoids "Something went wrong" on phone)
   React.useEffect(() => {
     if (currentItem?.type !== 'video' || !videoRef.current) return;
@@ -2410,13 +2493,31 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                       v.currentTime = savedTime;
                     }
                   }
-                  v.play().catch((err) => {
-                    // NotSupportedError = no/invalid src; expected for placeholder or failed loads
-                    if (err?.name !== 'NotSupportedError' && !String(err?.message || '').includes('no supported source')) {
-                      console.warn('Video play failed:', err);
+                  const allowAutoplay =
+                    autoplayPref === 'always' || (autoplayPref === 'wifi' && !lowBandwidthMode);
+                  const visibilityGate = lowBandwidthMode ? entry.intersectionRatio >= 0.9 : true;
+                  if (allowAutoplay && visibilityGate) {
+                    const now = Date.now();
+                    const sinceLast = now - lastFeedAutoplayAtMs;
+                    const minGapMs = 320;
+                    const delayMs = sinceLast >= minGapMs ? 0 : (minGapMs - sinceLast);
+                    if (autoplayTimerRef.current) {
+                      clearTimeout(autoplayTimerRef.current);
+                      autoplayTimerRef.current = null;
                     }
-                  });
-                  setIsPlaying(true);
+                    autoplayTimerRef.current = setTimeout(() => {
+                      window.dispatchEvent(new CustomEvent(FEED_ACTIVE_VIDEO_EVENT, { detail: { postId } }));
+                      v.play().catch((err) => {
+                        // NotSupportedError = no/invalid src; expected for placeholder or failed loads
+                        if (err?.name !== 'NotSupportedError' && !String(err?.message || '').includes('no supported source')) {
+                          console.warn('Video play failed:', err);
+                        }
+                      });
+                      lastFeedAutoplayAtMs = Date.now();
+                      setIsPlaying(true);
+                      autoplayTimerRef.current = null;
+                    }, delayMs);
+                  }
                 }
                 setShowMuteButton(true);
                 if (muteButtonHideTimerRef.current) clearTimeout(muteButtonHideTimerRef.current);
@@ -2427,6 +2528,10 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
               } else {
                 const v = videoRef.current;
                 if (v) {
+                  if (autoplayTimerRef.current) {
+                    clearTimeout(autoplayTimerRef.current);
+                    autoplayTimerRef.current = null;
+                  }
                   if (postId && videoTimesMap) {
                     videoTimesMap.set(postId, v.currentTime);
                   }
@@ -2443,7 +2548,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
             }
           });
         },
-        { threshold: 0.5 }
+        { threshold: lowBandwidthMode ? [0.5, 0.9] : 0.5 }
       );
       observerRef.current.observe(videoEl);
     } catch (err) {
@@ -2454,9 +2559,13 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       if (observerRef.current) {
         observerRef.current.disconnect();
       }
+      if (autoplayTimerRef.current) {
+        clearTimeout(autoplayTimerRef.current);
+        autoplayTimerRef.current = null;
+      }
       if (muteButtonHideTimerRef.current) clearTimeout(muteButtonHideTimerRef.current);
     };
-  }, [currentItem?.type, postId]);
+  }, [currentItem?.type, postId, lowBandwidthMode, autoplayPref]);
 
   // Sync video muted state with isMuted state
   React.useEffect(() => {
@@ -2477,7 +2586,12 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     if (videoRef.current) {
       const video = videoRef.current;
       if (video.videoWidth > 0 && video.videoHeight > 0) {
-        setAspectRatio(video.videoWidth / video.videoHeight);
+        // Keep this as height/width so image + video sizing use one consistent axis.
+        const nextRatio = video.videoHeight / video.videoWidth;
+        setAspectRatio(nextRatio);
+        if (hasMultipleItems && currentIndex === 0) {
+          setCarouselFrameAspectRatio(nextRatio);
+        }
       }
     }
   };
@@ -2496,6 +2610,9 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       // Calculate clamped dimensions using Instagram rules
       const dimensions = getInstagramImageDimensions(img.naturalWidth, img.naturalHeight);
       setAspectRatio(dimensions.aspectRatio);
+      if (hasMultipleItems && currentIndex === 0) {
+        setCarouselFrameAspectRatio(dimensions.aspectRatio);
+      }
     }
   };
 
@@ -2767,6 +2884,8 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
 
   // Calculate container style with Instagram aspect ratio clamping
   const containerStyle: React.CSSProperties = React.useMemo(() => {
+    const FEED_TARGET_ASPECT = 4 / 5; // portrait-first feed look
+    const FEED_MIN_ASPECT = 3 / 4; // avoid tiny landscape cards in feed
     if (tileMode) {
       return {
         width: '100%',
@@ -2779,16 +2898,19 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
         boxSizing: 'border-box',
       };
     }
-    // If we have aspect ratio, use Instagram clamping (matches Instagram 1.91:1–4:5 window)
-    if (aspectRatio) {
-      const dimensions = getInstagramImageDimensions(
-        window.innerWidth,
-        window.innerWidth / aspectRatio
-      );
+    // Portrait-first feed policy:
+    // - keep tall media at 4:5 max
+    // - keep normal/square media near natural height
+    // - lift very wide media to at least 3:4 so cards still feel immersive
+    const activeAspectRatio = hasMultipleItems
+      ? (carouselFrameAspectRatio ?? aspectRatio)
+      : aspectRatio;
+    if (activeAspectRatio) {
+      const feedAspect = Math.min(Math.max(activeAspectRatio, FEED_MIN_ASPECT), FEED_TARGET_ASPECT);
       return {
         width: '100%',
-        height: dimensions.height,
-        maxHeight: '90vh', // Prevent extremely tall images
+        height: window.innerWidth * feedAspect,
+        maxHeight: '82vh',
         position: 'relative',
         display: 'flex',
         alignItems: 'center',
@@ -2797,11 +2919,10 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       };
     }
 
-    // Default aspect ratio while loading (no dimensions yet):
-    // use a 4:5 frame like Instagram feed posts so cards don't feel like Reels.
+    // Default while loading: Instagram-like 4:5 frame.
     return {
       aspectRatio: '4/5',
-      maxHeight: '80vh',
+      maxHeight: '82vh',
       width: '100%',
       position: 'relative',
       display: 'flex',
@@ -2809,7 +2930,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       justifyContent: 'center',
       boxSizing: 'border-box'
     };
-  }, [aspectRatio]);
+  }, [aspectRatio, carouselFrameAspectRatio, hasMultipleItems]);
 
   return (
     <div className={tileMode ? 'mx-0 my-0 select-none w-full h-full' : 'mx-0 my-0 select-none'}>
@@ -2862,7 +2983,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
         className={
           tileMode
             ? 'relative w-full h-full max-h-none rounded-xl overflow-hidden bg-gray-900 shadow-none'
-            : 'relative aspect-[9/16] max-h-[55vh] rounded-2xl overflow-hidden bg-gray-900 mx-auto shadow-lg'
+            : 'relative w-full overflow-hidden bg-gray-900'
         }
         style={containerStyle}
       >
@@ -2940,7 +3061,9 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
             <video
               ref={videoRef}
               src={currentItem.url}
-              className="w-full h-full object-cover"
+              className="w-full h-full"
+              style={{ objectFit: 'cover' }}
+              poster={currentItem.type === 'video' && currentIndex === 0 ? videoPosterUrl : undefined}
               preload="metadata"
               playsInline
               muted={isMuted}
@@ -3799,12 +3922,12 @@ function EngagementBar({
 
   // Instagram-style: 24px icons (Instagram uses ~24–28px for feed actions), white on dark bar
   const iconSize = 'w-6 h-6'; // 24px – Instagram feed action size
-  const iconGap = 'gap-1.5'; // 8px between icon and count
-  const rowGap = 'gap-5'; // 20px between action groups
+  const iconGap = 'gap-1'; // denser Instagram-like spacing
+  const rowGap = 'gap-4';
 
   if (variant === 'boost') {
     return (
-      <div className="px-4 pb-4 pt-3 border-t min-w-0" style={{ borderColor: '#030712' }}>
+      <div className="px-3 pb-3 pt-2 border-t min-w-0" style={{ borderColor: '#030712' }}>
         <div className="flex items-center gap-3">
           {showBoostButton && onBoost && (
             <BoostButton postId={post.id} onBoost={onBoost} stretch knownBoosted={knownBoosted} />
@@ -3835,14 +3958,14 @@ function EngagementBar({
 
   return (
     <>
-      <div className="px-4 pb-4 pt-3 border-t min-w-0" style={{ borderColor: '#030712' }}>
+      <div className="px-3 pb-2.5 pt-2 border-t min-w-0" style={{ borderColor: '#030712' }}>
         <div className="flex items-center justify-between min-w-0">
         {/* Left group: Like, Views, Comment, Share to Stories, Reclip (Instagram order) */}
         <div className={`flex items-center min-w-0 flex-shrink ${rowGap}`}>
           {/* Like */}
           <button
             ref={likeButtonRef}
-            className={`flex items-center ${iconGap} min-h-[44px] px-1.5 -mx-1 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0`}
+            className={`flex items-center ${iconGap} min-h-[40px] px-1 -mx-1 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0`}
             onClick={likeClick}
             aria-pressed={liked}
             aria-label={liked ? 'Unlike' : 'Like'}
@@ -3867,7 +3990,7 @@ function EngagementBar({
 
           {/* Comments */}
           <button
-            className={`flex items-center ${iconGap} min-h-[44px] px-1.5 -mx-1 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0`}
+            className={`flex items-center ${iconGap} min-h-[40px] px-1 -mx-1 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0`}
             onClick={onOpenComments}
             aria-label="Comments"
             title="Comments"
@@ -3878,7 +4001,7 @@ function EngagementBar({
 
           {/* Share to Stories – Gazetteer stories icon (SiFigshare) */}
           <button
-            className={`flex items-center ${iconGap} min-h-[44px] px-1.5 -mx-1 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0`}
+            className={`flex items-center ${iconGap} min-h-[40px] px-1 -mx-1 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0`}
             onClick={shareClick}
             aria-label="Share post to stories"
             title="Share post to stories"
@@ -3889,7 +4012,7 @@ function EngagementBar({
 
           {/* Reclip */}
           <button
-            className={`flex items-center ${iconGap} min-h-[44px] px-1.5 -mx-1 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0 ${
+            className={`flex items-center ${iconGap} min-h-[40px] px-1 -mx-1 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0 ${
               post.userHandle === currentUserHandle ? 'opacity-30 cursor-not-allowed' : ''
             }`}
             onClick={reclipClick}
@@ -4384,7 +4507,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
       className={`mx-0 border-0 border-gray-200 dark:border-gray-700 animate-[cardBounce_0.6s_ease-out] relative ${
         isTileBoostMode
           ? 'w-full overflow-hidden aspect-square rounded-xl mb-0'
-          : 'overflow-visible border-b mb-4'
+          : 'overflow-visible border-b mb-2'
       }`}
       style={{ backgroundColor: '#030712' }}
     >
@@ -4505,6 +4628,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             postUserHandle={post.userHandle}
             postLocationLabel={post.locationLabel}
             postCreatedAt={post.createdAt?.toString()}
+            videoPosterUrl={post.videoPosterUrl}
             priority={priority}
           tileMode={isTileBoostMode}
           />
@@ -4514,10 +4638,10 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         {!isTileBoostMode && post.mediaItems && post.mediaItems.length > 1 ? (
           <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none">
             {/* Scrim effect - gradient overlay for better readability */}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/60 to-transparent pointer-events-none z-0" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/45 to-transparent pointer-events-none z-0" />
 
             {/* Content layer - above scrim */}
-            <div className="relative z-10 px-4 py-3 pointer-events-auto">
+            <div className="relative z-10 px-3 py-2.5 pointer-events-auto">
               <div className="flex items-center justify-center">
                 {/* Center - Carousel Display (Dots and Number) */}
                 <div className="flex items-center gap-3">
@@ -4547,7 +4671,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
       {!isTileBoostMode && (
         <>
           {(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0)) && (
-            <div className="px-4 py-3">
+            <div className="px-3 py-2.5">
               {(post.caption || post.text) && (
                 <CaptionText caption={post.caption || post.text || ''} />
               )}
@@ -5266,7 +5390,8 @@ function FeedPageWrapper() {
   const [customFilterType, setCustomFilterType] = React.useState<'location' | 'venue' | 'landmark' | null>(null);
   const [pages, setPages] = React.useState<Post[][]>([]);
   const [ads, setAds] = React.useState<Ad[]>([]);
-  const [cursor, setCursor] = React.useState<number | null>(0);
+  const [cursor, setCursor] = React.useState<string | number | null>(0);
+  const isFirstPageCursor = cursor === 0 || cursor === '0' || cursor === '' || cursor === null;
   const [loading, setLoading] = React.useState(false);
   const [end, setEnd] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -5317,6 +5442,15 @@ function FeedPageWrapper() {
   }, []);
 
   const [suggestedPlacesPrefs, setSuggestedPlacesPrefs] = React.useState(() => readSuggestedPlacesPrefs());
+  const [feedAutoplayPref, setFeedAutoplayPref] = React.useState<'always' | 'wifi' | 'never'>(() => {
+    try {
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(FEED_AUTOPLAY_PREF_KEY) : null;
+      if (raw === 'always' || raw === 'wifi' || raw === 'never') return raw;
+    } catch {
+      /* ignore */
+    }
+    return 'wifi';
+  });
 
   const dismissSuggestedPlacesRow = React.useCallback((bundleKey: string) => {
     emitSuggestedPlacesAnalytics({ action: 'dismiss_row', bundleKey });
@@ -5339,6 +5473,19 @@ function FeedPageWrapper() {
     }
     emitSuggestedPlacesAnalytics({ action: 'toggle_poster_locale', enabled });
     setSuggestedPlacesPrefs((prev) => ({ ...prev, includePosterLocale: enabled }));
+  }, []);
+
+  const cycleFeedAutoplayPref = React.useCallback(() => {
+    setFeedAutoplayPref((prev) => {
+      const next = prev === 'always' ? 'wifi' : prev === 'wifi' ? 'never' : 'always';
+      try {
+        localStorage.setItem(FEED_AUTOPLAY_PREF_KEY, next);
+      } catch {
+        /* ignore */
+      }
+      window.dispatchEvent(new CustomEvent(FEED_AUTOPLAY_PREF_EVENT, { detail: { pref: next } }));
+      return next;
+    });
   }, []);
 
   /** Laravel: server-ranked place suggestions; `undefined` = use client-side matcher (mock or API error). */
@@ -5755,7 +5902,7 @@ function FeedPageWrapper() {
     const params = new URLSearchParams(routerLocation.search);
     const pendingUrlLocation = params.get('location');
     if (pendingUrlLocation && !customLocation) return;
-    if (cursor !== 0 || !userId) return;
+    if (!isFirstPageCursor || !userId) return;
 
     const isDiscover = currentFilter.toLowerCase() === 'discover';
     if (isDiscover) {
@@ -5870,7 +6017,7 @@ function FeedPageWrapper() {
       }
       setPages(prev => {
         // In mock mode, always use fresh fetch result so new posts appear. (Previously we kept stale cache, which hid new posts.)
-        const existingIds = cursor === 0 ? new Set<string>() : new Set(prev.flat().map(p => p.id));
+        const existingIds = isFirstPageCursor ? new Set<string>() : new Set(prev.flat().map(p => p.id));
         const newChunk = page.items.filter(x => !existingIds.has(x.id));
         const seenInChunk = new Set<string>();
         const dedupedChunk = newChunk.filter(x => {
@@ -5878,8 +6025,8 @@ function FeedPageWrapper() {
           seenInChunk.add(x.id);
           return true;
         });
-        const next = cursor === 0 ? [dedupedChunk] : [...prev, dedupedChunk];
-        if (cursor === 0) {
+        const next = isFirstPageCursor ? [dedupedChunk] : [...prev, dedupedChunk];
+        if (isFirstPageCursor) {
           pagesLoadedForFilterRef.current = filterForRequest;
           if (!page.fromMock) saveFeed(userId, currentFilter, next).catch(() => {});
         }
@@ -6936,6 +7083,17 @@ function FeedPageWrapper() {
           </div>
         </div>
       )}
+      <div className="px-3 pt-1 pb-0.5">
+        <button
+          type="button"
+          onClick={cycleFeedAutoplayPref}
+          className="text-[11px] text-white/65 hover:text-white/90 transition-colors"
+          aria-label="Cycle feed autoplay preference"
+          title="Cycle autoplay: Always / Wi-Fi / Never"
+        >
+          Autoplay: {feedAutoplayPref === 'always' ? 'Always' : feedAutoplayPref === 'wifi' ? 'Wi-Fi only' : 'Never'}
+        </button>
+      </div>
 
       <div className="h-4" />
 

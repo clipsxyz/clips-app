@@ -3,6 +3,7 @@ import type { Post, Comment, StickerOverlay } from '../types';
 import { isLaravelApiEnabled, isViteDevMode } from '../config/runtimeEnv';
 import * as apiClient from './client';
 import { randomUUID } from '../utils/uuid';
+import { constrainImageToInstagramDataUrl } from '../utils/imageDimensions';
 import { wasEverAStory } from './stories';
 import { getActiveBoostedPostIds, activateBoost } from './boost';
 import type { BoostFeedType } from '../components/BoostSelectionModal';
@@ -593,7 +594,13 @@ export function getState(userId: string): UserState {
 
 const delay = (ms = 0) => new Promise(r => setTimeout(r, ms));
 
-export type Page = { items: Post[]; nextCursor: number | null; fromMock?: boolean };
+export type Page = { items: Post[]; nextCursor: string | number | null; fromMock?: boolean };
+
+function isFirstFeedPageCursor(cursor: string | number | null): boolean {
+  if (cursor === null) return true;
+  if (cursor === 0 || cursor === '0' || cursor === '') return true;
+  return false;
+}
 
 /** Case-insensitive lookup so "Bob@Cork" and "bob@cork" are treated as the same user. */
 export function getFollowState(follows: Record<string, boolean>, handle: string | undefined): boolean {
@@ -685,6 +692,8 @@ export function transformLaravelPost(response: any): Post {
   let resolvedMediaUrl = (finalVideoUrl || originalMediaUrl || firstItemUrl) || '';
   resolvedMediaUrl = rewriteMediaUrlForNetwork(resolvedMediaUrl);
   const resolvedMediaType = response.media_type || response.mediaType || firstItemType || undefined;
+  const resolvedVideoFrameMode = (response.video_frame_mode || response.videoFrameMode || 'crop') as Post['videoFrameMode'];
+  const resolvedVideoPosterUrl = response.video_poster_url || response.videoPosterUrl || undefined;
 
   // Rewrite mediaItems URLs for network access
   let processedMediaItems = mediaItems;
@@ -712,7 +721,9 @@ export function transformLaravelPost(response: any): Post {
     // Use final_video_url if available, else media_url, else first media_items item (for still-image posts)
     mediaUrl: resolvedMediaUrl,
     finalVideoUrl: rewriteMediaUrlForNetwork(finalVideoUrl || '') || undefined,
+    videoPosterUrl: resolvedVideoPosterUrl ? rewriteMediaUrlForNetwork(String(resolvedVideoPosterUrl)) : undefined,
     mediaType: resolvedMediaType,
+    videoFrameMode: resolvedVideoFrameMode,
     mediaItems: processedMediaItems ?? mediaItems,
     text: response.text_content || response.text,
     imageText: response.image_text || response.imageText,
@@ -955,7 +966,7 @@ export function postMatchesLocationTab(p: Post, tab: string): boolean {
   return local === query || regional === query || national === query || locationLabel === query || locationLabel.includes(query);
 }
 
-export async function fetchPostsPage(tab: string, cursor: number | null, limit = 5, userId = 'me', _userLocal = '', _userRegional = '', _userNational = '', _currentUserHandle = ''): Promise<Page> {
+export async function fetchPostsPage(tab: string, cursor: string | number | null, limit = 5, userId = 'me', _userLocal = '', _userRegional = '', _userNational = '', _currentUserHandle = ''): Promise<Page> {
   const t = tab.toLowerCase();
   const isVenueFeed = t.startsWith('venue:');
   const isLandmarkFeed = t.startsWith('landmark:');
@@ -1012,7 +1023,7 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       if (t === 'discover') {
         const stateUserId = userId || 'me';
         const follows = getState(stateUserId).follows || {};
-        const isFirstPageDiscover = cursor === null || cursor === 0;
+        const isFirstPageDiscover = isFirstFeedPageCursor(cursor);
         const followsAva = getFollowState(follows, 'Ava@galway');
         if (isFirstPageDiscover && followsAva && !transformedItems.some((p) => p.id === 'ava-normal-ireland-demo')) {
           const avaNormal = getAvaNormalPost();
@@ -1035,7 +1046,7 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       const allApiAndMockIds = new Set(transformedItems.map(p => p.id));
 
       // Prepend mock Sarah/Bob video posts on first page for Scenes testing (dev)
-      const isFirstPage = cursor === null || cursor === 0;
+      const isFirstPage = isFirstFeedPageCursor(cursor);
       const allMockVideo = (isFirstPage && t !== 'discover') ? getMockScenesVideoPosts() : [];
       const mockVideoPosts = allMockVideo.filter(p => postMatchesLocationTab(p, t));
       const dedupedMock = mockVideoPosts.filter(p => !allApiAndMockIds.has(p.id));
@@ -1268,7 +1279,7 @@ export async function fetchPostsPage(tab: string, cursor: number | null, limit =
       }
     }
 
-    const start = cursor ?? 0;
+    const start = typeof cursor === 'number' ? cursor : 0;
     const isFirstPage = start === 0;
     // Only add mock Sarah/Bob posts whose AUTHOR location matches this feed – e.g. Sarah (Dublin) only in Dublin, not in Galway
     const allMockVideo = (isFirstPage && t !== 'discover') ? getMockScenesVideoPosts() : [];
@@ -1755,6 +1766,84 @@ export async function fetchComments(postId: string): Promise<Comment[]> {
   return comments.filter(c => c.postId === postId && !c.parentId);
 }
 
+export type CommentsPage = {
+  items: Comment[];
+  nextCursor: string | null;
+  hasMore: boolean;
+};
+
+function mapLaravelCommentToComment(raw: any): Comment {
+  const mappedReplies: Comment[] = Array.isArray(raw?.replies)
+    ? raw.replies.map((r: any) => ({
+        id: r.id,
+        postId: r.post_id || r.postId || raw.post_id || raw.postId || '',
+        userHandle: r.user_handle || r.userHandle || r.user?.handle || '',
+        text: r.text_content || r.text || '',
+        createdAt: (() => {
+          const ts = r.created_at || r.createdAt;
+          const val = ts ? new Date(ts).getTime() : Date.now();
+          return Number.isFinite(val) ? val : Date.now();
+        })(),
+        likes: Number(r.likes_count ?? r.likes ?? 0) || 0,
+        userLiked: !!(r.user_liked ?? r.userLiked),
+        parentId: r.parent_id || r.parentId || raw.id,
+      }))
+    : [];
+
+  return {
+    id: raw.id,
+    postId: raw.post_id || raw.postId || '',
+    userHandle: raw.user_handle || raw.userHandle || raw.user?.handle || '',
+    text: raw.text_content || raw.text || '',
+    createdAt: (() => {
+      const ts = raw.created_at || raw.createdAt;
+      const val = ts ? new Date(ts).getTime() : Date.now();
+      return Number.isFinite(val) ? val : Date.now();
+    })(),
+    likes: Number(raw.likes_count ?? raw.likes ?? 0) || 0,
+    userLiked: !!(raw.user_liked ?? raw.userLiked),
+    replies: mappedReplies,
+    replyCount: Number(raw.replies_count ?? raw.replyCount ?? mappedReplies.length) || 0,
+  };
+}
+
+export async function fetchCommentsPage(
+  postId: string,
+  cursor: string | null = null,
+  limit: number = 30,
+  repliesLimit: number = 5,
+  userId?: string,
+): Promise<CommentsPage> {
+  const useLaravelAPI = isLaravelApiEnabled();
+  if (useLaravelAPI) {
+    try {
+      const response = await apiClient.fetchCommentsPage(postId, cursor, limit, userId, repliesLimit);
+      const itemsRaw = Array.isArray(response?.items) ? response.items : [];
+      return {
+        items: itemsRaw.map(mapLaravelCommentToComment),
+        nextCursor: typeof response?.nextCursor === 'string' ? response.nextCursor : null,
+        hasMore: !!response?.hasMore,
+      };
+    } catch (error: any) {
+      if (error?.name !== 'ConnectionRefused' && !error?.message?.includes('CONNECTION_REFUSED')) {
+        console.warn('fetchCommentsPage API failed, falling back to mock:', error);
+      }
+    }
+  }
+
+  const all = await fetchComments(postId);
+  if (!cursor) {
+    const slice = all.slice(0, limit);
+    const hasMore = all.length > limit;
+    return {
+      items: slice,
+      nextCursor: hasMore ? 'mock:1' : null,
+      hasMore,
+    };
+  }
+  return { items: [], nextCursor: null, hasMore: false };
+}
+
 export async function fetchPostsByUser(userHandle: string, limit = 30): Promise<Post[]> {
   await delay(150);
   const handle = userHandle.trim().toLowerCase();
@@ -1935,7 +2024,9 @@ export async function createPost(
   musicTrackId?: number, // Library music track ID
   venue?: string, // Venue / place name for metadata carousel
   landmark?: string, // Named landmark (e.g. River Liffey) for carousel + landmark feeds
-  socialFormat?: 'youtube_shorts' | 'tiktok' | 'instagram_reels' // Create → Shorts / TikTok / Reels upload flow
+  socialFormat?: 'youtube_shorts' | 'tiktok' | 'instagram_reels', // Create → Shorts / TikTok / Reels upload flow
+  videoFrameMode?: 'crop' | 'fit' | 'original',
+  videoPosterUrl?: string,
 ): Promise<Post> {
   // Use real Laravel API
   const { createPost: createPostAPI } = await import('./client');
@@ -1949,6 +2040,8 @@ export async function createPost(
       socialFormat: socialFormat || undefined,
       mediaUrl: imageUrl || undefined,
       mediaType: mediaType || undefined,
+      videoFrameMode: videoFrameMode || undefined,
+      videoPosterUrl: videoPosterUrl || undefined,
       caption: caption || undefined,
       imageText: imageText || undefined,
       bannerText: bannerText || undefined,
@@ -1980,6 +2073,8 @@ export async function createPost(
       venue: venue || transformed.venue,
       landmark: landmark || transformed.landmark,
       socialFormat: socialFormat ?? transformed.socialFormat,
+      videoFrameMode: videoFrameMode ?? transformed.videoFrameMode ?? 'crop',
+      videoPosterUrl: videoPosterUrl ?? transformed.videoPosterUrl,
     };
 
     // Also store newly created posts in the local in-memory array + localStorage
@@ -2029,13 +2124,16 @@ export async function createPost(
     }
 
     // Helper function to convert blob URL to data URL for persistence
-    async function convertBlobToDataUrl(blobUrl: string): Promise<string> {
+    async function convertBlobToDataUrl(blobUrl: string, constrainImage = false): Promise<string> {
       if (!blobUrl.startsWith('blob:')) {
         return blobUrl; // Not a blob URL, return as-is
       }
 
       try {
         console.log('Converting blob URL to data URL for persistence:', blobUrl.substring(0, 50));
+        if (constrainImage) {
+          return await constrainImageToInstagramDataUrl(blobUrl);
+        }
         const response = await fetch(blobUrl);
         const blob = await response.blob();
         const reader = new FileReader();
@@ -2140,6 +2238,7 @@ export async function createPost(
     // For videos, keep blob URLs as-is (like stories) to avoid memory issues on mobile
     let persistentImageUrl = imageUrl;
     let effectiveMediaType: 'image' | 'video' | undefined = mediaType;
+    let effectiveVideoPosterUrl = videoPosterUrl;
     if (imageUrl && imageUrl.trim() !== '' && imageUrl.startsWith('blob:')) {
       // For videos, skip conversion to avoid memory issues on mobile
       if (mediaType === 'video') {
@@ -2148,6 +2247,7 @@ export async function createPost(
           const thumb = await extractVideoBlobToThumbnailDataUrl(imageUrl);
           if (thumb) {
             persistentImageUrl = thumb;
+            effectiveVideoPosterUrl = effectiveVideoPosterUrl || thumb;
             effectiveMediaType = 'image';
           } else {
             // If thumbnail extraction fails, keep blob (may break after refresh).
@@ -2161,7 +2261,7 @@ export async function createPost(
       } else {
         // For images, convert to data URL
         try {
-          persistentImageUrl = await convertBlobToDataUrl(imageUrl);
+          persistentImageUrl = await convertBlobToDataUrl(imageUrl, true);
         } catch (error) {
           console.error('Failed to convert blob URL, using original:', error);
           persistentImageUrl = imageUrl; // Fallback to original
@@ -2181,6 +2281,7 @@ export async function createPost(
               try {
                 const thumb = await extractVideoBlobToThumbnailDataUrl(item.url);
                 if (thumb) {
+                  if (!effectiveVideoPosterUrl) effectiveVideoPosterUrl = thumb;
                   return { ...item, url: thumb, type: 'image' as const };
                 }
               } catch {
@@ -2190,7 +2291,7 @@ export async function createPost(
             } else {
               // For images and text, convert to data URL
               try {
-                const dataUrl = await convertBlobToDataUrl(item.url);
+                const dataUrl = await convertBlobToDataUrl(item.url, item.type === 'image');
                 return { ...item, url: dataUrl };
               } catch (error) {
                 console.error('Failed to convert blob URL in mediaItems, using original:', error);
@@ -2221,7 +2322,9 @@ export async function createPost(
       // Only set mediaUrl if we have actual media (not empty string for text-only posts)
       mediaUrl: persistentImageUrl && persistentImageUrl.trim() !== '' ? persistentImageUrl : undefined,
       finalVideoUrl: undefined, // Will be set when render job completes
+      videoPosterUrl: effectiveVideoPosterUrl || undefined,
       mediaType: effectiveMediaType || undefined, // thumbnail-friendly type in mock mode
+      videoFrameMode: videoFrameMode || 'crop',
       mediaItems: finalMediaItems, // New: support multiple media items (with persistent URLs)
       text: text || undefined, // Store the text content
       imageText: imageText || undefined, // Store the image text overlay

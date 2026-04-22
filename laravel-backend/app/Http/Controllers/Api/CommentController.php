@@ -5,12 +5,12 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Comment;
 use App\Models\Post;
-use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 
 class CommentController extends Controller
 {
@@ -19,8 +19,12 @@ class CommentController extends Controller
      */
     public function getPostComments(Request $request, string $postId): JsonResponse
     {
-        $validator = Validator::make(['postId' => $postId], [
-            'postId' => 'required|uuid|exists:posts,id'
+        $validator = Validator::make(array_merge($request->all(), ['postId' => $postId]), [
+            'postId' => 'required|uuid|exists:posts,id',
+            'cursor' => 'nullable|string',
+            'limit' => 'nullable|integer|min:1|max:100',
+            'repliesLimit' => 'nullable|integer|min:1|max:25',
+            'paged' => 'nullable|boolean',
         ]);
 
         if ($validator->fails()) {
@@ -28,61 +32,98 @@ class CommentController extends Controller
         }
 
         $userId = $request->get('userId');
+        $hasViewer = !empty($userId);
+        $limit = max(1, min((int) $request->get('limit', 30), 100));
+        $repliesLimit = max(1, min((int) $request->get('repliesLimit', 5), 25));
+        $cursorState = $this->decodeCommentCursor((string) $request->get('cursor', ''));
+        $isPaged = filter_var($request->get('paged', false), FILTER_VALIDATE_BOOLEAN);
 
         $query = Comment::topLevel()
             ->where('post_id', $postId)
             ->with(['user:id,handle,display_name,avatar_url'])
-            ->withCount(['likes', 'replies']);
+            ->withCount(['likes', 'replies'])
+            ->orderBy('created_at', 'desc')
+            ->orderBy('id', 'desc');
 
-        if ($userId) {
-            $query->with(['likes' => function ($q) use ($userId) {
-                $q->where('user_id', $userId);
-            }]);
+        if ($cursorState['created_at'] && $cursorState['id']) {
+            $query->where(function ($q) use ($cursorState) {
+                $q->where('created_at', '<', $cursorState['created_at'])
+                    ->orWhere(function ($q2) use ($cursorState) {
+                        $q2->where('created_at', '=', $cursorState['created_at'])
+                            ->where('id', '<', $cursorState['id']);
+                    });
+            });
         }
 
-        $comments = $query->orderBy('created_at', 'desc')->get();
+        if ($hasViewer) {
+            $query->withExists([
+                'likes as user_liked' => function ($q) use ($userId) {
+                    $q->where('user_id', $userId);
+                },
+            ]);
+        }
+
+        $comments = $query->limit($limit + 1)->get();
+        $hasMore = $comments->count() > $limit;
+        if ($hasMore) {
+            $comments = $comments->take($limit)->values();
+        }
+        $lastComment = $comments->last();
+        $nextCursor = null;
+        if ($hasMore && $lastComment) {
+            $nextCursor = $this->encodeCommentCursor(
+                $lastComment->created_at->format('Y-m-d H:i:s'),
+                (string) $lastComment->id
+            );
+        }
 
         // Load replies for each comment
-        $comments->load(['replies' => function ($query) use ($userId) {
+        $comments->load(['replies' => function ($query) use ($userId, $hasViewer, $repliesLimit) {
             $query->with(['user:id,handle,display_name,avatar_url'])
-                  ->withCount(['likes']);
+                ->withCount(['likes'])
+                ->orderBy('created_at', 'desc')
+                ->orderBy('id', 'desc')
+                ->limit($repliesLimit);
             
-            if ($userId) {
-                $query->with(['likes' => function ($q) use ($userId) {
-                    $q->where('user_id', $userId);
-                }]);
+            if ($hasViewer) {
+                $query->withExists([
+                    'likes as user_liked' => function ($q) use ($userId) {
+                        $q->where('user_id', $userId);
+                    },
+                ]);
             }
         }]);
 
-        // Transform comments to include user-specific data
-        $transformedComments = $comments->map(function ($comment) use ($userId) {
+        // Transform comments using already eager-loaded relations
+        $transformedComments = $comments->map(function ($comment) use ($hasViewer) {
             $commentData = $comment->toArray();
-            
-            if ($userId) {
-                $commentData['user_liked'] = $comment->isLikedBy(User::find($userId));
-                
-                // Transform replies
-                if (isset($commentData['replies'])) {
-                    $commentData['replies'] = collect($commentData['replies'])->map(function ($reply) use ($userId) {
-                        $replyData = $reply;
-                        $replyData['user_liked'] = Comment::find($reply['id'])->isLikedBy(User::find($userId));
-                        return $replyData;
-                    })->toArray();
-                }
-            } else {
-                $commentData['user_liked'] = false;
-                
-                if (isset($commentData['replies'])) {
-                    $commentData['replies'] = collect($commentData['replies'])->map(function ($reply) {
-                        $replyData = $reply;
-                        $replyData['user_liked'] = false;
-                        return $replyData;
-                    })->toArray();
-                }
+            $attrs = $comment->getAttributes();
+
+            $commentData['user_liked'] = $hasViewer
+                ? (array_key_exists('user_liked', $attrs) ? (bool) $attrs['user_liked'] : false)
+                : false;
+
+            if ($comment->relationLoaded('replies')) {
+                $commentData['replies'] = $comment->replies->map(function ($reply) use ($hasViewer) {
+                    $replyData = $reply->toArray();
+                    $replyAttrs = $reply->getAttributes();
+                    $replyData['user_liked'] = $hasViewer
+                        ? (array_key_exists('user_liked', $replyAttrs) ? (bool) $replyAttrs['user_liked'] : false)
+                        : false;
+                    return $replyData;
+                })->toArray();
             }
 
             return $commentData;
         });
+
+        if ($isPaged || $request->filled('cursor')) {
+            return response()->json([
+                'items' => $transformedComments,
+                'nextCursor' => $nextCursor,
+                'hasMore' => $hasMore,
+            ]);
+        }
 
         return response()->json($transformedComments);
     }
@@ -191,5 +232,40 @@ class CommentController extends Controller
         });
 
         return response()->json($result);
+    }
+
+    private function decodeCommentCursor(?string $cursor): array
+    {
+        $cursorValue = trim((string) ($cursor ?? ''));
+        if ($cursorValue === '' || $cursorValue === '0') {
+            return ['created_at' => null, 'id' => null];
+        }
+
+        if (ctype_digit($cursorValue)) {
+            // Legacy numeric cursor support.
+            return ['created_at' => null, 'id' => null];
+        }
+
+        $encoded = strtr($cursorValue, '-_', '+/');
+        $padding = strlen($encoded) % 4;
+        if ($padding > 0) {
+            $encoded .= str_repeat('=', 4 - $padding);
+        }
+        $decoded = base64_decode($encoded, true);
+        if ($decoded === false || !str_contains($decoded, '|')) {
+            return ['created_at' => null, 'id' => null];
+        }
+
+        [$createdAt, $id] = explode('|', $decoded, 2);
+        if (!$createdAt || !$id || !Str::isUuid($id)) {
+            return ['created_at' => null, 'id' => null];
+        }
+
+        return ['created_at' => $createdAt, 'id' => $id];
+    }
+
+    private function encodeCommentCursor(string $createdAt, string $id): string
+    {
+        return rtrim(strtr(base64_encode($createdAt . '|' . $id), '+/', '-_'), '=');
     }
 }
