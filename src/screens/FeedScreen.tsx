@@ -267,11 +267,13 @@ function PostHeader({
 
 function CommentsModal({
     postId,
+    post,
     isOpen,
     onClose,
     userId,
 }: {
     postId: string;
+    post?: Post | null;
     isOpen: boolean;
     onClose: () => void;
     userId: string;
@@ -373,6 +375,15 @@ function CommentsModal({
             onRequestClose={onClose}
         >
             <View style={styles.modalOverlay}>
+                {post?.mediaUrl ? (
+                    <View style={styles.commentsMiniPreviewWrap}>
+                        <Image
+                            source={{ uri: post.mediaUrl }}
+                            style={styles.commentsMiniPreviewImage}
+                            resizeMode="cover"
+                        />
+                    </View>
+                ) : null}
                 <View style={styles.modalContent}>
                     <View style={styles.modalHeader}>
                         <Text style={styles.modalTitle}>
@@ -844,6 +855,7 @@ function FeedScreen({ navigation }: { navigation?: any }) {
     const [showFollowingFeed, setShowFollowingFeed] = useState(false);
     const [commentsModalOpen, setCommentsModalOpen] = useState(false);
     const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
+    const [selectedPostForComments, setSelectedPostForComments] = useState<Post | null>(null);
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [selectedPostForShare, setSelectedPostForShare] = useState<Post | null>(null);
     const [unreadCount, setUnreadCount] = useState(0);
@@ -1053,6 +1065,7 @@ function FeedScreen({ navigation }: { navigation?: any }) {
             }}
             onComment={() => {
                 setSelectedPostId(post.id);
+                setSelectedPostForComments(post);
                 setCommentsModalOpen(true);
             }}
             onShare={async () => {
@@ -1172,10 +1185,12 @@ function FeedScreen({ navigation }: { navigation?: any }) {
             {/* Comments Modal */}
             <CommentsModal
                 postId={selectedPostId || ''}
+                post={selectedPostForComments}
                 isOpen={commentsModalOpen}
                 onClose={() => {
                     setCommentsModalOpen(false);
                     setSelectedPostId(null);
+                    setSelectedPostForComments(null);
                 }}
                 userId={userId}
             />
@@ -1563,11 +1578,24 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0, 0, 0, 0.5)',
         justifyContent: 'flex-end',
     },
+    commentsMiniPreviewWrap: {
+        alignSelf: 'center',
+        width: Math.min(Dimensions.get('window').width * 0.56, 260),
+        aspectRatio: 4 / 5,
+        borderRadius: 14,
+        overflow: 'hidden',
+        backgroundColor: '#111827',
+        marginBottom: 10,
+    },
+    commentsMiniPreviewImage: {
+        width: '100%',
+        height: '100%',
+    },
     modalContent: {
         backgroundColor: '#030712',
         borderTopLeftRadius: 20,
         borderTopRightRadius: 20,
-        maxHeight: '80%',
+        maxHeight: '58%',
         paddingBottom: 20,
     },
     shareModalContent: {

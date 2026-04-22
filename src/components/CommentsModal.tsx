@@ -634,7 +634,29 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
             />
 
             {/* Modal - always light theme (no dark mode) */}
-            <div className="relative bg-white w-full h-full md:max-w-md md:h-[80vh] rounded-none md:rounded-2xl md:rounded-b-2xl rounded-t-2xl shadow-xl flex flex-col text-gray-900">
+            <div className="relative bg-white w-full h-[58vh] md:max-w-md md:h-[80vh] rounded-t-2xl md:rounded-2xl shadow-xl flex flex-col text-gray-900">
+                {post?.mediaUrl ? (
+                    <div className="px-4 pt-3 pb-1">
+                        <div className="mx-auto w-[min(56vw,240px)] aspect-[4/5] rounded-xl overflow-hidden bg-gray-900">
+                            {post.mediaType === 'video' ? (
+                                <video
+                                    src={post.mediaUrl}
+                                    className="w-full h-full object-cover"
+                                    muted
+                                    autoPlay
+                                    loop
+                                    playsInline
+                                />
+                            ) : (
+                                <img
+                                    src={post.mediaUrl}
+                                    alt="Post preview"
+                                    className="w-full h-full object-cover"
+                                />
+                            )}
+                        </div>
+                    </div>
+                ) : null}
                 {/* Mobile drag affordance */}
                 <div className="flex justify-center pt-2 pb-0.5 flex-shrink-0 md:hidden">
                     <div className="w-10 h-1 bg-gray-300 rounded-full" aria-hidden />

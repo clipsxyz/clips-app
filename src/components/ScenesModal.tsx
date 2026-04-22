@@ -1,7 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { FiX, FiThumbsUp, FiShare2, FiRepeat, FiMapPin, FiHome, FiClock, FiVolume2, FiVolumeX, FiMessageCircle, FiChevronUp, FiChevronDown, FiBookmark, FiMoreHorizontal, FiSend, FiSmile } from 'react-icons/fi';
+import { FiX, FiThumbsUp, FiShare2, FiRepeat, FiMapPin, FiHome, FiClock, FiVolume2, FiVolumeX, FiMessageCircle, FiChevronUp, FiChevronDown, FiBookmark, FiMoreHorizontal, FiSend, FiSmile, FiPlus, FiPlay } from 'react-icons/fi';
 import SavePostModal from './SavePostModal';
 import PostMenuModal from './PostMenuModal';
 import CreateGroupModal from './CreateGroupModal';
@@ -194,7 +194,7 @@ export default function ScenesModal({
     onLike,
     onFollow,
     onShare,
-    onOpenComments: _onOpenComments, // kept for API; we use handleCaptionClick for inline comments
+    onOpenComments: _onOpenComments, // kept for API; we use openCommentsSheet for inline comments
     onReclip,
     onBoost,
     posts,
@@ -211,6 +211,7 @@ export default function ScenesModal({
     // Separate busy flags so Reclip doesn't visually affect Follow and vice versa
     const [followBusy, setFollowBusy] = React.useState(false);
     const [reclipBusy, setReclipBusy] = React.useState(false);
+    const [likeBusy, setLikeBusy] = React.useState(false);
     const [commentText, setCommentText] = React.useState('');
     const [isAddingComment, setIsAddingComment] = React.useState(false);
     const [heartBurst, setHeartBurst] = React.useState(false);
@@ -235,7 +236,7 @@ export default function ScenesModal({
     const [sheetDragY, setSheetDragY] = React.useState(0);
     const [isDragging, setIsDragging] = React.useState(false);
     // Height of the comments sheet. Keep it to about half the screen so video stays visible above.
-    const [sheetHeight, setSheetHeight] = React.useState('50vh'); // shrinks when keyboard opens
+    const [sheetHeight, setSheetHeight] = React.useState('56dvh'); // shrinks when keyboard opens
     const sheetRef = React.useRef<HTMLDivElement>(null);
     const dragStartY = React.useRef<number>(0);
     const [tapPosition, setTapPosition] = React.useState<{ x: number; y: number } | null>(null);
@@ -263,6 +264,9 @@ export default function ScenesModal({
     /** Vertical pull for swipe-down-to-dismiss (non-carousel, or carousel at first post). */
     const [dismissPullY, setDismissPullY] = React.useState(0);
     const chromeHideTimerRef = React.useRef<number | null>(null);
+    const holdPauseTimerRef = React.useRef<number | null>(null);
+    const holdPausedRef = React.useRef(false);
+    const wasPlayingBeforeHoldRef = React.useRef(false);
 
     const effectivePosts = React.useMemo(() => (posts && posts.length > 0 ? posts : (post ? [post] : [])), [posts, post]);
     const isCarousel = Boolean(effectivePosts.length > 1);
@@ -271,6 +275,8 @@ export default function ScenesModal({
     const [carouselTouchDelta, setCarouselTouchDelta] = React.useState(0);
     const [carouselAnimating, setCarouselAnimating] = React.useState(false);
     const vh = typeof window !== 'undefined' ? window.innerHeight : 768;
+    const commentsPreviewHeightPx = Math.round(vh * 0.48);
+    const commentsPreviewHeight = `${commentsPreviewHeightPx}px`;
 
     // Determine if we have multiple media items (carousel)
     const items: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }> = post.mediaItems && post.mediaItems.length > 0
@@ -281,10 +287,18 @@ export default function ScenesModal({
     const currentItem = items[currentIndex];
     const isTextOnlyPost = !post.mediaUrl && !(post.mediaItems && post.mediaItems.length > 0) && !!post.text;
 
+
     const clearChromeHideTimer = React.useCallback(() => {
         if (chromeHideTimerRef.current !== null) {
             window.clearTimeout(chromeHideTimerRef.current);
             chromeHideTimerRef.current = null;
+        }
+    }, []);
+
+    const clearHoldPauseTimer = React.useCallback(() => {
+        if (holdPauseTimerRef.current !== null) {
+            window.clearTimeout(holdPauseTimerRef.current);
+            holdPauseTimerRef.current = null;
         }
     }, []);
 
@@ -414,8 +428,8 @@ export default function ScenesModal({
             const visible = vv.height;
             const full = window.innerHeight;
             const keyboardOpen = visible < full * 0.85;
-            // Use at most ~50% of the screen height so the video area stays in view.
-            const maxPx = keyboardOpen ? Math.round(visible * 0.5) : Math.round(full * 0.5);
+            // Keep comments dominant like Reels while preserving a clear top video preview.
+            const maxPx = keyboardOpen ? Math.round(visible * 0.56) : Math.round(full * 0.56);
             setSheetHeight(`${maxPx}px`);
         };
         update();
@@ -713,6 +727,9 @@ export default function ScenesModal({
         setCommentsHasMore(false);
         setCommentsLoadingMore(false);
         setIsLoadingComments(false);
+        // Reset per-post optimistic states when Scenes moves to a different post.
+        setUserReclipped(Boolean(post.userReclipped));
+        setReclipBusy(false);
         setReplyingToCommentId(null);
         setReplyInputText('');
         setShowCommentEmojiPicker(false);
@@ -773,9 +790,8 @@ export default function ScenesModal({
     }, [user?.id, post.id]);
 
     async function handleLike() {
-        // Reuse reclipBusy for like operations so they don't interfere with follow UI
-        if (reclipBusy) return;
-        setReclipBusy(true);
+        if (likeBusy) return;
+        setLikeBusy(true);
         let previousLiked: boolean = liked;
         try {
             // Optimistically update liked state immediately using functional updates
@@ -791,7 +807,7 @@ export default function ScenesModal({
             setLikes(prev => previousLiked ? prev + 1 : Math.max(0, prev - 1));
             console.error('Error toggling like:', error);
         } finally {
-            setReclipBusy(false);
+            setLikeBusy(false);
         }
     }
 
@@ -886,8 +902,8 @@ export default function ScenesModal({
                 isProcessingDoubleTap.current = false;
             }, 1200);
 
-            if (!reclipBusy && !liked) {
-                setReclipBusy(true);
+            if (!likeBusy && !liked) {
+                setLikeBusy(true);
                 try {
                     // Optimistically update liked state immediately for double-tap
                     setLiked(true);
@@ -899,7 +915,7 @@ export default function ScenesModal({
                     setLikes(prev => Math.max(0, prev - 1));
                     console.error('Error toggling like:', error);
                 } finally {
-                    setReclipBusy(false);
+                    setLikeBusy(false);
                 }
             }
             // Note: Processing flag is reset after 1200ms regardless of whether we liked or not
@@ -934,23 +950,77 @@ export default function ScenesModal({
             (lastTapRef as any).singleTapTimer = singleTapTimer;
         }
         lastTapRef.current = now;
-    }, [currentItem?.type, onLike, reclipBusy, liked, isTextOnlyPost]);
+    }, [currentItem?.type, onLike, likeBusy, liked, isTextOnlyPost]);
+
+    const isInteractiveTarget = React.useCallback((target: EventTarget | null) => {
+        return target instanceof Element && Boolean(target.closest('button, a, input, textarea, [role="button"], [data-prevent-media-toggle="true"]'));
+    }, []);
 
     const handleMediaClick = React.useCallback((e: React.MouseEvent) => {
         if (touchHandledRef.current) {
             e.preventDefault();
             return;
         }
+        if (isInteractiveTarget(e.target)) return;
         handleMediaTap(e);
-    }, [handleMediaTap]);
+    }, [handleMediaTap, isInteractiveTarget]);
 
     const handleMediaTouchEnd = React.useCallback((e: React.TouchEvent) => {
+        clearHoldPauseTimer();
+        if (holdPausedRef.current) {
+            holdPausedRef.current = false;
+            touchHandledRef.current = true;
+            if (wasPlayingBeforeHoldRef.current && currentItem?.type === 'video' && videoRef.current) {
+                videoRef.current.play().catch(() => { /* ignore */ });
+                setIsPaused(false);
+            }
+            setTimeout(() => {
+                touchHandledRef.current = false;
+            }, 120);
+            return;
+        }
+        if (isInteractiveTarget(e.target)) return;
         touchHandledRef.current = true;
         handleMediaTap(e);
         setTimeout(() => {
             touchHandledRef.current = false;
         }, 300);
-    }, [handleMediaTap]);
+    }, [clearHoldPauseTimer, currentItem?.type, handleMediaTap, isInteractiveTarget]);
+
+    const handleMediaTouchStart = React.useCallback((e: React.TouchEvent) => {
+        if (isInteractiveTarget(e.target)) return;
+        if (isCaptionExpanded || isCarousel) return;
+        if (currentItem?.type !== 'video' || !videoRef.current) return;
+
+        holdPausedRef.current = false;
+        wasPlayingBeforeHoldRef.current = !videoRef.current.paused;
+        clearHoldPauseTimer();
+        holdPauseTimerRef.current = window.setTimeout(() => {
+            if (!videoRef.current) return;
+            if (!videoRef.current.paused) {
+                videoRef.current.pause();
+                setIsPaused(true);
+            }
+            holdPausedRef.current = true;
+        }, 180);
+    }, [clearHoldPauseTimer, currentItem?.type, isCaptionExpanded, isCarousel, isInteractiveTarget]);
+
+    const handleMediaTouchCancel = React.useCallback(() => {
+        clearHoldPauseTimer();
+        if (holdPausedRef.current) {
+            holdPausedRef.current = false;
+            if (wasPlayingBeforeHoldRef.current && currentItem?.type === 'video' && videoRef.current) {
+                videoRef.current.play().catch(() => { /* ignore */ });
+                setIsPaused(false);
+            }
+        }
+    }, [clearHoldPauseTimer, currentItem?.type]);
+
+    React.useEffect(() => {
+        return () => {
+            clearHoldPauseTimer();
+        };
+    }, [clearHoldPauseTimer]);
 
     // Carousel: vertical swipe between posts; non-carousel (or first post): swipe-down to dismiss (Reels-style).
     // When comments sheet is open, do not respond so the video stays fixed.
@@ -1107,34 +1177,37 @@ export default function ScenesModal({
         onReclip().catch(error => console.warn('Reclip request failed:', error)).finally(() => setReclipBusy(false));
     }
 
-    // Handle caption expansion
-    const handleCaptionClick = async () => {
-        if (isCaptionExpanded) {
-            setIsCaptionExpanded(false);
-            setSheetDragY(0);
-            setReplyingToCommentId(null);
-            setReplyInputText('');
-            setShowCommentEmojiPicker(false);
-            setExpandedReplyThreads({});
-        } else {
-            setScenesBottomChromeVisible(true);
-            setIsCaptionExpanded(true);
-            // Fetch comments when expanding
-            if (commentsList.length === 0 && !isLoadingComments) {
-                setIsLoadingComments(true);
-                try {
-                    const page = await fetchCommentsPage(post.id, null, 30, 5, user?.id);
-                    setCommentsList(page.items);
-                    setCommentsCursor(page.nextCursor);
-                    setCommentsHasMore(page.hasMore);
-                } catch (error) {
-                    console.error('Failed to load comments:', error);
-                } finally {
-                    setIsLoadingComments(false);
-                }
+    const closeCommentsSheet = React.useCallback(() => {
+        setIsCaptionExpanded(false);
+        setSheetDragY(0);
+        setReplyingToCommentId(null);
+        setReplyInputText('');
+        setShowCommentEmojiPicker(false);
+        setExpandedReplyThreads({});
+    }, []);
+
+    const openCommentsSheet = React.useCallback(async (e?: React.SyntheticEvent) => {
+        if (e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        if (isCaptionExpanded) return;
+        setScenesBottomChromeVisible(true);
+        setIsCaptionExpanded(true);
+        if (commentsList.length === 0 && !isLoadingComments) {
+            setIsLoadingComments(true);
+            try {
+                const page = await fetchCommentsPage(post.id, null, 30, 5, user?.id);
+                setCommentsList(page.items);
+                setCommentsCursor(page.nextCursor);
+                setCommentsHasMore(page.hasMore);
+            } catch (error) {
+                console.error('Failed to load comments:', error);
+            } finally {
+                setIsLoadingComments(false);
             }
         }
-    };
+    }, [commentsList.length, isCaptionExpanded, isLoadingComments, post.id, user?.id]);
 
     const handleLoadMoreComments = React.useCallback(async () => {
         if (commentsLoadingMore || !commentsHasMore || !commentsCursor) return;
@@ -1417,7 +1490,7 @@ export default function ScenesModal({
                             className="fixed left-0 right-0 top-0 overflow-hidden touch-none"
                             style={{
                                 touchAction: 'none',
-                                height: isCaptionExpanded ? '50vh' : '100vh',
+                                height: isCaptionExpanded ? commentsPreviewHeight : `${vh}px`,
                                 zIndex: isCaptionExpanded ? 105 : undefined,
                                 transition: 'height 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
                                 transform: !isCaptionExpanded && dismissPullY > 0 ? `translateY(${dismissPullY}px)` : undefined,
@@ -1506,9 +1579,9 @@ export default function ScenesModal({
                                             </div>
                                         )}
                                         {feedLabel && (
-                                            <div className="inline-flex items-center gap-1.5 rounded-full border border-white/80 bg-black/60 px-3 py-1.5 text-white">
-                                                <FiMapPin className="w-4 h-4 flex-shrink-0" />
-                                                <span className="text-xs font-semibold uppercase tracking-wider">
+                                            <div className="inline-flex items-center gap-1.5 rounded-full border-2 border-white bg-[linear-gradient(135deg,#f6e27a_0%,#d4af37_24%,#f4f4f4_48%,#bfc5cc_72%,#ffe8a3_100%)] shadow-[0_8px_20px_rgba(212,175,55,0.35)] px-3 py-1.5">
+                                                <FiMapPin className="w-4 h-4 flex-shrink-0 text-[#111111]" />
+                                                <span className="text-xs font-semibold uppercase tracking-wider text-[#111111]">
                                                     {feedLabel}
                                                 </span>
                                             </div>
@@ -1567,7 +1640,7 @@ export default function ScenesModal({
                     <div
                         ref={mediaContainerRef}
                         className={`w-full flex items-center justify-center select-none cursor-pointer transition-all duration-300 ease-out ${isCaptionExpanded
-                            ? 'absolute top-[8%] left-1/2 -translate-x-1/2 scale-[0.45] origin-top'
+                            ? 'absolute inset-0 scale-100'
                             : isCarousel
                                 ? 'absolute inset-0 scale-100'
                                 : 'relative h-full scale-100'
@@ -1580,6 +1653,8 @@ export default function ScenesModal({
                             }
                         }}
                         {...(isCarousel ? {} : {
+                            onTouchStart: handleMediaTouchStart,
+                            onTouchCancel: handleMediaTouchCancel,
                             onTouchEnd: handleMediaTouchEnd
                         })}
                     >
@@ -1663,7 +1738,7 @@ export default function ScenesModal({
                                 <div className="relative w-full h-full">
                                     <video
                                         ref={videoRef}
-                                        className="w-full h-full object-contain pointer-events-none transition-opacity duration-200"
+                                        className="w-full h-full bg-black object-contain pointer-events-none transition-opacity duration-200"
                                         src={currentItem.url}
                                         controls={false}
                                         autoPlay
@@ -1683,7 +1758,7 @@ export default function ScenesModal({
                                 </div>
                             ) : (
                                 <img
-                                    className="w-full h-full object-contain"
+                                    className="w-full h-full bg-black object-contain"
                                     src={currentItem.url}
                                     alt={post.caption || post.text || 'Post media'}
                                 />
@@ -1886,112 +1961,11 @@ export default function ScenesModal({
                             </div>
                         )}
 
-                        {/* Paused Overlay - Scenes Logo with Mute Button */}
+                        {/* Paused Overlay - subtle center play affordance (Reels-style) */}
                         {isPaused && currentItem?.type === 'video' && (
                             <div className="absolute inset-0 flex items-center justify-center z-40 pointer-events-none">
-                                <div className="flex flex-col items-center gap-3">
-                                    {/* Scenes Logo */}
-                                    <div className="p-3 rounded-lg border-2 border-white/80 bg-black/50 backdrop-blur-sm">
-                                        <svg
-                                            width="48"
-                                            height="48"
-                                            viewBox="0 0 24 24"
-                                            className="text-white"
-                                            fill="none"
-                                            xmlns="http://www.w3.org/2000/svg"
-                                        >
-                                            {/* Square border */}
-                                            <rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" strokeWidth="2" fill="none" />
-                                            {/* Play button triangle */}
-                                            <path d="M9 7 L9 17 L17 12 Z" fill="currentColor" />
-                                        </svg>
-                                    </div>
-                                    {/* Mute Button over logo */}
-                                    <button
-                                        onClick={async (e) => {
-                                            e.stopPropagation();
-                                            e.preventDefault();
-                                            const newMuted = !isMuted;
-                                            setIsMuted(newMuted);
-                                            
-                                            // Force update video muted state immediately
-                                            if (videoRef.current) {
-                                                videoRef.current.muted = newMuted;
-                                                
-                                                // If unmuting, ensure video is playing and audio is enabled
-                                                if (!newMuted) {
-                                                    try {
-                                                        // Double-check muted is false
-                                                        videoRef.current.muted = false;
-                                                        
-                                                        // Ensure video is playing
-                                                        if (videoRef.current.paused) {
-                                                            await videoRef.current.play();
-                                                            setIsPaused(false);
-                                                        }
-                                                        
-                                                        // Use a small delay to ensure the muted state is applied
-                                                        setTimeout(() => {
-                                                            if (videoRef.current && !newMuted) {
-                                                                videoRef.current.muted = false;
-                                                                if (videoRef.current.paused) {
-                                                                    videoRef.current.play().catch(console.error);
-                                                                }
-                                                            }
-                                                        }, 50);
-                                                    } catch (error) {
-                                                        console.error('Error unmuting video:', error);
-                                                    }
-                                                }
-                                            }
-                                        }}
-                                        onTouchEnd={async (e) => {
-                                            e.stopPropagation();
-                                            e.preventDefault();
-                                            const newMuted = !isMuted;
-                                            setIsMuted(newMuted);
-                                            
-                                            // Force update video muted state immediately
-                                            if (videoRef.current) {
-                                                videoRef.current.muted = newMuted;
-                                                
-                                                // If unmuting, ensure video is playing and audio is enabled
-                                                if (!newMuted) {
-                                                    try {
-                                                        // Double-check muted is false
-                                                        videoRef.current.muted = false;
-                                                        
-                                                        // Ensure video is playing
-                                                        if (videoRef.current.paused) {
-                                                            await videoRef.current.play();
-                                                            setIsPaused(false);
-                                                        }
-                                                        
-                                                        // Use a small delay to ensure the muted state is applied
-                                                        setTimeout(() => {
-                                                            if (videoRef.current && !newMuted) {
-                                                                videoRef.current.muted = false;
-                                                                if (videoRef.current.paused) {
-                                                                    videoRef.current.play().catch(console.error);
-                                                                }
-                                                            }
-                                                        }, 50);
-                                                    } catch (error) {
-                                                        console.error('Error unmuting video:', error);
-                                                    }
-                                                }
-                                            }
-                                        }}
-                                        className="p-1.5 rounded-full bg-black/50 hover:bg-black/70 active:bg-black/80 text-white transition-colors pointer-events-auto z-50"
-                                        aria-label={isMuted ? 'Unmute video' : 'Mute video'}
-                                        title={isMuted ? 'Unmute video' : 'Mute video'}
-                                    >
-                                        {isMuted ? (
-                                            <FiVolumeX size={16} />
-                                        ) : (
-                                            <FiVolume2 size={16} />
-                                        )}
-                                    </button>
+                                <div className="w-14 h-14 rounded-full bg-black/45 backdrop-blur-sm border border-white/35 flex items-center justify-center">
+                                    <FiPlay className="w-6 h-6 text-white ml-0.5" />
                                 </div>
                             </div>
                         )}
@@ -2000,15 +1974,13 @@ export default function ScenesModal({
                     {/* Bottom Section with Profile, Caption, and Bottom Action Bar (Bluesky-style) - hidden for text-only fullscreen */}
                     {!isCaptionExpanded && (post.mediaUrl || (post.mediaItems && post.mediaItems.length) || !post.text) && (
                         <div
-                            className={`absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black/90 via-black/70 to-transparent transition-opacity duration-300 ease-out ${
-                                scenesBottomChromeVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
-                            }`}
+                            className="absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black/90 via-black/70 to-transparent"
                         >
                             <div className="max-w-md mx-auto px-4 pb-safe">
                                 {/* Profile & Caption Section */}
                                 <div className="pt-12 pb-4">
                                     {/* Profile Section */}
-                                    <div className="flex items-center gap-3 mb-4">
+                                    <div className="flex items-center gap-3 mb-4 pr-[70px]">
                                         {/* Profile picture with rounded-md shape and animated white border */}
                                         <button
                                             onClick={() => {
@@ -2068,57 +2040,59 @@ export default function ScenesModal({
                                                 )}
                                             </div>
                                         </button>
-                                        <div className="flex-1">
+                                        {!isFollowing && !hasPendingRequest && user?.handle !== post.userHandle && (
+                                            <button
+                                                type="button"
+                                                onClick={handleFollow}
+                                                disabled={followBusy}
+                                                aria-label="Follow user"
+                                                className={`-ml-5 mt-5 w-5 h-5 rounded-full bg-white text-black border border-black/20 shadow flex items-center justify-center z-10 ${
+                                                    followBusy ? 'opacity-60 cursor-not-allowed' : 'hover:scale-105'
+                                                }`}
+                                            >
+                                                <FiPlus className="w-3 h-3" />
+                                            </button>
+                                        )}
+                                        <div className="flex-1 min-w-0">
                                             <button
                                                 onClick={() => {
                                                     window.scrollTo(0, 0);
                                                     navigate(`/user/${encodeURIComponent(post.userHandle)}`);
                                                     onClose();
                                                 }}
-                                                className="text-white font-semibold text-sm hover:opacity-80"
+                                                className="text-white font-semibold text-sm hover:opacity-80 truncate"
                                             >
                                                 {post.userHandle}
                                             </button>
-                                            {post.locationLabel && (
-                                                <div className="text-white/70 text-xs flex items-center gap-1 mt-0.5">
-                                                    <FiMapPin className="w-3 h-3" />
-                                                    {post.locationLabel}
-                                                </div>
-                                            )}
+                                            <div className="mt-0.5 flex items-center gap-2">
+                                                {post.locationLabel && (
+                                                    <div className="text-white/70 text-xs flex items-center gap-1 min-w-0">
+                                                        <FiMapPin className="w-3 h-3 shrink-0" />
+                                                        <span className="truncate">{post.locationLabel}</span>
+                                                    </div>
+                                                )}
+                                                {!isFollowing && hasPendingRequest && (
+                                                    <span
+                                                        className="px-2 py-0.5 rounded-full bg-white/20 text-white text-[10px] font-semibold cursor-default select-none"
+                                                        aria-label="Follow request sent"
+                                                    >
+                                                        Requested
+                                                    </span>
+                                                )}
+                                                {isFollowing && user?.handle !== post.userHandle && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleFollow}
+                                                        disabled={followBusy}
+                                                        className={`px-2 py-0.5 rounded-full bg-white/15 text-white text-[10px] font-semibold ${
+                                                            followBusy ? 'opacity-60 cursor-not-allowed' : 'hover:bg-white/25'
+                                                        }`}
+                                                    >
+                                                        Following
+                                                    </button>
+                                                )}
+                                            </div>
                                         </div>
-                                        {/* Follow / Following button – interactive on Scenes */}
-                                        {!isFollowing && !hasPendingRequest && (
-                                            <button
-                                                type="button"
-                                                onClick={handleFollow}
-                                                disabled={followBusy}
-                                                className={`px-4 py-1.5 bg-white/15 text-white text-sm font-semibold rounded-md ${
-                                                    followBusy ? 'opacity-60 cursor-not-allowed' : 'hover:bg-white/25'
-                                                }`}
-                                            >
-                                                Follow
-                                            </button>
-                                        )}
-                                        {!isFollowing && hasPendingRequest && (
-                                            <span
-                                                className="px-4 py-1.5 bg-white/20 text-white text-sm font-semibold rounded-md cursor-default select-none"
-                                                aria-label="Follow request sent"
-                                            >
-                                                Requested
-                                            </span>
-                                        )}
-                                        {isFollowing && (
-                                            <button
-                                                type="button"
-                                                onClick={handleFollow}
-                                                disabled={followBusy}
-                                                className={`px-4 py-1.5 bg-white/10 text-white text-sm font-semibold rounded-md ${
-                                                    followBusy ? 'opacity-60 cursor-not-allowed' : 'hover:bg-white/20'
-                                                }`}
-                                            >
-                                                Following
-                                            </button>
-                                        )}
                                     </div>
 
                                     {/* Caption - Only show if media is not a generated text image (data URL) */}
@@ -2127,7 +2101,7 @@ export default function ScenesModal({
                                             <span className="line-clamp-1">{post.caption}</span>
                                             {post.caption.length > 50 && (
                                                 <button
-                                                    onClick={handleCaptionClick}
+                                                    onClick={openCommentsSheet}
                                                     className="text-white/80 hover:text-white font-medium ml-1"
                                                 >
                                                     more
@@ -2147,7 +2121,7 @@ export default function ScenesModal({
                                             <span className="line-clamp-1">{post.text}</span>
                                             {post.text.length > 50 && (
                                                 <button
-                                                    onClick={handleCaptionClick}
+                                                    onClick={openCommentsSheet}
                                                     className="text-white/80 hover:text-white font-medium ml-1"
                                                 >
                                                     more
@@ -2160,7 +2134,7 @@ export default function ScenesModal({
                                     {comments > 0 ? (
                                         <button
                                             type="button"
-                                            onClick={handleCaptionClick}
+                                            onClick={openCommentsSheet}
                                             className="text-white text-xs opacity-80 hover:opacity-100 mb-3 inline-flex items-center gap-1.5"
                                         >
                                             <FiMessageCircle className="w-3.5 h-3.5 shrink-0" aria-hidden />
@@ -2171,7 +2145,7 @@ export default function ScenesModal({
                                     ) : (
                                         <button
                                             type="button"
-                                            onClick={handleCaptionClick}
+                                            onClick={openCommentsSheet}
                                             className="text-white text-xs opacity-80 hover:opacity-100 mb-3 inline-flex items-center gap-1.5"
                                         >
                                             <FiMessageCircle className="w-3.5 h-3.5 shrink-0" aria-hidden />
@@ -2179,158 +2153,148 @@ export default function ScenesModal({
                                         </button>
                                     )}
 
-                                    {/* Bottom action bar: likes / shares / save / reclip (left), DM & more (right).
-                                        Extra top margin so it's clearly separated from the Follow button row above,
-                                        reducing accidental taps on Follow when aiming for Reclip on small screens. */}
-                                    <div className="flex items-center justify-between mt-3 mb-3">
-                                    <div className="flex items-center gap-6">
-                                            {/* Like - YouTube Shorts-style thumbs up */}
-                                            <button
-                                                ref={likeButtonRef}
-                                                onClick={handleLike}
-                                                className="flex items-center gap-1.5 text-gray-300 hover:text-white transition-opacity"
-                                                aria-label={liked ? 'Unlike' : 'Like'}
-                                            >
-                                                <span className="w-6 h-6 inline-block">
-                                                    <svg className={`w-full h-full ${liked ? 'text-white' : 'text-gray-300'}`} viewBox="0 0 24 24" fill={liked ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={liked ? 0 : 1.5} strokeLinecap="round" strokeLinejoin="round">
-                                                        <path d="M2 9H5V21H2C1.45 21 1 20.55 1 20V10C1 9.45 1.45 9 2 9ZM7.29 7.71L13.69 1.31C13.87 1.13 14.15 1.11 14.35 1.26L15.2 1.9C15.68 2.26 15.9 2.88 15.75 3.47L14.6 8H21C22.1 8 23 8.9 23 10V12.1C23 12.36 22.95 12.62 22.85 12.87L19.76 20.38C19.6 20.76 19.24 21 18.83 21H8C7.45 21 7 20.55 7 20V8.41C7 8.15 7.11 7.89 7.29 7.71Z" />
-                                                    </svg>
-                                                </span>
-                                                <span className="text-xs font-semibold">{likes}</span>
-                                            </button>
+                                    <div className="mt-2 mb-1" />
+                                </div>
 
-                                            {/* Share */}
-                                            <button
-                                                onClick={handleShare}
-                                                className="flex items-center gap-1.5 text-gray-300 hover:text-white transition-opacity"
-                                                aria-label="Share"
-                                            >
-                                                <FiShare2 className="w-5 h-5" />
-                                                <span className="text-xs font-semibold">{shares}</span>
-                                            </button>
+                                {/* Floating action rail (always visible) */}
+                                <div className="absolute right-3 bottom-24 sm:bottom-20 flex flex-col items-center gap-2 z-20">
+                                    <div className="flex flex-col items-center gap-1">
+                                        <button
+                                            ref={likeButtonRef}
+                                            onClick={handleLike}
+                                            aria-label={liked ? 'Unlike' : 'Like'}
+                                            className="w-11 h-11 rounded-2xl border-2 border-white bg-[linear-gradient(135deg,#f6e27a_0%,#d4af37_24%,#f4f4f4_48%,#bfc5cc_72%,#ffe8a3_100%)] shadow-[0_8px_20px_rgba(212,175,55,0.35)] hover:scale-[1.02] transition-transform flex items-center justify-center"
+                                        >
+                                            <FiThumbsUp className="w-5 h-5 text-[#111111]" />
+                                        </button>
+                                        <span className="text-[10px] font-semibold text-white/90">{likes}</span>
+                                    </div>
 
-                                            {/* Save */}
-                                            <button
-                                                onClick={() => setSaveModalOpen(true)}
-                                                className="flex items-center gap-1.5 text-gray-300 hover:text-white transition-opacity"
-                                                aria-label="Save to collection"
-                                            >
-                                                <FiBookmark
-                                                    className={`w-5 h-5 ${isSaved ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300'}`}
-                                                />
-                                                <span className="text-xs font-semibold">
-                                                    {isSaved ? 'Saved' : 'Save'}
-                                                </span>
-                                            </button>
+                                    <div className="flex flex-col items-center gap-1">
+                                        <button
+                                            onClick={openCommentsSheet}
+                                            aria-label="Open comments"
+                                            className="w-11 h-11 rounded-2xl border-2 border-white bg-[linear-gradient(135deg,#f6e27a_0%,#d4af37_24%,#f4f4f4_48%,#bfc5cc_72%,#ffe8a3_100%)] shadow-[0_8px_20px_rgba(212,175,55,0.35)] hover:scale-[1.02] transition-transform flex items-center justify-center"
+                                        >
+                                            <FiMessageCircle className="w-5 h-5 text-[#111111]" />
+                                        </button>
+                                        <span className="text-[10px] font-semibold text-white/90">{comments}</span>
+                                    </div>
 
-                                            {/* Reclip */}
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleReclip(e);
-                                                }}
-                                                disabled={post.userHandle === user?.handle || userReclipped || reclipBusy}
-                                                className={`flex items-center gap-1.5 text-gray-300 hover:text-white transition-opacity ${
-                                                    post.userHandle === user?.handle || reclipBusy
-                                                        ? 'opacity-30 cursor-not-allowed'
-                                                        : ''
-                                                }`}
-                                                aria-label={
-                                                    post.userHandle === user?.handle
-                                                        ? "Cannot reclip your own post"
-                                                        : userReclipped
-                                                            ? "Post already reclipped"
-                                                            : "Reclip"
-                                                }
-                                                title={
-                                                    post.userHandle === user?.handle
-                                                        ? "Cannot reclip your own post"
-                                                        : userReclipped
-                                                            ? "Post already reclipped"
-                                                            : "Reclip"
-                                                }
-                                            >
-                                                <FiRepeat className={`w-5 h-5 ${userReclipped ? 'text-green-500' : 'text-gray-300'}`} />
-                                                <span className="text-xs font-semibold">{reclips}</span>
-                                            </button>
-                                        </div>
+                                    <div className="flex flex-col items-center gap-1">
+                                        <button
+                                            onClick={handleShare}
+                                            aria-label="Share"
+                                            className="w-11 h-11 rounded-2xl border-2 border-white bg-[linear-gradient(135deg,#f6e27a_0%,#d4af37_24%,#f4f4f4_48%,#bfc5cc_72%,#ffe8a3_100%)] shadow-[0_8px_20px_rgba(212,175,55,0.35)] hover:scale-[1.02] transition-transform flex items-center justify-center"
+                                        >
+                                            <FiShare2 className="w-5 h-5 text-[#111111]" />
+                                        </button>
+                                        <span className="text-[10px] font-semibold text-white/90">{shares}</span>
+                                    </div>
 
-                                        <div className="flex items-center gap-4">
-                                            {/* DM */}
-                                            <button
-                                                onClick={async () => {
-                                                    if (!post.userHandle || !user?.handle || !user?.id) return;
-                                                    if (post.userHandle === user.handle) return;
-                                                    
-                                                    // Check privacy and follow status
-                                                    const followedUsers = await getFollowedUsers(user.id);
-                                                    const profilePrivate = isProfilePrivate(post.userHandle);
-                                                    const canMessage = canSendMessage(user.handle, post.userHandle, followedUsers);
-                                                    const hasPending = hasPendingFollowRequest(user.handle, post.userHandle);
-                                                    
-                                                    if (!canMessage && profilePrivate) {
-                                                        // Show SweetAlert explaining they need to follow
-                                                        if (hasPending) {
-                                                            await Swal.fire(bottomSheet({
-                                                                title: 'Follow Request Pending',
-                                                                message: "This user has a private profile. You have already sent a follow request. Once they accept, you'll be able to send them a message.",
-                                                                icon: 'alert',
-                                                            }));
-                                                            return;
-                                                        }
-                                                        
-                                                        const result = await Swal.fire(bottomSheet({
-                                                            title: 'Cannot Send Message',
-                                                            message: "This user has a private profile. You must follow them and have your follow request accepted before you can send them a message.",
-                                                            icon: 'alert',
-                                                            showCancelButton: true,
-                                                            confirmButtonText: 'Request to Follow',
-                                                            cancelButtonText: 'Cancel',
-                                                        }));
-                                                        
-                                                        if (result.isConfirmed) {
-                                                            createFollowRequest(user.handle, post.userHandle);
-                                                            if (user?.id) setFollowState(user.id, post.userHandle, false);
-                                                            Swal.fire(bottomSheet({
-                                                                title: 'Follow Request Sent',
-                                                                message: "You will be notified when they accept your request.",
-                                                                icon: 'success',
-                                                            }));
-                                                        }
-                                                        return;
-                                                    }
-                                                    
-                                                    // If they can message, navigate to DM page
-                                                    navigate(`/messages/${encodeURIComponent(post.userHandle)}`);
-                                                    onClose();
-                                                }}
-                                                disabled={!user || post.userHandle === user?.handle}
-                                                className="flex items-center justify-center text-gray-300 hover:text-white transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
-                                                aria-label="Send direct message"
-                                            >
-                                                <FiSend className="w-5 h-5" />
-                                            </button>
+                                    <div className="flex flex-col items-center gap-1">
+                                        <button
+                                            onClick={() => setSaveModalOpen(true)}
+                                            aria-label="Save to collection"
+                                            className="w-11 h-11 rounded-2xl border-2 border-white bg-[linear-gradient(135deg,#f6e27a_0%,#d4af37_24%,#f4f4f4_48%,#bfc5cc_72%,#ffe8a3_100%)] shadow-[0_8px_20px_rgba(212,175,55,0.35)] hover:scale-[1.02] transition-transform flex items-center justify-center"
+                                        >
+                                            <FiBookmark className={`w-5 h-5 ${isSaved ? 'text-[#7A5A00] fill-[#7A5A00]' : 'text-[#111111]'}`} />
+                                        </button>
+                                        <span className="text-[10px] font-semibold text-white/90">{isSaved ? 'Saved' : 'Save'}</span>
+                                    </div>
 
-                                            {/* More Options (three dots) */}
-                                            <button
-                                                onClick={() => setMenuOpen(true)}
-                                                className="flex items-center justify-center text-gray-300 hover:text-white transition-opacity"
-                                                aria-label="More options"
-                                            >
-                                                <FiMoreHorizontal className="w-5 h-5" />
-                                            </button>
-                                        </div>
+                                    <div className="flex flex-col items-center gap-1">
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleReclip(e);
+                                            }}
+                                            disabled={post.userHandle === user?.handle || userReclipped || reclipBusy}
+                                            aria-label={
+                                                post.userHandle === user?.handle
+                                                    ? "Cannot reclip your own post"
+                                                    : userReclipped
+                                                        ? "Post already reclipped"
+                                                        : "Reclip"
+                                            }
+                                            className={`w-11 h-11 rounded-2xl border-2 border-white bg-[linear-gradient(135deg,#f6e27a_0%,#d4af37_24%,#f4f4f4_48%,#bfc5cc_72%,#ffe8a3_100%)] shadow-[0_8px_20px_rgba(212,175,55,0.35)] transition-transform flex items-center justify-center ${
+                                                post.userHandle === user?.handle || reclipBusy
+                                                    ? 'opacity-40 cursor-not-allowed'
+                                                    : 'hover:scale-[1.02]'
+                                            }`}
+                                        >
+                                            <FiRepeat className={`w-5 h-5 ${userReclipped ? 'text-[#2E7D32]' : 'text-[#111111]'}`} />
+                                        </button>
+                                        <span className="text-[10px] font-semibold text-white/90">{reclips}</span>
                                     </div>
                                 </div>
 
-                                {/* Comment Input at Bottom - acts as full-width trigger to open comments sheet */}
-                                <div className="pb-4 px-3 sm:px-4">
+                                {/* Footer CTA row */}
+                                <div className="pb-4 px-3 sm:px-4 flex items-center gap-2">
                                     <button
                                         type="button"
-                                        onClick={handleCaptionClick}
-                                        className="w-full flex items-center px-4 py-2.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white text-sm text-left placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/50 focus:bg-white/15"
+                                        onClick={openCommentsSheet}
+                                        className="flex-1 min-h-[44px] flex items-center px-4 py-2.5 rounded-full bg-white/95 text-gray-900 text-sm font-medium text-left shadow-[0_10px_24px_rgba(0,0,0,0.28)]"
                                     >
-                                        <span className="opacity-70">Add comment...</span>
+                                        <span className="opacity-90">Add comment...</span>
+                                    </button>
+                                    {/* DM + more keep same behavior, compact chips */}
+                                    <button
+                                        onClick={async () => {
+                                            if (!post.userHandle || !user?.handle || !user?.id) return;
+                                            if (post.userHandle === user.handle) return;
+
+                                            const followedUsers = await getFollowedUsers(user.id);
+                                            const profilePrivate = isProfilePrivate(post.userHandle);
+                                            const canMessage = canSendMessage(user.handle, post.userHandle, followedUsers);
+                                            const hasPending = hasPendingFollowRequest(user.handle, post.userHandle);
+
+                                            if (!canMessage && profilePrivate) {
+                                                if (hasPending) {
+                                                    await Swal.fire(bottomSheet({
+                                                        title: 'Follow Request Pending',
+                                                        message: "This user has a private profile. You have already sent a follow request. Once they accept, you'll be able to send them a message.",
+                                                        icon: 'alert',
+                                                    }));
+                                                    return;
+                                                }
+
+                                                const result = await Swal.fire(bottomSheet({
+                                                    title: 'Cannot Send Message',
+                                                    message: "This user has a private profile. You must follow them and have your follow request accepted before you can send them a message.",
+                                                    icon: 'alert',
+                                                    showCancelButton: true,
+                                                    confirmButtonText: 'Request to Follow',
+                                                    cancelButtonText: 'Cancel',
+                                                }));
+
+                                                if (result.isConfirmed) {
+                                                    createFollowRequest(user.handle, post.userHandle);
+                                                    if (user?.id) setFollowState(user.id, post.userHandle, false);
+                                                    Swal.fire(bottomSheet({
+                                                        title: 'Follow Request Sent',
+                                                        message: "You will be notified when they accept your request.",
+                                                        icon: 'success',
+                                                    }));
+                                                }
+                                                return;
+                                            }
+
+                                            navigate(`/messages/${encodeURIComponent(post.userHandle)}`);
+                                            onClose();
+                                        }}
+                                        disabled={!user || post.userHandle === user?.handle}
+                                        className="w-11 h-11 rounded-2xl border-2 border-white bg-[linear-gradient(135deg,#f6e27a_0%,#d4af37_24%,#f4f4f4_48%,#bfc5cc_72%,#ffe8a3_100%)] shadow-[0_8px_20px_rgba(212,175,55,0.35)] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
+                                        aria-label="Send direct message"
+                                    >
+                                        <FiSend className="w-5 h-5 text-[#111111]" />
+                                    </button>
+                                    <button
+                                        onClick={() => setMenuOpen(true)}
+                                        className="w-11 h-11 rounded-2xl border-2 border-white bg-[linear-gradient(135deg,#f6e27a_0%,#d4af37_24%,#f4f4f4_48%,#bfc5cc_72%,#ffe8a3_100%)] shadow-[0_8px_20px_rgba(212,175,55,0.35)] flex items-center justify-center"
+                                        aria-label="More options"
+                                    >
+                                        <FiMoreHorizontal className="w-5 h-5 text-[#111111]" />
                                     </button>
                                 </div>
                             </div>
@@ -2344,8 +2308,8 @@ export default function ScenesModal({
                             <div
                                 className="fixed left-0 right-0 bottom-0 z-[110] bg-black/50"
                                 // Leave more space for the video at the top when comments sheet is open.
-                                style={{ top: '40vh' }}
-                                onClick={handleCaptionClick}
+                                style={{ top: commentsPreviewHeight }}
+                                onClick={closeCommentsSheet}
                             />
                             {/* Comments sheet - TikTok style: white card, fixed to viewport; only handle bar triggers drag */}
                             <div
@@ -2353,8 +2317,9 @@ export default function ScenesModal({
                                 className="fixed left-0 right-0 bottom-0 z-[120] bg-white rounded-t-2xl flex flex-col shadow-[0_-4px_24px_rgba(0,0,0,0.2)]"
                                 style={{
                                     transform: `translateY(${Math.max(0, sheetDragY)}px)`,
-                                    maxHeight: sheetHeight,
-                                    height: sheetDragY > 0 ? `calc(${sheetHeight} - ${sheetDragY}px)` : sheetHeight,
+                                    top: commentsPreviewHeight,
+                                    bottom: 0,
+                                    height: sheetDragY > 0 ? `calc((100dvh - ${commentsPreviewHeight}) - ${sheetDragY}px)` : `calc(100dvh - ${commentsPreviewHeight})`,
                                     paddingBottom: 'env(safe-area-inset-bottom, 0px)'
                                 }}
                                 onTouchStart={handleSheetTouchStart}
@@ -2374,7 +2339,7 @@ export default function ScenesModal({
                                         <button type="button" className="p-2 -mr-1 text-gray-600 hover:text-gray-900" aria-label="Sort comments">
                                             <FiChevronDown className="w-5 h-5" />
                                         </button>
-                                        <button type="button" onClick={handleCaptionClick} className="p-2 -mr-1 text-gray-600 hover:text-gray-900" aria-label="Close comments">
+                                        <button type="button" onClick={closeCommentsSheet} className="p-2 -mr-1 text-gray-600 hover:text-gray-900" aria-label="Close comments">
                                             <FiX className="w-5 h-5" />
                                         </button>
                                     </div>
