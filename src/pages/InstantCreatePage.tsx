@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiArrowLeft, FiCircle, FiX, FiPlay, FiPause, FiRotateCw, FiMic, FiMicOff, FiImage, FiLayers, FiZap, FiGrid, FiUser, FiUsers, FiFilter, FiRefreshCw, FiEdit3, FiBookmark, FiUpload, FiSliders, FiDroplet, FiVideo, FiVideoOff, FiCopy, FiSave, FiPlus, FiType, FiCamera } from 'react-icons/fi';
+import { FiArrowLeft, FiCircle, FiX, FiPlay, FiPause, FiRotateCw, FiMic, FiMicOff, FiImage, FiLayers, FiZap, FiGrid, FiUser, FiFilter, FiRefreshCw, FiEdit3, FiBookmark, FiUpload, FiSliders, FiDroplet, FiVideo, FiVideoOff, FiCopy, FiSave, FiPlus, FiType, FiCamera } from 'react-icons/fi';
+import { FaPeopleRobbery } from 'react-icons/fa6';
 import { saveDraft } from '../api/drafts';
 import { getTemplate } from '../api/templates';
 import { TEMPLATE_IDS } from '../constants';
@@ -9,13 +10,10 @@ import { bottomSheet } from '../utils/swalBottomSheet';
 import { setGalleryPreviewMedia } from '../utils/galleryPreviewCache';
 import CreateGroupModal from '../components/CreateGroupModal';
 import { prepareMediaForPost } from '../utils/prepareMediaForPost';
-
-/** Same gradient as `Avatar` story ring (profile picture story border). */
-const PROFILE_STORY_RING_GRADIENT = 'linear-gradient(135deg, #f6e27a 0%, #d4af37 22%, #f4f4f4 44%, #bfc5cc 66%, #ffe8a3 82%, #d4af37 100%)';
-
-type SocialUploadTarget = 'youtube_shorts' | 'tiktok' | 'instagram_reels';
+import { useAuth } from '../context/Auth';
 
 export default function InstantCreatePage() {
+    const { user } = useAuth();
     const navigate = useNavigate();
     const location = useLocation();
     const videoRef = React.useRef<HTMLVideoElement | null>(null);
@@ -102,17 +100,14 @@ export default function InstantCreatePage() {
     const presetIdxRef = React.useRef(0);
     const MAX_VIDEO_SECONDS = 60;
 
-    type CreateModeAction = 'community' | 'text' | 'gallery' | 'story' | 'youtube' | 'tiktok' | 'instagram_reels';
+    type CreateModeAction = 'community' | 'text' | 'gallery' | 'story';
     type StoryAudience = 'public' | 'close_friends' | 'only_me';
     type StoryPreviewAction = 'filters' | 'audience' | 'save' | 'next';
     const [showCreateModePicker, setShowCreateModePicker] = React.useState(true);
     const [createGroupOpen, setCreateGroupOpen] = React.useState(false);
-    const pendingSocialUploadRef = React.useRef<SocialUploadTarget | null>(null);
+    const pendingSocialUploadRef = React.useRef<null>(null);
     const [recordingTime, setRecordingTime] = React.useState(MAX_VIDEO_SECONDS);
     const recordingTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
-    const verticalPickerRef = React.useRef<HTMLDivElement | null>(null);
-    const verticalPickerRafRef = React.useRef<number | null>(null);
-    const [isVerticalPickerDragging, setIsVerticalPickerDragging] = React.useState(false);
     const [centeredCreateMode, setCenteredCreateMode] = React.useState<CreateModeAction>('gallery');
     const [isStoryMode, setIsStoryMode] = React.useState(false);
     const [storyAudience, setStoryAudience] = React.useState<StoryAudience>('public');
@@ -133,45 +128,27 @@ export default function InstantCreatePage() {
         rail.scrollTo({ left: Math.max(0, desiredLeft), behavior: smooth ? 'smooth' : 'auto' });
     }, []);
 
-    const centerVerticalPickerItem = React.useCallback((rail: HTMLDivElement | null, actionId: CreateModeAction, smooth = true) => {
-        if (!rail) return;
-        const target = rail.querySelector<HTMLElement>(`[data-create-mode="${actionId}"]`);
-        if (!target) return;
-        const desiredTop = target.offsetTop - (rail.clientHeight / 2) + (target.clientHeight / 2);
-        rail.scrollTo({ top: Math.max(0, desiredTop), behavior: smooth ? 'smooth' : 'auto' });
-    }, []);
+    const createModeItems = React.useMemo(
+        () => ([
+            { id: 'community' as const, title: 'Community', icon: 'community' as const },
+            { id: 'text' as const, title: 'Text only', icon: 'type' as const },
+            { id: 'story' as const, title: '24h Story', icon: 'story' as const },
+            { id: 'gallery' as const, title: 'Gallery', icon: 'gallery' as const },
+        ]),
+        []
+    );
+    const [orbitIndex, setOrbitIndex] = React.useState<number>(() => createModeItems.findIndex((item) => item.id === 'gallery'));
+    const orbitTouchStartYRef = React.useRef<number | null>(null);
+    const orbitWheelAccumulatorRef = React.useRef<number>(0);
 
-    const updateVerticalPickerVisuals = React.useCallback(() => {
-        const rail = verticalPickerRef.current;
-        if (!rail) return;
-        const railRect = rail.getBoundingClientRect();
-        if (railRect.height < 32) return;
-        const centerY = railRect.top + railRect.height / 2;
-        let closestId: CreateModeAction | null = null;
-        let closestDist = Number.POSITIVE_INFINITY;
-        rail.querySelectorAll<HTMLElement>('[data-create-mode]').forEach((el) => {
-            const rect = el.getBoundingClientRect();
-            const icy = rect.top + rect.height / 2;
-            const dist = Math.abs(icy - centerY);
-            const id = el.dataset.createMode as CreateModeAction | undefined;
-            if (id && dist < closestDist) {
-                closestDist = dist;
-                closestId = id;
-            }
-            // Subtle vertical tilt only (no rotateY — that read as “crooked”). No translateZ — avoids skew with scroll clipping.
-            const denom = Math.max(260, railRect.height * 0.45);
-            const raw = (icy - centerY) / denom;
-            const t = Math.max(-1, Math.min(1, raw));
-            const absT = Math.abs(t);
-            const rotateX = -t * 34;
-            const scale = Math.max(0.82, 1.28 - absT * 0.42);
-            const opacity = Math.max(0.55, 1 - absT * 0.32);
-            el.style.transformOrigin = '50% 50%';
-            el.style.transform = `rotateX(${rotateX}deg) scale(${scale})`;
-            el.style.opacity = String(opacity);
+    const stepOrbitMode = React.useCallback((delta: number) => {
+        setOrbitIndex((prev) => {
+            const len = createModeItems.length;
+            const next = (prev + delta + len) % len;
+            setCenteredCreateMode(createModeItems[next].id);
+            return next;
         });
-        if (closestId) setCenteredCreateMode(closestId);
-    }, []);
+    }, [createModeItems]);
 
     const handleInstantBack = React.useCallback(() => {
         if (previewUrl) {
@@ -227,34 +204,10 @@ export default function InstantCreatePage() {
 
     React.useEffect(() => {
         if (!showCreateModePicker) return;
-        const t = window.setTimeout(() => {
-            const rail = verticalPickerRef.current;
-            if (rail) {
-                const galleryItem = rail.querySelector<HTMLElement>('[data-create-mode="gallery"]');
-                if (galleryItem) {
-                    const desiredTop = galleryItem.offsetTop - (rail.clientHeight / 2) + (galleryItem.clientHeight / 2);
-                    rail.scrollTo({ top: Math.max(0, desiredTop), behavior: 'auto' });
-                }
-                updateVerticalPickerVisuals();
-            }
-        }, 0);
-        return () => window.clearTimeout(t);
-    }, [showCreateModePicker, updateVerticalPickerVisuals]);
-
-    React.useEffect(() => {
-        if (!showCreateModePicker) return;
-        const rail = verticalPickerRef.current;
-        if (!rail) return;
-        const onScroll = () => {
-            if (verticalPickerRafRef.current != null) cancelAnimationFrame(verticalPickerRafRef.current);
-            verticalPickerRafRef.current = requestAnimationFrame(updateVerticalPickerVisuals);
-        };
-        rail.addEventListener('scroll', onScroll, { passive: true });
-        return () => {
-            rail.removeEventListener('scroll', onScroll);
-            if (verticalPickerRafRef.current != null) cancelAnimationFrame(verticalPickerRafRef.current);
-        };
-    }, [showCreateModePicker, updateVerticalPickerVisuals]);
+        const galleryIndex = createModeItems.findIndex((item) => item.id === 'gallery');
+        setOrbitIndex(galleryIndex >= 0 ? galleryIndex : 0);
+        setCenteredCreateMode('gallery');
+    }, [createModeItems, showCreateModePicker]);
 
     React.useEffect(() => {
         const rail = storyPreviewRailRef.current;
@@ -1423,48 +1376,8 @@ export default function InstantCreatePage() {
         </svg>
     );
 
-    const YoutubeShortsMark = ({ className }: { className?: string }) => (
-        <svg viewBox="0 0 24 24" className={className} aria-hidden>
-            <path fill="currentColor" d="M23.5 6.2s-.2-1.7-1-2.4c-.9-1-2-1-2.4-1.1C17 2.5 12 2.5 12 2.5h0s-5 0-8.1.2c-.4 0-1.5.1-2.4 1.1-.7.7-1 2.4-1 2.4S.5 8.1.5 10v1.9c0 1.9.2 3.8.2 3.8s.2 1.7 1 2.4c.9 1 2.1.9 2.6 1 1.9.2 7.7.2 7.7.2s5 0 8.1-.2c.4 0 1.5-.1 2.4-1.1.7-.7 1-2.4 1-2.4s.2-1.9.2-3.8V10c0-1.9-.2-3.8-.2-3.8z" />
-            {/* Knock-out play on black button = reads as white frame + play */}
-            <path fill="#000000" d="M9.8 15.5V8.5L15.5 12l-5.7 3.5z" />
-        </svg>
-    );
-
-    const TikTokMark = ({ className }: { className?: string }) => (
-        <svg viewBox="0 0 24 24" className={className} aria-hidden>
-            <path
-                fill="currentColor"
-                d="M19.32 8.28v3.38a8.3 8.3 0 0 1-4.76-1.48v6.7a6.38 6.38 0 1 1-6.38-6.38c.34 0 .67.03 1 .09v3.5a2.9 2.9 0 1 0 2.03 2.76V2h3.45v.45a4.82 4.82 0 0 0 4.66 4.53z"
-            />
-            <path
-                fill="currentColor"
-                d="M19.32 8.28a4.8 4.8 0 0 1-2.93-1v3.9a8.3 8.3 0 0 0 4.76 1.48V8.59a4.85 4.85 0 0 1-1.83-.31z"
-            />
-        </svg>
-    );
-
-    /** Instagram Reels–style mark (white frame + play cutout). */
-    const ReelsMark = ({ className }: { className?: string }) => (
-        <svg viewBox="0 0 24 24" className={className} aria-hidden>
-            <rect x="3" y="5" width="18" height="15" rx="2.5" fill="currentColor" />
-            <path fill="#000000" d="M11.2 12.2l4.2 2.4a.6.6 0 0 1 0 1.04l-4.2 2.4A.6.6 0 0 1 10.3 17V13a.6.6 0 0 1 .9-.52z" />
-        </svg>
-    );
-
         return (
         <div className="fixed inset-0 z-50 flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden bg-black">
-            {/* Profile story-ring palette (Avatar hasStory), soft corners ~20% viewport */}
-            <div
-                className="pointer-events-none absolute left-0 top-0 z-[6] h-[20vh] w-[20vw] min-h-[120px] min-w-[120px] max-h-[320px] max-w-[320px]"
-                style={{ background: PROFILE_STORY_RING_GRADIENT, opacity: 0.38, maskImage: 'radial-gradient(ellipse 90% 90% at 0% 0%, black 38%, transparent 72%)', WebkitMaskImage: 'radial-gradient(ellipse 90% 90% at 0% 0%, black 38%, transparent 72%)' }}
-                aria-hidden
-            />
-            <div
-                className="pointer-events-none absolute bottom-0 right-0 z-[6] h-[20vh] w-[20vw] min-h-[120px] min-w-[120px] max-h-[320px] max-w-[320px]"
-                style={{ background: PROFILE_STORY_RING_GRADIENT, opacity: 0.38, maskImage: 'radial-gradient(ellipse 90% 90% at 100% 100%, black 38%, transparent 72%)', WebkitMaskImage: 'radial-gradient(ellipse 90% 90% at 100% 100%, black 38%, transparent 72%)' }}
-                aria-hidden
-            />
             {/* Top bar: mode picker (simple) vs camera controls */}
             <div className="absolute top-0 left-0 right-0 z-50 bg-gradient-to-b from-black/80 to-transparent px-4 py-3">
                 {showCreateModePicker && !previewUrl ? (
@@ -1616,62 +1529,93 @@ export default function InstantCreatePage() {
 
                         {showCreateModePicker && (
                             <div
-                                className="relative flex min-h-0 flex-1 flex-col bg-gradient-to-b from-zinc-950 via-neutral-950 to-black"
+                                className="relative flex min-h-0 flex-1 flex-col bg-black"
                                 style={{
                                     perspective: '1400px',
                                     perspectiveOrigin: '50% 50%',
                                 }}
                             >
-                                {/* Narrow side rails: white → grey, centre stays dark */}
                                 <div
-                                    className="pointer-events-none absolute inset-y-0 left-0 z-[18] w-[min(15vw,80px)] bg-gradient-to-r from-white/30 via-neutral-400/22 to-transparent"
-                                    aria-hidden
-                                />
-                                <div
-                                    className="pointer-events-none absolute inset-y-0 right-0 z-[18] w-[min(15vw,80px)] bg-gradient-to-l from-white/30 via-neutral-400/22 to-transparent"
-                                    aria-hidden
-                                />
-                                <div className="relative z-[20] min-h-0 w-full flex-1 pt-14 opacity-[0.98]">
-                                    <div
-                                        ref={verticalPickerRef}
-                                        className="scrollbar-hide relative z-[20] h-full min-h-0 touch-pan-y overflow-x-hidden overflow-y-auto"
-                                        style={{ scrollSnapType: 'y mandatory', WebkitOverflowScrolling: 'touch' }}
-                                        onPointerDown={() => setIsVerticalPickerDragging(true)}
-                                        onPointerUp={() => window.setTimeout(() => setIsVerticalPickerDragging(false), 70)}
-                                        onPointerCancel={() => setIsVerticalPickerDragging(false)}
-                                        onPointerLeave={() => setIsVerticalPickerDragging(false)}
-                                    >
-                                        <div className="min-h-[28vh] shrink-0" aria-hidden />
-                                        {([
-                                            { id: 'community' as const, title: 'Community', icon: 'community' as const },
-                                            { id: 'text' as const, title: 'Text only', icon: 'type' as const },
-                                            { id: 'story' as const, title: '24h Story', icon: 'story' as const },
-                                            { id: 'gallery' as const, title: 'Gallery', icon: 'gallery' as const },
-                                            { id: 'youtube' as const, title: 'YouTube Shorts', icon: 'youtube' as const },
-                                            { id: 'tiktok' as const, title: 'TikTok', icon: 'tiktok' as const },
-                                            { id: 'instagram_reels' as const, title: 'Instagram Reels', icon: 'reels' as const },
-                                        ]).map((item) => {
+                                    className="relative z-[20] min-h-0 w-full flex-1 pt-14 opacity-[0.98]"
+                                    onWheel={(e) => {
+                                        orbitWheelAccumulatorRef.current += e.deltaY;
+                                        if (Math.abs(orbitWheelAccumulatorRef.current) < 68) return;
+                                        stepOrbitMode(orbitWheelAccumulatorRef.current > 0 ? 1 : -1);
+                                        orbitWheelAccumulatorRef.current = 0;
+                                    }}
+                                    onPointerDown={(e) => {
+                                        orbitTouchStartYRef.current = e.clientY;
+                                    }}
+                                    onPointerMove={(e) => {
+                                        if (orbitTouchStartYRef.current == null) return;
+                                        const deltaY = e.clientY - orbitTouchStartYRef.current;
+                                        if (Math.abs(deltaY) < 48) return;
+                                        stepOrbitMode(deltaY > 0 ? -1 : 1);
+                                        orbitTouchStartYRef.current = e.clientY;
+                                    }}
+                                    onPointerUp={() => {
+                                        orbitTouchStartYRef.current = null;
+                                        orbitWheelAccumulatorRef.current = 0;
+                                    }}
+                                    onPointerCancel={() => {
+                                        orbitTouchStartYRef.current = null;
+                                        orbitWheelAccumulatorRef.current = 0;
+                                    }}
+                                >
+                                    <div className="relative z-[20] h-full min-h-0 w-full">
+                                        <div className="absolute left-1/2 top-1/2 z-[19] h-[56px] w-[56px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white p-[1px] shadow-[0_0_30px_rgba(255,255,255,0.35)]">
+                                            <div className="pointer-events-none absolute -left-3 top-[55px] rounded-lg border border-white/90 bg-black/72 px-1.5 py-0.5 text-[10px] font-semibold leading-tight text-white backdrop-blur-[1px] shadow-lg shadow-black/45">
+                                                <span className="block">What's</span>
+                                                <span className="block">up?</span>
+                                                <span className="absolute -top-[6px] left-4 h-[10px] w-[10px] rotate-45 border-l border-t border-white/90 bg-black/72" aria-hidden />
+                                            </div>
+                                            <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-black">
+                                                {user?.avatarUrl ? (
+                                                    <img
+                                                        src={user.avatarUrl}
+                                                        alt={`${user.name || 'User'} profile`}
+                                                        className="h-full w-full object-cover"
+                                                    />
+                                                ) : (
+                                                    <span className="text-xs font-semibold text-white">
+                                                        {(user?.name?.trim()?.charAt(0) || 'U').toUpperCase()}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+                                        {createModeItems.map((item, idx) => {
+                                            const len = createModeItems.length;
+                                            const stepDeg = 360 / len;
+                                            const orbitRotationDeg = -orbitIndex * stepDeg;
+                                            const currentAngleDeg = (idx * stepDeg) + orbitRotationDeg;
+                                            const angleRad = (currentAngleDeg * Math.PI) / 180;
+                                            const radius = 118;
                                             const isCentered = centeredCreateMode === item.id;
+                                            const relative = ((idx - orbitIndex + len) % len);
+                                            const signed = relative > len / 2 ? relative - len : relative;
+                                            const distanceFactor = Math.min(Math.abs(signed), 2);
+                                            const scale = isCentered ? 1.34 : Math.max(0.8, 1 - distanceFactor * 0.17);
+                                            const opacity = isCentered ? 1 : Math.max(0.56, 1 - distanceFactor * 0.18);
                                             return (
-                                                <div
+                                                <button
                                                     key={item.id}
-                                                    className="flex shrink-0 min-h-[136px] items-center justify-center px-6"
-                                                    style={{ scrollSnapAlign: 'center' }}
-                                                >
-                                                    <button
-                                                        type="button"
-                                                        data-create-mode={item.id}
-                                                        title={item.title}
-                                                        aria-label={item.title}
-                                                        className={`relative flex w-full max-w-[240px] flex-col items-center gap-2 rounded-2xl py-1 outline-none will-change-transform transition-all duration-300 ${
-                                                            isCentered ? 'drop-shadow-[0_0_40px_rgba(255,255,255,0.55)]' : ''
-                                                        }`}
-                                                        onClick={() => {
-                                                            if (isVerticalPickerDragging) return;
-                                                            if (!isCentered) {
-                                                                centerVerticalPickerItem(verticalPickerRef.current, item.id, true);
-                                                                return;
-                                                            }
+                                                    type="button"
+                                                    data-create-mode={item.id}
+                                                    title={item.title}
+                                                    aria-label={item.title}
+                                                    className={`absolute left-1/2 top-1/2 z-[21] flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2 rounded-2xl py-1 outline-none will-change-transform transition-all duration-700 ease-out ${
+                                                        isCentered ? 'drop-shadow-[0_0_40px_rgba(255,255,255,0.55)]' : ''
+                                                    }`}
+                                                    style={{
+                                                        transform: `translate(-50%, -50%) rotate(${currentAngleDeg}deg) translateY(-${radius}px)`,
+                                                        opacity,
+                                                    }}
+                                                    onClick={() => {
+                                                        if (!isCentered) {
+                                                            setOrbitIndex(idx);
+                                                            setCenteredCreateMode(item.id);
+                                                            return;
+                                                        }
                                                             if (item.id === 'gallery') {
                                                                 setIsStoryMode(false);
                                                                 pendingSocialUploadRef.current = null;
@@ -1707,83 +1651,45 @@ export default function InstantCreatePage() {
                                                                 navigate('/create/text-only');
                                                                 return;
                                                             }
-                                                            if (item.id === 'youtube') {
-                                                                setIsStoryMode(false);
-                                                                pendingSocialUploadRef.current = 'youtube_shorts';
-                                                                cameraRollInputRef.current?.click();
-                                                                return;
-                                                            }
-                                                            if (item.id === 'tiktok') {
-                                                                setIsStoryMode(false);
-                                                                pendingSocialUploadRef.current = 'tiktok';
-                                                                cameraRollInputRef.current?.click();
-                                                                return;
-                                                            }
-                                                            if (item.id === 'instagram_reels') {
-                                                                setIsStoryMode(false);
-                                                                pendingSocialUploadRef.current = 'instagram_reels';
-                                                                cameraRollInputRef.current?.click();
-                                                                return;
-                                                            }
-                                                        }}
+                                                    }}
+                                                >
+                                                    <div
+                                                        className="flex flex-col items-center gap-2 transition-transform duration-700 ease-out"
+                                                        style={{ transform: `rotate(${-currentAngleDeg}deg) scale(${scale})` }}
                                                     >
                                                         <div
-                                                            className={`relative rounded-full p-[3px] transition-[box-shadow,background-color] duration-300 ${
+                                                            className={`${isCentered ? 'h-[76px] w-[76px]' : 'h-[50px] w-[50px]'} rounded-xl border transition-all duration-300 flex items-center justify-center shadow-lg ${
                                                                 isCentered
-                                                                    ? 'shadow-[0_0_0_1px_rgba(246,226,122,0.9),0_0_26px_rgba(212,175,55,0.75),0_0_54px_rgba(212,175,55,0.5),0_0_92px_rgba(192,198,205,0.35)]'
-                                                                    : 'shadow-none'
+                                                                    ? 'bg-gradient-to-br from-white to-gray-200 border-white/95 shadow-white/25 shadow-black/20'
+                                                                    : 'bg-gradient-to-br from-black/85 to-black/70 border-white/22 shadow-black/60'
                                                             }`}
-                                                            style={{
-                                                                background: isCentered
-                                                                    ? 'linear-gradient(135deg, #f5f6f8 0%, #d7dce2 26%, #c0c6cd 52%, #f0f2f5 78%, #d4af37 100%)'
-                                                                    : 'rgba(255,255,255,0.75)'
-                                                            }}
                                                         >
-                                                            {(item.id === 'youtube' || item.id === 'tiktok' || item.id === 'instagram_reels') && (
-                                                                <span
-                                                                    className="absolute -right-1 -top-1 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white text-black shadow-lg ring-2 ring-black/50"
-                                                                    title="Upload from your gallery"
-                                                                    aria-hidden
-                                                                >
-                                                                    <FiUpload className="h-4 w-4" strokeWidth={2.25} />
+                                                            {isCentered && (
+                                                                <span className="absolute -right-2 top-1/2 -translate-y-1/2 flex h-6 w-6 items-center justify-center rounded-full bg-white text-black text-sm font-bold shadow-lg border border-black/15">
+                                                                    +
                                                                 </span>
                                                             )}
-                                                            <div
-                                                                className={`${isCentered ? 'h-[76px] w-[76px]' : 'h-[48px] w-[48px]'} flex items-center justify-center rounded-full bg-black transition-[width,height,box-shadow] duration-300 ${
-                                                                    isCentered
-                                                                        ? 'shadow-[0_0_22px_rgba(192,198,205,0.55),inset_0_0_0_1px_rgba(240,242,245,0.55)]'
-                                                                        : ''
-                                                                }`}
-                                                            >
-                                                                {item.icon === 'community' && <FiUsers className={isCentered ? 'h-8 w-8 text-[#eef1f4]' : 'h-6 w-6 text-white'} />}
-                                                                {item.icon === 'type' && <FiType className={isCentered ? 'h-8 w-8 text-[#eef1f4]' : 'h-6 w-6 text-white'} />}
-                                                                {item.icon === 'gallery' && <FiUpload className={isCentered ? 'h-8 w-8 text-[#eef1f4]' : 'h-6 w-6 text-white'} />}
-                                                                {item.icon === 'story' && <FiCamera className={isCentered ? 'h-8 w-8 text-[#eef1f4]' : 'h-6 w-6 text-white'} />}
-                                                                {item.icon === 'youtube' && <YoutubeShortsMark className={isCentered ? 'h-9 w-9 text-[#eef1f4]' : 'h-6 w-6 text-white'} />}
-                                                                {item.icon === 'tiktok' && <TikTokMark className={isCentered ? 'h-9 w-9 text-[#eef1f4]' : 'h-6 w-6 text-white'} />}
-                                                                {item.icon === 'reels' && <ReelsMark className={isCentered ? 'h-9 w-9 text-[#eef1f4]' : 'h-6 w-6 text-white'} />}
-                                                            </div>
+                                                            {item.icon === 'community' && <FaPeopleRobbery className={isCentered ? 'h-8 w-8 text-black' : 'h-6 w-6 text-white'} />}
+                                                            {item.icon === 'type' && <FiType className={isCentered ? 'h-8 w-8 text-black' : 'h-6 w-6 text-white'} />}
+                                                            {item.icon === 'gallery' && <FiUpload className={isCentered ? 'h-8 w-8 text-black' : 'h-6 w-6 text-white'} />}
+                                                            {item.icon === 'story' && <FiCamera className={isCentered ? 'h-8 w-8 text-black' : 'h-6 w-6 text-white'} />}
                                                         </div>
                                                         <span
                                                             className={`max-w-[220px] text-center text-[13px] font-semibold leading-tight text-white ${isCentered ? 'opacity-100' : 'opacity-70'}`}
                                                         >
                                                             {item.title}
-                                                            {(item.id === 'youtube' || item.id === 'tiktok' || item.id === 'instagram_reels') && (
-                                                                <span className="mt-0.5 block text-[10px] font-medium text-white/65">Upload for this format</span>
-                                                            )}
                                                         </span>
-                                                    </button>
-                                                </div>
+                                                    </div>
+                                                </button>
                                             );
                                         })}
-                                        <div className="min-h-[28vh] shrink-0" aria-hidden />
                                     </div>
                                 </div>
                                 <p
                                     className="shrink-0 px-4 pb-4 text-center text-[11px] text-white/55"
                                     style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0) + 0.75rem)' }}
                                 >
-                                    Scroll to choose · tap the highlighted option
+                                    Rotate to choose · top icon is active · tap to open
                                 </p>
                             </div>
                         )}
