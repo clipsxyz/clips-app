@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Comment;
 use App\Models\Post;
+use App\Services\BoostAnalyticsService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -154,6 +155,7 @@ class CommentController extends Controller
 
             // Update post comment count
             Post::find($postId)->increment('comments_count');
+            BoostAnalyticsService::incrementForPost($postId, 'comments_count');
 
             return $comment;
         });
@@ -192,6 +194,7 @@ class CommentController extends Controller
 
             // Update post comment count
             Post::find($parentComment->post_id)->increment('comments_count');
+            BoostAnalyticsService::incrementForPost($parentComment->post_id, 'comments_count');
 
             return $reply;
         });

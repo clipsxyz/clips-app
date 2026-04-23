@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Boost;
+use App\Models\BoostAnalyticsEvent;
 use App\Models\User;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -369,5 +371,140 @@ class BoostController extends Controller
                 'expiresAt'    => null,
             ]);
         }
+    }
+
+    /**
+     * Get boost analytics for a post (owner only).
+     * Returns active boost analytics when available, else most recent historical boost.
+     */
+    public function analytics(Request $request, string $postId): JsonResponse
+    {
+        $viewer = Auth::user();
+        if (!$viewer) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $range = (string) $request->query('range', 'all');
+        if (!in_array($range, ['24h', '7d', 'all'], true)) {
+            $range = 'all';
+        }
+
+        $boost = Boost::where('post_id', $postId)
+            ->where('user_id', $viewer->id)
+            ->orderByRaw('CASE WHEN expires_at > NOW() THEN 0 ELSE 1 END')
+            ->orderByDesc('activated_at')
+            ->first();
+
+        if (!$boost) {
+            return response()->json([
+                'hasBoost' => false,
+                'isActive' => false,
+                'postId' => $postId,
+                'range' => $range,
+                'analytics' => null,
+            ]);
+        }
+
+        $fromTs = null;
+        if ($range === '24h') {
+            $fromTs = now()->subDay();
+        } elseif ($range === '7d') {
+            $fromTs = now()->subDays(7);
+        }
+
+        $eventsQuery = BoostAnalyticsEvent::query()->where('boost_id', $boost->id);
+        if ($fromTs) {
+            $eventsQuery->where('created_at', '>=', $fromTs);
+        }
+        $events = $eventsQuery->get(['event_type', 'created_at']);
+        $counts = [
+            'impression' => 0,
+            'like' => 0,
+            'comment' => 0,
+            'share' => 0,
+            'profile_visit' => 0,
+            'message_start' => 0,
+        ];
+        foreach ($events as $event) {
+            $type = (string) $event->event_type;
+            if (array_key_exists($type, $counts)) {
+                $counts[$type]++;
+            }
+        }
+
+        // If no event rows (e.g. legacy boosts), fall back to cumulative counters.
+        $impressions = $events->isEmpty() && $range === 'all' ? (int) ($boost->impressions_count ?? 0) : (int) $counts['impression'];
+        $likes = $events->isEmpty() && $range === 'all' ? (int) ($boost->likes_count ?? 0) : (int) $counts['like'];
+        $comments = $events->isEmpty() && $range === 'all' ? (int) ($boost->comments_count ?? 0) : (int) $counts['comment'];
+        $shares = $events->isEmpty() && $range === 'all' ? (int) ($boost->shares_count ?? 0) : (int) $counts['share'];
+        $profileVisits = (int) $counts['profile_visit'];
+        $messagesStarted = (int) $counts['message_start'];
+
+        // Build simple trend buckets for sparkline-like UI.
+        $bucketFormat = $range === '24h' ? 'Y-m-d H:00' : 'Y-m-d';
+        $trendMap = [
+            'impressions' => [],
+            'likes' => [],
+            'comments' => [],
+            'shares' => [],
+        ];
+        foreach ($events as $event) {
+            $bucket = $event->created_at->format($bucketFormat);
+            $key = match ((string) $event->event_type) {
+                'impression' => 'impressions',
+                'like' => 'likes',
+                'comment' => 'comments',
+                'share' => 'shares',
+                default => null,
+            };
+            if (!$key) continue;
+            if (!isset($trendMap[$key][$bucket])) {
+                $trendMap[$key][$bucket] = 0;
+            }
+            $trendMap[$key][$bucket]++;
+        }
+
+        $trend = [];
+        foreach ($trendMap as $metric => $bucketCounts) {
+            ksort($bucketCounts);
+            $trend[$metric] = [];
+            foreach ($bucketCounts as $bucket => $value) {
+                $trend[$metric][] = ['bucket' => $bucket, 'value' => $value];
+            }
+        }
+
+        $sourceMatchedEventsCount = BoostAnalyticsEvent::query()
+            ->where('boost_id', $boost->id)
+            ->where('attribution_context', 'source_post')
+            ->when($fromTs, fn ($q) => $q->where('created_at', '>=', $fromTs))
+            ->count();
+
+        $price = (float) ($boost->price ?? 0);
+        $costPerProfileVisit = $profileVisits > 0 ? round($price / $profileVisits, 4) : null;
+        $costPerMessageStart = $messagesStarted > 0 ? round($price / $messagesStarted, 4) : null;
+
+        return response()->json([
+            'hasBoost' => true,
+            'isActive' => $boost->expires_at->isFuture(),
+            'postId' => $boost->post_id,
+            'range' => $range,
+            'feedType' => $boost->feed_type,
+            'activatedAt' => optional($boost->activated_at)->toIso8601String(),
+            'expiresAt' => optional($boost->expires_at)->toIso8601String(),
+            'spendEur' => $price,
+            'analytics' => [
+                'impressions' => $impressions,
+                'likes' => $likes,
+                'comments' => $comments,
+                'shares' => $shares,
+                'profileVisits' => (int) $profileVisits,
+                'messageStarts' => (int) $messagesStarted,
+                'costPerProfileVisit' => $costPerProfileVisit,
+                'costPerMessageStart' => $costPerMessageStart,
+                'lastUpdatedAt' => optional($boost->last_analytics_event_at)->toIso8601String(),
+                'trend' => $trend,
+                'sourceMatchedEventsCount' => (int) $sourceMatchedEventsCount,
+            ],
+        ]);
     }
 }

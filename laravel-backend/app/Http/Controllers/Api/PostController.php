@@ -7,6 +7,7 @@ use App\Models\Post;
 use App\Models\User;
 use App\Models\RenderJob;
 use App\Jobs\ProcessRenderJob;
+use App\Services\BoostAnalyticsService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -547,6 +548,7 @@ class PostController extends Controller
                 // Like
                 $user->postLikes()->attach($post->id);
                 $post->increment('likes_count');
+                BoostAnalyticsService::incrementForPost($post->id, 'likes_count');
                 return ['liked' => true];
             }
         });
@@ -597,6 +599,7 @@ class PostController extends Controller
 
             try {
                 $post->increment('views_count');
+                BoostAnalyticsService::incrementForPost($post->id, 'impressions_count');
             } catch (\Exception $e) {
                 // no-op
             }
@@ -641,6 +644,7 @@ class PostController extends Controller
         DB::transaction(function () use ($user, $post) {
             $user->shares()->create(['post_id' => $post->id]);
             $post->increment('shares_count');
+            BoostAnalyticsService::incrementForPost($post->id, 'shares_count');
         });
 
         return response()->json(['success' => true]);

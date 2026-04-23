@@ -7,6 +7,7 @@ use App\Models\ChatGroup;
 use App\Models\ChatGroupMember;
 use App\Models\Message;
 use App\Models\User;
+use App\Services\BoostAnalyticsService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -442,7 +443,8 @@ class MessageController extends Controller
             'recipient_handle' => 'required|string|exists:users,handle',
             'text' => 'nullable|string|max:1000',
             'image_url' => 'nullable|url|max:500',
-            'is_system_message' => 'boolean'
+            'is_system_message' => 'boolean',
+            'source_post_id' => 'nullable|uuid|exists:posts,id',
         ]);
 
         if ($validator->fails()) {
@@ -471,6 +473,7 @@ class MessageController extends Controller
 
         $message = DB::transaction(function () use ($request, $user, $recipientHandle) {
             $conversationId = Message::getConversationId($user->handle, $recipientHandle);
+            $isFirstConversationMessage = !Message::where('conversation_id', $conversationId)->exists();
 
             $message = Message::create([
                 'conversation_id' => $conversationId,
@@ -483,6 +486,13 @@ class MessageController extends Controller
 
             // TODO: Create notification if needed (sticker, reply detection)
             // This would be handled by a service or event listener
+            if ($isFirstConversationMessage && !$request->boolean('is_system_message', false)) {
+                BoostAnalyticsService::recordMessageStartForConversation(
+                    $user->handle,
+                    $recipientHandle,
+                    $request->input('source_post_id')
+                );
+            }
 
             return $message;
         });

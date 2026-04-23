@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Notification;
+use App\Services\BoostAnalyticsService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -49,6 +50,7 @@ class UserController extends Controller
             'handle' => 'required|string|exists:users,handle',
             'postsCursor' => 'nullable|string',
             'postsLimit' => 'nullable|integer|min:1|max:50',
+            'sourcePostId' => 'nullable|uuid|exists:posts,id',
         ]);
 
         if ($validator->fails()) {
@@ -141,6 +143,14 @@ class UserController extends Controller
             );
         }
         $viewer = $hasViewer ? User::find($userId) : null;
+
+        if ($viewer && $viewer->id !== $user->id) {
+            BoostAnalyticsService::recordProfileVisitForUser(
+                (string) $user->id,
+                (string) $viewer->id,
+                $request->get('sourcePostId')
+            );
+        }
 
         // Transform posts using precomputed exists flags when available.
         $transformedPosts = $posts->map(function ($post) use ($viewer) {

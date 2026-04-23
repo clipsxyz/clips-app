@@ -27,6 +27,35 @@ export interface BoostedPost {
     isActive: boolean;
 }
 
+export interface BoostAnalytics {
+    hasBoost: boolean;
+    isActive: boolean;
+    postId: string;
+    range?: '24h' | '7d' | 'all';
+    feedType?: BoostFeedType | null;
+    activatedAt?: string | null;
+    expiresAt?: string | null;
+    spendEur?: number;
+    analytics: {
+        impressions: number;
+        likes: number;
+        comments: number;
+        shares: number;
+        profileVisits: number;
+        messageStarts: number;
+        costPerProfileVisit: number | null;
+        costPerMessageStart: number | null;
+        lastUpdatedAt?: string | null;
+        trend?: {
+            impressions?: Array<{ bucket: string; value: number }>;
+            likes?: Array<{ bucket: string; value: number }>;
+            comments?: Array<{ bucket: string; value: number }>;
+            shares?: Array<{ bucket: string; value: number }>;
+        };
+        sourceMatchedEventsCount?: number;
+    } | null;
+}
+
 // Mock boosted posts storage (fallback when backend unavailable)
 let boostedPosts: BoostedPost[] = [];
 
@@ -304,5 +333,24 @@ export async function getBoostStats(postId: string): Promise<{
         activatedAt: boost.activatedAt,
         expiresAt: boost.expiresAt
     };
+}
+
+export async function getBoostAnalytics(postId: string, range: '24h' | '7d' | 'all' = 'all'): Promise<BoostAnalytics> {
+    try {
+        return await apiClient.getBoostAnalyticsApi(postId, range);
+    } catch {
+        const stats = await getBoostStats(postId);
+        return {
+            hasBoost: stats.isActive,
+            isActive: stats.isActive,
+            postId,
+            range,
+            feedType: stats.feedType,
+            activatedAt: stats.activatedAt ? new Date(stats.activatedAt).toISOString() : null,
+            expiresAt: stats.expiresAt ? new Date(stats.expiresAt).toISOString() : null,
+            spendEur: undefined,
+            analytics: null,
+        };
+    }
 }
 

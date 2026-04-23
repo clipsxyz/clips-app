@@ -206,6 +206,8 @@ Route::prefix('posts')->group(function () {
 
 // Protected routes
 Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/boost/analytics/{postId}', [BoostController::class, 'analytics']);
+
     // Auth routes
     Route::prefix('auth')->group(function () {
         Route::get('/me', [AuthController::class, 'me']);

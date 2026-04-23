@@ -197,7 +197,7 @@ export async function fetchConversation(a: string, b: string): Promise<ChatMessa
     return conversations.get(id)?.slice().sort((m1, m2) => m2.timestamp - m1.timestamp) || [];
 }
 
-export async function appendMessage(from: string, to: string, message: Omit<ChatMessage, 'id' | 'timestamp' | 'senderHandle'> & { timestamp?: number }): Promise<ChatMessage> {
+export async function appendMessage(from: string, to: string, message: Omit<ChatMessage, 'id' | 'timestamp' | 'senderHandle'> & { timestamp?: number; sourcePostId?: string }): Promise<ChatMessage> {
     if (isLaravelApiEnabled() && hasAuthToken()) {
         try {
             const apiClient = await import('./client');
@@ -205,6 +205,7 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
                 text: message.text ?? undefined,
                 image_url: message.imageUrl ?? undefined,
                 is_system_message: message.isSystemMessage ?? false,
+                source_post_id: message.sourcePostId ?? undefined,
             });
             return laravelMsgToChatMessage(raw);
         } catch (e) {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { FiChevronLeft, FiBell, FiShare2, FiMessageSquare, FiMoreHorizontal, FiX, FiLock, FiMapPin, FiEye, FiUserPlus, FiMaximize, FiPlay, FiSearch, FiUsers, FiHeart, FiRepeat, FiVolume2, FiVolumeX, FiAlertCircle } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
@@ -199,6 +199,7 @@ function hapticProfilePeekDismiss() {
 
 export default function ViewProfilePage() {
     const navigate = useNavigate();
+    const location = useLocation();
     const { handle } = useParams<{ handle: string }>();
     const { user } = useAuth();
     const [profileUser, setProfileUser] = React.useState<any>(null);
@@ -238,6 +239,10 @@ export default function ViewProfilePage() {
     const [profileScenesOpen, setProfileScenesOpen] = React.useState(false);
     const [profileScenesPost, setProfileScenesPost] = React.useState<Post | null>(null);
     const [profileScenesInitialTime, setProfileScenesInitialTime] = React.useState<number | null>(null);
+    const sourcePostId = React.useMemo(() => {
+        const state = location.state as { sourcePostId?: string } | null;
+        return typeof state?.sourcePostId === 'string' ? state.sourcePostId : undefined;
+    }, [location.state]);
     const [profileScenesInitialMuted, setProfileScenesInitialMuted] = React.useState<boolean | null>(null);
     const profileViewerVideoTimesRef = React.useRef<Map<string, number>>(new Map());
     const online = useOnline();
@@ -273,7 +278,7 @@ export default function ViewProfilePage() {
         const decodedHandle = decodeURIComponent(handle);
         setProfilePostsLoadingMore(true);
         try {
-            const userProfileData = await fetchUserProfile(decodedHandle, user?.id, profilePostsCursor, 20);
+            const userProfileData = await fetchUserProfile(decodedHandle, user?.id, profilePostsCursor, 20, sourcePostId);
             const rawItems = Array.isArray((userProfileData as any)?.posts) ? (userProfileData as any).posts : [];
             const nextItems: Post[] = rawItems.map((p: any) => transformLaravelPost(p));
             if (DEBUG_PROFILE_GRID_PAGING) {
@@ -1472,7 +1477,7 @@ export default function ViewProfilePage() {
             }));
 
             // Refresh profile counts in background (don't block UI)
-            fetchUserProfile(handleToUse, user?.id).then((userProfileData) => {
+            fetchUserProfile(handleToUse, user?.id, undefined, undefined, sourcePostId).then((userProfileData) => {
                 const followingCount = userProfileData.following_count || 0;
                 const followersCount = userProfileData.followers_count || 0;
                 setStats(prev => ({ ...prev, following: followingCount, followers: followersCount }));
@@ -1690,7 +1695,7 @@ export default function ViewProfilePage() {
                 const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
                 if (useLaravelApi) {
                     try {
-                        const userProfileData = await fetchUserProfile(decodedHandle, user?.id, null, 20);
+                        const userProfileData = await fetchUserProfile(decodedHandle, user?.id, null, 20, sourcePostId);
                         apiProfileData = userProfileData;
                         followingCount = userProfileData.following_count || 0;
                         followersCount = userProfileData.followers_count || 0;

@@ -1,7 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { FiHome, FiUser, FiUserPlus, FiUserX, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX, FiClock, FiSend } from 'react-icons/fi';
+import { FiHome, FiUser, FiUserPlus, FiUserX, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiHeart, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX, FiClock, FiSend } from 'react-icons/fi';
 import { GiGreekTemple } from 'react-icons/gi';
 import { LuFlame, LuPlus } from 'react-icons/lu';
 import { VscLiveShare } from 'react-icons/vsc';
@@ -40,7 +40,7 @@ import {
 import SuggestedPlacesFeedSection from './components/SuggestedPlacesFeedSection';
 import LocalBusinessSuggestionCard from './components/LocalBusinessSuggestionCard';
 import { getActiveAds, trackAdImpression, trackAdClick } from './api/ads';
-import { getActiveBoost, getBoostTimeRemaining } from './api/boost';
+import { getActiveBoost, getBoostTimeRemaining, getBoostAnalytics } from './api/boost';
 import BoostSelectionModal from './components/BoostSelectionModal';
 import SavePostModal from './components/SavePostModal';
 import PostMenuModal from './components/PostMenuModal';
@@ -1051,7 +1051,7 @@ function PostHeader({
       e.preventDefault();
     }
     setProfileMenuOpen(false);
-    navigate(`/user/${profileTargetHandle}`);
+    navigate(`/user/${profileTargetHandle}`, { state: { sourcePostId: post.id } });
   };
 
   const handleViewStories = (e?: React.MouseEvent) => {
@@ -5679,7 +5679,7 @@ function FeedPageWrapper() {
     if (!text || !user?.handle || !dmSheetRecipientHandle) return;
     const recipient = dmSheetRecipientHandle;
     const anchorId = dmSheetAnchorPostId;
-    appendMessage(user.handle, recipient, { text })
+    appendMessage(user.handle, recipient, { text, sourcePostId: anchorId ?? undefined })
       .then(() => {
         setDmSheetMessage('');
         setDmSheetOpen(false);
@@ -8197,6 +8197,7 @@ function BoostPageWrapper() {
   const [hasInbox, setHasInbox] = React.useState(false);
   const [boostFilter, setBoostFilter] = React.useState<'all' | 'ready' | 'active' | 'ended'>('all');
   const [boostSort, setBoostSort] = React.useState<'best' | 'recent'>('best');
+  const [insightsRange, setInsightsRange] = React.useState<'24h' | '7d' | 'all'>('24h');
 
   // Load only the current user's posts (no mock users)
   React.useEffect(() => {
@@ -8369,6 +8370,121 @@ function BoostPageWrapper() {
     return `Estimated reach ${fmt(low)}-${fmt(high)}`;
   }, []);
 
+  const sparklineBars = React.useCallback((values: number[]): string => {
+    if (!values.length) return '—';
+    const bars = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    const max = Math.max(...values, 1);
+    return values.map((v) => {
+      const idx = Math.min(bars.length - 1, Math.floor((v / max) * (bars.length - 1)));
+      return bars[idx];
+    }).join('');
+  }, []);
+
+  const handleViewBoostInsights = React.useCallback(async (post: Post) => {
+    try {
+      const data = await getBoostAnalytics(post.id, insightsRange);
+      const metrics = data?.analytics ?? {
+        impressions: 0,
+        likes: 0,
+        comments: 0,
+        shares: 0,
+        profileVisits: 0,
+        messageStarts: 0,
+      };
+      const spend = typeof data?.spendEur === 'number' ? `€${data.spendEur.toFixed(2)}` : '€0.00';
+      const trendValues = (metrics as any)?.trend?.impressions?.map((t: any) => Number(t.value) || 0) ?? [];
+      const trendSpark = sparklineBars(trendValues);
+      const statusClass = data?.isActive
+        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40'
+        : 'bg-gray-500/20 text-gray-300 border-gray-400/30';
+      const firstMediaItem = Array.isArray(post.mediaItems) && post.mediaItems.length > 0
+        ? post.mediaItems.find((m) => (m.type === 'image' || m.type === 'video') && !!m.url) ?? post.mediaItems[0]
+        : null;
+      const previewUrl = firstMediaItem?.url || post.mediaUrl || '';
+      const previewType = (firstMediaItem?.type || post.mediaType || 'text') as 'image' | 'video' | 'text';
+      const previewHandle = post.userHandle || 'Post';
+      const previewText = (post.text || post.caption || post.imageText || '').trim();
+      const previewTextSafe = previewText
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+
+      await Swal.fire(bottomSheet({
+        title: 'Boost insights',
+        html: `
+          <div class="mt-2 text-left space-y-2.5">
+            <div class="rounded-xl border border-white/10 bg-white/[0.03] p-2.5">
+              <div class="flex items-center gap-2.5">
+                <div class="w-12 h-12 rounded-lg overflow-hidden border border-white/15 bg-black/30 shrink-0">
+                  ${
+                    previewUrl
+                      ? previewType === 'video'
+                        ? `<video src="${previewUrl}" class="w-full h-full object-cover" muted playsinline></video>`
+                        : `<img src="${previewUrl}" class="w-full h-full object-cover" alt="Post preview" />`
+                      : previewTextSafe
+                        ? `<div class="w-full h-full px-1.5 py-1.5 bg-gradient-to-br from-slate-700 to-slate-900 flex items-center justify-center">
+                            <p class="text-[9px] leading-tight text-center text-white/90 line-clamp-3">${previewTextSafe}</p>
+                          </div>`
+                        : `<div class="w-full h-full flex items-center justify-center text-[10px] text-gray-300 font-semibold">POST</div>`
+                  }
+                </div>
+                <div class="min-w-0">
+                  <p class="text-[10px] uppercase tracking-[0.12em] text-gray-400 font-semibold">Selected post</p>
+                  <p class="text-xs text-gray-100 font-medium truncate">${previewHandle}</p>
+                </div>
+              </div>
+            </div>
+            <div class="flex items-center justify-between gap-2">
+              <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusClass}">
+                ${data?.hasBoost ? (data?.isActive ? 'Active boost' : 'Boost ended') : 'No boost record yet'}
+              </span>
+              ${(data?.analytics?.sourceMatchedEventsCount ?? 0) > 0
+                ? '<span class="inline-flex items-center rounded-full border border-sky-400/40 bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold text-sky-200">Source matched</span>'
+                : ''}
+            </div>
+            <div class="rounded-xl border border-white/10 bg-white/[0.03] p-2.5">
+              <div class="flex items-center justify-between">
+                <span class="text-[11px] uppercase tracking-[0.12em] text-gray-400 font-semibold">Trend (${insightsRange})</span>
+                <span class="text-[12px] font-semibold text-sky-200">${trendSpark}</span>
+              </div>
+            </div>
+            <div class="rounded-xl border border-white/10 bg-white/[0.03] p-2.5">
+              <p class="text-[11px] uppercase tracking-[0.12em] text-gray-400 font-semibold mb-2">Delivery</p>
+              <div class="space-y-1.5 text-sm text-gray-100">
+                <div class="flex items-center justify-between"><span>Impressions</span><span class="font-semibold">${metrics.impressions}</span></div>
+                <div class="flex items-center justify-between"><span>Profile visits</span><span class="font-semibold">${metrics.profileVisits}</span></div>
+                <div class="flex items-center justify-between"><span>Message starts</span><span class="font-semibold">${metrics.messageStarts}</span></div>
+              </div>
+            </div>
+            <div class="rounded-xl border border-white/10 bg-white/[0.03] p-2.5">
+              <p class="text-[11px] uppercase tracking-[0.12em] text-gray-400 font-semibold mb-2">Engagement</p>
+              <div class="space-y-1.5 text-sm text-gray-100">
+                <div class="flex items-center justify-between"><span>Likes</span><span class="font-semibold">${metrics.likes}</span></div>
+                <div class="flex items-center justify-between"><span>Comments</span><span class="font-semibold">${metrics.comments}</span></div>
+                <div class="flex items-center justify-between"><span>Shares</span><span class="font-semibold">${metrics.shares}</span></div>
+              </div>
+            </div>
+            <div class="rounded-xl border border-sky-400/30 bg-sky-500/10 p-2.5">
+              <div class="flex items-center justify-between gap-2 text-sm">
+                <span class="text-sky-200 font-medium">Spend</span>
+                <span class="text-white font-semibold">${spend}</span>
+              </div>
+            </div>
+          </div>
+        `,
+        icon: 'info',
+        confirmButtonText: 'Close',
+      }));
+    } catch (err) {
+      await Swal.fire(bottomSheet({
+        title: 'Could not load insights',
+        message: err instanceof Error ? err.message : 'Please try again.',
+        icon: 'alert',
+      }));
+    }
+  }, [insightsRange, sparklineBars]);
+
   // Not logged in
   if (!user) {
     return (
@@ -8457,6 +8573,30 @@ function BoostPageWrapper() {
             );
           })}
         </div>
+        <div className="mt-2 flex items-center gap-2">
+          <span className="text-[11px] uppercase tracking-[0.12em] text-gray-500 font-semibold">Insights range</span>
+          {([
+            { id: '24h' as const, label: '24h' },
+            { id: '7d' as const, label: '7d' },
+            { id: 'all' as const, label: 'All' },
+          ]).map((opt) => {
+            const active = insightsRange === opt.id;
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setInsightsRange(opt.id)}
+                className={`min-h-[30px] px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
+                  active
+                    ? 'bg-sky-500 text-white border-sky-400'
+                    : 'bg-black/40 text-gray-300 border-white/20 hover:bg-white/10'
+                }`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div className="relative z-0">
@@ -8492,6 +8632,13 @@ function BoostPageWrapper() {
                 <p className="mt-1 text-[11px] text-gray-500">{qualityReason}</p>
                 <p className="mt-1 text-xs text-gray-400">{estimateReachTeaser(p)} from base €4.99</p>
               </div>
+              <button
+                type="button"
+                onClick={() => { void handleViewBoostInsights(p); }}
+                className="mb-1 w-full min-h-[32px] rounded-lg border border-sky-400/30 bg-sky-500/10 text-[11px] font-semibold text-sky-200 hover:bg-sky-500/20"
+              >
+                View insights
+              </button>
               <FeedCard
                 post={p}
                 showBoostIcon={true}

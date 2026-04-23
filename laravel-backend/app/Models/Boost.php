@@ -16,6 +16,11 @@ class Boost extends Model
         'center_local',
         'eligible_users_count',
         'duration_hours',
+        'impressions_count',
+        'likes_count',
+        'comments_count',
+        'shares_count',
+        'last_analytics_event_at',
         'payment_intent_id',
         'activated_at',
         'expires_at',
@@ -25,6 +30,7 @@ class Boost extends Model
         'price' => 'decimal:2',
         'activated_at' => 'datetime',
         'expires_at' => 'datetime',
+        'last_analytics_event_at' => 'datetime',
     ];
 
     public function post(): BelongsTo

@@ -329,11 +329,13 @@ export async function fetchUserProfile(
     userId?: string,
     postsCursor?: string | number | null,
     postsLimit?: number,
+    sourcePostId?: string,
 ) {
     const params = new URLSearchParams();
     if (userId) params.append('userId', userId);
     if (postsCursor != null) params.append('postsCursor', String(postsCursor));
     if (postsLimit != null) params.append('postsLimit', String(postsLimit));
+    if (sourcePostId) params.append('sourcePostId', sourcePostId);
     const encoded = encodeURIComponent(handle);
     return apiRequest(`/users/${encoded}?${params}`);
 }
@@ -431,7 +433,7 @@ export async function fetchConversationPage(otherHandle: string, cursor: string 
     return apiRequest(`/messages/conversation/${encoded}/paged?${params}`);
 }
 
-export async function sendMessage(recipientHandle: string, payload: { text?: string; image_url?: string; is_system_message?: boolean }) {
+export async function sendMessage(recipientHandle: string, payload: { text?: string; image_url?: string; is_system_message?: boolean; source_post_id?: string }) {
     return apiRequest('/messages/send', {
         method: 'POST',
         body: JSON.stringify({
@@ -439,6 +441,7 @@ export async function sendMessage(recipientHandle: string, payload: { text?: str
             text: payload.text ?? null,
             image_url: payload.image_url ?? null,
             is_system_message: payload.is_system_message ?? false,
+            source_post_id: payload.source_post_id ?? null,
         }),
     });
 }
@@ -626,6 +629,38 @@ export async function getBoostStatusApi(postId: string): Promise<{
         expiresAt: string | null;
     };
     return data;
+}
+
+/** Get boost analytics for a post owned by the current user. */
+export async function getBoostAnalyticsApi(postId: string, range: '24h' | '7d' | 'all' = 'all'): Promise<{
+    hasBoost: boolean;
+    isActive: boolean;
+    postId: string;
+    range?: '24h' | '7d' | 'all';
+    feedType?: 'local' | 'regional' | 'national' | null;
+    activatedAt?: string | null;
+    expiresAt?: string | null;
+    spendEur?: number;
+    analytics: {
+        impressions: number;
+        likes: number;
+        comments: number;
+        shares: number;
+        profileVisits: number;
+        messageStarts: number;
+        costPerProfileVisit: number | null;
+        costPerMessageStart: number | null;
+        lastUpdatedAt?: string | null;
+        trend?: {
+            impressions?: Array<{ bucket: string; value: number }>;
+            likes?: Array<{ bucket: string; value: number }>;
+            comments?: Array<{ bucket: string; value: number }>;
+            shares?: Array<{ bucket: string; value: number }>;
+        };
+        sourceMatchedEventsCount?: number;
+    } | null;
+}> {
+    return apiRequest(`/boost/analytics/${encodeURIComponent(postId)}?range=${encodeURIComponent(range)}`);
 }
 
 // Upload API (with timeout and clearer errors for phone/network)
