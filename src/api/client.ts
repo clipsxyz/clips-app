@@ -92,6 +92,8 @@ export async function registerUser(userData: {
     locationLocal?: string;
     locationRegional?: string;
     locationNational?: string;
+    accountType?: 'personal' | 'business';
+    isBusiness?: boolean;
 }) {
     return apiRequest('/auth/register', {
         method: 'POST',
@@ -113,6 +115,11 @@ export async function getCurrentUser() {
 /** Map Laravel `/auth/me` or `/auth/profile` JSON into partial app `User` fields. */
 export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Record<string, unknown> {
     const pt = apiUser.places_traveled ?? apiUser.placesTraveled;
+    const rawAccountType = (apiUser.account_type ?? apiUser.accountType) as string | undefined;
+    const accountType =
+        rawAccountType === 'business' || rawAccountType === 'personal'
+            ? rawAccountType
+            : (apiUser.is_business === true ? 'business' : undefined);
     return {
         id: apiUser.id != null ? String(apiUser.id) : undefined,
         name: (apiUser.display_name ?? apiUser.name) as string | undefined,
@@ -128,6 +135,7 @@ export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Rec
         socialLinks: (apiUser.social_links ?? apiUser.socialLinks) as Record<string, string> | undefined,
         is_private: apiUser.is_private as boolean | undefined,
         is_verified: apiUser.is_verified as boolean | undefined,
+        accountType,
     };
 }
 
@@ -139,6 +147,8 @@ export async function updateAuthProfile(data: {
     location_regional?: string | null;
     location_national?: string | null;
     social_links?: Record<string, string | undefined>;
+    account_type?: 'personal' | 'business';
+    is_business?: boolean;
 }) {
     return apiRequest('/auth/profile', {
         method: 'PUT',

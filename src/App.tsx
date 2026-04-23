@@ -6488,7 +6488,12 @@ function FeedPageWrapper() {
           });
     const matched = shuffle(matchedRaw, `${seedBase}:places`);
 
-    const hasBusinessSignal = (p: Post) => Boolean(p.venue || p.landmark || p.boostFeedType === 'local');
+    const hasBusinessSignal = (p: Post) => {
+      if (p.userAccountType === 'business') return true;
+      // Backward compatibility for older posts that don't carry explicit account type yet.
+      if (!p.userAccountType) return Boolean(p.venue || p.landmark || p.boostFeedType === 'local');
+      return false;
+    };
     const localNorm = (user?.local || '').trim().toLowerCase();
     const postTimeMs = (p: Post) => {
       if (typeof p.createdAt === 'number' && Number.isFinite(p.createdAt)) return p.createdAt;
@@ -6643,7 +6648,11 @@ function FeedPageWrapper() {
     const posts = flat
       .filter((x): x is { type: 'post'; item: Post; createdAt: number } => x.type === 'post')
       .map((x) => x.item);
-    const business = posts.filter((p) => Boolean(p.venue || p.landmark || p.boostFeedType === 'local'));
+    const business = posts.filter((p) => {
+      if (p.userAccountType === 'business') return true;
+      if (!p.userAccountType) return Boolean(p.venue || p.landmark || p.boostFeedType === 'local');
+      return false;
+    });
     const source = business.length > 0 ? business : posts;
     const shuffled = [...source];
     for (let i = shuffled.length - 1; i > 0; i -= 1) {

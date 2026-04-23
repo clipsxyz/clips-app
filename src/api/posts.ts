@@ -757,6 +757,16 @@ export function transformLaravelPost(response: any): Post {
     userLocal: response.user?.local || response.userLocal || '',
     userRegional: response.user?.regional || response.userRegional || '',
     userNational: response.user?.national || response.userNational || '',
+    userAccountType:
+      response.user?.account_type === 'business' || response.user?.account_type === 'personal'
+        ? response.user.account_type
+        : response.user_account_type === 'business' || response.user_account_type === 'personal'
+          ? response.user_account_type
+          : response.userAccountType === 'business' || response.userAccountType === 'personal'
+            ? response.userAccountType
+            : response.user?.is_business === true || response.is_business === true
+              ? 'business'
+              : undefined,
     renderJobId: response.render_job_id || response.renderJobId,
   } as Post;
 }
@@ -2030,6 +2040,17 @@ export async function createPost(
 ): Promise<Post> {
   // Use real Laravel API
   const { createPost: createPostAPI } = await import('./client');
+  const currentUserAccountType = (() => {
+    try {
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('user') : null;
+      const parsed = raw ? JSON.parse(raw) : null;
+      return parsed?.accountType === 'business' || parsed?.accountType === 'personal'
+        ? parsed.accountType
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
 
   try {
     const response = await createPostAPI({
@@ -2070,6 +2091,7 @@ export async function createPost(
       userLocal: userLocal ?? transformed.userLocal,
       userRegional: userRegional ?? transformed.userRegional,
       userNational: userNational ?? transformed.userNational,
+      userAccountType: transformed.userAccountType ?? currentUserAccountType,
       venue: venue || transformed.venue,
       landmark: landmark || transformed.landmark,
       socialFormat: socialFormat ?? transformed.socialFormat,
@@ -2350,6 +2372,7 @@ export async function createPost(
       subtitlesEnabled: subtitlesEnabled || undefined, // Store video subtitles enabled state
       subtitleText: subtitleText || undefined, // Store video subtitle text
       socialFormat: socialFormat || undefined,
+      userAccountType: currentUserAccountType,
       ...locationData
     };
 

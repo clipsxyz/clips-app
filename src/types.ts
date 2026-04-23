@@ -31,6 +31,8 @@ export type User = {
   posts_count?: number; // Backend field
   can_view?: boolean; // Whether current user can view this profile
   has_pending_request?: boolean; // Whether current user has pending follow request
+  /** Explicit account classification from signup/profile. */
+  accountType?: 'personal' | 'business';
 };
 
 export type Post = {
@@ -87,6 +89,8 @@ export type Post = {
   userLocal?: string;
   userRegional?: string;
   userNational?: string;
+  /** Optional author account classification mirrored from backend/user profile. */
+  userAccountType?: 'personal' | 'business';
   // Boost data
   isBoosted?: boolean;
   boostExpiresAt?: number; // Epoch timestamp when boost expires

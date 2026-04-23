@@ -80,6 +80,7 @@ export default function LoginPage() {
   const [birthDay, setBirthDay] = React.useState('');
   const [birthYear, setBirthYear] = React.useState('');
   const [preferredLocationsInput, setPreferredLocationsInput] = React.useState('');
+  const [accountType, setAccountType] = React.useState<'personal' | 'business'>('personal');
 
   // Password visibility toggle
   const [showPassword, setShowPassword] = React.useState(false);
@@ -282,6 +283,7 @@ export default function LoginPage() {
       countryFlag: countryFlag.trim(),
       avatarUrl: undefined as string | undefined,
       placesTraveled: preferredLocations.length > 0 ? preferredLocations : undefined,
+      accountType,
       termsAcceptedAt: consentTimestamp,
       guidelinesAcceptedAt: consentTimestamp,
     };
@@ -320,6 +322,10 @@ export default function LoginPage() {
           national: apiUser.location_national || '',
           avatarUrl: apiUser.avatar_url,
           is_private: apiUser.is_private || false,
+          accountType:
+            apiUser.account_type === 'business' || apiUser.accountType === 'business' || apiUser.is_business === true
+              ? 'business'
+              : 'personal',
         };
         login(userData);
         nav('/feed', { replace: true });
@@ -676,6 +682,35 @@ export default function LoginPage() {
                 autoComplete="name"
               />
               {signupFieldErrors.name && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.name}</p>}
+            </div>
+
+            <div className="rounded-sm border border-white/10 bg-white/5 px-3 py-2.5">
+              <p className="text-[11px] text-gray-400 mb-2">Account type</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAccountType('personal')}
+                  className={`rounded-sm border px-3 py-2 text-xs font-semibold transition-colors ${
+                    accountType === 'personal'
+                      ? 'border-[#8ab4ff] bg-[#8ab4ff]/15 text-[#dce9ff]'
+                      : 'border-white/15 bg-black/30 text-gray-300 hover:bg-white/5'
+                  }`}
+                >
+                  Personal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAccountType('business')}
+                  className={`rounded-sm border px-3 py-2 text-xs font-semibold transition-colors ${
+                    accountType === 'business'
+                      ? 'border-[#8ab4ff] bg-[#8ab4ff]/15 text-[#dce9ff]'
+                      : 'border-white/15 bg-black/30 text-gray-300 hover:bg-white/5'
+                  }`}
+                >
+                  Business
+                </button>
+              </div>
+              <p className="mt-1 text-[11px] text-gray-500">Business accounts are eligible for local business suggestion cards.</p>
             </div>
 
             {/* Date of Birth - required, 13+ */}

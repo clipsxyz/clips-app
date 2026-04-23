@@ -130,6 +130,7 @@ export default function ProfilePage() {
   const [unreadCount, setUnreadCount] = React.useState(0);
   const [createGroupOpen, setCreateGroupOpen] = React.useState(false);
   const [placesTraveled, setPlacesTraveled] = React.useState<string>(user?.placesTraveled?.join(', ') || '');
+  const [accountType, setAccountType] = React.useState<'personal' | 'business'>(user?.accountType === 'business' ? 'business' : 'personal');
   const [showProfilePictureModal, setShowProfilePictureModal] = React.useState(false);
   const [notificationPrefs, setNotificationPrefs] = React.useState<NotificationPreferences>(getNotificationPreferences());
   const [isInitializingNotifications, setIsInitializingNotifications] = React.useState(false);
@@ -190,6 +191,10 @@ export default function ProfilePage() {
       setPlacesTraveled('');
     }
   }, [user?.placesTraveled]);
+
+  React.useEffect(() => {
+    setAccountType(user?.accountType === 'business' ? 'business' : 'personal');
+  }, [user?.accountType]);
 
   React.useEffect(() => {
     if (user?.socialLinks) {
@@ -1030,7 +1035,7 @@ export default function ProfilePage() {
                   />
                   <div className="text-center w-full">
                     <div className="font-semibold text-sm text-gray-100">Travel Info</div>
-                    <div className="text-xs text-gray-400 mt-0.5">Edit details</div>
+                    <div className="text-xs text-gray-400 mt-0.5">{accountType === 'business' ? 'Business account' : 'Personal account'}</div>
                   </div>
                 </div>
               </button>
@@ -1332,6 +1337,38 @@ export default function ProfilePage() {
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Account Type
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setAccountType('personal')}
+                          className={`rounded-xl border px-3 py-2 text-sm font-semibold transition-colors ${
+                            accountType === 'personal'
+                              ? 'border-brand-500 bg-brand-50 text-brand-700'
+                              : 'border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          Personal
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAccountType('business')}
+                          className={`rounded-xl border px-3 py-2 text-sm font-semibold transition-colors ${
+                            accountType === 'business'
+                              ? 'border-brand-500 bg-brand-50 text-brand-700'
+                              : 'border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          Business
+                        </button>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-2">
+                        Business accounts are eligible for local business suggestion cards.
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
                         Places You've Traveled To
                       </label>
                       <input
@@ -1366,8 +1403,12 @@ export default function ProfilePage() {
                       onClick={async () => {
                         const places = placesTraveled.split(',').map(p => p.trim()).filter(p => p);
                         try {
-                          const ok = await persistLaravelProfile({ places_traveled: places });
-                          if (!ok) login({ ...user, placesTraveled: places.length ? places : undefined });
+                          const ok = await persistLaravelProfile({
+                            places_traveled: places,
+                            account_type: accountType,
+                            is_business: accountType === 'business',
+                          });
+                          if (!ok) login({ ...user, placesTraveled: places.length ? places : undefined, accountType });
                         } catch {
                           Swal.fire(
                             bottomSheet({
@@ -1376,7 +1417,7 @@ export default function ProfilePage() {
                               icon: 'alert',
                             })
                           );
-                          login({ ...user, placesTraveled: places.length ? places : undefined });
+                          login({ ...user, placesTraveled: places.length ? places : undefined, accountType });
                         }
                         setSelectedCard(null);
                       }}
