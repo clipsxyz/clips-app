@@ -1,23 +1,13 @@
 import React from 'react';
-import { FiX, FiZap, FiMapPin, FiGlobe, FiTrendingUp } from 'react-icons/fi';
+import { FiCheckCircle, FiChevronDown, FiInfo, FiX, FiZap } from 'react-icons/fi';
 import type { Post } from '../types';
 import { useAuth } from '../context/Auth';
-import { estimateBoostPriceApi } from '../api/client';
+import { estimateBoostPriceApi, updateAuthProfile } from '../api/client';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 
 export type BoostFeedType = 'local' | 'regional' | 'national';
 export type BoostGoal = 'views' | 'profile_visits' | 'messages';
 export type BoostDuration = 6 | 12 | 24 | 72;
-
-export interface BoostOption {
-    type: BoostFeedType;
-    label: string;
-    description: string;
-    price: number;
-    currency: string;
-    icon: React.ReactNode;
-    audience: string;
-}
 
 interface BoostSelectionModalProps {
     isOpen: boolean;
@@ -36,36 +26,6 @@ interface BoostSelectionModalProps {
     ) => void;
 }
 
-const boostOptions: BoostOption[] = [
-    {
-        type: 'local',
-        label: 'Local Newsfeed',
-        description: 'Reach users in your local area',
-        price: 4.99,
-        currency: 'EUR',
-        icon: <FiMapPin className="w-6 h-6" />,
-        audience: 'Local audience'
-    },
-    {
-        type: 'regional',
-        label: 'Regional Newsfeed',
-        description: 'Reach a larger regional audience',
-        price: 6.99,
-        currency: 'EUR',
-        icon: <FiTrendingUp className="w-6 h-6" />,
-        audience: 'Regional audience'
-    },
-    {
-        type: 'national',
-        label: 'National Newsfeed',
-        description: 'Maximum reach across the country',
-        price: 9.99,
-        currency: 'EUR',
-        icon: <FiGlobe className="w-6 h-6" />,
-        audience: 'National audience'
-    }
-];
-
 const goalOptions: Array<{ id: BoostGoal; label: string; description: string }> = [
     { id: 'views', label: 'More views', description: 'Increase post exposure in-feed' },
     { id: 'profile_visits', label: 'Profile visits', description: 'Drive people to your profile' },
@@ -78,6 +38,7 @@ const durationOptions: Array<{ hours: BoostDuration; label: string; multiplier: 
     { hours: 24, label: '24h', multiplier: 2.8 },
     { hours: 72, label: '3d', multiplier: 6.2 },
 ];
+const MIN_ELIGIBLE_AUDIENCE = 100;
 
 export default function BoostSelectionModal({
     isOpen,
@@ -85,26 +46,56 @@ export default function BoostSelectionModal({
     onClose,
     onSelect
 }: BoostSelectionModalProps) {
-    const [selectedOption, setSelectedOption] = React.useState<BoostFeedType | null>(null);
+    const modalScrollRef = React.useRef<HTMLDivElement | null>(null);
     const [selectedDuration, setSelectedDuration] = React.useState<BoostDuration>(6);
     const [activeStep, setActiveStep] = React.useState<1 | 2>(1);
     const [radiusKm, setRadiusKm] = React.useState<number>(2);
+    const [localBoundaryKm, setLocalBoundaryKm] = React.useState<number>(() => {
+        try {
+            const raw = localStorage.getItem('clips:boostLocalBoundaryKm');
+            const parsed = raw ? Number(raw) : NaN;
+            return Number.isFinite(parsed) && parsed > 0 ? parsed : 2;
+        } catch {
+            return 2;
+        }
+    });
+    const [regionalBoundaryKm, setRegionalBoundaryKm] = React.useState<number>(() => {
+        try {
+            const raw = localStorage.getItem('clips:boostRegionalBoundaryKm');
+            const parsed = raw ? Number(raw) : NaN;
+            return Number.isFinite(parsed) && parsed > 0 ? parsed : 6;
+        } catch {
+            return 6;
+        }
+    });
     const [eligibleUsersCount, setEligibleUsersCount] = React.useState<number | null>(null);
     const [estimatedTotalPrice, setEstimatedTotalPrice] = React.useState<number | null>(null);
     const [estimateLoading, setEstimateLoading] = React.useState(false);
     const [estimateError, setEstimateError] = React.useState<string | null>(null);
+    const [showStepOneScrollHint, setShowStepOneScrollHint] = React.useState(false);
 
     const { user } = useAuth();
 
-    const selectedBoostOption = selectedOption ? boostOptions.find((o) => o.type === selectedOption) : null;
     const selectedDurationMeta = durationOptions.find((d) => d.hours === selectedDuration) ?? durationOptions[0];
 
     const estimatedReach = eligibleUsersCount != null ? `${eligibleUsersCount.toLocaleString()} users` : '--';
-    const radiusOptions = [0.5, 1, 2, 3, 5, 10] as const;
-    const radiusIndex = Math.max(0, radiusOptions.indexOf(radiusKm as (typeof radiusOptions)[number]));
     const durationIndex = Math.max(0, durationOptions.findIndex((d) => d.hours === selectedDuration));
-    const radiusFillPercent = (radiusIndex / Math.max(1, radiusOptions.length - 1)) * 100;
+    const effectiveLocalBoundary = Math.max(0.5, Number.isFinite(localBoundaryKm) ? localBoundaryKm : 2);
+    const effectiveRegionalBoundary = Math.max(
+        effectiveLocalBoundary + 0.5,
+        Number.isFinite(regionalBoundaryKm) ? regionalBoundaryKm : 6
+    );
+    const sliderMax = Math.max(25, Math.ceil(effectiveRegionalBoundary * 2), Math.ceil(radiusKm * 1.2));
+    const clampedForSlider = Math.min(Math.max(0.5, radiusKm), sliderMax);
+    const radiusFillPercent = (clampedForSlider / Math.max(1, sliderMax)) * 100;
     const durationFillPercent = (durationIndex / Math.max(1, durationOptions.length - 1)) * 100;
+    const selectedOption: BoostFeedType =
+        radiusKm <= effectiveLocalBoundary ? 'local' : radiusKm <= effectiveRegionalBoundary ? 'regional' : 'national';
+    const derivedAudienceLabel = selectedOption === 'local'
+        ? 'Local audience'
+        : selectedOption === 'regional'
+            ? 'Regional audience'
+            : 'National audience';
     const firstVisualItem =
         post?.mediaItems?.find((item) => (item.type === 'image' || item.type === 'video') && !!item.url) ||
         post?.mediaItems?.[0];
@@ -112,19 +103,58 @@ export default function BoostSelectionModal({
     const previewType = (firstVisualItem?.type || post?.mediaType || 'text') as 'image' | 'video' | 'text';
     const previewTitle = post?.userHandle ? `@${post.userHandle}` : 'Gazetteer post';
     const previewSubtitle = 'Gazetteer selected post';
+    const isBusinessAccount = user?.accountType === 'business';
+    const eligibleTooLow =
+        typeof eligibleUsersCount === 'number' &&
+        eligibleUsersCount > 0 &&
+        eligibleUsersCount < MIN_ELIGIBLE_AUDIENCE;
+    const suggestedRadiusKm = React.useMemo(() => {
+        if (!eligibleTooLow || !eligibleUsersCount || radiusKm <= 0) return null;
+        const ratio = MIN_ELIGIBLE_AUDIENCE / Math.max(1, eligibleUsersCount);
+        const next = Math.max(radiusKm + 0.5, radiusKm * ratio);
+        return Number((Math.ceil(next * 2) / 2).toFixed(1));
+    }, [eligibleTooLow, eligibleUsersCount, radiusKm]);
     const canContinue =
-        !!selectedOption &&
         estimatedTotalPrice != null &&
         estimatedTotalPrice > 0 &&
+        !eligibleTooLow &&
         !estimateLoading;
     const currentStep = activeStep;
 
-    const handleSelect = (option: BoostOption) => {
-        setSelectedOption(option.type);
-    };
+    React.useEffect(() => {
+        try {
+            localStorage.setItem('clips:boostLocalBoundaryKm', String(effectiveLocalBoundary));
+            localStorage.setItem('clips:boostRegionalBoundaryKm', String(effectiveRegionalBoundary));
+        } catch {
+            /* ignore */
+        }
+    }, [effectiveLocalBoundary, effectiveRegionalBoundary]);
+
+    React.useEffect(() => {
+        const useLaravel = isLaravelApiEnabled();
+        const token = typeof localStorage !== 'undefined' ? localStorage.getItem('authToken') : null;
+        if (!useLaravel || !token || !user?.id) return;
+        const timer = window.setTimeout(() => {
+            void updateAuthProfile({
+                // Best-effort server persistence for cross-device consistency.
+                boost_local_boundary_km: Number(effectiveLocalBoundary.toFixed(1)),
+                boost_regional_boundary_km: Number(effectiveRegionalBoundary.toFixed(1)),
+            } as any).catch(() => {
+                /* ignore */
+            });
+        }, 700);
+        return () => window.clearTimeout(timer);
+    }, [user?.id, effectiveLocalBoundary, effectiveRegionalBoundary]);
+
+    React.useEffect(() => {
+        const node = modalScrollRef.current;
+        if (!node) return;
+        const hasOverflow = node.scrollHeight - node.clientHeight > 40;
+        setShowStepOneScrollHint(activeStep === 1 && hasOverflow);
+    }, [activeStep, radiusKm, effectiveLocalBoundary, effectiveRegionalBoundary]);
 
     const handleSubmit = () => {
-        if (!selectedOption || eligibleUsersCount == null || estimatedTotalPrice == null) return;
+        if (eligibleUsersCount == null || estimatedTotalPrice == null) return;
         if (estimatedTotalPrice <= 0) return;
 
         onSelect(selectedOption, estimatedTotalPrice, {
@@ -140,7 +170,7 @@ export default function BoostSelectionModal({
         let cancelled = false;
 
         async function run() {
-            if (!selectedOption || !user?.id || !radiusKm || radiusKm <= 0) {
+            if (!user?.id || !radiusKm || radiusKm <= 0) {
                 setEligibleUsersCount(null);
                 setEstimatedTotalPrice(null);
                 setEstimateError(null);
@@ -197,12 +227,6 @@ export default function BoostSelectionModal({
         };
     }, [selectedOption, user?.id, radiusKm, selectedDuration]);
 
-    React.useEffect(() => {
-        if (!selectedOption && activeStep === 2) {
-            setActiveStep(1);
-        }
-    }, [activeStep, selectedOption]);
-
     if (!isOpen || !post) return null;
 
     return (
@@ -211,6 +235,7 @@ export default function BoostSelectionModal({
             onClick={onClose}
         >
             <div
+                ref={modalScrollRef}
                 className="w-full max-w-md bg-white dark:bg-[#0b0b0f] rounded-t-3xl sm:rounded-3xl shadow-2xl animate-in slide-in-from-bottom duration-300 max-h-[92vh] overflow-y-auto border border-black/10 dark:border-white/10"
                 onClick={(e) => e.stopPropagation()}
             >
@@ -321,10 +346,44 @@ export default function BoostSelectionModal({
 
                 {/* Body */}
                 <div className="px-5 py-4">
+                    {showStepOneScrollHint && (
+                        <div className="mb-2 rounded-xl border border-sky-200/70 bg-sky-50/80 px-3 py-2 text-[11px] text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-300">
+                            <div className="flex items-center justify-center gap-1.5 font-medium">
+                                <FiChevronDown className="h-3.5 w-3.5" />
+                                Scroll down for boundary and radius controls
+                            </div>
+                        </div>
+                    )}
                     {activeStep === 1 && (
                         <div className="space-y-3">
-                            <h3 className="text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">Select audience</h3>
-                            <p className="text-sm text-gray-500 dark:text-gray-400">Pick where to deliver your promotion.</p>
+                            <h3 className="text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">Select audience radius</h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">Use KM targeting to control how far this boost reaches.</p>
+                            <div className="rounded-2xl border border-sky-200 dark:border-sky-500/30 bg-sky-50/80 dark:bg-sky-500/10 p-3">
+                                <div className="flex items-center gap-2">
+                                    <FiInfo className="h-4 w-4 text-sky-700 dark:text-sky-300 shrink-0" />
+                                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-sky-800 dark:text-sky-200">
+                                        Boost Benefits
+                                    </p>
+                                </div>
+                                <ul className="mt-2 space-y-1.5 text-xs text-gray-700 dark:text-gray-200">
+                                    <li className="flex items-start gap-2">
+                                        <FiCheckCircle className="h-3.5 w-3.5 mt-0.5 text-sky-600 dark:text-sky-300 shrink-0" />
+                                        <span>Appear across more feeds based on your selected radius and campaign duration.</span>
+                                    </li>
+                                    <li className="flex items-start gap-2">
+                                        <FiCheckCircle className="h-3.5 w-3.5 mt-0.5 text-sky-600 dark:text-sky-300 shrink-0" />
+                                        <span>See estimated audience reach before payment so you can adjust radius for better results.</span>
+                                    </li>
+                                    <li className="flex items-start gap-2">
+                                        <FiCheckCircle className="h-3.5 w-3.5 mt-0.5 text-sky-600 dark:text-sky-300 shrink-0" />
+                                        <span>
+                                            {isBusinessAccount
+                                                ? 'Business account: eligible for local business suggested card placements.'
+                                                : 'Personal account: not eligible for local business suggested card placements.'}
+                                        </span>
+                                    </li>
+                                </ul>
+                            </div>
                             <div className="rounded-2xl border border-gray-200 dark:border-white/10 p-3 mt-1">
                                 <div className="flex items-center justify-between mb-2">
                                     <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Radius</p>
@@ -333,69 +392,97 @@ export default function BoostSelectionModal({
                                 <div className="px-1">
                                     <input
                                         type="range"
-                                        min={0}
-                                        max={radiusOptions.length - 1}
-                                        step={1}
-                                        value={radiusIndex}
+                                        min={0.5}
+                                        max={sliderMax}
+                                        step={0.5}
+                                        value={clampedForSlider}
                                         onChange={(e) => {
-                                            const idx = Number(e.target.value);
-                                            const next = radiusOptions[idx];
-                                            if (next != null) setRadiusKm(next);
+                                            const next = Number(e.target.value);
+                                            if (Number.isFinite(next) && next > 0) setRadiusKm(next);
                                         }}
                                         className="boost-slider"
                                         style={{ ['--fill' as any]: `${radiusFillPercent}%` }}
                                         aria-label="Radius in kilometers"
                                     />
                                     <div className="mt-1 flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400">
-                                        <span>{radiusOptions[0]} km</span>
-                                        <span>{radiusOptions[radiusOptions.length - 1]} km</span>
+                                        <span>0.5 km</span>
+                                        <span>{sliderMax} km</span>
+                                    </div>
+                                </div>
+                                <div className="mt-2 grid grid-cols-2 gap-2">
+                                    <div>
+                                        <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-1">Exact radius (km)</p>
+                                        <input
+                                            type="number"
+                                            min={0.5}
+                                            step={0.5}
+                                            value={Number.isFinite(radiusKm) ? radiusKm : 0.5}
+                                            onChange={(e) => {
+                                                const next = Number(e.target.value);
+                                                if (!Number.isFinite(next) || next <= 0) return;
+                                                setRadiusKm(next);
+                                            }}
+                                            className="w-full rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-[#0f1117] px-3 py-2 text-sm text-gray-900 dark:text-gray-100"
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-1">
+                                        <button
+                                            type="button"
+                                            onClick={() => setRadiusKm((prev) => Math.max(0.5, Number((prev - 0.5).toFixed(1))))}
+                                            className="rounded-xl border border-gray-200 dark:border-white/10 px-2 py-2 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10"
+                                        >
+                                            -0.5
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setRadiusKm((prev) => Number((prev + 0.5).toFixed(1)))}
+                                            className="rounded-xl border border-gray-200 dark:border-white/10 px-2 py-2 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10"
+                                        >
+                                            +0.5
+                                        </button>
                                     </div>
                                 </div>
                             </div>
-                            <div className="space-y-2">
-                                {boostOptions.map((option) => {
-                                    const isSelected = selectedOption === option.type;
-                                    return (
-                                        <button
-                                            key={option.type}
-                                            onClick={() => {
-                                                handleSelect(option);
+                            <div className="rounded-2xl border border-gray-200 dark:border-white/10 bg-gray-50/80 dark:bg-white/[0.03] p-3">
+                                <div className="flex items-center justify-between text-sm">
+                                    <span className="text-gray-600 dark:text-gray-400">Audience tier</span>
+                                    <span className="font-semibold text-gray-900 dark:text-gray-100 capitalize">{derivedAudienceLabel}</span>
+                                </div>
+                                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                    Feed tier is derived from your boundaries: local up to {effectiveLocalBoundary}km, regional up to {effectiveRegionalBoundary}km.
+                                </p>
+                                <div className="mt-2 grid grid-cols-2 gap-2">
+                                    <div>
+                                        <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-1">Local boundary (km)</p>
+                                        <input
+                                            type="number"
+                                            min={0.5}
+                                            step={0.5}
+                                            value={effectiveLocalBoundary}
+                                            onChange={(e) => {
+                                                const next = Number(e.target.value);
+                                                if (!Number.isFinite(next) || next <= 0) return;
+                                                setLocalBoundaryKm(next);
                                             }}
-                                            className={`w-full p-4 rounded-2xl border transition-all duration-200 text-left ${
-                                                isSelected
-                                                    ? 'border-sky-500 bg-sky-50 dark:bg-sky-500/10'
-                                                    : 'border-gray-200 dark:border-white/10 bg-white dark:bg-transparent hover:bg-gray-50 dark:hover:bg-white/5'
-                                            }`}
-                                        >
-                                            <div className="flex items-start gap-4">
-                                                <div
-                                                    className={`w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
-                                                        isSelected
-                                                            ? 'bg-sky-500 text-white'
-                                                            : 'bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-300'
-                                                    }`}
-                                                >
-                                                    {option.icon}
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex items-center justify-between">
-                                                        <h3 className="font-semibold text-gray-900 dark:text-gray-100">{option.label}</h3>
-                                                        <span className="text-xs font-semibold text-sky-600 dark:text-sky-300">€0.05/user</span>
-                                                    </div>
-                                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{option.description}</p>
-                                                    <div className="text-[11px] text-gray-400 mt-1">{option.audience} • priced by radius</div>
-                                                </div>
-                                                {isSelected && (
-                                                    <div className="w-5 h-5 mt-0.5 rounded-full bg-sky-500 flex items-center justify-center flex-shrink-0">
-                                                        <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                                        </svg>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </button>
-                                    );
-                                })}
+                                            className="w-full rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-[#0f1117] px-3 py-2 text-sm text-gray-900 dark:text-gray-100"
+                                        />
+                                    </div>
+                                    <div>
+                                        <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-1">Regional boundary (km)</p>
+                                        <input
+                                            type="number"
+                                            min={effectiveLocalBoundary + 0.5}
+                                            step={0.5}
+                                            value={effectiveRegionalBoundary}
+                                            onChange={(e) => {
+                                                const next = Number(e.target.value);
+                                                if (!Number.isFinite(next) || next <= 0) return;
+                                                setRegionalBoundaryKm(next);
+                                            }}
+                                            className="w-full rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-[#0f1117] px-3 py-2 text-sm text-gray-900 dark:text-gray-100"
+                                        />
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     )}
@@ -464,6 +551,20 @@ export default function BoostSelectionModal({
                         {estimateError && (
                             <p className="mt-2 text-xs text-red-600 dark:text-red-400">{estimateError}</p>
                         )}
+                        {eligibleTooLow && (
+                            <div className="mt-2 rounded-xl border border-amber-300/50 bg-amber-50/70 px-2.5 py-2 text-xs text-amber-800 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-200">
+                                <p>Audience is below minimum ({MIN_ELIGIBLE_AUDIENCE} users) for this radius.</p>
+                                {suggestedRadiusKm != null && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setRadiusKm(suggestedRadiusKm)}
+                                        className="mt-1 inline-flex items-center rounded-lg border border-amber-400/50 px-2 py-1 font-semibold hover:bg-amber-100/70 dark:hover:bg-amber-400/10"
+                                    >
+                                        Try {suggestedRadiusKm} km
+                                    </button>
+                                )}
+                            </div>
+                        )}
                     </div>
                     <div className="flex items-center gap-2">
                         <button
@@ -482,11 +583,9 @@ export default function BoostSelectionModal({
                             <button
                                 type="button"
                                 onClick={() => setActiveStep((prev) => (prev < 2 ? ((prev + 1) as 1 | 2) : prev))}
-                                disabled={(activeStep === 1 && !selectedOption)}
+                                disabled={false}
                                 className={`flex-1 py-3 px-6 rounded-xl font-semibold text-white transition-all duration-200 ${
-                                    activeStep === 1 && !selectedOption
-                                        ? 'bg-gray-300 dark:bg-gray-700 cursor-not-allowed'
-                                        : 'bg-sky-500 hover:bg-sky-600 active:scale-[0.99]'
+                                    'bg-sky-500 hover:bg-sky-600 active:scale-[0.99]'
                                 }`}
                             >
                                 Next
@@ -506,16 +605,12 @@ export default function BoostSelectionModal({
                         )}
                     </div>
                     <p className="text-xs text-center text-gray-500 dark:text-gray-400 mt-3">
-                        {selectedOption ? (
-                            estimateLoading ? (
-                                'Calculating audience...'
-                            ) : estimatedTotalPrice != null && estimatedTotalPrice > 0 ? (
-                                `Estimated total: €${estimatedTotalPrice.toFixed(2)} • Secure payment`
-                            ) : (
-                                'No eligible audience found for this radius'
-                            )
+                        {estimateLoading ? (
+                            'Calculating audience...'
+                        ) : estimatedTotalPrice != null && estimatedTotalPrice > 0 ? (
+                            `Estimated total: €${estimatedTotalPrice.toFixed(2)} • Secure payment`
                         ) : (
-                            'Select an audience to continue to payment'
+                            'No eligible audience found for this radius'
                         )}
                     </p>
                 </div>

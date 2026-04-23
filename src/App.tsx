@@ -737,6 +737,14 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               <p className="mt-1.5 text-xs leading-relaxed text-white/50">
                 More views, faster discovery, and a stronger chance to trend with your audience.
               </p>
+              <div className="mt-4 rounded-xl border border-white/15 bg-white/[0.04] px-3 py-2.5 text-left">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.11em] text-white/75">Boost benefits</p>
+                <ul className="mt-2 space-y-1 text-[11px] leading-relaxed text-white/70">
+                  <li>Target by KM radius and preview estimated reach before payment.</li>
+                  <li>Auto-matches local/regional/national tier from your selected radius.</li>
+                  <li>Business accounts can appear in local business suggested cards.</li>
+                </ul>
+              </div>
 
               <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:gap-3">
                 <button
@@ -4610,7 +4618,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             stickers={post.stickers}
             mediaItems={post.mediaItems}
             onDoubleLike={onLike}
-            onOpenScenes={onOpenScenes}
+            onOpenScenes={isTileBoostMode ? undefined : onOpenScenes}
             postId={post.id}
             onCarouselIndexChange={setCarouselIndex}
             onHeartAnimation={(clientX, clientY) => {
