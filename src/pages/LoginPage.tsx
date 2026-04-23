@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
-import { FiMapPin, FiUser, FiGlobe, FiX, FiEye, FiEyeOff, FiFileText, FiShield } from 'react-icons/fi';
+import { FiMapPin, FiUser, FiGlobe, FiX, FiEye, FiEyeOff, FiFileText, FiShield, FiCheck } from 'react-icons/fi';
 import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMaps';
 import { loginUser } from '../api/client';
 
@@ -80,7 +80,7 @@ export default function LoginPage() {
   const [birthDay, setBirthDay] = React.useState('');
   const [birthYear, setBirthYear] = React.useState('');
   const [preferredLocationsInput, setPreferredLocationsInput] = React.useState('');
-  const [accountType, setAccountType] = React.useState<'personal' | 'business'>('personal');
+  const [accountType, setAccountType] = React.useState<'personal' | 'business' | null>(null);
 
   // Password visibility toggle
   const [showPassword, setShowPassword] = React.useState(false);
@@ -226,6 +226,9 @@ export default function LoginPage() {
       if (!password) nextErrors.password = 'Password is required.';
       if (!confirmPassword) nextErrors.confirmPassword = 'Please confirm your password.';
     }
+    if (!accountType) {
+      nextErrors.accountType = 'Please choose Personal or Business account.';
+    }
     if (password !== confirmPassword) {
       nextErrors.confirmPassword = 'Passwords do not match.';
     }
@@ -283,7 +286,7 @@ export default function LoginPage() {
       countryFlag: countryFlag.trim(),
       avatarUrl: undefined as string | undefined,
       placesTraveled: preferredLocations.length > 0 ? preferredLocations : undefined,
-      accountType,
+      accountType: accountType ?? 'personal',
       termsAcceptedAt: consentTimestamp,
       guidelinesAcceptedAt: consentTimestamp,
     };
@@ -574,6 +577,52 @@ export default function LoginPage() {
         {step === 1 && (
           <>
             {/* Step 1: Account details (email + password) */}
+            <div className="rounded-sm border border-white/10 bg-white/5 px-3 py-2.5">
+              <p className="text-[11px] text-gray-400 mb-2">Account type</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAccountType('personal')}
+                  className={`relative rounded-sm border px-3 py-2 text-xs font-semibold transition-colors ${
+                    accountType === 'personal'
+                      ? 'border-[#8ab4ff] bg-[#8ab4ff]/15 text-[#dce9ff]'
+                      : 'border-white/15 bg-black/30 text-gray-300 hover:bg-white/5'
+                  }`}
+                >
+                  <span
+                    className={`absolute right-2 top-1/2 -translate-y-1/2 transition-all duration-200 ${
+                      accountType === 'personal' ? 'opacity-100 scale-100' : 'opacity-0 scale-75'
+                    }`}
+                  >
+                    <FiCheck className="h-3.5 w-3.5" />
+                  </span>
+                  Personal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAccountType('business')}
+                  className={`relative rounded-sm border px-3 py-2 text-xs font-semibold transition-colors ${
+                    accountType === 'business'
+                      ? 'border-[#8ab4ff] bg-[#8ab4ff]/15 text-[#dce9ff]'
+                      : 'border-white/15 bg-black/30 text-gray-300 hover:bg-white/5'
+                  }`}
+                >
+                  <span
+                    className={`absolute right-2 top-1/2 -translate-y-1/2 transition-all duration-200 ${
+                      accountType === 'business' ? 'opacity-100 scale-100' : 'opacity-0 scale-75'
+                    }`}
+                  >
+                    <FiCheck className="h-3.5 w-3.5" />
+                  </span>
+                  Business
+                </button>
+              </div>
+              <p className="mt-1 text-[11px] text-gray-500">Business accounts are eligible for local business suggestion cards.</p>
+              {signupFieldErrors.accountType && (
+                <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.accountType}</p>
+              )}
+            </div>
+
             {/* Email */}
             <div>
               <input
@@ -682,35 +731,6 @@ export default function LoginPage() {
                 autoComplete="name"
               />
               {signupFieldErrors.name && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.name}</p>}
-            </div>
-
-            <div className="rounded-sm border border-white/10 bg-white/5 px-3 py-2.5">
-              <p className="text-[11px] text-gray-400 mb-2">Account type</p>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setAccountType('personal')}
-                  className={`rounded-sm border px-3 py-2 text-xs font-semibold transition-colors ${
-                    accountType === 'personal'
-                      ? 'border-[#8ab4ff] bg-[#8ab4ff]/15 text-[#dce9ff]'
-                      : 'border-white/15 bg-black/30 text-gray-300 hover:bg-white/5'
-                  }`}
-                >
-                  Personal
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAccountType('business')}
-                  className={`rounded-sm border px-3 py-2 text-xs font-semibold transition-colors ${
-                    accountType === 'business'
-                      ? 'border-[#8ab4ff] bg-[#8ab4ff]/15 text-[#dce9ff]'
-                      : 'border-white/15 bg-black/30 text-gray-300 hover:bg-white/5'
-                  }`}
-                >
-                  Business
-                </button>
-              </div>
-              <p className="mt-1 text-[11px] text-gray-500">Business accounts are eligible for local business suggestion cards.</p>
             </div>
 
             {/* Date of Birth - required, 13+ */}

@@ -6489,10 +6489,7 @@ function FeedPageWrapper() {
     const matched = shuffle(matchedRaw, `${seedBase}:places`);
 
     const hasBusinessSignal = (p: Post) => {
-      if (p.userAccountType === 'business') return true;
-      // Backward compatibility for older posts that don't carry explicit account type yet.
-      if (!p.userAccountType) return Boolean(p.venue || p.landmark || p.boostFeedType === 'local');
-      return false;
+      return p.userAccountType === 'business';
     };
     const localNorm = (user?.local || '').trim().toLowerCase();
     const postTimeMs = (p: Post) => {
@@ -6649,9 +6646,7 @@ function FeedPageWrapper() {
       .filter((x): x is { type: 'post'; item: Post; createdAt: number } => x.type === 'post')
       .map((x) => x.item);
     const business = posts.filter((p) => {
-      if (p.userAccountType === 'business') return true;
-      if (!p.userAccountType) return Boolean(p.venue || p.landmark || p.boostFeedType === 'local');
-      return false;
+      return p.userAccountType === 'business';
     });
     const source = business.length > 0 ? business : posts;
     const shuffled = [...source];
