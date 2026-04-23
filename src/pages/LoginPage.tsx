@@ -79,6 +79,7 @@ export default function LoginPage() {
   const [birthMonth, setBirthMonth] = React.useState('');
   const [birthDay, setBirthDay] = React.useState('');
   const [birthYear, setBirthYear] = React.useState('');
+  const [preferredLocationsInput, setPreferredLocationsInput] = React.useState('');
 
   // Password visibility toggle
   const [showPassword, setShowPassword] = React.useState(false);
@@ -263,6 +264,11 @@ export default function LoginPage() {
     setSignupFieldErrors({});
     setSignupError('');
     const consentTimestamp = new Date().toISOString();
+    const preferredLocations = preferredLocationsInput
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .slice(0, 12);
 
     const userData = {
       name: name.trim(),
@@ -275,6 +281,7 @@ export default function LoginPage() {
       handle: `${name.trim().split(/\s+/)[0] || name.trim()}@${regional}`,
       countryFlag: countryFlag.trim(),
       avatarUrl: undefined as string | undefined,
+      placesTraveled: preferredLocations.length > 0 ? preferredLocations : undefined,
       termsAcceptedAt: consentTimestamp,
       guidelinesAcceptedAt: consentTimestamp,
     };
@@ -803,6 +810,18 @@ export default function LoginPage() {
                 @{(name.trim().split(/\s+/)[0] || 'yourname')}
                 {regional ? `@${regional}` : '@yourregion'}
               </p>
+            </div>
+
+            <div className="rounded-sm border border-white/10 bg-white/5 px-3 py-2.5">
+              <p className="text-[11px] text-gray-400 mb-1">Preferred locations for suggestions (optional)</p>
+              <textarea
+                value={preferredLocationsInput}
+                onChange={e => setPreferredLocationsInput(e.target.value)}
+                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                placeholder="Dublin, Barcelona, New York"
+                rows={2}
+              />
+              <p className="mt-1 text-[11px] text-gray-500">Comma separated. You can edit this later in profile settings.</p>
             </div>
           </>
         )}

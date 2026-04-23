@@ -38,6 +38,7 @@ import {
   type PlaceMatchedPost,
 } from './utils/suggestedPlaces';
 import SuggestedPlacesFeedSection from './components/SuggestedPlacesFeedSection';
+import LocalBusinessSuggestionCard from './components/LocalBusinessSuggestionCard';
 import { getActiveAds, trackAdImpression, trackAdClick } from './api/ads';
 import { getActiveBoost, getBoostTimeRemaining } from './api/boost';
 import BoostSelectionModal from './components/BoostSelectionModal';
@@ -5442,28 +5443,53 @@ function FeedPageWrapper() {
   }, []);
 
   const [suggestedPlacesPrefs, setSuggestedPlacesPrefs] = React.useState(() => readSuggestedPlacesPrefs());
-  const [feedAutoplayPref, setFeedAutoplayPref] = React.useState<'always' | 'wifi' | 'never'>(() => {
+  const BUSINESS_SUGGESTION_LAST_SHOWN_KEY = 'clips:businessSuggestionLastShown';
+  const BUSINESS_HIDDEN_KEY = 'clips:hiddenBusinessSuggestions';
+  const BUSINESS_LIKED_KEY = 'clips:likedBusinessSuggestions';
+  const BUSINESS_STRIP_LAST_INSERTED_KEY = 'clips:businessStripLastInsertedAt';
+  const BUSINESS_STRIP_MIN_INTERVAL_MS = 8 * 60 * 1000; // 8 min pacing
+  const BUSINESS_SUGGESTION_CAP_MS = 12 * 60 * 60 * 1000; // 12 hours per business per user
+  const [businessStripEligible, setBusinessStripEligible] = React.useState(() => {
     try {
-      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(FEED_AUTOPLAY_PREF_KEY) : null;
-      if (raw === 'always' || raw === 'wifi' || raw === 'never') return raw;
+      const last = Number(sessionStorage.getItem(BUSINESS_STRIP_LAST_INSERTED_KEY) || '0');
+      return Date.now() - last >= BUSINESS_STRIP_MIN_INTERVAL_MS;
+    } catch {
+      return true;
+    }
+  });
+  const previewSuggestedCardsFromQuery = React.useMemo(() => {
+    try {
+      return new URLSearchParams(routerLocation.search).get('mockcards') === '1';
+    } catch {
+      return false;
+    }
+  }, [routerLocation.search]);
+  const previewSuggestedCards = React.useMemo(() => {
+    const irelandFeed = !customLocation && active.trim().toLowerCase() === 'ireland';
+    return previewSuggestedCardsFromQuery || irelandFeed;
+  }, [previewSuggestedCardsFromQuery, customLocation, active]);
+  const [suggestedCardsV2LocalOverride, setSuggestedCardsV2LocalOverride] = React.useState<boolean | null>(() => {
+    try {
+      const raw = localStorage.getItem('clips:enableSuggestedCardsV2');
+      if (raw === '1') return true;
+      if (raw === '0') return false;
     } catch {
       /* ignore */
     }
-    return 'wifi';
+    return null;
   });
-
-  const dismissSuggestedPlacesRow = React.useCallback((bundleKey: string) => {
-    emitSuggestedPlacesAnalytics({ action: 'dismiss_row', bundleKey });
-    setSuggestedPlacesPrefs((prev) => {
-      const nextBundles = [...new Set([...prev.dismissedBundles, bundleKey])];
-      try {
-        sessionStorage.setItem('clips:suggestedPlacesDismissedBundles', JSON.stringify(nextBundles));
-      } catch {
-        /* ignore */
-      }
-      return { ...prev, dismissedBundles: nextBundles };
-    });
-  }, []);
+  const suggestedCardsV2Enabled = React.useMemo(() => {
+    try {
+      const params = new URLSearchParams(routerLocation.search);
+      if (params.get('suggestcardsv2') === '0') return false;
+      if (params.get('suggestcardsv2') === '1') return true;
+      if (suggestedCardsV2LocalOverride === false) return false;
+      if (suggestedCardsV2LocalOverride === true) return true;
+    } catch {
+      /* ignore */
+    }
+    return true;
+  }, [routerLocation.search, suggestedCardsV2LocalOverride]);
 
   const setSuggestedPlacesIncludePosterLocale = React.useCallback((enabled: boolean) => {
     try {
@@ -5475,17 +5501,64 @@ function FeedPageWrapper() {
     setSuggestedPlacesPrefs((prev) => ({ ...prev, includePosterLocale: enabled }));
   }, []);
 
-  const cycleFeedAutoplayPref = React.useCallback(() => {
-    setFeedAutoplayPref((prev) => {
-      const next = prev === 'always' ? 'wifi' : prev === 'wifi' ? 'never' : 'always';
-      try {
-        localStorage.setItem(FEED_AUTOPLAY_PREF_KEY, next);
-      } catch {
-        /* ignore */
-      }
-      window.dispatchEvent(new CustomEvent(FEED_AUTOPLAY_PREF_EVENT, { detail: { pref: next } }));
-      return next;
-    });
+  const markBusinessSuggestionShown = React.useCallback((businessKey: string) => {
+    if (!businessKey) return;
+    try {
+      const raw = localStorage.getItem(BUSINESS_SUGGESTION_LAST_SHOWN_KEY);
+      const current = raw ? (JSON.parse(raw) as Record<string, number>) : {};
+      current[businessKey] = Date.now();
+      localStorage.setItem(BUSINESS_SUGGESTION_LAST_SHOWN_KEY, JSON.stringify(current));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const hideBusinessSuggestion = React.useCallback((businessKey: string) => {
+    if (!businessKey) return;
+    try {
+      const raw = localStorage.getItem(BUSINESS_HIDDEN_KEY);
+      const current = raw ? (JSON.parse(raw) as string[]) : [];
+      const key = businessKey.trim().toLowerCase();
+      const next = [...new Set([...current, key])].slice(0, 100);
+      localStorage.setItem(BUSINESS_HIDDEN_KEY, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const unhideBusinessSuggestion = React.useCallback((businessKey: string) => {
+    if (!businessKey) return;
+    try {
+      const raw = localStorage.getItem(BUSINESS_HIDDEN_KEY);
+      const current = raw ? (JSON.parse(raw) as string[]) : [];
+      const key = businessKey.trim().toLowerCase();
+      const next = current.filter((k) => String(k).trim().toLowerCase() !== key);
+      localStorage.setItem(BUSINESS_HIDDEN_KEY, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const likeBusinessSuggestion = React.useCallback((businessKey: string) => {
+    if (!businessKey) return;
+    try {
+      const raw = localStorage.getItem(BUSINESS_LIKED_KEY);
+      const current = raw ? (JSON.parse(raw) as string[]) : [];
+      const key = businessKey.trim().toLowerCase();
+      const next = [...new Set([...current, key])].slice(0, 100);
+      localStorage.setItem(BUSINESS_LIKED_KEY, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const markBusinessStripInserted = React.useCallback(() => {
+    try {
+      sessionStorage.setItem(BUSINESS_STRIP_LAST_INSERTED_KEY, String(Date.now()));
+    } catch {
+      /* ignore */
+    }
+    setBusinessStripEligible(false);
   }, []);
 
   /** Laravel: server-ranked place suggestions; `undefined` = use client-side matcher (mock or API error). */
@@ -6368,26 +6441,151 @@ function FeedPageWrapper() {
 
   /** Insert “Suggested for your places” strips between posts (skipped on custom venue/location feeds). */
   const flatWithSuggested = React.useMemo(() => {
+    if (!suggestedCardsV2Enabled) return flat;
     if (customLocation) return flat;
     if (!user) return flat;
+    // In explicit mock-preview mode, render only dedicated preview strips (avoid mixed real+mock cards).
+    if (previewSuggestedCards) return flat;
 
     const posts = flat
       .filter((x): x is { type: 'post'; item: Post; createdAt: number } => x.type === 'post')
       .map((x) => x.item);
+    const suggestionPool = posts.length > 5 ? posts.slice(2) : posts;
 
-    const matched =
+    const seededHash = (input: string): number => {
+      let h = 2166136261;
+      for (let i = 0; i < input.length; i += 1) {
+        h ^= input.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+      }
+      return h >>> 0;
+    };
+    const shuffle = <T,>(arr: T[], seedInput: string): T[] => {
+      const next = [...arr];
+      let seed = seededHash(seedInput) || 1;
+      const rand = () => {
+        seed ^= seed << 13;
+        seed ^= seed >>> 17;
+        seed ^= seed << 5;
+        return ((seed >>> 0) % 10000) / 10000;
+      };
+      for (let i = next.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(rand() * (i + 1));
+        [next[i], next[j]] = [next[j], next[i]];
+      }
+      return next;
+    };
+    const todayKey = new Date().toISOString().slice(0, 10);
+    const seedBase = `${user?.id || 'anon'}:${active}:${todayKey}`;
+
+    const matchedRaw =
       serverPlaceSuggestions !== undefined
         ? serverPlaceSuggestions
-        : findPlaceMatchedPosts(user, posts, {
+        : findPlaceMatchedPosts(user, suggestionPool, {
             max: 9,
             excludeOwn: true,
             includePosterRegionalNational: suggestedPlacesPrefs.includePosterLocale,
           });
-    if (matched.length === 0) return flat;
+    const matched = shuffle(matchedRaw, `${seedBase}:places`);
+
+    const hasBusinessSignal = (p: Post) => Boolean(p.venue || p.landmark || p.boostFeedType === 'local');
+    const localNorm = (user?.local || '').trim().toLowerCase();
+    const postTimeMs = (p: Post) => {
+      if (typeof p.createdAt === 'number' && Number.isFinite(p.createdAt)) return p.createdAt;
+      if (typeof p.created_at === 'string') {
+        const parsed = Date.parse(p.created_at);
+        if (Number.isFinite(parsed)) return parsed;
+      }
+      return 0;
+    };
+    const businessRankScore = (p: Post): number => {
+      const handleKey = String(p.userHandle || '').trim().toLowerCase();
+      const inLocalScore =
+        ((p.userLocal || '').trim().toLowerCase() === localNorm ? 2 : 0) +
+        ((p.locationLabel || '').trim().toLowerCase().includes(localNorm) ? 1.2 : 0) +
+        ((p.venue || '').trim().toLowerCase().includes(localNorm) ? 1 : 0) +
+        ((p.landmark || '').trim().toLowerCase().includes(localNorm) ? 1 : 0);
+      const businessSignalScore = p.boostFeedType === 'local' ? 1.4 : (p.venue || p.landmark ? 1.0 : 0.4);
+      const followScore = p.isFollowing ? -1.5 : 0.8;
+      const preferenceScore = likedBusinesses.has(handleKey) ? 1.8 : 0;
+      const ageHours = Math.max(0, (Date.now() - postTimeMs(p)) / (1000 * 60 * 60));
+      const freshness = ageHours <= 24 ? 1.4 : ageHours <= 72 ? 0.7 : 0.2;
+      return inLocalScore + businessSignalScore + followScore + preferenceScore + freshness;
+    };
+    const readBusinessLastShown = (): Record<string, number> => {
+      try {
+        const raw = localStorage.getItem(BUSINESS_SUGGESTION_LAST_SHOWN_KEY);
+        return raw ? (JSON.parse(raw) as Record<string, number>) : {};
+      } catch {
+        return {};
+      }
+    };
+    const readHiddenBusinesses = (): Set<string> => {
+      try {
+        const raw = localStorage.getItem(BUSINESS_HIDDEN_KEY);
+        const arr = raw ? (JSON.parse(raw) as string[]) : [];
+        return new Set(arr.map((s) => String(s).trim().toLowerCase()).filter(Boolean));
+      } catch {
+        return new Set<string>();
+      }
+    };
+    const readLikedBusinesses = (): Set<string> => {
+      try {
+        const raw = localStorage.getItem(BUSINESS_LIKED_KEY);
+        const arr = raw ? (JSON.parse(raw) as string[]) : [];
+        return new Set(arr.map((s) => String(s).trim().toLowerCase()).filter(Boolean));
+      } catch {
+        return new Set<string>();
+      }
+    };
+    const businessLastShown = readBusinessLastShown();
+    const hiddenBusinesses = readHiddenBusinesses();
+    const likedBusinesses = readLikedBusinesses();
+    const canShowBusinessNow = (businessKey: string) => {
+      const last = businessLastShown[businessKey] || 0;
+      return Date.now() - last >= BUSINESS_SUGGESTION_CAP_MS;
+    };
+    const localBusinessCandidatesRaw = suggestionPool.filter((p) => {
+      if (!localNorm) return false;
+      const handleKey = String(p.userHandle || '').trim().toLowerCase();
+      if (handleKey && hiddenBusinesses.has(handleKey)) return false;
+      const inLocal =
+        (p.userLocal || '').trim().toLowerCase() === localNorm ||
+        (p.locationLabel || '').trim().toLowerCase().includes(localNorm) ||
+        (p.venue || '').trim().toLowerCase().includes(localNorm) ||
+        (p.landmark || '').trim().toLowerCase().includes(localNorm);
+      return inLocal && hasBusinessSignal(p);
+    });
+    // Keep business suggestions local to the viewer's area.
+    const scoredBusinesses = [...localBusinessCandidatesRaw]
+      .map((p) => ({ post: p, score: businessRankScore(p) }))
+      .sort((a, b) => b.score - a.score);
+    const rankedBusinesses = scoredBusinesses
+      .filter((entry) => entry.score >= 1.6)
+      .map((entry) => entry.post);
+    const shuffledBusinesses = shuffle(rankedBusinesses, `${seedBase}:business`);
+    const isActiveLocalBoost = (p: Post) => {
+      const boosted = p.boostFeedType === 'local' || p.isBoosted;
+      const notExpired = !p.boostExpiresAt || p.boostExpiresAt > Date.now();
+      return boosted && notExpired;
+    };
+    const paidPinned = shuffledBusinesses.find((p) => {
+      if (!isActiveLocalBoost(p)) return false;
+      const key = `${userId}:${String(p.id)}`;
+      return canShowBusinessNow(key);
+    });
+    const topBusinessScore = scoredBusinesses[0]?.score ?? -Infinity;
+    const passesHardFallback = topBusinessScore >= 2.4;
+    const localBusinessCandidates = paidPinned
+      ? [paidPinned, ...shuffledBusinesses.filter((p) => String(p.id) !== String(paidPinned.id))]
+      : passesHardFallback
+        ? shuffledBusinesses
+        : [];
 
     type StreamRow =
       | { type: 'post'; item: Post; createdAt: number }
       | { type: 'ad'; item: Ad; createdAt: number }
+      | { type: 'local_business'; item: { posts: Post[]; pinnedPaidPostId?: string }; createdAt: number }
       | { type: 'suggested'; item: { suggestions: typeof matched }; createdAt: number };
 
     const bundlesRaw: { suggestions: typeof matched }[] = [];
@@ -6402,7 +6600,6 @@ function FeedPageWrapper() {
       const dismissed = new Set(suggestedPlacesPrefs.dismissedBundles);
       bundles = bundlesRaw.filter((b) => !dismissed.has(suggestedPlacesBundleKey(b.suggestions)));
     }
-    if (bundles.length === 0) return flat;
 
     const out: StreamRow[] = [];
     let bundleIdx = 0;
@@ -6415,6 +6612,13 @@ function FeedPageWrapper() {
       out.push(it as StreamRow);
       if (it.type === 'post') {
         postCount += 1;
+        if (businessStripEligible && localBusinessCandidates.length > 0 && postCount === 2) {
+          out.push({
+            type: 'local_business',
+            item: { posts: localBusinessCandidates.slice(0, 8), pinnedPaidPostId: paidPinned ? String(paidPinned.id) : undefined },
+            createdAt: 0,
+          });
+        }
         if (shouldInsertSuggestedStrip(postCount, bundleIdx)) {
           out.push({
             type: 'suggested',
@@ -6425,8 +6629,60 @@ function FeedPageWrapper() {
         }
       }
     }
+    if (businessStripEligible && localBusinessCandidates.length > 0 && !out.some((r) => r.type === 'local_business')) {
+      out.unshift({
+        type: 'local_business',
+        item: { posts: localBusinessCandidates.slice(0, 8), pinnedPaidPostId: paidPinned ? String(paidPinned.id) : undefined },
+        createdAt: 0,
+      });
+    }
     return out;
-  }, [flat, user, customLocation, suggestedPlacesPrefs, serverPlaceSuggestions]);
+  }, [flat, user, customLocation, suggestedPlacesPrefs, serverPlaceSuggestions, previewSuggestedCards, userId, businessStripEligible, suggestedCardsV2Enabled]);
+
+  const previewLocalBusinessPosts = React.useMemo(() => {
+    const posts = flat
+      .filter((x): x is { type: 'post'; item: Post; createdAt: number } => x.type === 'post')
+      .map((x) => x.item);
+    const business = posts.filter((p) => Boolean(p.venue || p.landmark || p.boostFeedType === 'local'));
+    const source = business.length > 0 ? business : posts;
+    const shuffled = [...source];
+    for (let i = shuffled.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled.slice(0, 8);
+  }, [flat]);
+
+  const previewSuggestedPlaces = React.useMemo<PlaceMatchedPost[]>(() => {
+    const posts = flat
+      .filter((x): x is { type: 'post'; item: Post; createdAt: number } => x.type === 'post')
+      .map((x) => x.item);
+    if (!user || posts.length === 0) return [];
+    const matched = findPlaceMatchedPosts(user, posts, {
+      max: 3,
+      excludeOwn: true,
+      includePosterRegionalNational: suggestedPlacesPrefs.includePosterLocale,
+    });
+    if (matched.length > 0) {
+      const shuffledMatched = [...matched];
+      for (let i = shuffledMatched.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffledMatched[i], shuffledMatched[j]] = [shuffledMatched[j], shuffledMatched[i]];
+      }
+      return shuffledMatched.slice(0, 3);
+    }
+    const shuffledPosts = [...posts];
+    for (let i = shuffledPosts.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffledPosts[i], shuffledPosts[j]] = [shuffledPosts[j], shuffledPosts[i]];
+    }
+    return shuffledPosts.slice(0, 3).map((post) => ({
+      post,
+      matchedPlace: post.venue || post.landmark || post.locationLabel || user.local || 'Your area',
+      reason: 'home_area' as const,
+      confidence: 'medium' as const,
+    }));
+  }, [flat, user, suggestedPlacesPrefs.includePosterLocale]);
 
   // Posts only (no ads) - for Scenes carousel (only posts that have media: image or video; exclude text-only)
   const postsOnly = React.useMemo(() => {
@@ -7083,18 +7339,6 @@ function FeedPageWrapper() {
           </div>
         </div>
       )}
-      <div className="px-3 pt-1 pb-0.5">
-        <button
-          type="button"
-          onClick={cycleFeedAutoplayPref}
-          className="text-[11px] text-white/65 hover:text-white/90 transition-colors"
-          aria-label="Cycle feed autoplay preference"
-          title="Cycle autoplay: Always / Wi-Fi / Never"
-        >
-          Autoplay: {feedAutoplayPref === 'always' ? 'Always' : feedAutoplayPref === 'wifi' ? 'Wi-Fi only' : 'Never'}
-        </button>
-      </div>
-
       <div className="h-4" />
 
       {error && (
@@ -7137,9 +7381,28 @@ function FeedPageWrapper() {
                 suggestions={sug}
                 viewerHandle={user?.handle ?? null}
                 includePosterLocale={suggestedPlacesPrefs.includePosterLocale}
-                onToggleIncludePosterLocale={setSuggestedPlacesIncludePosterLocale}
-                onDismissRow={() => dismissSuggestedPlacesRow(bKey)}
                 onFollowPost={handleMainFeedFollow}
+              />
+            );
+          }
+          if (feedItem.type === 'local_business') {
+            const localPosts = feedItem.item.posts;
+            const pinnedPaidPostId = feedItem.item.pinnedPaidPostId;
+            markBusinessStripInserted();
+            if (pinnedPaidPostId) {
+              markBusinessSuggestionShown(`${userId}:${pinnedPaidPostId}`);
+            }
+            return (
+              <LocalBusinessSuggestionCard
+                key={`local-business-${index}`}
+                posts={localPosts}
+                userLocal={user?.local}
+                pinnedPaidPostId={pinnedPaidPostId}
+                viewerHandle={user?.handle ?? null}
+                onFollowPost={handleMainFeedFollow}
+                onHideBusiness={hideBusinessSuggestion}
+                onUnhideBusiness={unhideBusinessSuggestion}
+                onLikeBusiness={likeBusinessSuggestion}
               />
             );
           }
@@ -7171,11 +7434,23 @@ function FeedPageWrapper() {
           postCounter += 1;
           const showStories24AfterThisPost =
             !customLocation && stories24Items.length > 0 && postCounter === 1;
+          const showPreviewBusinessAfterThisPost =
+            suggestedCardsV2Enabled &&
+            previewSuggestedCards &&
+            !customLocation &&
+            previewLocalBusinessPosts.length > 0 &&
+            postCounter === 2;
+          const showPreviewPlacesAfterThisPost =
+            suggestedCardsV2Enabled &&
+            previewSuggestedCards &&
+            !customLocation &&
+            previewSuggestedPlaces.length > 0 &&
+            postCounter === 4;
 
           // Priority loading: first 1-3 posts with media get priority
           const hasMedia = !!(p.mediaUrl || (p.mediaItems && p.mediaItems.length > 0));
           const priorityPostsCount = flatWithSuggested.slice(0, index + 1).filter(item => {
-            if (item.type === 'ad' || item.type === 'suggested') return false;
+            if (item.type === 'ad' || item.type === 'suggested' || item.type === 'local_business') return false;
             const post = item.item as Post;
             return !!(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0));
           }).length;
@@ -7324,6 +7599,29 @@ function FeedPageWrapper() {
                   stories24Items={stories24Items}
                   navigate={navigate}
                   onBeforeOpenStoryFromRail={snapshotStories24FeedScrollForRail}
+                />
+              )}
+              {showPreviewBusinessAfterThisPost && (
+                <LocalBusinessSuggestionCard
+                  key={`preview-local-business-after-${p.id}`}
+                  posts={previewLocalBusinessPosts}
+                  userLocal={user?.local}
+                  useMockBusinesses
+                  viewerHandle={user?.handle ?? null}
+                  onFollowPost={handleMainFeedFollow}
+                  onHideBusiness={hideBusinessSuggestion}
+                  onUnhideBusiness={unhideBusinessSuggestion}
+                  onLikeBusiness={likeBusinessSuggestion}
+                />
+              )}
+              {showPreviewPlacesAfterThisPost && (
+                <SuggestedPlacesFeedSection
+                  key={`preview-suggested-places-after-${p.id}`}
+                  bundleKey="preview-suggestions"
+                  suggestions={previewSuggestedPlaces}
+                  viewerHandle={user?.handle ?? null}
+                  includePosterLocale={suggestedPlacesPrefs.includePosterLocale}
+                  onFollowPost={handleMainFeedFollow}
                 />
               )}
             </React.Fragment>

@@ -31,6 +31,7 @@ import TextOnlyPostDetailsPage from '../pages/TextOnlyPostDetailsPage';
 import GalleryPreviewPage from '../pages/GalleryPreviewPage';
 import ReplyQuestionPage from '../pages/ReplyQuestionPage';
 import TermsPage from '../pages/TermsPage';
+import ContentPreferencesPage from '../pages/ContentPreferencesPage';
 import PortraitEnforcer from './PortraitEnforcer';
 
 
@@ -86,6 +87,7 @@ export default function Root() {
                                 <Route path="discover" element={<DiscoverPage />} />
                                 <Route path="search" element={<SearchPage />} />
                                 <Route path="profile" element={<ProfilePage />} />
+                                <Route path="preferences/locations" element={<ContentPreferencesPage />} />
                                 <Route path="profile/cover" element={<ProfileCoverPage />} />
                                 <Route path="user/:handle" element={<ViewProfilePage />} />
                                 <Route path="collection/:collectionId" element={<CollectionFeedPage />} />

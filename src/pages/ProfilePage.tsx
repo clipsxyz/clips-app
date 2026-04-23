@@ -1787,6 +1787,22 @@ export default function ProfilePage() {
                 </button>
               </div>
               <div className="p-6 space-y-6">
+                <div>
+                  <button
+                    onClick={() => {
+                      setSettingsOpen(false);
+                      nav('/preferences/locations');
+                    }}
+                    className="w-full flex items-center justify-between rounded-xl border border-gray-200 px-4 py-3 hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="text-left">
+                      <p className="text-sm font-semibold text-gray-900">Content preferences</p>
+                      <p className="text-xs text-gray-500">Edit preferred locations for feed suggestions</p>
+                    </div>
+                    <FiMapPin className="w-4 h-4 text-gray-600" />
+                  </button>
+                </div>
+
                 {/* Notification Settings Section */}
                 <div>
                   <div className="flex items-center justify-between mb-4">

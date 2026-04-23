@@ -1,11 +1,12 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FiChevronRight, FiX } from 'react-icons/fi';
+import { FiChevronRight, FiInfo, FiSliders } from 'react-icons/fi';
 import Avatar from './Avatar';
 import { getAvatarForHandle } from '../api/users';
 import type { Post } from '../types';
 import {
   emitSuggestedPlacesAnalytics,
+  reasonExplanation,
   type PlaceMatchedPost,
   type PlaceSuggestionReason,
 } from '../utils/suggestedPlaces';
@@ -126,8 +127,6 @@ export type SuggestedPlacesFeedSectionProps = {
   /** Logged-in user handle (no @) — hides Follow on own posts. */
   viewerHandle?: string | null;
   includePosterLocale: boolean;
-  onToggleIncludePosterLocale: (enabled: boolean) => void;
-  onDismissRow: () => void;
   /** Same behavior as main feed Follow — includes private / pending / Laravel. */
   onFollowPost?: (post: Post) => void | Promise<void>;
 };
@@ -137,12 +136,41 @@ export default function SuggestedPlacesFeedSection({
   suggestions,
   viewerHandle = null,
   includePosterLocale,
-  onToggleIncludePosterLocale,
-  onDismissRow,
   onFollowPost,
 }: SuggestedPlacesFeedSectionProps) {
   const navigate = useNavigate();
   const [followBusyId, setFollowBusyId] = React.useState<string | null>(null);
+  const [hiddenPostIds, setHiddenPostIds] = React.useState<Set<string>>(new Set());
+  const [expandedWhyPostId, setExpandedWhyPostId] = React.useState<string | null>(null);
+  const [lastHidden, setLastHidden] = React.useState<{ postId: string; matchedPlace: string } | null>(null);
+
+  const persistPlaceFeedback = React.useCallback((storageKey: string, place: string) => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      const current = raw ? (JSON.parse(raw) as string[]) : [];
+      const next = [...new Set([...current, place.trim()])].slice(0, 40);
+      localStorage.setItem(storageKey, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const removePlaceFeedback = React.useCallback((storageKey: string, place: string) => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      const current = raw ? (JSON.parse(raw) as string[]) : [];
+      const target = place.trim().toLowerCase();
+      const next = current.filter((p) => String(p).trim().toLowerCase() !== target);
+      localStorage.setItem(storageKey, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const visibleSuggestions = React.useMemo(
+    () => suggestions.filter(({ post }) => !hiddenPostIds.has(String(post.id))),
+    [suggestions, hiddenPostIds]
+  );
 
   React.useEffect(() => {
     emitSuggestedPlacesAnalytics({
@@ -153,7 +181,7 @@ export default function SuggestedPlacesFeedSection({
     });
   }, [bundleKey, suggestions.length, includePosterLocale]);
 
-  if (!suggestions.length) return null;
+  if (!visibleSuggestions.length) return null;
 
   return (
     <section
@@ -162,27 +190,25 @@ export default function SuggestedPlacesFeedSection({
     >
       <div className="flex items-start justify-between gap-2 mb-3 px-0.5">
         <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold text-white tracking-tight">Suggested for your places</h3>
-          <p className="text-[11px] text-[#8e8e8e] mt-1 leading-snug">
-            From your location, travels, and bio — matched to post venues and places.
-          </p>
+          <h3 className="text-sm font-semibold text-white tracking-tight">Users from places you like</h3>
+          <p className="text-[11px] text-[#8e8e8e] mt-1 leading-snug">Based on places you selected.</p>
         </div>
         <button
           type="button"
           onClick={(e) => {
             e.preventDefault();
-            onDismissRow();
+            navigate('/preferences/locations');
           }}
-          className="shrink-0 p-1 rounded-full text-[#a8a8a8] hover:text-white hover:bg-white/10 transition-colors"
-          aria-label="Hide this suggestion row"
+          className="inline-flex items-center gap-1.5 rounded-full border border-[#363636] bg-white/5 px-2 py-1 text-[11px] font-semibold text-white/85 hover:bg-white/10 transition-colors"
+          aria-label="Adjust location suggestions"
         >
-          <FiX className="w-4 h-4" aria-hidden />
+          <FiSliders className="h-3.5 w-3.5" aria-hidden />
+          Adjust
         </button>
       </div>
 
-      <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-0.5 px-0.5">
-        {suggestions.map(({ post, matchedPlace, reason }) => {
-          const thumb = postThumbVisual(post);
+      <div className="flex gap-2.5 overflow-x-auto pb-1 scrollbar-hide">
+        {visibleSuggestions.map(({ post, matchedPlace, reason, confidence }) => {
           const avatar = getAvatarForHandle(post.userHandle);
           const isOwn =
             !!viewerHandle &&
@@ -203,78 +229,42 @@ export default function SuggestedPlacesFeedSection({
               setFollowBusyId((cur) => (cur === id ? null : cur));
             }
           };
+          const whyOpen = expandedWhyPostId === String(post.id);
           return (
-            <div
+            <article
               key={String(post.id)}
-              className="shrink-0 w-[158px] text-left rounded-3xl border border-[#363636] bg-[#121212] overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.35)] flex flex-col"
+              className="shrink-0 w-[165px] rounded-2xl border border-[#30363d] bg-[#0d1318] p-2.5 shadow-[0_2px_10px_rgba(0,0,0,0.35)]"
             >
-              <div className="p-[2px] bg-gradient-to-tr from-teal-400 via-sky-500 to-fuchsia-500 rounded-t-3xl">
-                <div className="relative aspect-[4/5] bg-[#0a0a0a] rounded-[1.125rem] overflow-hidden">
-                  <button
-                    type="button"
-                    className="absolute inset-0 z-0 cursor-pointer"
-                    onClick={() =>
-                      scrollToFeedPost(String(post.id), {
-                        matchedPlace,
-                        reason,
-                        bundleKey,
-                      })
-                    }
-                    aria-label="Jump to post in feed"
-                  />
-                  {thumb ? (
-                    thumb.isVideo ? (
-                      <SuggestedStripPreviewVideo
-                        src={thumb.url}
-                        className="absolute inset-0 z-[1] w-full h-full object-cover pointer-events-none"
-                      />
-                    ) : (
-                      <img
-                        src={thumb.url}
-                        alt=""
-                        className="absolute inset-0 z-[1] w-full h-full object-cover pointer-events-none"
-                        loading="lazy"
-                      />
-                    )
-                  ) : (
-                    <div className="absolute inset-0 z-[1] flex items-center justify-center text-[10px] text-[#8e8e8e] px-2 text-center pointer-events-none">
-                      {post.text?.slice(0, 80) || post.caption?.slice(0, 80) || 'Clip'}
-                    </div>
-                  )}
-                  <div className="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/90 via-black/45 to-transparent pt-8 pb-1.5 px-2">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openProfile();
-                      }}
-                      className="flex items-center gap-1.5 min-w-0 w-full text-left rounded-lg py-0.5 -mx-0.5 px-0.5 hover:bg-white/10 active:bg-white/15 transition-colors"
-                      aria-label={`View profile ${post.userHandle}`}
-                    >
-                      <Avatar src={avatar} name={post.userHandle} size="sm" className="!w-[22px] !h-[22px] !text-[9px] ring-1 ring-black/60 shrink-0" />
-                      <span className="text-[11px] font-semibold text-white truncate">{post.userHandle}</span>
-                    </button>
-                  </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openProfile();
+                }}
+                className="w-full"
+              >
+                <div className="mb-2.5 flex justify-center">
+                  <Avatar src={avatar} name={post.userHandle} size={94} className="!rounded-full ring-1 ring-white/10" />
                 </div>
-              </div>
-              <div className="px-2.5 pb-3 pt-2 space-y-1.5 flex-1 flex flex-col">
-                <p className="text-[11px] font-semibold text-white truncate" title={matchedPlace}>
-                  {matchedPlace}
-                </p>
-                {!isOwn && onFollowPost ? (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={onFollowClick}
-                    className={`w-full py-1.5 rounded-xl text-[11px] font-semibold transition-colors active:scale-[0.98] disabled:opacity-60 ${
-                      following
-                        ? 'border border-[#363636] bg-transparent text-white hover:bg-white/5'
-                        : 'bg-[#0095f6] text-white hover:bg-[#1877f2]'
-                    }`}
-                  >
-                    {busy ? 'Saving…' : following ? 'Following' : 'Follow'}
-                  </button>
-                ) : null}
+                <p className="truncate text-center text-[15px] font-semibold text-white leading-tight">{post.userHandle}</p>
+                <p className="mt-0.5 truncate text-center text-[12px] text-[#8e8e8e]">{matchedPlace}</p>
+                <p className="mt-0.5 text-center text-[11px] text-[#8e8e8e]">Suggested for you</p>
+              </button>
+
+              {!isOwn && onFollowPost ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={onFollowClick}
+                  className={`mt-3 w-full rounded-xl py-2 text-sm font-semibold transition-colors disabled:opacity-60 ${
+                    following
+                      ? 'border border-[#3a3a3a] bg-transparent text-white hover:bg-white/5'
+                      : 'bg-[#4f68ff] text-white hover:bg-[#6077ff]'
+                  }`}
+                >
+                  {busy ? 'Saving…' : following ? 'Following' : 'Follow'}
+                </button>
+              ) : (
                 <button
                   type="button"
                   onClick={() =>
@@ -284,43 +274,71 @@ export default function SuggestedPlacesFeedSection({
                       bundleKey,
                     })
                   }
-                  className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-[#0095f6] hover:text-[#67b9ff] mt-auto text-left"
+                  className="mt-3 w-full rounded-xl bg-[#4f68ff] py-2 text-sm font-semibold text-white hover:bg-[#6077ff] transition-colors"
                 >
-                  Jump to post
-                  <FiChevronRight className="w-3.5 h-3.5 shrink-0" aria-hidden />
+                  Open
+                </button>
+              )}
+
+              <div className="mt-1.5 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => setExpandedWhyPostId((cur) => (cur === String(post.id) ? null : String(post.id)))}
+                  className="inline-flex items-center gap-1 text-[10px] font-medium text-white/75 hover:text-white"
+                >
+                  <FiInfo className="w-3 h-3" aria-hidden />
+                  Why this?
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHiddenPostIds((prev) => new Set([...prev, String(post.id)]));
+                    persistPlaceFeedback('clips:suggestedPlacesDislikedPlaces', matchedPlace);
+                    setLastHidden({ postId: String(post.id), matchedPlace });
+                    emitSuggestedPlacesAnalytics({
+                      action: 'not_interested_post',
+                      postId: String(post.id),
+                      matchedPlace,
+                      reason,
+                      bundleKey,
+                    });
+                  }}
+                  className="text-[10px] font-medium text-white/55 hover:text-white/85"
+                >
+                  Not interested
                 </button>
               </div>
-            </div>
+              {whyOpen && (
+                <p className="mt-1 text-[10px] leading-snug text-[#b8b8b8]">
+                  {reasonExplanation(reason, matchedPlace, confidence)}
+                </p>
+              )}
+            </article>
           );
         })}
       </div>
 
-      <div className="mt-2 pt-3 border-t border-[#363636] space-y-3">
-        <div className="flex items-start gap-2.5 select-none">
+      {lastHidden && (
+        <div className="mt-2 flex items-center justify-between rounded-xl border border-[#363636] bg-black/35 px-2.5 py-2 text-[11px]">
+          <span className="text-[#bdbdbd] truncate pr-3">Hidden suggestions like {lastHidden.matchedPlace}</span>
           <button
             type="button"
-            role="switch"
-            aria-checked={includePosterLocale}
-            aria-label="Broader matching: include poster region and country"
-            onClick={() => onToggleIncludePosterLocale(!includePosterLocale)}
-            className={`mt-0.5 relative inline-flex h-6 w-10 shrink-0 items-center rounded-full transition-colors ${
-              includePosterLocale ? 'bg-[#0095f6]' : 'bg-[#363636]'
-            }`}
+            onClick={() => {
+              setHiddenPostIds((prev) => {
+                const next = new Set(prev);
+                next.delete(lastHidden.postId);
+                return next;
+              });
+              removePlaceFeedback('clips:suggestedPlacesDislikedPlaces', lastHidden.matchedPlace);
+              setLastHidden(null);
+            }}
+            className="shrink-0 rounded-lg border border-[#4c4c4c] px-2 py-1 text-white/90 hover:bg-white/10"
           >
-            <span
-              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                includePosterLocale ? 'translate-x-5' : 'translate-x-1'
-              }`}
-            />
+            Undo
           </button>
-          <div className="text-[11px] text-[#a8a8a8] leading-snug">
-            <span className="text-white/90 font-medium">Broader matching</span>
-            <span className="block mt-0.5 text-[#8e8e8e]">
-              Also use each poster’s region and country (more results; may feel less specific).
-            </span>
-          </div>
         </div>
-      </div>
+      )}
+
     </section>
   );
 }
