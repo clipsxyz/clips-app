@@ -1,7 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { FiX, FiThumbsUp, FiShare2, FiRepeat, FiMapPin, FiHome, FiClock, FiVolume2, FiVolumeX, FiMessageCircle, FiChevronUp, FiChevronDown, FiBookmark, FiMoreHorizontal, FiSend, FiSmile, FiPlus, FiPlay } from 'react-icons/fi';
+import { FiX, FiThumbsUp, FiShare2, FiRepeat, FiMapPin, FiHome, FiClock, FiVolume2, FiVolumeX, FiMessageCircle, FiChevronUp, FiChevronDown, FiChevronLeft, FiBookmark, FiMoreHorizontal, FiSend, FiSmile, FiPlus, FiPlay } from 'react-icons/fi';
 import SavePostModal from './SavePostModal';
 import PostMenuModal from './PostMenuModal';
 import CreateGroupModal from './CreateGroupModal';
@@ -28,6 +28,7 @@ import type { Post } from '../types';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from '../constants';
 import { showToast } from '../utils/toast';
 import { TEXT_STORY_TEMPLATES } from '../textStoryTemplates';
+import { GLOBAL_VIDEO_MUTED_EVENT, getGlobalVideoMuted, setGlobalVideoMuted } from '../utils/globalVideoMute';
 
 /** Radiating red/pink lines burst for YouTube Shorts-style double-tap like (used in Scenes). */
 function ShortsLikeBurstLines() {
@@ -217,7 +218,7 @@ export default function ScenesModal({
     const [heartBurst, setHeartBurst] = React.useState(false);
     const [shareModalOpen, setShareModalOpen] = React.useState(false);
     const [videoProgress, setVideoProgress] = React.useState(0);
-    const [isMuted, setIsMuted] = React.useState(initialMutedState !== null ? initialMutedState : true);
+    const [isMuted, setIsMuted] = React.useState(initialMutedState !== null ? initialMutedState : getGlobalVideoMuted());
     const [isPaused, setIsPaused] = React.useState(false);
     const [isCaptionExpanded, setIsCaptionExpanded] = React.useState(false);
     const [commentsList, setCommentsList] = React.useState<Comment[]>([]);
@@ -444,7 +445,7 @@ export default function ScenesModal({
             }
             videoRef.current.load();
             setVideoProgress(0);
-            setIsMuted(true); // Reset to muted when switching videos
+            setIsMuted(getGlobalVideoMuted()); // Respect global mute preference when switching videos
             setIsPaused(false); // Reset to playing when switching videos
         }
         // Reset animation states when switching items
@@ -487,6 +488,15 @@ export default function ScenesModal({
             }
         }
     }, [isMuted, currentItem?.type]);
+
+    React.useEffect(() => {
+        const onGlobalMutedChanged = (event: Event) => {
+            const muted = (event as CustomEvent<{ muted?: boolean }>).detail?.muted;
+            if (typeof muted === 'boolean') setIsMuted(muted);
+        };
+        window.addEventListener(GLOBAL_VIDEO_MUTED_EVENT, onGlobalMutedChanged as EventListener);
+        return () => window.removeEventListener(GLOBAL_VIDEO_MUTED_EVENT, onGlobalMutedChanged as EventListener);
+    }, []);
 
     // Ensure video is paused when isPaused is true (but not when initially loading)
     // This effect only handles pausing, not playing - let autoPlay handle initial playback
@@ -535,6 +545,7 @@ export default function ScenesModal({
                 if (videoRef.current) {
                     videoRef.current.muted = initialMutedState;
                     setIsMuted(initialMutedState);
+                    setGlobalVideoMuted(initialMutedState);
                 }
             };
             
@@ -1581,18 +1592,36 @@ export default function ScenesModal({
                                         </div>
                                     )}
 
-                                    {/* Top left — carousel index + metadata display */}
-                                    <div className="absolute left-4 z-30 flex flex-col items-start gap-2 max-w-[min(100%,16rem)]" style={{ top: 'max(2.75rem, calc(env(safe-area-inset-top, 0px) + 1.25rem))' }}>
+                                    {/* Top left — back button */}
+                                    <div className="absolute left-4 z-30 flex flex-col items-start gap-2" style={{ top: 'max(2.75rem, calc(env(safe-area-inset-top, 0px) + 1.25rem))' }}>
+                                        <button
+                                            onClick={() => {
+                                                let savedTime: number | undefined;
+                                                if (videoRef.current && currentItem?.type === 'video') {
+                                                    savedTime = videoRef.current.currentTime;
+                                                }
+                                                onClose(savedTime);
+                                            }}
+                                            aria-label="Back"
+                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/40 hover:bg-black/60 text-white text-xs font-semibold transition-colors"
+                                        >
+                                            <FiChevronLeft size={14} />
+                                            Back
+                                        </button>
+                                    </div>
+
+                                    {/* Top right — carousel index + metadata display */}
+                                    <div className="absolute right-4 z-30 flex flex-col items-end gap-2 max-w-[min(100%,16rem)]" style={{ top: 'max(2.75rem, calc(env(safe-area-inset-top, 0px) + 1.25rem))' }}>
                                         {hasMultipleItems && (
                                             <div className="px-2 py-1 bg-black/50 text-white text-xs rounded-full">
                                                 {currentIndex + 1} / {items.length}
                                             </div>
                                         )}
                                         {scenesMetadataItems.length > 0 && (
-                                            <div className="flex items-center min-h-[1.5rem] overflow-visible animate-chyron-emerge origin-left">
+                                            <div className="flex items-center min-h-[1.5rem] overflow-visible animate-chyron-emerge origin-right">
                                                 <div
                                                     key={scenesMetadataIndex}
-                                                    className="flex items-center gap-1 justify-start min-w-0 max-w-[140px] rounded-lg border border-[#d4af37]/80 bg-[linear-gradient(135deg,#f6e27a_0%,#d4af37_24%,#f4f4f4_48%,#bfc5cc_72%,#ffe8a3_100%)] px-2 py-1 shadow-[0_8px_20px_rgba(212,175,55,0.35)]"
+                                                    className="flex items-center gap-1 justify-end min-w-0 max-w-[140px] px-0 py-0"
                                                     title={scenesMetadataItems.map((m) => m.label).join(' · ')}
                                                 >
                                                     {(() => {
@@ -1607,8 +1636,8 @@ export default function ScenesModal({
                                                                         : FiClock;
                                                         return (
                                                             <>
-                                                                <Icon className="w-2.5 h-2.5 flex-shrink-0 text-[#111111]" />
-                                                                <span className="text-[10px] font-medium whitespace-nowrap truncate min-w-0 tracking-tight text-[#111111]">
+                                                                <Icon className="w-2.5 h-2.5 flex-shrink-0 text-white" />
+                                                                <span className="text-[10px] font-medium whitespace-nowrap truncate min-w-0 tracking-tight text-white text-right">
                                                                     {current.label}
                                                                 </span>
                                                             </>
@@ -1617,29 +1646,6 @@ export default function ScenesModal({
                                                 </div>
                                             </div>
                                         )}
-                                    </div>
-
-                                    {/* Top right — close (with video ring) */}
-                                    <div className="absolute right-4 z-30 flex flex-col items-end gap-2" style={{ top: 'max(2.75rem, calc(env(safe-area-inset-top, 0px) + 1.25rem))' }}>
-                                        <div className="relative w-9 h-9 flex items-center justify-center shrink-0">
-                                            <svg className="absolute inset-0 w-9 h-9 transform -rotate-90" viewBox="0 0 48 48">
-                                                <circle cx="24" cy="24" r="18" stroke="rgba(255,255,255,0.25)" strokeWidth="3" fill="none" />
-                                                <circle cx="24" cy="24" r="18" stroke="rgba(255,255,255,0.95)" strokeWidth="3" fill="none" strokeDasharray={`${2 * Math.PI * 18}`} strokeDashoffset={`${2 * Math.PI * 18 * (1 - Math.max(0, Math.min(1, videoProgress)))}`} strokeLinecap="round" />
-                                            </svg>
-                                            <button
-                                                onClick={() => {
-                                                    let savedTime: number | undefined;
-                                                    if (videoRef.current && currentItem?.type === 'video') {
-                                                        savedTime = videoRef.current.currentTime;
-                                                    }
-                                                    onClose(savedTime);
-                                                }}
-                                                aria-label="Close scenes"
-                                                className="relative z-10 p-1.25 rounded-full bg-black/40 hover:bg-black/60 text-white transition-colors"
-                                            >
-                                                <FiX size={14} />
-                                            </button>
-                                        </div>
                                     </div>
                                             </>
                                         );

@@ -1,5 +1,5 @@
 import React from 'react';
-import { FiX, FiRotateCw, FiMaximize2, FiMinimize2 } from 'react-icons/fi';
+import { FiX, FiRotateCw, FiMaximize2, FiMinimize2, FiLink } from 'react-icons/fi';
 import type { StickerOverlay, Sticker } from '../types';
 
 interface StickerOverlayProps {
@@ -90,7 +90,6 @@ export default function StickerOverlayComponent({
         if (isDragging && initialState) {
             const newX = ((e.clientX - dragStart.x) / containerWidth) * 100;
             const newY = ((e.clientY - dragStart.y) / containerHeight) * 100;
-
             onUpdate({
                 ...overlay,
                 x: Math.max(0, Math.min(100, newX)),
@@ -138,7 +137,6 @@ export default function StickerOverlayComponent({
         if (isDragging && initialState) {
             const newX = ((clientX - dragStart.x) / containerWidth) * 100;
             const newY = ((clientY - dragStart.y) / containerHeight) * 100;
-
             onUpdate({
                 ...overlay,
                 x: Math.max(0, Math.min(100, newX)),
@@ -344,9 +342,26 @@ export default function StickerOverlayComponent({
         });
     }
 
-    // Base size: 80px for GIFs, 50px for other stickers
-    const baseSize = overlay.sticker.category === 'GIF' ? 80 : 50;
-    const size = baseSize * overlay.scale;
+    const isLinkSticker = Boolean((overlay as any).linkUrl) || overlay.sticker.category === 'Link';
+    const getLinkLabel = () => {
+        const explicit = ((overlay as any).linkName || (overlay as any).textContent || '').trim();
+        if (explicit) return explicit;
+        const rawUrl = ((overlay as any).linkUrl || '').trim();
+        if (!rawUrl) return 'Shop now';
+        try {
+            const parsed = new URL(rawUrl);
+            return parsed.hostname.replace(/^www\./i, '');
+        } catch {
+            return 'Shop now';
+        }
+    };
+
+    // Base size: GIF larger, link wider to match Instagram-style pill
+    const baseWidth = overlay.sticker.category === 'GIF' ? 80 : isLinkSticker ? 212 : 50;
+    const baseHeight = overlay.sticker.category === 'GIF' ? 80 : isLinkSticker ? 42 : 50;
+    const width = baseWidth * overlay.scale;
+    const height = baseHeight * overlay.scale;
+    const size = Math.min(width, height);
 
     return (
         <div
@@ -358,8 +373,8 @@ export default function StickerOverlayComponent({
                 top: `${overlay.y}%`,
                 transform: `translate(-50%, -50%) rotate(${overlay.rotation}deg)`,
                 opacity: overlay.opacity,
-                width: `${size}px`,
-                height: `${size}px`,
+                width: `${width}px`,
+                height: `${height}px`,
                 zIndex: isModalOpen 
                     ? 1  // Lower z-index when modals are open (modals are z-[200])
                     : (isSelected ? 100 : 50), // Higher z-index to be above textarea when no modals
@@ -384,6 +399,21 @@ export default function StickerOverlayComponent({
                     <span className="text-4xl" style={{ fontSize: `${size * 0.8}px`, pointerEvents: 'none' }}>
                         {overlay.sticker.emoji}
                     </span>
+                ) : isLinkSticker ? (
+                    <div
+                        className="flex items-center gap-0 px-0 py-0 rounded-lg overflow-hidden shadow-[0_6px_14px_rgba(0,0,0,0.2)] bg-white border border-black/10"
+                        style={{ pointerEvents: 'none', maxWidth: '100%' }}
+                    >
+                        <span className="inline-flex h-8 w-8 items-center justify-center shrink-0 bg-[#EAF4FF] text-[#138CFF] rounded-l-lg">
+                            <FiLink className="w-3.5 h-3.5" />
+                        </span>
+                        <span
+                            className="font-semibold whitespace-nowrap overflow-hidden text-ellipsis px-3 text-black tracking-[-0.01em]"
+                            style={{ fontFamily: 'Inter, system-ui, sans-serif', fontSize: '15px', lineHeight: '1', maxWidth: `${Math.max(112, width - 52)}px` }}
+                        >
+                            {getLinkLabel()}
+                        </span>
+                    </div>
                 ) : overlay.sticker.url ? (
                     <img
                         src={overlay.sticker.url}

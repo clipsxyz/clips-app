@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import Avatar from '../components/Avatar';
 import CreateGroupModal from '../components/CreateGroupModal';
-import EditPostModal from '../components/EditPostModal';
 import { FiCamera, FiBookmark, FiMessageCircle, FiLock, FiUnlock, FiX, FiUser, FiMapPin, FiThumbsUp, FiGlobe, FiEdit3, FiLink2, FiUsers, FiUserCheck, FiPlus, FiSettings, FiFileText, FiLayers, FiType, FiImage, FiGrid, FiVideo } from 'react-icons/fi';
 import Flag from '../components/Flag';
 import { getUserCollections } from '../api/collections';
@@ -16,7 +15,7 @@ import { setProfilePrivacy } from '../api/privacy';
 import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMaps';
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
 import { getUnreadTotal } from '../api/messages';
-import { fetchFollowers, fetchFollowing, updateAuthProfile, mapLaravelUserToAppFields, updatePost as updatePostRequest } from '../api/client';
+import { fetchFollowers, fetchFollowing, updateAuthProfile, mapLaravelUserToAppFields } from '../api/client';
 import type { Post, User } from '../types';
 import { getAvatarForHandle } from '../api/users';
 import { 
@@ -122,7 +121,6 @@ export default function ProfilePage() {
   const [myFeedDragY, setMyFeedDragY] = React.useState(0);
   const [myFeedSelectedPost, setMyFeedSelectedPost] = React.useState<Post | null>(null);
   const [myFeedRefreshTick, setMyFeedRefreshTick] = React.useState(0);
-  const [myFeedEditOpen, setMyFeedEditOpen] = React.useState(false);
   const [myFeedEditedPostIds, setMyFeedEditedPostIds] = React.useState<Record<string, true>>({});
   const [myFeedOpeningPostId, setMyFeedOpeningPostId] = React.useState<string | null>(null);
   const myFeedTouchStartYRef = React.useRef<number | null>(null);
@@ -168,7 +166,6 @@ export default function ProfilePage() {
   const closeMyFeed = React.useCallback(() => {
     setMyFeedVisible(false);
     setMyFeedDragY(0);
-    setMyFeedEditOpen(false);
     setMyFeedSelectedPost(null);
     window.setTimeout(() => setMyFeedOpen(false), 180);
   }, []);
@@ -189,7 +186,6 @@ export default function ProfilePage() {
     try {
       await deletePost(String(user.id), myFeedSelectedPost.id, user?.handle);
       setMyFeedRefreshTick((v) => v + 1);
-      setMyFeedEditOpen(false);
       setMyFeedSelectedPost(null);
     } catch (err) {
       Swal.fire(
@@ -214,57 +210,6 @@ export default function ProfilePage() {
     }, 140);
   }, []);
 
-  const handleSaveMyFeedPostEdit = React.useCallback(
-    async (text: string, location: string, venue: string, landmark: string) => {
-      if (!myFeedSelectedPost) return;
-      try {
-        await updatePostRequest(myFeedSelectedPost.id, {
-          text,
-          location,
-          venue: venue || undefined,
-          landmark: landmark || undefined,
-        });
-      } catch (err: any) {
-        const isConnectionError =
-          err?.message === 'CONNECTION_REFUSED' ||
-          err?.name === 'ConnectionRefused' ||
-          err?.message?.includes('Failed to fetch') ||
-          err?.message?.includes('ERR_CONNECTION_REFUSED') ||
-          err?.message?.includes('NetworkError');
-
-        if (!isConnectionError) throw err;
-
-        // Backend unavailable: keep local feed responsive by patching mock post in memory.
-        const idx = posts.findIndex((p) => String(p.id) === String(myFeedSelectedPost.id));
-        if (idx >= 0) {
-          posts[idx] = {
-            ...posts[idx],
-            text,
-            text_content: text,
-            locationLabel: location,
-            venue: venue || undefined,
-            landmark: landmark || undefined,
-          };
-        }
-      }
-
-      setMyFeedSelectedPost((prev) =>
-        prev
-          ? {
-              ...prev,
-              text,
-              text_content: text,
-              locationLabel: location,
-              venue: venue || undefined,
-              landmark: landmark || undefined,
-            }
-          : prev
-      );
-      setMyFeedEditedPostIds((prev) => ({ ...prev, [myFeedSelectedPost.id]: true }));
-      setMyFeedRefreshTick((v) => v + 1);
-    },
-    [myFeedSelectedPost]
-  );
 
   const handleMyFeedTouchStart = React.useCallback((event: React.TouchEvent<HTMLDivElement>) => {
     myFeedTouchStartYRef.current = event.touches[0]?.clientY ?? null;
@@ -2093,26 +2038,10 @@ export default function ProfilePage() {
 
                       <button
                         type="button"
-                        onClick={() => setMyFeedEditOpen(true)}
-                        className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-gray-200 bg-white text-black font-semibold hover:bg-gray-100 transition-colors"
-                      >
-                        Edit post
-                      </button>
-
-                      <button
-                        type="button"
                         onClick={handleDeleteMyFeedPost}
                         className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-gray-200 bg-white text-black font-semibold hover:bg-gray-100 transition-colors"
                       >
                         Delete post
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setMyFeedSelectedPost(null)}
-                        className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-gray-200 bg-white text-black font-semibold hover:bg-gray-100 transition-colors"
-                      >
-                        Close
                       </button>
                     </div>
                   </div>
@@ -2120,15 +2049,6 @@ export default function ProfilePage() {
               )}
             </div>
           </div>
-        )}
-
-        {myFeedSelectedPost && (
-          <EditPostModal
-            post={myFeedSelectedPost}
-            isOpen={myFeedEditOpen}
-            onClose={() => setMyFeedEditOpen(false)}
-            onSave={handleSaveMyFeedPostEdit}
-          />
         )}
 
         {/* Collections Modal */}

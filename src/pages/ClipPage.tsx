@@ -934,12 +934,37 @@ export default function ClipPage() {
     setSelectedGifOverlay(gifOverlay.id);
   };
 
+  const normalizeStoryLinkUrl = (rawUrl: string): string | null => {
+    const cleanedInput = rawUrl
+      .trim()
+      .replace(/[\u200B-\u200D\uFEFF]/g, '');
+    if (!cleanedInput) return null;
+
+    // Some mobile/browser copy flows include extra text around the URL.
+    const urlMatch = cleanedInput.match(/(https?:\/\/[^\s]+|www\.[^\s]+|[a-z0-9.-]+\.[a-z]{2,}(?:\/[^\s]*)?)/i);
+    const candidateRaw = (urlMatch?.[1] || cleanedInput)
+      .trim()
+      .replace(/^[('"[\s]+/, '')
+      .replace(/[)'"\],.;!?]+$/, '');
+
+    const withProtocol = /^https?:\/\//i.test(candidateRaw) ? candidateRaw : `https://${candidateRaw}`;
+    const safeUrl = encodeURI(withProtocol);
+
+    try {
+      const parsed = new URL(safeUrl);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+      return parsed.toString();
+    } catch {
+      return null;
+    }
+  };
+
   // Handle adding link as overlay
   const handleAddLink = (url: string, name: string) => {
-    // Ensure URL has protocol
-    let formattedUrl = url.trim();
-    if (!formattedUrl.startsWith('http://') && !formattedUrl.startsWith('https://')) {
-      formattedUrl = 'https://' + formattedUrl;
+    const formattedUrl = normalizeStoryLinkUrl(url);
+    if (!formattedUrl) {
+      alert('Please enter a valid website link.');
+      return;
     }
 
     const linkOverlay: StickerOverlay = {
@@ -962,7 +987,8 @@ export default function ClipPage() {
       textColor: '#FFFFFF',
       fontSize: 'medium',
       linkUrl: formattedUrl,
-      linkName: name || formattedUrl
+      linkName: name || formattedUrl,
+      linkStyle: 'light'
     };
     setLinkOverlays([...linkOverlays, linkOverlay]);
     setSelectedLinkOverlay(linkOverlay.id);
@@ -1806,7 +1832,11 @@ export default function ClipPage() {
                       URL
                     </label>
                     <input
-                      type="url"
+                      type="text"
+                      inputMode="url"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
                       name="url"
                       placeholder="https://example.com"
                       required
@@ -2656,7 +2686,11 @@ export default function ClipPage() {
                     URL
                   </label>
                   <input
-                    type="url"
+                    type="text"
+                    inputMode="url"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     name="url"
                     placeholder="https://example.com"
                     required
@@ -3246,7 +3280,11 @@ export default function ClipPage() {
                   URL
                 </label>
                 <input
-                  type="url"
+                  type="text"
+                  inputMode="url"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   name="url"
                   placeholder="https://example.com"
                   required

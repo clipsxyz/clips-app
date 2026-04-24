@@ -331,6 +331,7 @@ export type StickerOverlay = {
   isQuestionCard?: boolean; // Special flag for question card styling
   linkUrl?: string; // URL for link stickers
   linkName?: string; // Display name/description for link stickers
+  linkStyle?: 'light' | 'dark' | 'gradient'; // Visual style for link stickers
 };
 
 // Video editing types

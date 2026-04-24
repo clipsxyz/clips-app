@@ -585,6 +585,23 @@ function delay(ms = 300): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function normalizeStickerOverlay(sticker: any): StickerOverlay {
+    return {
+        ...sticker,
+        textContent: sticker?.textContent ?? sticker?.text_content ?? undefined,
+        textColor: sticker?.textColor ?? sticker?.text_color ?? undefined,
+        fontSize: sticker?.fontSize ?? sticker?.font_size ?? undefined,
+        linkUrl: sticker?.linkUrl ?? sticker?.link_url ?? undefined,
+        linkName: sticker?.linkName ?? sticker?.link_name ?? undefined,
+        linkStyle: sticker?.linkStyle ?? sticker?.link_style ?? undefined,
+    } as StickerOverlay;
+}
+
+function normalizeStoryStickers(stickers: any): StickerOverlay[] | undefined {
+    if (!Array.isArray(stickers)) return undefined;
+    return stickers.map(normalizeStickerOverlay);
+}
+
 /** Newest first (Instagram-style): first slide is the latest post in the 24h window. */
 export function sortStoriesNewestFirst(stories: Story[]): Story[] {
     return [...stories].sort((a, b) => b.createdAt - a.createdAt);
@@ -616,7 +633,7 @@ function mapLaravelStoryToStory(story: any): Story {
         replies: [],
         userReaction: story.user_reaction || undefined,
         textStyle: story.text_style || undefined,
-        stickers: story.stickers || undefined,
+        stickers: normalizeStoryStickers(story.stickers),
         taggedUsers: story.tagged_users || undefined,
     };
 }
@@ -807,7 +824,7 @@ export async function createStory(
             textColor: response.text_color || textColor || undefined,
             textSize: response.text_size || textSize || undefined,
             textStyle: response.text_style || textStyle || undefined,
-            stickers: response.stickers || stickers || undefined,
+            stickers: normalizeStoryStickers(response.stickers) || stickers || undefined,
             taggedUsers: response.tagged_users || taggedUsers || undefined, // Get tagged users from backend
             taggedUsersPositions: response.tagged_users_positions || taggedUsersPositions || undefined, // Get tagged users with positions
             createdAt: new Date(response.created_at).getTime() || now,

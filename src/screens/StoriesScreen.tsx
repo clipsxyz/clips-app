@@ -5,6 +5,7 @@ import {
     StyleSheet,
     Image,
     TouchableOpacity,
+    Linking,
     Animated,
     Dimensions,
     ActivityIndicator,
@@ -186,6 +187,16 @@ export default function StoriesScreen({ route, navigation }: any) {
         navigation.goBack();
     };
 
+    const openStoryLink = async (rawUrl?: string) => {
+        if (!rawUrl) return;
+        const withProtocol = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
+        try {
+            await Linking.openURL(withProtocol);
+        } catch (error) {
+            console.error('Failed to open story link:', error);
+        }
+    };
+
     const handleReaction = async (emoji: string) => {
         const currentGroup = storyGroups[currentGroupIndex];
         const currentStory = currentGroup?.stories[currentStoryIndex];
@@ -335,6 +346,41 @@ export default function StoriesScreen({ route, navigation }: any) {
                             <Text style={styles.storyText}>{currentStory.text}</Text>
                         </View>
                     )}
+
+                    {Array.isArray(currentStory.stickers) &&
+                        currentStory.stickers
+                            .filter((overlay) => !!overlay?.linkUrl)
+                            .map((overlay) => {
+                                const label = (overlay.linkName || overlay.textContent || 'Shop now').trim();
+                                return (
+                                    <TouchableOpacity
+                                        key={overlay.id}
+                                        activeOpacity={0.9}
+                                        onPress={() => openStoryLink(overlay.linkUrl)}
+                                        style={[
+                                            styles.storyLinkSticker,
+                                            {
+                                                left: `${overlay.x}%`,
+                                                top: `${overlay.y}%`,
+                                                transform: [
+                                                    { translateX: -96 },
+                                                    { translateY: -21 },
+                                                    { scale: overlay.scale || 1 },
+                                                    { rotate: `${overlay.rotation || 0}deg` },
+                                                ],
+                                                opacity: overlay.opacity ?? 1,
+                                            },
+                                        ]}
+                                    >
+                                        <View style={styles.storyLinkIconTile}>
+                                            <Icon name="link-outline" size={15} color="#138CFF" />
+                                        </View>
+                                        <Text numberOfLines={1} style={styles.storyLinkLabel}>
+                                            {label}
+                                        </Text>
+                                    </TouchableOpacity>
+                                );
+                            })}
 
                     {/* Bottom actions */}
                     <View style={styles.storyActions}>
@@ -526,6 +572,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'center',
         gap: 32,
+        zIndex: 10,
     },
     actionButton: {
         width: 48,
@@ -541,6 +588,7 @@ const styles = StyleSheet.create({
         top: 0,
         bottom: 0,
         width: width / 2,
+        zIndex: 1,
     },
     rightTapArea: {
         position: 'absolute',
@@ -548,6 +596,44 @@ const styles = StyleSheet.create({
         top: 0,
         bottom: 0,
         width: width / 2,
+        zIndex: 1,
+    },
+    storyLinkSticker: {
+        position: 'absolute',
+        width: 192,
+        height: 42,
+        borderRadius: 6,
+        backgroundColor: '#FFFFFF',
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.10)',
+        flexDirection: 'row',
+        alignItems: 'center',
+        overflow: 'hidden',
+        shadowColor: '#000',
+        shadowOpacity: 0.2,
+        shadowRadius: 7,
+        shadowOffset: { width: 0, height: 3 },
+        elevation: 6,
+        zIndex: 25,
+    },
+    storyLinkIconTile: {
+        width: 32,
+        height: 32,
+        marginLeft: 5,
+        borderRadius: 4,
+        backgroundColor: '#EAF4FF',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    storyLinkLabel: {
+        flex: 1,
+        marginLeft: 10,
+        marginRight: 12,
+        fontSize: 15,
+        lineHeight: 16,
+        fontFamily: 'Inter-SemiBold',
+        fontWeight: '600',
+        color: '#111111',
     },
     replyModal: {
         flex: 1,

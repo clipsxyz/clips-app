@@ -68,6 +68,7 @@ import {
   isLikelyLightTextColor,
   resolveTextCardTailFill,
 } from './utils/feedTextBubble';
+import { GLOBAL_VIDEO_MUTED_EVENT, getGlobalVideoMuted, setGlobalVideoMuted } from './utils/globalVideoMute';
 
 // Global map to store video playback times per post ID for seamless transitions
 const videoTimesMap = new Map<string, number>();
@@ -1209,7 +1210,7 @@ function PostHeader({
         {/* z-40 so the quick-actions sheet (absolute below header) paints above the bubble row — a following sibling would otherwise cover it. */}
         <div className="relative z-40">
           <div className="flex items-start justify-between gap-3 pt-1">
-            <div className="min-w-0 flex-1 flex flex-col gap-1">
+            <div className="min-w-0 flex-1 flex flex-col gap-1 pr-2">
               {isReclippedPost && (
                 <div className={`text-xs flex items-center gap-1 ${reclipColorClass}`}>
                   <FiRepeat className="w-3 h-3" />
@@ -1229,7 +1230,7 @@ function PostHeader({
                   className={`text-sm font-semibold flex items-center gap-1.5 leading-tight ${textColorClass}`}
                   style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}
                 >
-                  <span className="truncate">{isReclippedPost ? post.originalUserHandle : post.userHandle}</span>
+                  <span className="truncate max-w-[min(52vw,14rem)] inline-block align-bottom">{isReclippedPost ? post.originalUserHandle : post.userHandle}</span>
                   <Flag
                     value={isCurrentUser ? user?.countryFlag || '' : getFlagForHandle(isReclippedPost ? post.originalUserHandle! : post.userHandle) || ''}
                     size={16}
@@ -1416,7 +1417,7 @@ function PostHeader({
 
       {/* Content layer - above scrim */}
       <div className="relative z-10 flex items-start justify-between w-full">
-        <div className="flex items-center gap-3 flex-1">
+        <div className="flex items-center gap-3 flex-1 min-w-0 pr-2">
           <div
             className="relative overflow-visible"
             data-feed-author-handle={post.userHandle}
@@ -1503,7 +1504,7 @@ function PostHeader({
               className={`text-left transition-opacity w-full ${isOverlaid ? 'hover:opacity-80' : 'hover:opacity-70'}`}
             >
               <h3 id={titleId} className={`text-sm font-semibold flex items-center gap-1.5 leading-tight ${textColorClass}`} style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
-                <span className="truncate">{isReclippedPost ? post.originalUserHandle : post.userHandle}</span>
+                <span className="truncate max-w-[min(52vw,14rem)] inline-block align-bottom">{isReclippedPost ? post.originalUserHandle : post.userHandle}</span>
                 <Flag
                   value={isCurrentUser ? (user?.countryFlag || '') : (getFlagForHandle(isReclippedPost ? post.originalUserHandle! : post.userHandle) || '')}
                   size={16}
@@ -2193,7 +2194,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   const [hasError, setHasError] = React.useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [showControls, setShowControls] = React.useState(false);
-  const [isMuted, setIsMuted] = React.useState(true);
+  const [isMuted, setIsMuted] = React.useState(getGlobalVideoMuted);
   const [isPaused, setIsPaused] = React.useState(false);
   const [showMuteButton, setShowMuteButton] = React.useState(true); // show when scroll onto card, hide after 2s; one tap brings back
   const muteButtonHideTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2357,6 +2358,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     e.preventDefault();
     setIsMuted(prev => {
       const newMuted = !prev;
+      setGlobalVideoMuted(newMuted);
       // Update video element directly for immediate feedback
       if (videoRef.current) {
         videoRef.current.muted = newMuted;
@@ -2368,6 +2370,23 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       return newMuted;
     });
   };
+
+  React.useEffect(() => {
+    const onGlobalMutedChanged = (event: Event) => {
+      const muted = (event as CustomEvent<{ muted?: boolean }>).detail?.muted;
+      if (typeof muted === 'boolean') setIsMuted(muted);
+    };
+    window.addEventListener(GLOBAL_VIDEO_MUTED_EVENT, onGlobalMutedChanged as EventListener);
+    return () => window.removeEventListener(GLOBAL_VIDEO_MUTED_EVENT, onGlobalMutedChanged as EventListener);
+  }, []);
+
+  const toggleGlobalMute = React.useCallback(() => {
+    setIsMuted((prev) => {
+      const next = !prev;
+      setGlobalVideoMuted(next);
+      return next;
+    });
+  }, []);
 
   // Restore video time when video loads (if returning from Scenes)
   React.useEffect(() => {
@@ -3154,12 +3173,12 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                     onClick={(e) => {
                       e.stopPropagation();
                       e.preventDefault();
-                      setIsMuted(prev => !prev);
+                      toggleGlobalMute();
                     }}
                     onTouchEnd={(e) => {
                       e.stopPropagation();
                       e.preventDefault();
-                      setIsMuted(prev => !prev);
+                      toggleGlobalMute();
                     }}
                     className="p-3 rounded-full bg-black/50 hover:bg-black/70 active:bg-black/80 text-white transition-colors shadow-lg pointer-events-auto"
                     aria-label={isMuted ? 'Unmute video' : 'Mute video'}
@@ -3238,12 +3257,12 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                       onClick={(e) => {
                         e.stopPropagation();
                         e.preventDefault();
-                        setIsMuted(prev => !prev);
+                        toggleGlobalMute();
                       }}
                       onTouchEnd={(e) => {
                         e.stopPropagation();
                         e.preventDefault();
-                        setIsMuted(prev => !prev);
+                        toggleGlobalMute();
                       }}
                       className="p-1.5 rounded-full bg-black/50 hover:bg-black/70 active:bg-black/80 text-white transition-colors pointer-events-auto z-50"
                       aria-label={isMuted ? 'Unmute video' : 'Mute video'}

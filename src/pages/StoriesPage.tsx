@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiX, FiChevronRight, FiChevronLeft, FiChevronDown, FiChevronUp, FiMessageCircle, FiThumbsUp, FiVolume2, FiVolumeX, FiMaximize2, FiMapPin, FiSend, FiLink, FiCopy, FiPlus, FiHome, FiClock } from 'react-icons/fi';
+import { FiX, FiChevronRight, FiChevronLeft, FiMessageCircle, FiThumbsUp, FiVolume2, FiVolumeX, FiMaximize2, FiMapPin, FiSend, FiLink, FiCopy, FiPlus, FiHome, FiClock, FiUsers } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { fetchStoryGroups, fetchUserStories, markStoryViewed, incrementStoryViews, addStoryReaction, addStoryReply, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle, voteOnPoll, sortStoriesNewestFirst, getLastStoriesLoadSource } from '../api/stories';
@@ -20,9 +20,97 @@ import { TEXT_STORY_TEMPLATES } from '../textStoryTemplates';
 import { toggleFollow } from '../api/client';
 import { FiUserPlus, FiUserCheck } from 'react-icons/fi';
 import type { Story, StoryGroup, Post } from '../types';
+import { GLOBAL_VIDEO_MUTED_EVENT, getGlobalVideoMuted, setGlobalVideoMuted } from '../utils/globalVideoMute';
 
 /** Must match App.tsx `STORIES24_FROM_RAIL_HANDLE_KEY` — rail return + /feed navigation if `location.state` is dropped. */
 const STORIES24_FROM_RAIL_HANDLE_KEY = 'clips:stories24OpenedFromRailHandle';
+
+const SHARED_STORY_DEFAULT_GRADIENT = 'linear-gradient(135deg, #0f172a 0%, #111827 52%, #1f2937 100%)';
+const sharedStoryPaletteCache = new Map<string, { c1: string; c2: string }>();
+
+function clamp(value: number, min: number, max: number): number {
+    return Math.max(min, Math.min(max, value));
+}
+
+function toHex(value: number): string {
+    return clamp(Math.round(value), 0, 255).toString(16).padStart(2, '0');
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+async function extractPaletteFromImageUrl(imageUrl: string): Promise<{ c1: string; c2: string } | null> {
+    if (!imageUrl) return null;
+    if (sharedStoryPaletteCache.has(imageUrl)) return sharedStoryPaletteCache.get(imageUrl)!;
+    try {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.src = imageUrl;
+        await new Promise<void>((resolve, reject) => {
+            img.onload = () => resolve();
+            img.onerror = () => reject(new Error('IMAGE_LOAD_FAILED'));
+        });
+        const canvas = document.createElement('canvas');
+        const sampleSize = 80;
+        canvas.width = sampleSize;
+        canvas.height = sampleSize;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return null;
+        ctx.drawImage(img, 0, 0, sampleSize, sampleSize);
+        const { data } = ctx.getImageData(0, 0, sampleSize, sampleSize);
+
+        let edgeR = 0;
+        let edgeG = 0;
+        let edgeB = 0;
+        let edgeCount = 0;
+
+        let allR = 0;
+        let allG = 0;
+        let allB = 0;
+        let allCount = 0;
+
+        for (let y = 0; y < sampleSize; y += 2) {
+            for (let x = 0; x < sampleSize; x += 2) {
+                const idx = (y * sampleSize + x) * 4;
+                const alpha = data[idx + 3];
+                if (alpha < 30) continue;
+                const r = data[idx];
+                const g = data[idx + 1];
+                const b = data[idx + 2];
+
+                allR += r;
+                allG += g;
+                allB += b;
+                allCount += 1;
+
+                const isEdge = x < 10 || y < 10 || x > sampleSize - 11 || y > sampleSize - 11;
+                if (isEdge) {
+                    edgeR += r;
+                    edgeG += g;
+                    edgeB += b;
+                    edgeCount += 1;
+                }
+            }
+        }
+
+        if (allCount === 0) return null;
+        const baseR = (edgeCount > 0 ? edgeR / edgeCount : allR / allCount);
+        const baseG = (edgeCount > 0 ? edgeG / edgeCount : allG / allCount);
+        const baseB = (edgeCount > 0 ? edgeB / edgeCount : allB / allCount);
+        const avgR = allR / allCount;
+        const avgG = allG / allCount;
+        const avgB = allB / allCount;
+
+        const colorA = rgbToHex(baseR * 0.58, baseG * 0.58, baseB * 0.58);
+        const colorB = rgbToHex(avgR * 0.96 + 18, avgG * 0.96 + 18, avgB * 0.96 + 18);
+        const palette = { c1: colorA, c2: colorB };
+        sharedStoryPaletteCache.set(imageUrl, palette);
+        return palette;
+    } catch {
+        return null;
+    }
+}
 
 // Special Gazetteer world highlights configuration (mock stories only for now)
 const GAZETTEER_WORLD_USER_ID = 'gazetteer-world';
@@ -176,13 +264,12 @@ export default function StoriesPage() {
     const [autoOpeningStory, setAutoOpeningStory] = React.useState<boolean>(!!openUserHandle);
     const [progress, setProgress] = React.useState(0);
     const [paused, setPaused] = React.useState(false);
-    const [isMuted, setIsMuted] = React.useState(true);
+    const [isMuted, setIsMuted] = React.useState(getGlobalVideoMuted);
     const [hasVideo, setHasVideo] = React.useState(false);
     const [showEmojiPicker, setShowEmojiPicker] = React.useState(false);
     const [showReplyComposer, setShowReplyComposer] = React.useState(false);
     const [replyText, setReplyText] = React.useState('');
     const [showStoryShareModal, setShowStoryShareModal] = React.useState(false);
-    const [metadataExpanded, setMetadataExpanded] = React.useState(false);
     const [showInsightsSheet, setShowInsightsSheet] = React.useState(false);
     const [insightsTab, setInsightsTab] = React.useState<'viewers' | 'replies'>('viewers');
     const [viewerFollowMap, setViewerFollowMap] = React.useState<Record<string, boolean>>({});
@@ -193,12 +280,16 @@ export default function StoriesPage() {
     const [originalPost, setOriginalPost] = React.useState<Post | null>(null);
     const [sharedPostFetchFailed, setSharedPostFetchFailed] = React.useState(false);
     const [showSharedPostModal, setShowSharedPostModal] = React.useState(false);
+    const [sharedStoryBackdrop, setSharedStoryBackdrop] = React.useState<{
+        gradient: string;
+        imageUrl?: string;
+    }>({ gradient: SHARED_STORY_DEFAULT_GRADIENT });
     const [isFollowingStoryUser, setIsFollowingStoryUser] = React.useState<boolean>(false);
     const [isFollowLoading, setIsFollowLoading] = React.useState<boolean>(false);
     const [optimisticVote, setOptimisticVote] = React.useState<'option1' | 'option2' | 'option3' | null>(null);
     const [showStoryProfileCard, setShowStoryProfileCard] = React.useState(false);
 
-    // Metadata carousel for story viewer: location → venue → timestamp (same as newsfeed cards)
+    // Metadata carousel for story viewer: location → venue → audience → timestamp
     // For shared posts, use originalPost's location/venue so carousel matches the newsfeed card
     const currentStoryForMeta = storyGroups[currentGroupIndex]?.stories?.[currentStoryIndex];
     const storyMetadataItems = React.useMemo(() => {
@@ -207,12 +298,19 @@ export default function StoriesPage() {
         const isSharedPost = s.sharedFromPost && originalPost?.id === s.sharedFromPost;
         const locationLabel = isSharedPost && originalPost?.locationLabel ? originalPost.locationLabel.trim() : (s.location && s.location.trim()) || '';
         const venueLabel = isSharedPost && originalPost?.venue ? originalPost.venue.trim() : (s.venue && s.venue.trim()) || '';
-        const out: Array<{ label: string; type: 'location' | 'venue' | 'timestamp' }> = [];
+        const out: Array<{ label: string; type: 'location' | 'venue' | 'audience' | 'timestamp' }> = [];
         if (locationLabel) out.push({ label: locationLabel, type: 'location' });
         if (venueLabel) out.push({ label: venueLabel, type: 'venue' });
+        const audienceLabel =
+            s.audience === 'close_friends'
+                ? 'Friends'
+                : s.audience === 'only_me'
+                    ? 'Private'
+                    : 'Public';
+        out.push({ label: audienceLabel, type: 'audience' });
         if (typeof s.createdAt === 'number' && !Number.isNaN(s.createdAt)) out.push({ label: getTimeAgo(s.createdAt), type: 'timestamp' });
         return out;
-    }, [currentStoryForMeta, originalPost?.id, originalPost?.locationLabel, originalPost?.venue, currentStoryForMeta?.location, currentStoryForMeta?.venue, currentStoryForMeta?.createdAt]);
+    }, [currentStoryForMeta, originalPost?.id, originalPost?.locationLabel, originalPost?.venue, currentStoryForMeta?.location, currentStoryForMeta?.venue, currentStoryForMeta?.createdAt, currentStoryForMeta?.audience]);
     const [storyMetadataIndex, setStoryMetadataIndex] = React.useState(0);
     React.useEffect(() => {
         setStoryMetadataIndex(0);
@@ -261,6 +359,56 @@ export default function StoriesPage() {
     React.useEffect(() => {
         pausedRef.current = paused;
     }, [paused]);
+
+    React.useEffect(() => {
+        let cancelled = false;
+        const run = async () => {
+            const story = storyGroups[currentGroupIndex]?.stories?.[currentStoryIndex];
+            if (!viewingStories || !story?.sharedFromPost || !originalPost) {
+                setSharedStoryBackdrop({ gradient: SHARED_STORY_DEFAULT_GRADIENT });
+                return;
+            }
+
+            const mediaUrl = originalPost.mediaUrl || originalPost.mediaItems?.[0]?.url;
+            if (!mediaUrl) {
+                setSharedStoryBackdrop({ gradient: SHARED_STORY_DEFAULT_GRADIENT });
+                return;
+            }
+
+            const mediaIsVideo = originalPost.mediaType === 'video' || originalPost.mediaItems?.[0]?.type === 'video';
+            let paletteSource = mediaUrl;
+            if (mediaIsVideo) {
+                const frame = await captureVideoFrameDataUrl(mediaUrl);
+                if (frame) paletteSource = frame;
+            }
+            const palette = await extractPaletteFromImageUrl(paletteSource);
+            if (cancelled) return;
+            if (!palette) {
+                setSharedStoryBackdrop({
+                    gradient: SHARED_STORY_DEFAULT_GRADIENT,
+                    imageUrl: mediaUrl,
+                });
+                return;
+            }
+            setSharedStoryBackdrop({
+                gradient: `linear-gradient(135deg, ${palette.c1} 0%, ${palette.c2} 100%)`,
+                imageUrl: mediaUrl,
+            });
+        };
+        void run();
+        return () => {
+            cancelled = true;
+        };
+    }, [viewingStories, storyGroups, currentGroupIndex, currentStoryIndex, originalPost?.id, originalPost?.mediaUrl, originalPost?.mediaItems]);
+
+    React.useEffect(() => {
+        const onGlobalMutedChanged = (event: Event) => {
+            const muted = (event as CustomEvent<{ muted?: boolean }>).detail?.muted;
+            if (typeof muted === 'boolean') setIsMuted(muted);
+        };
+        window.addEventListener(GLOBAL_VIDEO_MUTED_EVENT, onGlobalMutedChanged as EventListener);
+        return () => window.removeEventListener(GLOBAL_VIDEO_MUTED_EVENT, onGlobalMutedChanged as EventListener);
+    }, []);
 
     // Pause playback while message composer is active.
     React.useEffect(() => {
@@ -496,7 +644,7 @@ export default function StoriesPage() {
             setAutoOpeningStory(false);
             setProgress(0);
             setPaused(false);
-            setIsMuted(true);
+            setIsMuted(getGlobalVideoMuted());
             elapsedTimeRef.current = 0;
             return;
         }
@@ -513,7 +661,7 @@ export default function StoriesPage() {
             setAutoOpeningStory(false);
             setProgress(0);
             setPaused(false);
-            setIsMuted(true);
+            setIsMuted(getGlobalVideoMuted());
             elapsedTimeRef.current = 0;
             return;
         }
@@ -541,7 +689,7 @@ export default function StoriesPage() {
                     setAutoOpeningStory(false);
                     setProgress(0);
                     setPaused(false);
-                    setIsMuted(true);
+                    setIsMuted(getGlobalVideoMuted());
                     elapsedTimeRef.current = 0;
                 }, 0);
                 
@@ -560,7 +708,7 @@ export default function StoriesPage() {
                 setAutoOpeningStory(false);
                 setProgress(0);
                 setPaused(false);
-                setIsMuted(true);
+                setIsMuted(getGlobalVideoMuted());
                 elapsedTimeRef.current = 0;
                 
                 return updated;
@@ -581,7 +729,7 @@ export default function StoriesPage() {
         setViewingStories(false);
         setProgress(0);
         setPaused(false);
-        setIsMuted(true);
+        setIsMuted(getGlobalVideoMuted());
         elapsedTimeRef.current = 0;
 
         // Always navigate back to feed when stories finish
@@ -626,7 +774,7 @@ export default function StoriesPage() {
             setCurrentStoryIndex(0);
             currentStoryIndexRef.current = 0;
             setProgress(0);
-            setIsMuted(true);
+            setIsMuted(getGlobalVideoMuted());
             elapsedTimeRef.current = 0;
             setPaused(false);
             pausedRef.current = false;
@@ -661,7 +809,7 @@ export default function StoriesPage() {
                 setCurrentStoryIndex(nextStoryIdx);
                 currentStoryIndexRef.current = nextStoryIdx;
                 setProgress(0);
-                setIsMuted(true);
+                setIsMuted(getGlobalVideoMuted());
                 elapsedTimeRef.current = 0;
                 setPaused(false);
                 pausedRef.current = false;
@@ -794,7 +942,11 @@ export default function StoriesPage() {
         if (now - lastLikeTapAtRef.current < 420) return;
         if (now - lastMuteToggleAtRef.current < 260) return;
         lastMuteToggleAtRef.current = now;
-        setIsMuted((prev) => !prev);
+        setIsMuted((prev) => {
+            const next = !prev;
+            setGlobalVideoMuted(next);
+            return next;
+        });
     }
 
     function resumeStoryIfAllowed() {
@@ -884,7 +1036,7 @@ export default function StoriesPage() {
         if (currentStoryIndex > 0) {
             setCurrentStoryIndex(currentStoryIndex - 1);
             setProgress(0);
-            setIsMuted(true);
+            setIsMuted(getGlobalVideoMuted());
             elapsedTimeRef.current = 0;
             // Reset paused state for new story (poll check will handle pausing if needed)
             setPaused(false);
@@ -896,7 +1048,7 @@ export default function StoriesPage() {
                 const prevGroup = storyGroups[currentGroupIndex - 1];
                 setCurrentStoryIndex(prevGroup?.stories.length - 1 || 0);
                 setProgress(0);
-                setIsMuted(true);
+                setIsMuted(getGlobalVideoMuted());
                 elapsedTimeRef.current = 0;
                 // Reset paused state for new story (poll check will handle pausing if needed)
                 setPaused(false);
@@ -915,7 +1067,7 @@ export default function StoriesPage() {
             setCurrentGroupIndex(currentGroupIndex + 1);
             setCurrentStoryIndex(0);
             setProgress(0);
-            setIsMuted(true);
+            setIsMuted(getGlobalVideoMuted());
             elapsedTimeRef.current = 0;
             setPaused(false);
             pausedRef.current = false;
@@ -932,7 +1084,7 @@ export default function StoriesPage() {
             const prevGroup = storyGroups[currentGroupIndex - 1];
             setCurrentStoryIndex(prevGroup?.stories.length - 1 || 0);
             setProgress(0);
-            setIsMuted(true);
+            setIsMuted(getGlobalVideoMuted());
             elapsedTimeRef.current = 0;
             setPaused(false);
             pausedRef.current = false;
@@ -1407,10 +1559,6 @@ export default function StoriesPage() {
     };
 
     React.useEffect(() => {
-        setMetadataExpanded(false);
-    }, [currentGroupIndex, currentStoryIndex]);
-
-    React.useEffect(() => {
         if (showInsightsSheet) {
             setPaused(true);
             pausedRef.current = true;
@@ -1507,16 +1655,6 @@ export default function StoriesPage() {
         || (((currentStory as any)?.mediaItems || []).find((m: any) => m?.type === 'text')?.text)
         || ''
     ).trim();
-    const currentStoryAudienceLabel = currentStory?.audience === 'close_friends'
-        ? 'Followers'
-        : currentStory?.audience === 'only_me'
-            ? 'Only me'
-            : 'Public';
-    const currentStoryAudienceBadgeClass = currentStory?.audience === 'close_friends'
-        ? 'border-emerald-300/70 bg-emerald-500/25 text-emerald-100'
-        : currentStory?.audience === 'only_me'
-            ? 'border-slate-300/60 bg-slate-500/25 text-slate-100'
-            : 'border-white/35 bg-black/45 text-white/95';
     const isViewingOwnStory = !!(currentGroup && user && (currentGroup.userId === user.id || currentGroup.userHandle === user.handle));
     const storyViewsCount = Number(currentStory?.views || 0);
     const storyRepliesCount = Number(currentStory?.replies?.length || 0);
@@ -1601,32 +1739,59 @@ export default function StoriesPage() {
                                     if (currentStory?.sharedFromPost && !originalPost && sharedPostFetchFailed && currentStory.mediaUrl) {
                                         const isVideo = currentStory.mediaType === 'video';
                                         return (
-                                            <div className="w-full h-full flex items-center justify-center bg-black">
+                                            <div
+                                                className="w-full h-full flex flex-col items-center justify-center relative p-6"
+                                                style={{
+                                                    background: sharedStoryBackdrop.gradient || SHARED_STORY_DEFAULT_GRADIENT,
+                                                }}
+                                            >
                                                 {isVideo ? (
                                                     <video
-                                                        ref={videoRef}
                                                         src={currentStory.mediaUrl}
-                                                        className="w-full h-full object-contain"
+                                                        className="absolute inset-0 w-full h-full object-cover scale-110 opacity-70 pointer-events-none"
+                                                        style={{ filter: 'blur(46px)' }}
                                                         autoPlay
+                                                        muted
                                                         loop
-                                                        muted={isMuted}
                                                         playsInline
-                                                        onLoadedData={() => {
-                                                            if (videoRef.current) {
-                                                                videoRef.current.muted = isMuted;
-                                                                if (!isMuted && videoRef.current.paused) {
-                                                                    videoRef.current.play().catch(() => {});
-                                                                }
-                                                            }
-                                                        }}
                                                     />
                                                 ) : (
                                                     <img
-                                                        src={currentStory.mediaUrl}
-                                                        alt="Shared clip"
-                                                        className="w-full h-full object-contain"
+                                                        src={sharedStoryBackdrop.imageUrl || currentStory.mediaUrl}
+                                                        alt=""
+                                                        aria-hidden
+                                                        className="absolute inset-0 w-full h-full object-cover scale-110 opacity-70 pointer-events-none"
+                                                        style={{ filter: 'blur(46px)' }}
                                                     />
                                                 )}
+                                                <div className="absolute inset-0 bg-black/40 pointer-events-none" />
+                                                <div className="relative z-10 w-full max-w-xs rounded-2xl overflow-hidden bg-white shadow-[0_8px_32px_rgba(0,0,0,0.4)] border-2 border-white/20">
+                                                    {isVideo ? (
+                                                        <video
+                                                            ref={videoRef}
+                                                            src={currentStory.mediaUrl}
+                                                            className="w-full h-auto object-cover"
+                                                            autoPlay
+                                                            loop
+                                                            muted={isMuted}
+                                                            playsInline
+                                                            onLoadedData={() => {
+                                                                if (videoRef.current) {
+                                                                    videoRef.current.muted = isMuted;
+                                                                    if (!isMuted && videoRef.current.paused) {
+                                                                        videoRef.current.play().catch(() => {});
+                                                                    }
+                                                                }
+                                                            }}
+                                                        />
+                                                    ) : (
+                                                        <img
+                                                            src={currentStory.mediaUrl}
+                                                            alt="Shared clip"
+                                                            className="w-full h-auto object-cover"
+                                                        />
+                                                    )}
+                                                </div>
                                             </div>
                                         );
                                     }
@@ -1634,7 +1799,7 @@ export default function StoriesPage() {
                                     if (currentStory?.sharedFromPost && originalPost) {
                                         // This is a shared post - ALWAYS show the original post format, not the generated image
                                         // Check if it has media or is text-only
-                                        const hasRealMedia = (originalPost.mediaUrl && originalPost.mediaUrl.trim() !== '' && !originalPost.mediaUrl.startsWith('data:image')) || (originalPost.mediaItems && originalPost.mediaItems.length > 0);
+                                        const hasRealMedia = Boolean((originalPost.mediaUrl && originalPost.mediaUrl.trim() !== '') || (originalPost.mediaItems && originalPost.mediaItems.length > 0));
                                         
                                         if (hasRealMedia) {
                                             // Shared post with media - Instagram style: blurred background with centered card
@@ -1645,22 +1810,29 @@ export default function StoriesPage() {
                                                 <div
                                                     className="w-full h-full flex flex-col items-center justify-center relative p-6"
                                                     style={{
-                                                        // Blurred background using the post image - this is the reclipper's story space
-                                                        backgroundImage: `url(${mediaUrl})`,
-                                                        backgroundSize: 'cover',
-                                                        backgroundPosition: 'center',
-                                                        backgroundRepeat: 'no-repeat'
+                                                        background: sharedStoryBackdrop.gradient || SHARED_STORY_DEFAULT_GRADIENT,
                                                     }}
                                                 >
-                                                    {/* Blurred background overlay - creates the outer story frame */}
-                                                    <div 
-                                                        className="absolute inset-0"
-                                                        style={{
-                                                            backdropFilter: 'blur(25px)',
-                                                            WebkitBackdropFilter: 'blur(25px)',
-                                                            backgroundColor: 'rgba(0, 0, 0, 0.4)'
-                                                        }}
-                                                    />
+                                                    {mediaIsVideo ? (
+                                                        <video
+                                                            src={mediaUrl}
+                                                            className="absolute inset-0 w-full h-full object-cover scale-110 opacity-70 pointer-events-none"
+                                                            style={{ filter: 'blur(46px)' }}
+                                                            autoPlay
+                                                            muted
+                                                            loop
+                                                            playsInline
+                                                        />
+                                                    ) : sharedStoryBackdrop.imageUrl ? (
+                                                        <img
+                                                            src={sharedStoryBackdrop.imageUrl}
+                                                            alt=""
+                                                            aria-hidden
+                                                            className="absolute inset-0 w-full h-full object-cover scale-110 opacity-70 pointer-events-none"
+                                                            style={{ filter: 'blur(46px)' }}
+                                                        />
+                                                    ) : null}
+                                                    <div className="absolute inset-0 bg-black/40 pointer-events-none" />
                                                     
                                                     {/* Container for card and attribution - centered column */}
                                                     <div className="relative z-10 flex flex-col items-center">
@@ -2126,10 +2298,17 @@ export default function StoriesPage() {
                                             }
                                             
                                             // Render link stickers (clickable)
-                                            if (overlay.linkUrl && overlay.textContent) {
-                                                const fontSize = overlay.fontSize === 'small' ? 'text-sm' :
-                                                    overlay.fontSize === 'large' ? 'text-lg' : 'text-base';
+                                            if (overlay.linkUrl) {
                                                 const scale = overlay.scale || 1;
+                                                const linkLabel = (() => {
+                                                    const explicit = (overlay.linkName || overlay.textContent || '').trim();
+                                                    if (explicit) return explicit;
+                                                    try {
+                                                        return new URL(overlay.linkUrl || '').hostname.replace(/^www\./i, '');
+                                                    } catch {
+                                                        return 'Shop now';
+                                                    }
+                                                })();
                                                 return (
                                                     <a
                                                         key={overlay.id}
@@ -2147,18 +2326,22 @@ export default function StoriesPage() {
                                                         onClick={(e) => e.stopPropagation()}
                                                     >
                                                         <div
-                                                            className={`font-bold text-center ${fontSize} px-3 py-2 rounded-lg bg-blue-500/90 backdrop-blur-sm border-2 border-white/50 hover:bg-blue-600 transition-colors flex items-center gap-1.5 justify-center shadow-lg`}
+                                                            className="font-semibold text-center rounded-lg overflow-hidden transition-transform active:scale-[0.97] flex items-center gap-0 justify-center shadow-[0_6px_14px_rgba(0,0,0,0.2)] max-w-[86vw] bg-white border border-black/10"
                                                             style={{
-                                                                color: '#FFFFFF',
-                                                                textShadow: '1px 1px 4px rgba(0,0,0,0.8)',
-                                                                whiteSpace: 'nowrap'
+                                                                color: '#111111',
+                                                                whiteSpace: 'nowrap',
+                                                                maxWidth: '22rem'
                                                             }}
                                                         >
-                                                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                                                                <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
-                                                                <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
-                                                            </svg>
-                                                            {overlay.textContent}
+                                                            <span className="inline-flex h-8 w-8 items-center justify-center shrink-0 bg-[#EAF4FF] text-[#138CFF] rounded-l-lg">
+                                                                <FiLink className="w-3.5 h-3.5" />
+                                                            </span>
+                                                            <span
+                                                                className="truncate max-w-[15.5rem] px-3 tracking-[-0.01em]"
+                                                                style={{ fontFamily: 'Inter, system-ui, sans-serif', fontSize: '15px', lineHeight: 1, fontWeight: 600 }}
+                                                            >
+                                                                {linkLabel}
+                                                            </span>
                                                         </div>
                                                     </a>
                                                 );
@@ -3091,9 +3274,9 @@ export default function StoriesPage() {
                     {/* Header with user info - Instagram style */}
                     <div className="absolute top-3 left-0 right-0 px-4 z-50" data-story-interactive>
                         <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3 flex-1">
+                            <div className="flex items-center gap-3 flex-1 min-w-0 pr-2">
                                 <div 
-                                    className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity flex-1"
+                                    className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity flex-1 min-w-0"
                                     data-story-header-avatar="true"
                                     onClick={handleStoryAvatarTap}
                                 >
@@ -3110,21 +3293,25 @@ export default function StoriesPage() {
                                         )}
                                     </div>
                                     <div className="flex flex-col gap-0.5 min-w-0">
-                                        <div className="flex items-center gap-1.5 min-w-0">
-                                            <p className="text-white font-semibold text-sm truncate">{currentGroup?.userHandle}</p>
-                                            <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${currentStoryAudienceBadgeClass}`}>
-                                                {currentStoryAudienceLabel}
-                                            </span>
+                                        <div className="flex items-center gap-1.5 min-w-0 max-w-[min(55vw,16rem)]">
+                                            <p className="text-white font-semibold text-sm truncate max-w-full">{currentGroup?.userHandle}</p>
                                         </div>
                                         {/* Metadata carousel: location → venue → timestamp (collapsible for cleaner header) */}
-                                        {metadataExpanded && storyMetadataItems.length > 0 ? (() => {
+                                        {storyMetadataItems.length > 0 ? (() => {
                                             const current = storyMetadataItems[storyMetadataIndex];
                                             if (!current) {
                                                 return currentStory?.createdAt ? (
                                                     <p className="text-white/70 text-xs">{getTimeAgo(currentStory.createdAt)}</p>
                                                 ) : null;
                                             }
-                                            const Icon = current.type === 'location' ? FiMapPin : current.type === 'venue' ? FiHome : FiClock;
+                                            const Icon =
+                                                current.type === 'location'
+                                                    ? FiMapPin
+                                                    : current.type === 'venue'
+                                                        ? FiHome
+                                                        : current.type === 'audience'
+                                                            ? FiUsers
+                                                            : FiClock;
                                             return (
                                                 <div
                                                     className="flex items-center gap-0.5 min-w-0 max-w-[110px] min-h-[1rem] overflow-hidden"
@@ -3145,19 +3332,6 @@ export default function StoriesPage() {
                                             <p className="text-white/70 text-xs">{getTimeAgo(currentStory.createdAt)}</p>
                                         ) : null}
                                     </div>
-                                    {storyMetadataItems.length > 1 && (
-                                        <button
-                                            type="button"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                setMetadataExpanded((v) => !v);
-                                            }}
-                                            className="shrink-0 p-1 rounded-full bg-black/35 border border-white/20 text-white/85 hover:bg-black/55 transition-colors"
-                                            aria-label={metadataExpanded ? 'Collapse metadata' : 'Expand metadata'}
-                                        >
-                                            {metadataExpanded ? <FiChevronUp className="w-3.5 h-3.5" /> : <FiChevronDown className="w-3.5 h-3.5" />}
-                                        </button>
-                                    )}
                                 </div>
                                 
                                 {/* Follow/Following button */}
@@ -3314,7 +3488,7 @@ export default function StoriesPage() {
                                     </button>
                                 )}
                             </div>
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex items-center gap-1.5 shrink-0">
                                     <button
                                         type="button"
                                         onPointerDown={(e) => e.stopPropagation()}
@@ -4574,7 +4748,7 @@ export default function StoriesPage() {
                             
                             // If it's a shared post, show the original post format
                             if (story.sharedFromPost && originalPost) {
-                                const hasRealMedia = (originalPost.mediaUrl && originalPost.mediaUrl.trim() !== '' && !originalPost.mediaUrl.startsWith('data:image')) || (originalPost.mediaItems && originalPost.mediaItems.length > 0);
+                                const hasRealMedia = Boolean((originalPost.mediaUrl && originalPost.mediaUrl.trim() !== '') || (originalPost.mediaItems && originalPost.mediaItems.length > 0));
                                 
                                 if (hasRealMedia) {
                                     // Shared post with media
