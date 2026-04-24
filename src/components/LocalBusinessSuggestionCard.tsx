@@ -43,6 +43,7 @@ type BusinessCardModel = {
   post?: Post;
   isFollowing?: boolean;
   isOwn?: boolean;
+  canViewProfile?: boolean;
 };
 
 function normalizeHandle(v: string | null | undefined): string {
@@ -90,21 +91,34 @@ export default function LocalBusinessSuggestionCard({
   );
 
   const businessCards: BusinessCardModel[] = React.useMemo(() => {
+    const isBusinessAuthor = (post: Post) => post.userAccountType === 'business';
+
     if (useMockBusinesses) {
+      const viewer = normalizeHandle(viewerHandle);
+      const businessSources = posts.filter((post) => {
+        const handle = normalizeHandle(post.userHandle);
+        if (!handle || handle === viewer) return false;
+        return isBusinessAuthor(post);
+      });
+      const sourcePool = businessSources;
+
       return mockBusinesses.map((mock, idx) => {
-        const source = posts[idx % posts.length];
+        const source = sourcePool.length > 0 ? sourcePool[idx % sourcePool.length] : undefined;
         return {
           ...mock,
           avatarSrc: mockBusinessAvatar(mock.name),
-          handle: undefined,
+          // Mock cards should still open a profile when tapping "View".
+          // Prefer business-like authors and never route to the current viewer.
+          handle: source?.userHandle,
           postId: source ? String(source.id) : undefined,
           post: source,
           isFollowing: false,
           isOwn: false,
+          canViewProfile: Boolean(source?.userHandle),
         };
       });
     }
-    return posts.slice(0, 8).map((post) => {
+    return posts.filter((post) => isBusinessAuthor(post)).slice(0, 8).map((post) => {
       const own = normalizeHandle(post.userHandle) === normalizeHandle(viewerHandle);
       return {
       id: String(post.id),
@@ -116,12 +130,14 @@ export default function LocalBusinessSuggestionCard({
       post,
       isFollowing: post.isFollowing,
       isOwn: own,
+      canViewProfile: Boolean(post.userHandle) && !own,
     };
     });
   }, [useMockBusinesses, mockBusinesses, posts, userLocal, viewerHandle]);
   const visibleBusinessCards = React.useMemo(
     () =>
       businessCards.filter((card) => {
+        if (!card.canViewProfile) return false;
         const key = normalizeHandle(card.handle);
         return !key || !locallyHiddenBusinesses.has(key);
       }),
@@ -173,6 +189,11 @@ export default function LocalBusinessSuggestionCard({
         <span className="shrink-0 text-xs font-semibold text-[#8ab4ff]">Suggested</span>
       </div>
 
+      {visibleBusinessCards.length === 0 ? (
+        <div className="rounded-2xl border border-[#30363d] bg-[#0d1318] px-3 py-4 text-center">
+          <p className="text-[12px] text-[#bdbdbd]">No business profiles available right now.</p>
+        </div>
+      ) : (
       <div className="flex gap-2.5 overflow-x-auto pb-1 scrollbar-hide">
         {visibleBusinessCards.map((card, idx) => {
           const isSponsored = Boolean(pinnedPaidPostId && card.postId && card.postId === pinnedPaidPostId);
@@ -190,6 +211,7 @@ export default function LocalBusinessSuggestionCard({
               <button
                 type="button"
                 onClick={() => {
+                  if (!card.canViewProfile) return;
                   emitSuggestedPlacesAnalytics({
                     action: 'business_card_profile_open',
                     businessKey: card.id,
@@ -201,7 +223,8 @@ export default function LocalBusinessSuggestionCard({
                     jumpToPost(card.postId);
                   }
                 }}
-                className="w-full"
+                className="w-full disabled:cursor-not-allowed"
+                disabled={!card.canViewProfile}
               >
                 <div className="mb-2.5 flex justify-center">
                   <Avatar src={card.avatarSrc} name={card.name} size={94} className="!rounded-full ring-1 ring-white/10" />
@@ -216,9 +239,9 @@ export default function LocalBusinessSuggestionCard({
               </button>
               <button
                 type="button"
-                disabled={card.isOwn}
+                disabled={card.isOwn || !card.canViewProfile}
                 onClick={() => {
-                  if (card.isOwn) return;
+                  if (card.isOwn || !card.canViewProfile) return;
                   emitSuggestedPlacesAnalytics({
                     action: 'business_card_profile_open',
                     businessKey: card.id,
@@ -291,6 +314,7 @@ export default function LocalBusinessSuggestionCard({
           );
         })}
       </div>
+      )}
       {lastHiddenBusiness && (
         <div className="mt-2 flex items-center justify-between rounded-xl border border-[#363636] bg-black/35 px-2.5 py-2 text-[11px]">
           <span className="text-[#bdbdbd] truncate pr-3">Business hidden</span>
