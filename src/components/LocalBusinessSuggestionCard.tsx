@@ -65,7 +65,6 @@ export default function LocalBusinessSuggestionCard({
   onLikeBusiness,
 }: LocalBusinessSuggestionCardProps) {
   const navigate = useNavigate();
-  const [followBusyId, setFollowBusyId] = React.useState<string | null>(null);
   const [locallyHiddenBusinesses, setLocallyHiddenBusinesses] = React.useState<Set<string>>(new Set());
   const [lastHiddenBusiness, setLastHiddenBusiness] = React.useState<string | null>(null);
   const cardRefs = React.useRef<Record<string, HTMLElement | null>>({});
@@ -176,7 +175,6 @@ export default function LocalBusinessSuggestionCard({
 
       <div className="flex gap-2.5 overflow-x-auto pb-1 scrollbar-hide">
         {visibleBusinessCards.map((card, idx) => {
-          const busy = followBusyId === card.id;
           const isSponsored = Boolean(pinnedPaidPostId && card.postId && card.postId === pinnedPaidPostId);
           return (
             <article
@@ -218,28 +216,32 @@ export default function LocalBusinessSuggestionCard({
               </button>
               <button
                 type="button"
-                disabled={busy || card.isOwn}
-                onClick={async () => {
-                  if (!card.post || !onFollowPost || card.isOwn) return;
+                disabled={card.isOwn}
+                onClick={() => {
+                  if (card.isOwn) return;
                   emitSuggestedPlacesAnalytics({
-                    action: 'business_card_follow_click',
+                    action: 'business_card_profile_open',
                     businessKey: card.id,
                     postId: card.postId,
                   });
-                  setFollowBusyId(card.id);
-                  try {
-                    await onFollowPost(card.post);
-                  } finally {
-                    setFollowBusyId((cur) => (cur === card.id ? null : cur));
+                  if (card.handle) {
+                    navigate(`/user/${card.handle}`);
+                  } else if (card.postId) {
+                    jumpToPost(card.postId);
                   }
                 }}
                 className={`mt-3 w-full rounded-xl py-2 text-sm font-semibold transition-colors disabled:opacity-60 ${
-                  card.isFollowing
+                  card.isOwn
                     ? 'border border-[#3a3a3a] bg-transparent text-white hover:bg-white/5'
-                    : 'bg-[#4f68ff] text-white hover:bg-[#6077ff]'
+                    : 'border-2 border-white text-[#111111] shadow-[0_2px_8px_rgba(212,175,55,0.45)]'
                 }`}
+                style={
+                  card.isOwn
+                    ? undefined
+                    : { background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 24%, #f4f4f4 48%, #bfc5cc 72%, #ffe8a3 100%)' }
+                }
               >
-                {busy ? 'Saving…' : card.isOwn ? 'You' : card.isFollowing ? 'Following' : 'Follow'}
+                {card.isOwn ? 'You' : 'View'}
               </button>
               <div className="mt-1.5 inline-flex items-center gap-1 text-[10px] text-[#8e8e8e]">
                 <FiMapPin className="h-3 w-3" />
