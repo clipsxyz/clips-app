@@ -1,5 +1,6 @@
 import raw from '../data/posts.json';
 import type { Post, Comment, StickerOverlay } from '../types';
+import { evaluateCommentModeration } from '../utils/commentModeration';
 import { isLaravelApiEnabled, isViteDevMode } from '../config/runtimeEnv';
 import * as apiClient from './client';
 import { randomUUID } from '../utils/uuid';
@@ -1833,6 +1834,17 @@ export type CommentsPage = {
   hasMore: boolean;
 };
 
+export type HiddenCommentReviewItem = {
+  id: string;
+  postId: string;
+  userHandle: string;
+  text: string;
+  createdAt: number;
+  moderationReason?: string;
+  isReply?: boolean;
+  parentId?: string;
+};
+
 function mapLaravelCommentToComment(raw: any): Comment {
   const mappedReplies: Comment[] = Array.isArray(raw?.replies)
     ? raw.replies.map((r: any) => ({
@@ -1938,6 +1950,7 @@ export async function addComment(postId: string, userHandle: string, text: strin
   if (useLaravelAPI) {
     try {
       const response = await apiClient.addComment(postId, text);
+      const moderation = evaluateCommentModeration(response.text || response.text_content || text);
       // Transform Laravel comment response to frontend format
       return {
         id: response.id,
@@ -1946,7 +1959,9 @@ export async function addComment(postId: string, userHandle: string, text: strin
         text: response.text || response.text_content,
         userLiked: false,
         createdAt: new Date(response.created_at || response.createdAt).getTime(),
-        likes: response.likes_count || response.likes || 0
+        likes: response.likes_count || response.likes || 0,
+        moderationState: moderation.level === 'hide' ? 'hidden_by_filter' : 'visible',
+        moderationReason: moderation.matched[0]
       };
     } catch (error: any) {
       // Only log if it's not a connection refused error (backend not running)
@@ -1960,6 +1975,7 @@ export async function addComment(postId: string, userHandle: string, text: strin
   // Mock implementation (fallback)
   await delay(300);
   console.log('addComment called:', { postId, userHandle, text, postsCount: posts.length });
+  const moderation = evaluateCommentModeration(text);
 
   const comment: Comment = {
     id: randomUUID(),
@@ -1969,6 +1985,8 @@ export async function addComment(postId: string, userHandle: string, text: strin
     createdAt: Date.now(),
     likes: 0,
     userLiked: false,
+    moderationState: moderation.level === 'hide' ? 'hidden_by_filter' : 'visible',
+    moderationReason: moderation.matched[0],
   };
   comments.push(comment);
 
@@ -2052,6 +2070,7 @@ export async function toggleReplyLike(parentCommentId: string, replyId: string):
 
 export async function addReply(postId: string, parentId: string, userHandle: string, text: string): Promise<Comment> {
   await delay(300);
+  const moderation = evaluateCommentModeration(text);
   const reply: Comment = {
     id: randomUUID(),
     postId,
@@ -2061,6 +2080,8 @@ export async function addReply(postId: string, parentId: string, userHandle: str
     likes: 0,
     userLiked: false,
     parentId,
+    moderationState: moderation.level === 'hide' ? 'hidden_by_filter' : 'visible',
+    moderationReason: moderation.matched[0],
   };
 
   // Add reply to the parent comment
@@ -2074,6 +2095,130 @@ export async function addReply(postId: string, parentId: string, userHandle: str
   }
 
   return reply;
+}
+
+export async function fetchHiddenCommentsForOwner(ownerHandle: string): Promise<HiddenCommentReviewItem[]> {
+  await delay(80);
+  const normalizedOwner = String(ownerHandle || '').trim().toLowerCase();
+  if (!normalizedOwner) return [];
+  const ownerPostIds = new Set(
+    posts
+      .filter((p) => String(p.userHandle || '').trim().toLowerCase() === normalizedOwner)
+      .map((p) => String(p.id))
+  );
+  if (ownerPostIds.size === 0) return [];
+
+  const out: HiddenCommentReviewItem[] = [];
+  for (const comment of comments) {
+    if (!ownerPostIds.has(String(comment.postId))) continue;
+    if (comment.moderationState === 'hidden_by_filter') {
+      out.push({
+        id: comment.id,
+        postId: comment.postId,
+        userHandle: comment.userHandle,
+        text: comment.text,
+        createdAt: comment.createdAt,
+        moderationReason: comment.moderationReason,
+        isReply: false,
+      });
+    }
+    for (const reply of comment.replies || []) {
+      if (reply.moderationState !== 'hidden_by_filter') continue;
+      out.push({
+        id: reply.id,
+        postId: reply.postId,
+        userHandle: reply.userHandle,
+        text: reply.text,
+        createdAt: reply.createdAt,
+        moderationReason: reply.moderationReason,
+        isReply: true,
+        parentId: comment.id,
+      });
+    }
+  }
+
+  return out.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+}
+
+export async function approveHiddenComment(commentId: string): Promise<boolean> {
+  await delay(80);
+  const target = String(commentId || '').trim();
+  if (!target) return false;
+
+  for (const comment of comments) {
+    if (comment.id === target) {
+      comment.moderationState = 'visible';
+      comment.moderationReason = undefined;
+      return true;
+    }
+    for (const reply of comment.replies || []) {
+      if (reply.id === target) {
+        reply.moderationState = 'visible';
+        reply.moderationReason = undefined;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+export async function deleteHiddenComment(commentId: string): Promise<boolean> {
+  await delay(80);
+  const target = String(commentId || '').trim();
+  if (!target) return false;
+
+  const topLevelIndex = comments.findIndex((c) => c.id === target);
+  if (topLevelIndex >= 0) {
+    const targetComment = comments[topLevelIndex];
+    comments.splice(topLevelIndex, 1);
+    const post = posts.find((p) => String(p.id) === String(targetComment.postId));
+    if (post?.stats && typeof post.stats.comments === 'number') {
+      post.stats.comments = Math.max(0, post.stats.comments - 1);
+    }
+    return true;
+  }
+
+  for (const parent of comments) {
+    const replies = parent.replies || [];
+    const replyIndex = replies.findIndex((r) => r.id === target);
+    if (replyIndex >= 0) {
+      replies.splice(replyIndex, 1);
+      parent.replyCount = Math.max(0, (parent.replyCount || 0) - 1);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export async function setCommentModerationState(
+  commentId: string,
+  state: 'visible' | 'hidden_by_filter',
+  reason?: string
+): Promise<boolean> {
+  await delay(80);
+  const target = String(commentId || '').trim();
+  if (!target) return false;
+
+  for (const comment of comments) {
+    if (comment.id === target) {
+      comment.moderationState = state;
+      comment.moderationReason = state === 'hidden_by_filter' ? (reason || 'manual_moderation') : undefined;
+      return true;
+    }
+    for (const reply of comment.replies || []) {
+      if (reply.id === target) {
+        reply.moderationState = state;
+        reply.moderationReason = state === 'hidden_by_filter' ? (reason || 'manual_moderation') : undefined;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+export async function deleteCommentById(commentId: string): Promise<boolean> {
+  return deleteHiddenComment(commentId);
 }
 
 export async function createPost(

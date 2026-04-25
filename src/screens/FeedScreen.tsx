@@ -39,9 +39,13 @@ import {
     toggleCommentLike,
     toggleReplyLike,
     addReply,
+    deleteCommentById,
+    setCommentModerationState,
 } from '../api/posts';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle } from '../api/stories';
 import { getUnreadTotal } from '../api/messages';
+import { blockUser } from '../api/messages';
+import { isUserBlocked } from '../api/messages';
 import { timeAgo } from '../utils/timeAgo';
 import { enqueue, drain } from '../utils/mutationQueue';
 import type { Post, Comment } from '../types';
@@ -271,18 +275,25 @@ function CommentsModal({
     isOpen,
     onClose,
     userId,
+    currentUserHandle,
 }: {
     postId: string;
     post?: Post | null;
     isOpen: boolean;
     onClose: () => void;
     userId: string;
+    currentUserHandle?: string;
 }) {
     const [comments, setComments] = useState<Comment[]>([]);
     const [loading, setLoading] = useState(false);
     const [commentText, setCommentText] = useState('');
     const [replyingToCommentId, setReplyingToCommentId] = useState<string | null>(null);
     const [replyInputText, setReplyInputText] = useState('');
+    const [sortMode, setSortMode] = useState<'top' | 'newest'>('top');
+    const normalizedViewerHandle = String(currentUserHandle || '').trim().toLowerCase();
+    const isPostOwner =
+        Boolean(post?.userHandle) &&
+        String(post?.userHandle || '').trim().toLowerCase() === normalizedViewerHandle;
 
     useEffect(() => {
         if (isOpen && postId) {
@@ -365,6 +376,65 @@ function CommentsModal({
         }
     };
 
+    const handleModerateComment = async (commentId: string, action: 'hide' | 'unhide' | 'delete') => {
+        if (!isPostOwner) return;
+        if (action === 'delete') {
+            const ok = await deleteCommentById(commentId);
+            if (!ok) return;
+            setComments((prev) =>
+                prev
+                    .filter((comment) => comment.id !== commentId)
+                    .map((comment) => ({
+                        ...comment,
+                        replies: (comment.replies || []).filter((reply) => reply.id !== commentId),
+                        replyCount: (comment.replies || []).filter((reply) => reply.id !== commentId).length,
+                    }))
+            );
+            return;
+        }
+
+        const nextState = action === 'hide' ? 'hidden_by_filter' : 'visible';
+        const ok = await setCommentModerationState(commentId, nextState, 'creator_moderation');
+        if (!ok) return;
+        setComments((prev) =>
+            prev.map((comment) => {
+                if (comment.id === commentId) {
+                    return {
+                        ...comment,
+                        moderationState: nextState,
+                        moderationReason: nextState === 'hidden_by_filter' ? 'creator_moderation' : undefined,
+                    };
+                }
+                return {
+                    ...comment,
+                    replies: (comment.replies || []).map((reply) =>
+                        reply.id === commentId
+                            ? {
+                                ...reply,
+                                moderationState: nextState,
+                                moderationReason: nextState === 'hidden_by_filter' ? 'creator_moderation' : undefined,
+                            }
+                            : reply
+                    ),
+                };
+            })
+        );
+    };
+
+    const sortedComments = useMemo(() => {
+        const next = [...comments];
+        if (sortMode === 'newest') {
+            next.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+            return next;
+        }
+        next.sort((a, b) => {
+            const likesDelta = (b.likes || 0) - (a.likes || 0);
+            if (likesDelta !== 0) return likesDelta;
+            return (b.createdAt || 0) - (a.createdAt || 0);
+        });
+        return next;
+    }, [comments, sortMode]);
+
     if (!isOpen) return null;
 
     return (
@@ -389,16 +459,52 @@ function CommentsModal({
                         <Text style={styles.modalTitle}>
                             {comments.length} {comments.length === 1 ? 'comment' : 'comments'}
                         </Text>
-                        <TouchableOpacity onPress={onClose}>
-                            <Icon name="close" size={24} color="#FFFFFF" />
-                        </TouchableOpacity>
+                        <View style={styles.modalHeaderRight}>
+                            <View style={styles.commentSortToggle}>
+                                <TouchableOpacity
+                                    onPress={() => setSortMode('top')}
+                                    style={[
+                                        styles.commentSortButton,
+                                        sortMode === 'top' && styles.commentSortButtonActive,
+                                    ]}
+                                >
+                                    <Text
+                                        style={[
+                                            styles.commentSortButtonText,
+                                            sortMode === 'top' && styles.commentSortButtonTextActive,
+                                        ]}
+                                    >
+                                        Top
+                                    </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    onPress={() => setSortMode('newest')}
+                                    style={[
+                                        styles.commentSortButton,
+                                        sortMode === 'newest' && styles.commentSortButtonActive,
+                                    ]}
+                                >
+                                    <Text
+                                        style={[
+                                            styles.commentSortButtonText,
+                                            sortMode === 'newest' && styles.commentSortButtonTextActive,
+                                        ]}
+                                    >
+                                        Newest
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+                            <TouchableOpacity onPress={onClose}>
+                                <Icon name="close" size={24} color="#FFFFFF" />
+                            </TouchableOpacity>
+                        </View>
                     </View>
 
                     {loading ? (
                         <ActivityIndicator size="small" color="#8B5CF6" style={styles.modalLoading} />
                     ) : (
                         <FlatList
-                            data={comments}
+                            data={sortedComments}
                             keyExtractor={(item) => item.id}
                             style={styles.commentsList}
                             renderItem={({ item }) => (
@@ -413,9 +519,37 @@ function CommentsModal({
                                             <Text style={styles.commentUser}>{item.userHandle}</Text>
                                             <Text style={styles.commentTime}>{timeAgo(item.createdAt)}</Text>
                                         </View>
-                                        <Text style={styles.commentText}>{item.text}</Text>
+                                        <Text style={styles.commentText}>
+                                            {item.moderationState === 'hidden_by_filter' &&
+                                            String(item.userHandle || '').trim().toLowerCase() !== normalizedViewerHandle
+                                                ? 'Comment hidden for safety.'
+                                                : item.text}
+                                        </Text>
+                                        {isPostOwner && (
+                                            <View style={styles.moderationActionsRow}>
+                                                <TouchableOpacity
+                                                    onPress={() =>
+                                                        handleModerateComment(
+                                                            item.id,
+                                                            item.moderationState === 'hidden_by_filter' ? 'unhide' : 'hide'
+                                                        )
+                                                    }
+                                                >
+                                                    <Text style={styles.moderationActionText}>
+                                                        {item.moderationState === 'hidden_by_filter' ? 'Unhide' : 'Hide'}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                                <TouchableOpacity onPress={() => handleModerateComment(item.id, 'delete')}>
+                                                    <Text style={styles.moderationDeleteText}>Delete</Text>
+                                                </TouchableOpacity>
+                                            </View>
+                                        )}
                                         <View style={styles.commentActionsRow}>
                                             <TouchableOpacity
+                                                disabled={
+                                                    item.moderationState === 'hidden_by_filter' &&
+                                                    String(item.userHandle || '').trim().toLowerCase() !== normalizedViewerHandle
+                                                }
                                                 onPress={() => {
                                                     setReplyingToCommentId(
                                                         replyingToCommentId === item.id ? null : item.id
@@ -429,6 +563,10 @@ function CommentsModal({
                                             </TouchableOpacity>
                                             <TouchableOpacity
                                                 style={styles.commentLikeRow}
+                                                disabled={
+                                                    item.moderationState === 'hidden_by_filter' &&
+                                                    String(item.userHandle || '').trim().toLowerCase() !== normalizedViewerHandle
+                                                }
                                                 onPress={() => handleToggleCommentLike(item.id)}
                                             >
                                                 <Icon
@@ -462,10 +600,36 @@ function CommentsModal({
                                                                 </Text>
                                                             </View>
                                                             <Text style={styles.replyText}>
-                                                                {reply.text}
+                                                                {reply.moderationState === 'hidden_by_filter' &&
+                                                                String(reply.userHandle || '').trim().toLowerCase() !== normalizedViewerHandle
+                                                                    ? 'Comment hidden for safety.'
+                                                                    : reply.text}
                                                             </Text>
+                                                            {isPostOwner && (
+                                                                <View style={styles.moderationActionsRow}>
+                                                                    <TouchableOpacity
+                                                                        onPress={() =>
+                                                                            handleModerateComment(
+                                                                                reply.id,
+                                                                                reply.moderationState === 'hidden_by_filter' ? 'unhide' : 'hide'
+                                                                            )
+                                                                        }
+                                                                    >
+                                                                        <Text style={styles.moderationActionText}>
+                                                                            {reply.moderationState === 'hidden_by_filter' ? 'Unhide' : 'Hide'}
+                                                                        </Text>
+                                                                    </TouchableOpacity>
+                                                                    <TouchableOpacity onPress={() => handleModerateComment(reply.id, 'delete')}>
+                                                                        <Text style={styles.moderationDeleteText}>Delete</Text>
+                                                                    </TouchableOpacity>
+                                                                </View>
+                                                            )}
                                                             <TouchableOpacity
                                                                 style={styles.replyLikeRow}
+                                                                disabled={
+                                                                    reply.moderationState === 'hidden_by_filter' &&
+                                                                    String(reply.userHandle || '').trim().toLowerCase() !== normalizedViewerHandle
+                                                                }
                                                                 onPress={() =>
                                                                     handleToggleReplyLike(item.id, reply.id)
                                                                 }
@@ -614,6 +778,8 @@ const FeedCard = React.memo(function FeedCard({
     onPostPress,
     onVisitProfile,
     onViewStories,
+    onBlockUser,
+    onReportUser,
     onNotificationsPress,
     unreadCount,
     hasInbox,
@@ -630,6 +796,8 @@ const FeedCard = React.memo(function FeedCard({
     onPostPress?: () => void;
     onVisitProfile?: () => void;
     onViewStories?: () => void;
+    onBlockUser?: () => Promise<void>;
+    onReportUser?: () => Promise<void>;
     onNotificationsPress?: () => void;
     unreadCount?: number;
     hasInbox?: boolean;
@@ -833,6 +1001,30 @@ const FeedCard = React.memo(function FeedCard({
                             <Text style={styles.profileMenuItemText}>View stories</Text>
                         </TouchableOpacity>
                     )}
+                    {!isCurrentUser && onBlockUser && (
+                        <TouchableOpacity
+                            style={styles.profileMenuItem}
+                            onPress={async () => {
+                                setProfileMenuVisible(false);
+                                await onBlockUser();
+                            }}
+                        >
+                            <Icon name="ban-outline" size={18} color="#FCA5A5" />
+                            <Text style={[styles.profileMenuItemText, { color: '#FCA5A5' }]}>Block user</Text>
+                        </TouchableOpacity>
+                    )}
+                    {!isCurrentUser && onReportUser && (
+                        <TouchableOpacity
+                            style={styles.profileMenuItem}
+                            onPress={async () => {
+                                setProfileMenuVisible(false);
+                                await onReportUser();
+                            }}
+                        >
+                            <Icon name="flag-outline" size={18} color="#FDE68A" />
+                            <Text style={[styles.profileMenuItemText, { color: '#FDE68A' }]}>Report</Text>
+                        </TouchableOpacity>
+                    )}
                 </View>
             )}
         </TouchableOpacity>
@@ -861,6 +1053,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [unreadCount, setUnreadCount] = useState(0);
     const [hasInbox, setHasInbox] = useState(false);
     const [reloadTick, setReloadTick] = useState(0);
+    const [showBoostPrompt, setShowBoostPrompt] = useState(false);
     const requestTokenRef = useRef(0);
 
     const currentFilter = showFollowingFeed ? 'discover' : active;
@@ -871,6 +1064,22 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             page.map(p => p.id === postId ? updater(p) : p)
         ));
     };
+
+    const hideUserFromFeed = React.useCallback((handleToHide: string) => {
+        const normalized = String(handleToHide || '').trim().toLowerCase();
+        if (!normalized) return;
+        setPages((prev) =>
+            prev
+                .map((page) => page.filter((p) => String(p.userHandle || '').trim().toLowerCase() !== normalized))
+                .filter((page) => page.length > 0)
+        );
+        setSelectedPostForComments((prev) =>
+            prev && String(prev.userHandle || '').trim().toLowerCase() === normalized ? null : prev
+        );
+        setSelectedPostForShare((prev) =>
+            prev && String(prev.userHandle || '').trim().toLowerCase() === normalized ? null : prev
+        );
+    }, []);
 
     useEffect(() => {
         if (user?.national) {
@@ -987,10 +1196,21 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 return;
             }
 
-            if (page.items.length === 0) {
+            let visibleItems = page.items;
+            if (user?.handle) {
+                const checks = await Promise.all(
+                    page.items.map(async (item) => {
+                        const blocked = await isUserBlocked(user.handle, item.userHandle);
+                        return { item, blocked };
+                    })
+                );
+                visibleItems = checks.filter((row) => !row.blocked).map((row) => row.item);
+            }
+
+            if (visibleItems.length === 0) {
                 setEnd(true);
             } else {
-                setPages(prev => [...prev, page.items]);
+                setPages(prev => [...prev, visibleItems]);
                 setCursor(page.nextCursor);
             }
         } catch (err) {
@@ -1133,6 +1353,24 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             onPostPress={() => navigation.navigate('PostDetail', { postId: post.id })}
             onVisitProfile={() => navigation.navigate('ViewProfile', { handle: post.userHandle })}
             onViewStories={() => navigation.navigate('Stories', { openUserHandle: post.userHandle })}
+            onBlockUser={async () => {
+                if (!user?.handle) return;
+                Alert.alert('Block user?', `Hide ${post.userHandle} from your feed?`, [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                        text: 'Block',
+                        style: 'destructive',
+                        onPress: async () => {
+                            await blockUser(user.handle, post.userHandle);
+                            hideUserFromFeed(post.userHandle);
+                            Alert.alert('Blocked', `${post.userHandle} was blocked and removed from your feed.`);
+                        },
+                    },
+                ]);
+            }}
+            onReportUser={async () => {
+                Alert.alert('Reported', 'Thanks for reporting. We will review this content.');
+            }}
             onNotificationsPress={() => navigation.navigate('Inbox')}
             unreadCount={unreadCount}
             hasInbox={hasInbox}
@@ -1145,7 +1383,23 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             <View style={styles.stickyTabsContainer}>
                 <View style={styles.scrim} />
                 <View style={styles.feedHeaderTopRow}>
-                    <Text style={styles.gazetteerText}>Gazetteer</Text>
+                    <View style={styles.topHeaderRow}>
+                        <Text style={styles.gazetteerText}>Gazetteer</Text>
+                        <View style={styles.topHeaderActions}>
+                            <TouchableOpacity style={[styles.headerMiniAction, styles.storiesHeaderAction]} onPress={() => navigation.navigate('Stories')}>
+                                <Icon name="location" size={15} color="#D4AF37" />
+                                <Text style={styles.storiesHeaderActionText}>Stories 24</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.headerMiniAction} onPress={() => navigation.navigate('CreateComposer', { addYours: true })}>
+                                <Icon name="add-circle-outline" size={16} color="#F9FAFB" />
+                                <Text style={styles.headerMiniActionText}>Add Yours</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.headerMiniAction, styles.boostHeaderAction]} onPress={() => setShowBoostPrompt(true)}>
+                                <Icon name="flash" size={16} color="#111827" />
+                                <Text style={[styles.headerMiniActionText, { color: '#111827' }]}>Boost</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
                 </View>
                 <PillTabs
                     active={showFollowingFeed ? 'Following' : active}
@@ -1212,6 +1466,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     setSelectedPostForComments(null);
                 }}
                 userId={userId}
+                currentUserHandle={user?.handle}
             />
 
             {/* Share Modal */}
@@ -1223,6 +1478,29 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     setSelectedPostForShare(null);
                 }}
             />
+
+            <Modal visible={showBoostPrompt} transparent animationType="fade" onRequestClose={() => setShowBoostPrompt(false)}>
+                <View style={styles.modalOverlay}>
+                    <View style={styles.boostPromptCard}>
+                        <Text style={styles.boostPromptTitle}>Boost your posts</Text>
+                        <Text style={styles.boostPromptText}>Reach more people in local, regional, and national feeds.</Text>
+                        <View style={styles.boostPromptActions}>
+                            <TouchableOpacity style={styles.boostPromptSecondaryBtn} onPress={() => setShowBoostPrompt(false)}>
+                                <Text style={styles.boostPromptSecondaryText}>Cancel</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.boostPromptPrimaryBtn}
+                                onPress={() => {
+                                    setShowBoostPrompt(false);
+                                    navigation.navigate('Boost');
+                                }}
+                            >
+                                <Text style={styles.boostPromptPrimaryText}>Open Boost</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 };
@@ -1245,9 +1523,49 @@ const styles = StyleSheet.create({
     feedHeaderTopRow: {
         paddingTop: 12,
         paddingBottom: 4,
-        alignItems: 'center',
+        alignItems: 'stretch',
         justifyContent: 'center',
         zIndex: 1,
+        paddingHorizontal: 12,
+    },
+    topHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    topHeaderActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    headerMiniAction: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: '#374151',
+        backgroundColor: '#111827',
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+    },
+    boostHeaderAction: {
+        borderColor: '#FDE68A',
+        backgroundColor: '#FBBF24',
+    },
+    headerMiniActionText: {
+        color: '#F9FAFB',
+        fontSize: 11,
+        fontWeight: '700',
+    },
+    storiesHeaderAction: {
+        borderColor: '#6B7280',
+        backgroundColor: '#0B1220',
+    },
+    storiesHeaderActionText: {
+        color: '#E5E7EB',
+        fontSize: 11,
+        fontWeight: '700',
     },
     scrim: {
         position: 'absolute',
@@ -1632,6 +1950,36 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
         borderBottomColor: '#1F2937',
     },
+    modalHeaderRight: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        columnGap: 8,
+    },
+    commentSortToggle: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#111827',
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#374151',
+        padding: 2,
+    },
+    commentSortButton: {
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 6,
+    },
+    commentSortButtonActive: {
+        backgroundColor: '#8B5CF6',
+    },
+    commentSortButtonText: {
+        fontSize: 11,
+        color: '#9CA3AF',
+        fontWeight: '600',
+    },
+    commentSortButtonTextActive: {
+        color: '#FFFFFF',
+    },
     modalTitle: {
         fontSize: 18,
         fontWeight: 'bold',
@@ -1673,6 +2021,22 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: '#D1D5DB',
         marginBottom: 8,
+    },
+    moderationActionsRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        columnGap: 12,
+        marginBottom: 8,
+    },
+    moderationActionText: {
+        fontSize: 11,
+        color: '#9CA3AF',
+        fontWeight: '600',
+    },
+    moderationDeleteText: {
+        fontSize: 11,
+        color: '#F87171',
+        fontWeight: '600',
     },
     commentActionsRow: {
         flexDirection: 'row',
@@ -1788,6 +2152,56 @@ const styles = StyleSheet.create({
     shareOptionText: {
         fontSize: 16,
         color: '#FFFFFF',
+    },
+    boostPromptCard: {
+        margin: 24,
+        backgroundColor: '#030712',
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: '#374151',
+        padding: 16,
+        gap: 10,
+    },
+    boostPromptTitle: {
+        color: '#FFFFFF',
+        fontSize: 18,
+        fontWeight: '800',
+    },
+    boostPromptText: {
+        color: '#D1D5DB',
+        fontSize: 13,
+        lineHeight: 18,
+    },
+    boostPromptActions: {
+        flexDirection: 'row',
+        gap: 8,
+        marginTop: 4,
+    },
+    boostPromptSecondaryBtn: {
+        flex: 1,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#374151',
+        backgroundColor: '#111827',
+        paddingVertical: 10,
+        alignItems: 'center',
+    },
+    boostPromptSecondaryText: {
+        color: '#E5E7EB',
+        fontSize: 13,
+        fontWeight: '700',
+    },
+    boostPromptPrimaryBtn: {
+        flex: 1,
+        borderRadius: 10,
+        backgroundColor: '#FBBF24',
+        paddingVertical: 10,
+        alignItems: 'center',
+    },
+    boostPromptPrimaryText: {
+        color: '#111827',
+        fontSize: 13,
+        fontWeight: '800',
     },
 });
 

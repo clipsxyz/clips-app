@@ -18,9 +18,11 @@ import {
     markConversationRead,
     deleteConversation,
     blockUser,
+    unblockUser,
     muteConversation,
     unmuteConversation,
     isConversationMuted,
+    isUserBlocked,
     fetchGroupThread,
     fetchGroupThreadMessagesPage,
     markGroupConversationReadById,
@@ -607,6 +609,7 @@ export default function MessagesPage() {
     // Chat info modal state
     const [showChatInfo, setShowChatInfo] = useState(false);
     const [isMuted, setIsMuted] = useState(false);
+    const [isBlocked, setIsBlocked] = useState(false);
     /** Sent bubble: iMessage blue vs SMS green (persisted). */
     const [dmSentStyle, setDmSentStyle] = useState<DmSentBubbleStyle>(() => getDmSentBubblePreference());
     const sentBubbleBg = dmSentBubbleBgClass(dmSentStyle);
@@ -1060,6 +1063,20 @@ export default function MessagesPage() {
         }
 
         checkMuted();
+    }, [handle, user?.handle]);
+
+    // Check if conversation user is blocked
+    React.useEffect(() => {
+        async function checkBlocked() {
+            if (!handle || !user?.handle) return;
+            try {
+                const blocked = await isUserBlocked(user.handle, handle);
+                setIsBlocked(blocked);
+            } catch (error) {
+                console.error('Error checking blocked status:', error);
+            }
+        }
+        checkBlocked();
     }, [handle, user?.handle]);
 
     // Listen to Socket.IO events (connection is handled globally in Auth context)
@@ -2220,8 +2237,8 @@ export default function MessagesPage() {
     return (
         <div className="min-h-screen bg-black text-white flex flex-col">
             {/* Header */}
-            <div className="sticky top-0 bg-black border-b border-white/[0.08] z-10">
-                <div className={`flex items-center ${compactPhone ? 'px-2.5 py-2.5' : 'px-4 py-3'}`}>
+            <div className="sticky top-0 z-[120] isolate bg-black/95 backdrop-blur-md border-b border-white/[0.08]">
+                <div className={`relative z-10 flex items-center ${compactPhone ? 'px-2.5 py-2.5' : 'px-4 py-3'}`}>
                     <button
                         onClick={() => navigate(-1)}
                         className={`${compactPhone ? 'p-1.5' : 'p-2'} hover:bg-gray-900 rounded-full transition-colors`}
@@ -2583,13 +2600,18 @@ export default function MessagesPage() {
                                                     }
                                                 }
                                                 
+                                                const isMediaOnlyMessage = Boolean(msg.imageUrl && !msg.text && !msg.audioUrl && !msg.replyTo);
                                                 return (
                                                     <div className={`flex items-end gap-2 ml-auto ${compactPhone ? 'max-w-[82%]' : 'max-w-[75%]'}`}>
                                                         <div className="flex flex-col items-end gap-1 min-w-0 flex-1">
                                                             <IMessageDmBubbleShell
                                                                 isFromMe
                                                                 tailBgClassName={sentBubbleBg}
-                                                                bubbleClassName={`${sentBubbleBg} break-words cursor-pointer select-none relative text-[15px] leading-snug antialiased ${compactPhone ? 'px-3.5 py-2' : 'px-4 py-2.5'}`}
+                                                                bubbleClassName={`break-words cursor-pointer select-none relative text-[15px] leading-snug antialiased ${
+                                                                    isMediaOnlyMessage
+                                                                        ? 'bg-transparent p-0 shadow-none'
+                                                                        : `${sentBubbleBg} ${compactPhone ? 'px-3.5 py-2' : 'px-4 py-2.5'}`
+                                                                }`}
                                                                 data-message-bubble-id={msg.id}
                                                                 bubbleStyle={{
                                                                 maxWidth: '100%',
@@ -2597,7 +2619,7 @@ export default function MessagesPage() {
                                                                 overflowWrap: 'break-word',
                                                                 transform: swipingMessageId === msg.id ? `translateX(${swipeOffset}px)` : 'translateX(0)',
                                                                 transition: swipeOffset === 0 ? 'transform 0.2s' : 'none',
-                                                                paddingBottom: messageReactions[msg.id] && messageReactions[msg.id].length > 0 ? '20px' : '10px'
+                                                                paddingBottom: messageReactions[msg.id] && messageReactions[msg.id].length > 0 ? '20px' : (isMediaOnlyMessage ? '0px' : '10px')
                                                             }}
                                                             onContextMenu={(e) => handleMessageContextMenu(msg, e)}
                                                             onTouchStart={(e) => handleTouchStart(msg, e)}
@@ -2637,10 +2659,14 @@ export default function MessagesPage() {
                                                                 </div>
                                                             )}
                                                             {msg.imageUrl && (
-                                                                <div className="relative mb-2 -mx-2 -mt-2 first:mt-0">
-                                                                    <img src={msg.imageUrl} alt="Sent image" className="max-w-full rounded-t-2xl rounded-tr-sm" />
+                                                                <div className={`relative overflow-hidden ${
+                                                                    isMediaOnlyMessage
+                                                                        ? 'rounded-[18px]'
+                                                                        : 'mb-2 -mx-2 -mt-2 first:mt-0 rounded-t-2xl rounded-tr-sm'
+                                                                }`}>
+                                                                    <img src={msg.imageUrl} alt="Sent image" className="block w-full max-w-full max-h-[380px] object-contain bg-black/10" />
                                                                     {msg.imageUrl && wasEverAStory(msg.imageUrl) && storyActiveByUrl[msg.imageUrl] === false && (
-                                                                        <div className="absolute inset-0 bg-black/50 rounded-t-2xl rounded-tr-sm flex items-center justify-center">
+                                                                        <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
                                                                             <span className="text-[10px] text-white/90 px-2 py-1 rounded">Story unavailable</span>
                                                                         </div>
                                                                     )}
@@ -3016,6 +3042,7 @@ export default function MessagesPage() {
                                                     }
                                                 }
                                                 
+                                                const isMediaOnlyMessage = Boolean(msg.imageUrl && !msg.text && !msg.audioUrl && !msg.replyTo);
                                                 return (
                                                     <div className={`flex items-end gap-2 ${compactPhone ? 'max-w-[82%]' : 'max-w-[75%]'}`}>
                                                         {msg.senderAvatar && (
@@ -3030,7 +3057,11 @@ export default function MessagesPage() {
                                                             <IMessageDmBubbleShell
                                                                 isFromMe={false}
                                                                 tailBgClassName={DM_RECEIVED_BG}
-                                                                bubbleClassName={`${DM_RECEIVED_BG} break-words cursor-pointer select-none relative text-[15px] leading-snug antialiased ${compactPhone ? 'px-3.5 py-2' : 'px-4 py-2.5'}`}
+                                                                bubbleClassName={`break-words cursor-pointer select-none relative text-[15px] leading-snug antialiased ${
+                                                                    isMediaOnlyMessage
+                                                                        ? 'bg-transparent p-0 shadow-none'
+                                                                        : `${DM_RECEIVED_BG} ${compactPhone ? 'px-3.5 py-2' : 'px-4 py-2.5'}`
+                                                                }`}
                                                                 data-message-bubble-id={msg.id}
                                                                 bubbleStyle={{
                                                                     maxWidth: '100%',
@@ -3038,7 +3069,7 @@ export default function MessagesPage() {
                                                                     overflowWrap: 'break-word',
                                                                     transform: swipingMessageId === msg.id ? `translateX(${swipeOffset}px)` : 'translateX(0)',
                                                                     transition: swipeOffset === 0 ? 'transform 0.2s' : 'none',
-                                                                    paddingBottom: messageReactions[msg.id] && messageReactions[msg.id].length > 0 ? '20px' : '10px'
+                                                                    paddingBottom: messageReactions[msg.id] && messageReactions[msg.id].length > 0 ? '20px' : (isMediaOnlyMessage ? '0px' : '10px')
                                                                 }}
                                                                 onContextMenu={(e) => handleMessageContextMenu(msg, e)}
                                                                 onTouchStart={(e) => handleTouchStart(msg, e)}
@@ -3078,10 +3109,14 @@ export default function MessagesPage() {
                                                                     </div>
                                                                 )}
                                                                 {msg.imageUrl && (
-                                                                    <div className="relative mb-2 -mx-2 -mt-2 first:mt-0">
-                                                                        <img src={msg.imageUrl} alt="Received image" className="max-w-full rounded-t-2xl rounded-tl-sm" />
+                                                                    <div className={`relative overflow-hidden ${
+                                                                        isMediaOnlyMessage
+                                                                            ? 'rounded-[18px]'
+                                                                            : 'mb-2 -mx-2 -mt-2 first:mt-0 rounded-t-2xl rounded-tl-sm'
+                                                                    }`}>
+                                                                        <img src={msg.imageUrl} alt="Received image" className="block w-full max-w-full max-h-[380px] object-contain bg-black/10" />
                                                                         {msg.imageUrl && wasEverAStory(msg.imageUrl) && storyActiveByUrl[msg.imageUrl] === false && (
-                                                                            <div className="absolute inset-0 bg-black/50 rounded-t-2xl rounded-tl-sm flex items-center justify-center">
+                                                                            <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
                                                                                 <span className="text-[10px] text-white/90 px-2 py-1 rounded">Story unavailable</span>
                                                                             </div>
                                                                         )}
@@ -3854,22 +3889,31 @@ export default function MessagesPage() {
                                 <button
                                     onClick={async () => {
                                         if (!user?.handle || !handle) return;
-                                        if (confirm(`Block ${handle}? You won't receive messages from them.`)) {
-                                            try {
+                                        try {
+                                            if (isBlocked) {
+                                                await unblockUser(user.handle, handle);
+                                                setIsBlocked(false);
+                                                showToast('User unblocked');
+                                                setShowChatInfo(false);
+                                                return;
+                                            }
+
+                                            if (confirm(`Block ${handle}? You won't receive messages from them.`)) {
                                                 await blockUser(user.handle, handle);
+                                                setIsBlocked(true);
                                                 showToast('User blocked');
                                                 setShowChatInfo(false);
                                                 navigate('/inbox');
-                                            } catch (error) {
-                                                console.error('Error blocking user:', error);
-                                                showToast('Failed to block user');
                                             }
+                                        } catch (error) {
+                                            console.error('Error updating blocked status:', error);
+                                            showToast(isBlocked ? 'Failed to unblock user' : 'Failed to block user');
                                         }
                                     }}
                                     className="w-full text-left px-4 py-3 hover:bg-gray-800 rounded-lg flex items-center gap-3 text-red-500 transition-colors"
                                 >
                                     <FaExclamationCircle className="w-5 h-5" />
-                                    <span>Block User</span>
+                                    <span>{isBlocked ? 'Unblock User' : 'Block User'}</span>
                                 </button>
 
                                 <button

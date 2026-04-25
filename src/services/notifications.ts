@@ -3,10 +3,16 @@
 
 // Notification preferences storage key
 const NOTIFICATION_PREFS_KEY = 'notification_preferences';
+let inMemoryNotificationPrefs: NotificationPreferences | null = null;
+
+function canUseLocalStorage(): boolean {
+  return typeof localStorage !== 'undefined';
+}
 
 export interface NotificationPreferences {
   enabled: boolean; // Master toggle
   directMessages: boolean;
+  groupChats: boolean;
   likes: boolean;
   comments: boolean;
   replies: boolean;
@@ -18,10 +24,25 @@ export interface NotificationPreferences {
   reclips: boolean;
 }
 
+export type NotificationPreferenceChannel =
+  | 'dm'
+  | 'group_chat'
+  | 'sticker'
+  | 'reply'
+  | 'like'
+  | 'comment'
+  | 'follow'
+  | 'follow_request'
+  | 'story_insight'
+  | 'question'
+  | 'share'
+  | 'reclip';
+
 // Default notification preferences
 const defaultPreferences: NotificationPreferences = {
   enabled: false,
   directMessages: true,
+  groupChats: true,
   likes: true,
   comments: true,
   replies: true,
@@ -35,6 +56,9 @@ const defaultPreferences: NotificationPreferences = {
 
 // Get notification preferences from localStorage
 export function getNotificationPreferences(): NotificationPreferences {
+  if (!canUseLocalStorage()) {
+    return inMemoryNotificationPrefs ? { ...defaultPreferences, ...inMemoryNotificationPrefs } : { ...defaultPreferences };
+  }
   try {
     const stored = localStorage.getItem(NOTIFICATION_PREFS_KEY);
     if (stored) {
@@ -46,15 +70,60 @@ export function getNotificationPreferences(): NotificationPreferences {
   return { ...defaultPreferences };
 }
 
+export function isNotificationTypeEnabled(
+  prefs: NotificationPreferences,
+  channel: NotificationPreferenceChannel
+): boolean {
+  if (!prefs.enabled) return false;
+
+  switch (channel) {
+    case 'dm':
+    case 'sticker':
+    case 'reply':
+      return !!prefs.directMessages;
+    case 'group_chat':
+      return !!prefs.groupChats;
+    case 'like':
+      return !!prefs.likes;
+    case 'comment':
+      return !!prefs.comments;
+    case 'follow':
+      return !!prefs.follows;
+    case 'follow_request':
+      return !!prefs.followRequests;
+    case 'story_insight':
+      return !!prefs.storyInsights;
+    case 'question':
+      return !!prefs.questions;
+    case 'share':
+      return !!prefs.shares;
+    case 'reclip':
+      return !!prefs.reclips;
+    default:
+      return true;
+  }
+}
+
 // Save notification preferences to localStorage
 export function saveNotificationPreferences(prefs: NotificationPreferences): void {
+  inMemoryNotificationPrefs = { ...prefs };
   try {
-    localStorage.setItem(NOTIFICATION_PREFS_KEY, JSON.stringify(prefs));
+    if (canUseLocalStorage()) {
+      localStorage.setItem(NOTIFICATION_PREFS_KEY, JSON.stringify(prefs));
+    }
     // Also sync to backend if user is logged in
-    syncPreferencesToBackend(prefs);
+    if (canUseLocalStorage()) {
+      syncPreferencesToBackend(prefs);
+    }
   } catch (error) {
     console.error('Error saving notification preferences:', error);
   }
+}
+
+export function resetNotificationPreferences(): NotificationPreferences {
+  const next = { ...defaultPreferences };
+  saveNotificationPreferences(next);
+  return next;
 }
 
 // Sync preferences to backend

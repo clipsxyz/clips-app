@@ -12,14 +12,16 @@ import {
     Modal,
     Share,
     Clipboard,
+    TextInput,
+    RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
 import { fetchPostsByUser, toggleFollowForPost, getFollowedUsers } from '../api/posts';
-import { fetchUserProfile, toggleFollow } from '../api/client';
+import { fetchUserProfile, toggleFollow, fetchFollowers, fetchFollowing } from '../api/client';
 import { userHasStoriesByHandle } from '../api/stories';
-import { isProfilePrivate, canViewProfile, hasPendingFollowRequest } from '../api/privacy';
+import { isProfilePrivate, canViewProfile, hasPendingFollowRequest, canSendMessage } from '../api/privacy';
 import { FEED_UI } from '../constants/feedUiTokens';
 import type { Post } from '../types';
 import Avatar from '../components/Avatar';
@@ -39,6 +41,22 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     const [stats, setStats] = useState({ following: 0, followers: 0, posts: 0 });
     const [showTraveledModal, setShowTraveledModal] = useState(false);
     const [showProfileMenu, setShowProfileMenu] = useState(false);
+    const [showConnectionsModal, setShowConnectionsModal] = useState(false);
+    const [connectionsScope, setConnectionsScope] = useState<'followers' | 'following' | 'mutual' | 'suggested'>('followers');
+    const [followersList, setFollowersList] = useState<Array<{ handleNoAt: string; displayName: string; avatarUrl?: string; isRequested?: boolean }>>([]);
+    const [followingList, setFollowingList] = useState<Array<{ handleNoAt: string; displayName: string; avatarUrl?: string; isRequested?: boolean }>>([]);
+    const [connectionsSearch, setConnectionsSearch] = useState('');
+    const [connectionsLoading, setConnectionsLoading] = useState(false);
+    const [connectionsLoadingMore, setConnectionsLoadingMore] = useState(false);
+    const [followersCursor, setFollowersCursor] = useState<number | string | null>(0);
+    const [followingCursor, setFollowingCursor] = useState<number | string | null>(0);
+    const [followersHasMore, setFollowersHasMore] = useState(true);
+    const [followingHasMore, setFollowingHasMore] = useState(true);
+    const [viewerFollowedSet, setViewerFollowedSet] = useState<Set<string>>(new Set());
+    const [connectionFollowMap, setConnectionFollowMap] = useState<Record<string, boolean>>({});
+    const [connectionRequestMap, setConnectionRequestMap] = useState<Record<string, boolean>>({});
+    const [connectionActionLoadingMap, setConnectionActionLoadingMap] = useState<Record<string, boolean>>({});
+    const [contentTab, setContentTab] = useState<'all' | 'videos' | 'photos' | 'text'>('all');
 
     useEffect(() => {
         loadProfile();
@@ -185,6 +203,160 @@ export default function ViewProfileScreen({ route, navigation }: any) {
         navigation.navigate('Stories', { openUserHandle: handle });
     };
 
+    const normalizeConnectionItems = (items: any[]): Array<{ handleNoAt: string; displayName: string; avatarUrl?: string; isRequested?: boolean }> => {
+        return (Array.isArray(items) ? items : [])
+            .map((item: any) => {
+                const handleRaw = String(item?.handle || item?.userHandle || item?.username || item?.name || '').replace(/^@/, '').trim();
+                if (!handleRaw) return null;
+                return {
+                    handleNoAt: handleRaw,
+                    displayName: String(item?.display_name || item?.displayName || handleRaw),
+                    avatarUrl: typeof item?.avatar_url === 'string' ? item.avatar_url : item?.avatarUrl,
+                    isRequested: !!(item?.is_requested || item?.has_pending_request),
+                };
+            })
+            .filter(Boolean) as Array<{ handleNoAt: string; displayName: string; avatarUrl?: string; isRequested?: boolean }>;
+    };
+
+    const normalizeHandleKey = (value: string) => value.replace(/^@/, '').trim().toLowerCase();
+
+    const loadConnections = async (tab: 'followers' | 'following', reset = true) => {
+        if (!handle || !user?.id) return;
+        const decodedHandle = decodeURIComponent(handle);
+        if (reset) setConnectionsLoading(true);
+        else setConnectionsLoadingMore(true);
+        try {
+            const followedUsers = await getFollowedUsers(user.id);
+            const followedSet = new Set((Array.isArray(followedUsers) ? followedUsers : []).map((h) => normalizeHandleKey(String(h))));
+            setViewerFollowedSet(followedSet);
+            const cursor = tab === 'followers' ? (reset ? 0 : followersCursor) : (reset ? 0 : followingCursor);
+            const response = tab === 'followers'
+                ? await fetchFollowers(decodedHandle, cursor, 40)
+                : await fetchFollowing(decodedHandle, cursor, 40);
+            const normalized = normalizeConnectionItems(Array.isArray(response?.items) ? response.items : []);
+            const followPatch: Record<string, boolean> = {};
+            const requestPatch: Record<string, boolean> = {};
+            normalized.forEach((entry) => {
+                followPatch[entry.handleNoAt] = followedSet.has(normalizeHandleKey(entry.handleNoAt));
+                requestPatch[entry.handleNoAt] = !!entry.isRequested;
+            });
+            setConnectionFollowMap((prev) => ({ ...prev, ...followPatch }));
+            setConnectionRequestMap((prev) => ({ ...prev, ...requestPatch }));
+            const hasMore = !!response?.hasMore || response?.nextCursor != null;
+            const nextCursor = response?.nextCursor != null
+                ? response.nextCursor
+                : (typeof cursor === 'number' && hasMore ? cursor + 1 : null);
+            if (tab === 'followers') {
+                setFollowersList((prev) => {
+                    if (reset) return normalized;
+                    const merged = [...prev, ...normalized];
+                    const dedup = new Map<string, { handleNoAt: string; displayName: string; avatarUrl?: string; isRequested?: boolean }>();
+                    merged.forEach((row) => dedup.set(normalizeHandleKey(row.handleNoAt), row));
+                    return Array.from(dedup.values());
+                });
+                setFollowersHasMore(hasMore);
+                setFollowersCursor(nextCursor);
+            } else {
+                setFollowingList((prev) => {
+                    if (reset) return normalized;
+                    const merged = [...prev, ...normalized];
+                    const dedup = new Map<string, { handleNoAt: string; displayName: string; avatarUrl?: string; isRequested?: boolean }>();
+                    merged.forEach((row) => dedup.set(normalizeHandleKey(row.handleNoAt), row));
+                    return Array.from(dedup.values());
+                });
+                setFollowingHasMore(hasMore);
+                setFollowingCursor(nextCursor);
+            }
+        } catch (error) {
+            console.error('Failed to load connections:', error);
+            if (reset) {
+                if (tab === 'followers') setFollowersList([]);
+                if (tab === 'following') setFollowingList([]);
+            }
+        } finally {
+            if (reset) setConnectionsLoading(false);
+            else setConnectionsLoadingMore(false);
+        }
+    };
+
+    const openConnections = (scope: 'followers' | 'following' | 'mutual' | 'suggested') => {
+        setConnectionsScope(scope);
+        setShowConnectionsModal(true);
+        setConnectionsSearch('');
+        setFollowersCursor(0);
+        setFollowingCursor(0);
+        setFollowersHasMore(true);
+        setFollowingHasMore(true);
+        void Promise.all([loadConnections('followers', true), loadConnections('following', true)]);
+    };
+
+    const filteredPosts = posts.filter((p) => {
+        if (contentTab === 'videos') return p.mediaType === 'video';
+        if (contentTab === 'photos') return !!p.mediaUrl && p.mediaType !== 'video';
+        if (contentTab === 'text') return !p.mediaUrl;
+        return true;
+    });
+
+    const mutualList = followingList.filter((entry) =>
+        followersList.some((f) => f.handleNoAt.toLowerCase() === entry.handleNoAt.toLowerCase())
+    );
+    const suggestedList = React.useMemo(() => {
+        const mutualKey = new Set(mutualList.map((row) => normalizeHandleKey(row.handleNoAt)));
+        const source = [...followersList, ...followingList];
+        const dedup = new Map<string, { handleNoAt: string; displayName: string; avatarUrl?: string; isRequested?: boolean }>();
+        source.forEach((row) => {
+            const key = normalizeHandleKey(row.handleNoAt);
+            if (mutualKey.has(key)) return;
+            if (viewerFollowedSet.has(key)) return;
+            if (normalizeHandleKey(row.handleNoAt) === normalizeHandleKey(String(user?.handle || ''))) return;
+            if (!dedup.has(key)) dedup.set(key, row);
+        });
+        return Array.from(dedup.values());
+    }, [followersList, followingList, mutualList, viewerFollowedSet, user?.handle]);
+    const activeConnectionsList =
+        connectionsScope === 'followers'
+            ? followersList
+            : connectionsScope === 'following'
+                ? followingList
+                : connectionsScope === 'mutual'
+                    ? mutualList
+                    : suggestedList;
+    const searchedConnections = activeConnectionsList.filter((entry) => {
+        const q = connectionsSearch.trim().toLowerCase();
+        if (!q) return true;
+        return entry.handleNoAt.toLowerCase().includes(q) || entry.displayName.toLowerCase().includes(q);
+    });
+
+    const toggleConnectionFollow = async (entryHandle: string) => {
+        if (!user?.id) return;
+        setConnectionActionLoadingMap((prev) => ({ ...prev, [entryHandle]: true }));
+        try {
+            const result = await toggleFollow(entryHandle);
+            const nextFollowing = result?.status === 'accepted' || result?.following === true;
+            const isRequested = result?.status === 'pending';
+            setConnectionFollowMap((prev) => ({ ...prev, [entryHandle]: nextFollowing }));
+            setConnectionRequestMap((prev) => ({ ...prev, [entryHandle]: isRequested }));
+            const nextSet = new Set(viewerFollowedSet);
+            const key = normalizeHandleKey(entryHandle);
+            if (nextFollowing) nextSet.add(key);
+            else nextSet.delete(key);
+            setViewerFollowedSet(nextSet);
+        } catch (error) {
+            console.error('Failed to toggle connection follow:', error);
+            Alert.alert('Error', 'Could not update follow status.');
+        } finally {
+            setConnectionActionLoadingMap((prev) => ({ ...prev, [entryHandle]: false }));
+        }
+    };
+
+    const refreshConnections = async () => {
+        setFollowersCursor(0);
+        setFollowingCursor(0);
+        setFollowersHasMore(true);
+        setFollowingHasMore(true);
+        await Promise.all([loadConnections('followers', true), loadConnections('following', true)]);
+    };
+
     const handlePostPress = (postId: string) => {
         navigation.navigate('PostDetail', { postId });
     };
@@ -246,18 +418,18 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     </TouchableOpacity>
 
                     <View style={styles.statsContainer}>
-                        <View style={styles.statItem}>
+                        <TouchableOpacity style={styles.statItem} onPress={() => {}}>
                             <Text style={styles.statNumber}>{stats.posts}</Text>
                             <Text style={styles.statLabel}>Posts</Text>
-                        </View>
-                        <View style={styles.statItem}>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.statItem} onPress={() => openConnections('followers')}>
                             <Text style={styles.statNumber}>{stats.followers}</Text>
                             <Text style={styles.statLabel}>Followers</Text>
-                        </View>
-                        <View style={styles.statItem}>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.statItem} onPress={() => openConnections('following')}>
                             <Text style={styles.statNumber}>{stats.following}</Text>
                             <Text style={styles.statLabel}>Following</Text>
-                        </View>
+                        </TouchableOpacity>
                     </View>
                 </View>
 
@@ -286,7 +458,19 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                                 {hasPendingRequest ? 'Request Sent' : isFollowing ? 'Following' : 'Follow'}
                             </Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={styles.messageButton}>
+                        <TouchableOpacity
+                            style={styles.messageButton}
+                            onPress={async () => {
+                                if (!user?.handle || !handle) return;
+                                const decodedHandle = decodeURIComponent(handle);
+                                const followedUsers = await getFollowedUsers(user.id);
+                                if (!canSendMessage(user.handle, decodedHandle, followedUsers)) {
+                                    Alert.alert('Cannot Message', 'You must follow this user to send a message.');
+                                    return;
+                                }
+                                navigation.navigate('Messages', { handle: decodedHandle });
+                            }}
+                        >
                             <Text style={styles.messageButtonText}>Message</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
@@ -303,9 +487,28 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 )}
 
                 {/* Posts Grid */}
+                <View style={styles.contentTabsRow}>
+                    {[
+                        { id: 'all', label: 'All' },
+                        { id: 'videos', label: 'Videos' },
+                        { id: 'photos', label: 'Photos' },
+                        { id: 'text', label: 'Text' },
+                    ].map((tab) => {
+                        const active = contentTab === tab.id;
+                        return (
+                            <TouchableOpacity
+                                key={tab.id}
+                                style={[styles.contentTabButton, active && styles.contentTabButtonActive]}
+                                onPress={() => setContentTab(tab.id as 'all' | 'videos' | 'photos' | 'text')}
+                            >
+                                <Text style={[styles.contentTabText, active && styles.contentTabTextActive]}>{tab.label}</Text>
+                            </TouchableOpacity>
+                        );
+                    })}
+                </View>
                 <View style={styles.postsContainer}>
                     <FlatList
-                        data={posts}
+                        data={filteredPosts}
                         numColumns={3}
                         keyExtractor={(item) => item.id}
                         renderItem={({ item }) => (
@@ -345,7 +548,18 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                                 <Icon name="close" size={24} color="#FFFFFF" />
                             </TouchableOpacity>
                         </View>
-                        <ScrollView style={styles.modalBody}>
+                        <ScrollView
+                            style={styles.modalBody}
+                            refreshControl={
+                                <RefreshControl
+                                    refreshing={connectionsLoading}
+                                    onRefresh={() => {
+                                        void refreshConnections();
+                                    }}
+                                    tintColor="#8B5CF6"
+                                />
+                            }
+                        >
                             {profileUser?.placesTraveled && Array.isArray(profileUser.placesTraveled) && profileUser.placesTraveled.length > 0 ? (
                                 profileUser.placesTraveled.map((place: string, index: number) => (
                                     <TouchableOpacity
@@ -463,6 +677,143 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     </View>
                 </TouchableOpacity>
             </Modal>
+
+            {/* Connections Modal */}
+            <Modal
+                visible={showConnectionsModal}
+                transparent={true}
+                animationType="slide"
+                onRequestClose={() => setShowConnectionsModal(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.connectionsModalContent}>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Connections</Text>
+                            <TouchableOpacity onPress={() => setShowConnectionsModal(false)}>
+                                <Icon name="close" size={24} color="#FFFFFF" />
+                            </TouchableOpacity>
+                        </View>
+                        <View style={styles.connectionsTabs}>
+                            {[
+                                { id: 'mutual', label: `Mutual (${mutualList.length})` },
+                                { id: 'followers', label: `Followers (${followersList.length})` },
+                                { id: 'following', label: `Following (${followingList.length})` },
+                                { id: 'suggested', label: `Suggested (${suggestedList.length})` },
+                            ].map((tab) => {
+                                const active = connectionsScope === tab.id;
+                                return (
+                                    <TouchableOpacity
+                                        key={tab.id}
+                                        style={[styles.connectionsTabBtn, active && styles.connectionsTabBtnActive]}
+                                        onPress={() => setConnectionsScope(tab.id as 'followers' | 'following' | 'mutual' | 'suggested')}
+                                    >
+                                        <Text style={[styles.connectionsTabText, active && styles.connectionsTabTextActive]}>
+                                            {tab.label}
+                                        </Text>
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </View>
+                        <View style={styles.connectionsSearchWrap}>
+                            <Icon name="search" size={16} color="#9CA3AF" />
+                            <TextInput
+                                value={connectionsSearch}
+                                onChangeText={setConnectionsSearch}
+                                placeholder="Search people"
+                                placeholderTextColor="#6B7280"
+                                style={styles.connectionsSearchInput}
+                            />
+                        </View>
+                        <ScrollView style={styles.modalBody}>
+                            {connectionsLoading ? (
+                                <ActivityIndicator size="small" color="#8B5CF6" />
+                            ) : searchedConnections.length > 0 ? (
+                                searchedConnections.map((entry) => (
+                                    <View
+                                        key={entry.handleNoAt}
+                                        style={styles.connectionRow}
+                                    >
+                                        <TouchableOpacity
+                                            style={styles.connectionLeftTap}
+                                            onPress={() => {
+                                                setShowConnectionsModal(false);
+                                                navigation.navigate('ViewProfile', { handle: entry.handleNoAt });
+                                            }}
+                                        >
+                                            <Avatar
+                                                src={entry.avatarUrl}
+                                                name={entry.displayName || entry.handleNoAt}
+                                                size="sm"
+                                            />
+                                            <View style={styles.connectionTextWrap}>
+                                                <Text style={styles.connectionNameText}>{entry.displayName}</Text>
+                                                <Text style={styles.connectionHandleText}>@{entry.handleNoAt}</Text>
+                                                {connectionRequestMap[entry.handleNoAt] && (
+                                                    <View style={styles.connectionMetaBadge}>
+                                                        <Icon name="lock-closed" size={11} color="#CBD5E1" />
+                                                        <Text style={styles.connectionMetaBadgeText}>Private account</Text>
+                                                    </View>
+                                                )}
+                                            </View>
+                                        </TouchableOpacity>
+                                        {normalizeHandleKey(entry.handleNoAt) !== normalizeHandleKey(String(user?.handle || '')) && (
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.connectionFollowBtn,
+                                                    connectionRequestMap[entry.handleNoAt] && styles.connectionRequestedBtn,
+                                                    connectionFollowMap[entry.handleNoAt] && styles.connectionFollowingBtn,
+                                                ]}
+                                                disabled={!!connectionActionLoadingMap[entry.handleNoAt] || !!connectionRequestMap[entry.handleNoAt]}
+                                                onPress={() => void toggleConnectionFollow(entry.handleNoAt)}
+                                            >
+                                                {connectionActionLoadingMap[entry.handleNoAt] ? (
+                                                    <ActivityIndicator size="small" color="#FFFFFF" />
+                                                ) : (
+                                                    <Text style={styles.connectionFollowBtnText}>
+                                                        {connectionRequestMap[entry.handleNoAt]
+                                                            ? 'Requested'
+                                                            : connectionFollowMap[entry.handleNoAt]
+                                                                ? 'Following'
+                                                                : 'Follow'}
+                                                    </Text>
+                                                )}
+                                            </TouchableOpacity>
+                                        )}
+                                    </View>
+                                ))
+                            ) : (
+                                <Text style={styles.emptyText}>No connections found.</Text>
+                            )}
+                            {connectionsScope === 'followers' && followersHasMore && !connectionsSearch.trim() && (
+                                <TouchableOpacity
+                                    style={styles.loadMoreBtn}
+                                    disabled={connectionsLoadingMore}
+                                    onPress={() => void loadConnections('followers', false)}
+                                >
+                                    {connectionsLoadingMore ? (
+                                        <ActivityIndicator size="small" color="#FFFFFF" />
+                                    ) : (
+                                        <Text style={styles.loadMoreBtnText}>Load more followers</Text>
+                                    )}
+                                </TouchableOpacity>
+                            )}
+                            {connectionsScope === 'following' && followingHasMore && !connectionsSearch.trim() && (
+                                <TouchableOpacity
+                                    style={styles.loadMoreBtn}
+                                    disabled={connectionsLoadingMore}
+                                    onPress={() => void loadConnections('following', false)}
+                                >
+                                    {connectionsLoadingMore ? (
+                                        <ActivityIndicator size="small" color="#FFFFFF" />
+                                    ) : (
+                                        <Text style={styles.loadMoreBtnText}>Load more following</Text>
+                                    )}
+                                </TouchableOpacity>
+                            )}
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
         </SafeAreaView>
     );
 }
@@ -569,6 +920,32 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '600',
     },
+    contentTabsRow: {
+        flexDirection: 'row',
+        gap: 8,
+        paddingHorizontal: FEED_UI.spacing.inset,
+        marginBottom: 8,
+    },
+    contentTabButton: {
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: '#374151',
+        backgroundColor: '#111827',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+    },
+    contentTabButtonActive: {
+        borderColor: '#F8D26A',
+        backgroundColor: '#3F2B07',
+    },
+    contentTabText: {
+        color: '#D1D5DB',
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    contentTabTextActive: {
+        color: '#F8D26A',
+    },
     postsContainer: {
         paddingHorizontal: FEED_UI.spacing.inset,
         paddingTop: 4,
@@ -649,6 +1026,141 @@ const styles = StyleSheet.create({
     },
     modalBody: {
         padding: 16,
+    },
+    connectionsModalContent: {
+        backgroundColor: '#111827',
+        borderRadius: 16,
+        maxWidth: 500,
+        width: '100%',
+        maxHeight: '85%',
+    },
+    connectionsTabs: {
+        flexDirection: 'row',
+        gap: 8,
+        paddingHorizontal: 16,
+        paddingTop: 12,
+        paddingBottom: 8,
+    },
+    connectionsTabBtn: {
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: '#374151',
+        backgroundColor: '#1F2937',
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+    },
+    connectionsTabBtnActive: {
+        borderColor: '#F8D26A',
+        backgroundColor: '#3F2B07',
+    },
+    connectionsTabText: {
+        color: '#D1D5DB',
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    connectionsTabTextActive: {
+        color: '#F8D26A',
+    },
+    connectionsSearchWrap: {
+        marginHorizontal: 16,
+        marginBottom: 8,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#374151',
+        backgroundColor: '#1F2937',
+        paddingHorizontal: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    connectionsSearchInput: {
+        flex: 1,
+        color: '#FFFFFF',
+        fontSize: 14,
+        paddingVertical: 8,
+    },
+    connectionRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#1F2937',
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#374151',
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        marginBottom: 8,
+        justifyContent: 'space-between',
+        gap: 10,
+    },
+    connectionLeftTap: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+    },
+    connectionTextWrap: {
+        marginLeft: 10,
+        flex: 1,
+    },
+    connectionNameText: {
+        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '700',
+    },
+    connectionHandleText: {
+        color: '#9CA3AF',
+        fontSize: 12,
+        marginTop: 2,
+    },
+    connectionMetaBadge: {
+        marginTop: 5,
+        alignSelf: 'flex-start',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: '#475569',
+        backgroundColor: '#1E293B',
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+    },
+    connectionMetaBadgeText: {
+        color: '#CBD5E1',
+        fontSize: 10,
+        fontWeight: '700',
+    },
+    connectionFollowBtn: {
+        borderRadius: 999,
+        backgroundColor: '#2563EB',
+        paddingHorizontal: 12,
+        paddingVertical: 7,
+        minWidth: 84,
+        alignItems: 'center',
+    },
+    connectionFollowingBtn: {
+        backgroundColor: '#374151',
+    },
+    connectionRequestedBtn: {
+        backgroundColor: '#475569',
+    },
+    connectionFollowBtnText: {
+        color: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    loadMoreBtn: {
+        marginTop: 6,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#4B5563',
+        backgroundColor: '#111827',
+        alignItems: 'center',
+        paddingVertical: 10,
+    },
+    loadMoreBtnText: {
+        color: '#E5E7EB',
+        fontSize: 13,
+        fontWeight: '700',
     },
     placeItem: {
         flexDirection: 'row',

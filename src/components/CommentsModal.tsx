@@ -6,9 +6,11 @@ import {
     fetchCommentsPage,
     addComment,
     addReply,
+    deleteCommentById,
     toggleCommentLike,
     toggleReplyLike,
     getPostById,
+    setCommentModerationState,
     toggleFollowForPost,
     setFollowState,
 } from '../api/posts';
@@ -18,6 +20,7 @@ import { enqueue } from '../utils/mutationQueue';
 import Avatar from './Avatar';
 import type { Comment, Post } from '../types';
 import { getAvatarForHandle } from '../api/users';
+import { evaluateCommentModeration, getCommentModerationPreferences } from '../utils/commentModeration';
 
 interface CommentsModalProps {
     postId: string;
@@ -57,6 +60,8 @@ function CommentItem({
     onLikeComment,
     onLikeReply,
     onReply,
+    onModerateComment,
+    isPostOwner,
     userId: _userId,
     postId: _postId
 }: {
@@ -64,6 +69,8 @@ function CommentItem({
     onLikeComment: (commentId: string) => Promise<void>;
     onLikeReply: (parentCommentId: string, replyId: string) => Promise<void>;
     onReply: (parentId: string, text: string) => Promise<void>;
+    onModerateComment: (commentId: string, action: 'hide' | 'unhide' | 'delete') => Promise<void>;
+    isPostOwner: boolean;
     userId: string;
     postId: string;
 }) {
@@ -100,6 +107,12 @@ function CommentItem({
 
     const replyCount = comment.replyCount || 0;
     const hasReplies = replyCount > 0;
+    const isCommentAuthor = String(comment.userHandle || '').trim().toLowerCase() === String(user?.handle || '').trim().toLowerCase();
+    const isHiddenForViewer = comment.moderationState === 'hidden_by_filter' && !isCommentAuthor;
+    const visibleReplies = (comment.replies || []).filter((reply) => {
+        if (reply.moderationState !== 'hidden_by_filter') return true;
+        return String(reply.userHandle || '').trim().toLowerCase() === String(user?.handle || '').trim().toLowerCase();
+    });
 
     return (
         <div className="flex gap-3">
@@ -122,13 +135,37 @@ function CommentItem({
                         {formatTime(comment.createdAt)}
                     </span>
                 </div>
-                <p className="text-sm text-gray-900 mb-2">{comment.text}</p>
+                <p className="text-sm text-gray-900 mb-2">
+                    {isHiddenForViewer ? 'Comment hidden for safety.' : comment.text}
+                </p>
+                {comment.moderationState === 'hidden_by_filter' && String(comment.userHandle || '').trim().toLowerCase() === String(user?.handle || '').trim().toLowerCase() && (
+                    <p className="mb-2 text-[11px] text-amber-700">Hidden from others by safety filter</p>
+                )}
+                {isPostOwner && (
+                    <div className="mb-2 flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => onModerateComment(comment.id, comment.moderationState === 'hidden_by_filter' ? 'unhide' : 'hide')}
+                            className="text-[11px] font-medium text-gray-600 hover:text-gray-900"
+                        >
+                            {comment.moderationState === 'hidden_by_filter' ? 'Unhide' : 'Hide'}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => onModerateComment(comment.id, 'delete')}
+                            className="text-[11px] font-medium text-red-600 hover:text-red-700"
+                        >
+                            Delete
+                        </button>
+                    </div>
+                )}
 
                 {/* Action row: Reply on left, like on right (Scenes style) */}
                 <div className="flex items-center justify-between">
                     <button
                         onClick={() => setShowReplyInput(!showReplyInput)}
-                        className="text-xs text-gray-500 hover:text-gray-900 font-medium"
+                        className="text-xs text-gray-500 hover:text-gray-900 font-medium disabled:opacity-50"
+                        disabled={isHiddenForViewer}
                     >
                         Reply
                     </button>
@@ -150,7 +187,7 @@ function CommentItem({
                                 setBusy(false);
                             }
                         }}
-                        disabled={busy}
+                        disabled={busy || isHiddenForViewer}
                         className="flex items-center gap-1 text-gray-500 hover:text-blue-500 disabled:opacity-50 disabled:pointer-events-none"
                         aria-pressed={liked}
                         aria-label={liked ? 'Unlike comment' : 'Like comment'}
@@ -194,9 +231,9 @@ function CommentItem({
                                 : `View replies (${replyCount})`}
                         </button>
 
-                        {showReplies && comment.replies && (
+                        {showReplies && visibleReplies.length > 0 && (
                             <div className="mt-2 pl-4 border-l-2 border-gray-200 bg-gray-50/80 rounded-r-md py-2 space-y-3">
-                                {comment.replies.map(reply => (
+                                {visibleReplies.map(reply => (
                                     <div key={reply.id} className="flex gap-2">
                                         <Avatar
                                             src={
@@ -321,10 +358,24 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
     const [commentsCursor, setCommentsCursor] = React.useState<string | null>(null);
     const [commentsHasMore, setCommentsHasMore] = React.useState(false);
     const [commentsLoadingMore, setCommentsLoadingMore] = React.useState(false);
+    const [sortMode, setSortMode] = React.useState<'top' | 'newest'>('top');
     const [loading, setLoading] = React.useState(false);
     const [submitting, setSubmitting] = React.useState(false);
     const [followBusy, setFollowBusy] = React.useState(false);
     const commentsScrollRef = React.useRef<HTMLDivElement | null>(null);
+    const filteredComments = React.useMemo(() => {
+        const ordered = [...comments];
+        if (sortMode === 'newest') {
+            ordered.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+            return ordered;
+        }
+        ordered.sort((a, b) => {
+            const byLikes = (b.likes || 0) - (a.likes || 0);
+            if (byLikes !== 0) return byLikes;
+            return (b.createdAt || 0) - (a.createdAt || 0);
+        });
+        return ordered;
+    }, [comments, sortMode]);
 
     // Load post (author, caption) + comments when modal opens
     React.useEffect(() => {
@@ -456,6 +507,15 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
 
     const handleAddComment = async (text: string) => {
         if (!user) return;
+        const moderation = evaluateCommentModeration(text, getCommentModerationPreferences());
+        if (moderation.level !== 'none') {
+            const shouldContinue = window.confirm(
+                moderation.level === 'hide'
+                    ? 'This comment may violate safety filters and will be hidden from others. Post anyway?'
+                    : 'This comment looks potentially harmful. Post anyway?'
+            );
+            if (!shouldContinue) return;
+        }
 
         // Always show an optimistic comment immediately in the UI
         const optimisticComment: Comment = {
@@ -466,6 +526,8 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
             createdAt: Date.now(),
             likes: 0,
             userLiked: false,
+            moderationState: moderation.level === 'hide' ? 'hidden_by_filter' : 'visible',
+            moderationReason: moderation.matched[0],
         };
         setComments(prev => [...prev, optimisticComment]);
 
@@ -555,6 +617,15 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
 
     const handleReplyToComment = async (parentId: string, text: string) => {
         if (!user) return;
+        const moderation = evaluateCommentModeration(text, getCommentModerationPreferences());
+        if (moderation.level !== 'none') {
+            const shouldContinue = window.confirm(
+                moderation.level === 'hide'
+                    ? 'This reply may violate safety filters and will be hidden from others. Post anyway?'
+                    : 'This reply looks potentially harmful. Post anyway?'
+            );
+            if (!shouldContinue) return;
+        }
 
         // Always show an optimistic reply immediately
         const optimisticReply: Comment = {
@@ -566,6 +637,8 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
             likes: 0,
             userLiked: false,
             parentId,
+            moderationState: moderation.level === 'hide' ? 'hidden_by_filter' : 'visible',
+            moderationReason: moderation.matched[0],
         };
 
         setComments(prevComments =>
@@ -618,10 +691,59 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
         }
     };
 
+    const handleModerateComment = async (commentId: string, action: 'hide' | 'unhide' | 'delete') => {
+        if (!post || !user?.handle) return;
+        const isOwner = String(post.userHandle || '').trim().toLowerCase() === String(user.handle || '').trim().toLowerCase();
+        if (!isOwner) return;
+
+        if (action === 'delete') {
+            const ok = await deleteCommentById(commentId);
+            if (!ok) return;
+            setComments((prev) =>
+                prev
+                    .filter((comment) => comment.id !== commentId)
+                    .map((comment) => ({
+                        ...comment,
+                        replies: (comment.replies || []).filter((reply) => reply.id !== commentId),
+                        replyCount: Math.max(0, ((comment.replies || []).filter((reply) => reply.id !== commentId)).length),
+                    }))
+            );
+            return;
+        }
+
+        const nextState = action === 'hide' ? 'hidden_by_filter' : 'visible';
+        const ok = await setCommentModerationState(commentId, nextState, 'creator_moderation');
+        if (!ok) return;
+        setComments((prev) =>
+            prev.map((comment) => {
+                if (comment.id === commentId) {
+                    return {
+                        ...comment,
+                        moderationState: nextState,
+                        moderationReason: nextState === 'hidden_by_filter' ? 'creator_moderation' : undefined,
+                    };
+                }
+                return {
+                    ...comment,
+                    replies: (comment.replies || []).map((reply) =>
+                        reply.id === commentId
+                            ? {
+                                ...reply,
+                                moderationState: nextState,
+                                moderationReason: nextState === 'hidden_by_filter' ? 'creator_moderation' : undefined,
+                            }
+                            : reply
+                    ),
+                };
+            })
+        );
+    };
+
     if (!isOpen) return null;
 
     const storyText = (post?.caption || post?.text || '').trim();
     const authorHandle = post?.userHandle ?? '';
+    const isPostOwner = Boolean(user?.handle && authorHandle && String(user.handle).trim().toLowerCase() === String(authorHandle).trim().toLowerCase());
     const showFollow =
         Boolean(user?.handle && authorHandle && user.handle !== authorHandle);
 
@@ -667,13 +789,31 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                     <h2 className="text-base font-semibold text-gray-900">
                         {comments.length} {comments.length === 1 ? 'comment' : 'comments'}
                     </h2>
-                    <button
-                        onClick={onClose}
-                        className="p-2 -mr-1 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
-                        aria-label="Close comments"
-                    >
-                        <FiX size={20} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <div className="flex items-center rounded-lg border border-gray-200 p-0.5">
+                            <button
+                                type="button"
+                                onClick={() => setSortMode('top')}
+                                className={`px-2.5 py-1 text-xs font-medium rounded-md ${sortMode === 'top' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+                            >
+                                Top
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setSortMode('newest')}
+                                className={`px-2.5 py-1 text-xs font-medium rounded-md ${sortMode === 'newest' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+                            >
+                                Newest
+                            </button>
+                        </div>
+                        <button
+                            onClick={onClose}
+                            className="p-2 -mr-1 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+                            aria-label="Close comments"
+                        >
+                            <FiX size={20} />
+                        </button>
+                    </div>
                 </div>
 
                 {/* Scrollable: author row → story text → comments (Instagram-style order) */}
@@ -733,7 +873,7 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
 
                             {/* 3 — Comments list */}
                             <div className="p-4">
-                                {comments.length === 0 ? (
+                                {filteredComments.length === 0 ? (
                                     <div className="text-center py-8 text-gray-500">
                                         <FiMessageSquare size={48} className="mx-auto mb-4 opacity-50" />
                                         <p>No comments yet</p>
@@ -741,13 +881,15 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                                     </div>
                                 ) : (
                                     <div className="space-y-4">
-                                        {comments.map(comment => (
+                                        {filteredComments.map(comment => (
                                             <CommentItem
                                                 key={comment.id}
                                                 comment={comment}
                                                 onLikeComment={handleLikeComment}
                                                 onLikeReply={handleLikeReply}
                                                 onReply={handleReplyToComment}
+                                                onModerateComment={handleModerateComment}
+                                                isPostOwner={isPostOwner}
                                                 userId={user?.id || ''}
                                                 postId={postId}
                                             />

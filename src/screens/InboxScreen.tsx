@@ -6,22 +6,48 @@ import {
     FlatList,
     TouchableOpacity,
     ActivityIndicator,
+    Alert,
+    TextInput,
+    RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
-import { getNotifications, type Notification, markNotificationRead } from '../api/notifications';
+import {
+    getNotifications,
+    type Notification,
+    markNotificationRead,
+    markAllNotificationsRead,
+    deleteNotification,
+} from '../api/notifications';
 import { getStoryInsightsForUser, type StoryInsight } from '../api/stories';
 import { getAvatarForHandle } from '../api/users';
 import { timeAgo } from '../utils/timeAgo';
 import Avatar from '../components/Avatar';
+import {
+    listConversations,
+    markConversationRead,
+    markConversationUnread,
+    markGroupConversationReadById,
+    pinConversation,
+    unpinConversation,
+    muteConversation,
+    unmuteConversation,
+    deleteConversation,
+    acceptMessageRequest,
+    type ConversationSummary,
+} from '../api/messages';
 
 export default function InboxScreen({ navigation }: any) {
     const { user } = useAuth();
     const [insights, setInsights] = useState<StoryInsight[]>([]);
     const [notifications, setNotifications] = useState<Notification[]>([]);
+    const [conversations, setConversations] = useState<ConversationSummary[]>([]);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState<'insights' | 'notifications'>('notifications');
+    const [activeTab, setActiveTab] = useState<'insights' | 'notifications' | 'messages' | 'groups'>('notifications');
+    const [messageFilter, setMessageFilter] = useState<'all' | 'unread' | 'requests' | 'pinned'>('all');
+    const [conversationQuery, setConversationQuery] = useState('');
+    const [refreshing, setRefreshing] = useState(false);
 
     useEffect(() => {
         loadData();
@@ -37,10 +63,21 @@ export default function InboxScreen({ navigation }: any) {
             ]);
             setNotifications(notifs);
             setInsights(storyInsights);
+            const convs = await listConversations(user.handle);
+            setConversations(convs);
         } catch (error) {
             console.error('Error loading inbox:', error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const refreshData = async () => {
+        setRefreshing(true);
+        try {
+            await loadData();
+        } finally {
+            setRefreshing(false);
         }
     };
 
@@ -52,6 +89,49 @@ export default function InboxScreen({ navigation }: any) {
 
         if (notif.type === 'sticker' || notif.type === 'reply' || notif.type === 'dm') {
             navigation.navigate('Messages', { handle: notif.fromHandle });
+        }
+    };
+
+    const handleMarkAllRead = async () => {
+        if (!user?.handle) return;
+        try {
+            await markAllNotificationsRead(user.handle);
+            setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+        } catch (error) {
+            console.error('Failed to mark all notifications read:', error);
+        }
+    };
+
+    const handleDeleteNotification = async (notifId: string) => {
+        if (!user?.handle) return;
+        try {
+            await deleteNotification(notifId, user.handle);
+            setNotifications((prev) => prev.filter((n) => n.id !== notifId));
+        } catch (error) {
+            console.error('Failed to delete notification:', error);
+        }
+    };
+
+    const openConversation = async (conv: ConversationSummary) => {
+        if (!user?.handle) return;
+        try {
+            if (conv.kind === 'group' && conv.chatGroupId) {
+                await markGroupConversationReadById(conv.chatGroupId, user.handle);
+                navigation.navigate('Messages', { chatGroupId: conv.chatGroupId, kind: 'group' });
+            } else {
+                await markConversationRead(user.handle, conv.otherHandle);
+                navigation.navigate('Messages', { handle: conv.otherHandle });
+            }
+            setConversations((prev) =>
+                prev.map((c) =>
+                    c.kind === conv.kind &&
+                    (c.kind === 'group' ? c.chatGroupId === conv.chatGroupId : c.otherHandle === conv.otherHandle)
+                        ? { ...c, unread: 0 }
+                        : c
+                )
+            );
+        } catch (error) {
+            console.error('Failed to open conversation:', error);
         }
     };
 
@@ -86,6 +166,43 @@ export default function InboxScreen({ navigation }: any) {
     };
 
     const unreadNotifications = notifications.filter(n => !n.read).length;
+    const sortedConversations = [...conversations].sort((a, b) => {
+        if (a.isPinned && !b.isPinned) return -1;
+        if (!a.isPinned && b.isPinned) return 1;
+        return (b.lastMessage?.timestamp || 0) - (a.lastMessage?.timestamp || 0);
+    });
+    const directMessages = sortedConversations.filter((c) => c.kind !== 'group');
+    const groupMessages = sortedConversations.filter((c) => c.kind === 'group');
+    const unreadMessages = directMessages.reduce((sum, c) => sum + (c.unread || 0), 0);
+    const unreadGroups = groupMessages.reduce((sum, c) => sum + (c.unread || 0), 0);
+    const filteredDirectMessages = directMessages.filter((c) => {
+        if (messageFilter === 'unread') return (c.unread || 0) > 0;
+        if (messageFilter === 'requests') return !!c.isRequest;
+        if (messageFilter === 'pinned') return !!c.isPinned;
+        return true;
+    });
+    const queryLower = conversationQuery.trim().toLowerCase();
+    const searchedDirectMessages = filteredDirectMessages.filter((c) =>
+        !queryLower ||
+        c.otherHandle.toLowerCase().includes(queryLower) ||
+        (c.lastMessage?.text || '').toLowerCase().includes(queryLower)
+    );
+    const searchedGroupMessages = groupMessages.filter((c) =>
+        !queryLower ||
+        (c.groupName || '').toLowerCase().includes(queryLower) ||
+        (c.lastMessage?.text || '').toLowerCase().includes(queryLower)
+    );
+
+    const updateConversationRow = (target: ConversationSummary, updater: (row: ConversationSummary) => ConversationSummary) => {
+        setConversations((prev) =>
+            prev.map((row) => {
+                const match =
+                    row.kind === target.kind &&
+                    (row.kind === 'group' ? row.chatGroupId === target.chatGroupId : row.otherHandle === target.otherHandle);
+                return match ? updater(row) : row;
+            })
+        );
+    };
 
     if (loading) {
         return (
@@ -99,6 +216,11 @@ export default function InboxScreen({ navigation }: any) {
         <SafeAreaView style={styles.container} edges={['top']}>
             <View style={styles.header}>
                 <Text style={styles.headerTitle}>Inbox</Text>
+                {activeTab === 'notifications' && unreadNotifications > 0 && (
+                    <TouchableOpacity onPress={handleMarkAllRead}>
+                        <Text style={styles.headerActionText}>Mark all read</Text>
+                    </TouchableOpacity>
+                )}
             </View>
 
             {/* Tabs */}
@@ -124,6 +246,28 @@ export default function InboxScreen({ navigation }: any) {
                         Insights
                     </Text>
                 </TouchableOpacity>
+                <TouchableOpacity
+                    onPress={() => setActiveTab('messages')}
+                    style={[styles.tab, activeTab === 'messages' && styles.tabActive]}
+                >
+                    <Text style={[styles.tabText, activeTab === 'messages' && styles.tabTextActive]}>Messages</Text>
+                    {unreadMessages > 0 && (
+                        <View style={styles.badge}>
+                            <Text style={styles.badgeText}>{unreadMessages > 99 ? '99+' : unreadMessages}</Text>
+                        </View>
+                    )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                    onPress={() => setActiveTab('groups')}
+                    style={[styles.tab, activeTab === 'groups' && styles.tabActive]}
+                >
+                    <Text style={[styles.tabText, activeTab === 'groups' && styles.tabTextActive]}>Groups</Text>
+                    {unreadGroups > 0 && (
+                        <View style={styles.badge}>
+                            <Text style={styles.badgeText}>{unreadGroups > 99 ? '99+' : unreadGroups}</Text>
+                        </View>
+                    )}
+                </TouchableOpacity>
             </View>
 
             {/* Content */}
@@ -148,6 +292,17 @@ export default function InboxScreen({ navigation }: any) {
                                 <Text style={styles.itemMessage}>{formatNotificationMessage(item)}</Text>
                                 <Text style={styles.itemTime}>{timeAgo(item.timestamp)}</Text>
                             </View>
+                            <TouchableOpacity
+                                onPress={() =>
+                                    Alert.alert('Delete notification', 'Remove this notification?', [
+                                        { text: 'Cancel', style: 'cancel' },
+                                        { text: 'Delete', style: 'destructive', onPress: () => { void handleDeleteNotification(item.id); } },
+                                    ])
+                                }
+                                style={styles.rowActionIcon}
+                            >
+                                <Icon name="trash-outline" size={18} color="#6B7280" />
+                            </TouchableOpacity>
                             {!item.read && <View style={styles.unreadDot} />}
                         </TouchableOpacity>
                     )}
@@ -157,7 +312,7 @@ export default function InboxScreen({ navigation }: any) {
                         </View>
                     }
                 />
-            ) : (
+            ) : activeTab === 'insights' ? (
                 <FlatList
                     data={insights}
                     keyExtractor={(item) => item.storyId}
@@ -198,6 +353,178 @@ export default function InboxScreen({ navigation }: any) {
                         </View>
                     }
                 />
+            ) : (
+                <>
+                <View style={styles.conversationSearchWrap}>
+                    <Icon name="search" size={16} color="#9CA3AF" />
+                    <TextInput
+                        value={conversationQuery}
+                        onChangeText={setConversationQuery}
+                        placeholder={activeTab === 'groups' ? 'Search groups' : 'Search messages'}
+                        placeholderTextColor="#6B7280"
+                        style={styles.conversationSearchInput}
+                    />
+                    {!!conversationQuery && (
+                        <TouchableOpacity onPress={() => setConversationQuery('')}>
+                            <Icon name="close-circle" size={16} color="#9CA3AF" />
+                        </TouchableOpacity>
+                    )}
+                </View>
+                {activeTab === 'messages' && (
+                    <View style={styles.messageFiltersRow}>
+                        {[
+                            { id: 'all', label: 'All' },
+                            { id: 'unread', label: 'Unread' },
+                            { id: 'requests', label: 'Requests' },
+                            { id: 'pinned', label: 'Pinned' },
+                        ].map((item) => {
+                            const active = messageFilter === item.id;
+                            return (
+                                <TouchableOpacity
+                                    key={item.id}
+                                    onPress={() => setMessageFilter(item.id as 'all' | 'unread' | 'requests' | 'pinned')}
+                                    style={[styles.messageFilterChip, active && styles.messageFilterChipActive]}
+                                >
+                                    <Text style={[styles.messageFilterChipText, active && styles.messageFilterChipTextActive]}>
+                                        {item.label}
+                                    </Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </View>
+                )}
+                <FlatList
+                    data={activeTab === 'groups' ? searchedGroupMessages : searchedDirectMessages}
+                    keyExtractor={(item, idx) => `${item.kind}-${item.kind === 'group' ? item.chatGroupId || idx : item.otherHandle}`}
+                    refreshControl={
+                        <RefreshControl
+                            refreshing={refreshing}
+                            onRefresh={() => { void refreshData(); }}
+                            tintColor="#8B5CF6"
+                        />
+                    }
+                    renderItem={({ item }) => {
+                        const isGroup = item.kind === 'group';
+                        const title = isGroup ? item.groupName || 'Group chat' : item.otherHandle;
+                        const subtitle = item.lastMessage?.text || (isGroup ? 'Open group' : 'Open conversation');
+                        return (
+                            <TouchableOpacity onPress={() => { void openConversation(item); }} style={styles.item}>
+                                <View style={styles.itemIcon}>
+                                    {isGroup ? (
+                                        <Icon name="people" size={22} color="#8B5CF6" />
+                                    ) : (
+                                        <Avatar src={getAvatarForHandle(item.otherHandle)} name={item.otherHandle} size={40} />
+                                    )}
+                                </View>
+                                <View style={styles.itemContent}>
+                                    <Text style={styles.itemTitle}>{title}</Text>
+                                    <Text style={styles.itemMessage} numberOfLines={1}>{subtitle}</Text>
+                                    <Text style={styles.itemTime}>
+                                        {item.lastMessage?.timestamp ? timeAgo(item.lastMessage.timestamp) : ''}
+                                    </Text>
+                                    {!isGroup && item.isRequest && (
+                                        <Text style={styles.requestBadgeText}>Message request</Text>
+                                    )}
+                                </View>
+                                {!isGroup && (
+                                    <View style={styles.conversationActionsCol}>
+                                        <TouchableOpacity
+                                            style={styles.conversationActionBtn}
+                                            onPress={async () => {
+                                                if (!user?.handle) return;
+                                                if (item.isPinned) {
+                                                    await unpinConversation(user.handle, item.otherHandle);
+                                                    updateConversationRow(item, (r) => ({ ...r, isPinned: false }));
+                                                } else {
+                                                    await pinConversation(user.handle, item.otherHandle);
+                                                    updateConversationRow(item, (r) => ({ ...r, isPinned: true }));
+                                                }
+                                            }}
+                                        >
+                                            <Text style={styles.conversationActionText}>{item.isPinned ? 'Unpin' : 'Pin'}</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={styles.conversationActionBtn}
+                                            onPress={async () => {
+                                                if (!user?.handle) return;
+                                                if (item.isMuted) {
+                                                    await unmuteConversation(user.handle, item.otherHandle);
+                                                    updateConversationRow(item, (r) => ({ ...r, isMuted: false }));
+                                                } else {
+                                                    await muteConversation(user.handle, item.otherHandle);
+                                                    updateConversationRow(item, (r) => ({ ...r, isMuted: true }));
+                                                }
+                                            }}
+                                        >
+                                            <Text style={styles.conversationActionText}>{item.isMuted ? 'Unmute' : 'Mute'}</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={styles.conversationActionBtn}
+                                            onPress={async () => {
+                                                if (!user?.handle) return;
+                                                if ((item.unread || 0) > 0) {
+                                                    await markConversationRead(user.handle, item.otherHandle);
+                                                    updateConversationRow(item, (r) => ({ ...r, unread: 0 }));
+                                                } else {
+                                                    await markConversationUnread(user.handle, item.otherHandle);
+                                                    updateConversationRow(item, (r) => ({ ...r, unread: 1 }));
+                                                }
+                                            }}
+                                        >
+                                            <Text style={styles.conversationActionText}>{(item.unread || 0) > 0 ? 'Read' : 'Unread'}</Text>
+                                        </TouchableOpacity>
+                                        {item.isRequest && (
+                                            <TouchableOpacity
+                                                style={styles.conversationActionBtn}
+                                                onPress={async () => {
+                                                    if (!user?.handle) return;
+                                                    await acceptMessageRequest(user.handle, item.otherHandle);
+                                                    updateConversationRow(item, (r) => ({ ...r, isRequest: false }));
+                                                }}
+                                            >
+                                                <Text style={styles.conversationActionText}>Accept</Text>
+                                            </TouchableOpacity>
+                                        )}
+                                        <TouchableOpacity
+                                            style={[styles.conversationActionBtn, styles.conversationDeleteBtn]}
+                                            onPress={() =>
+                                                Alert.alert('Delete conversation', 'Delete this conversation?', [
+                                                    { text: 'Cancel', style: 'cancel' },
+                                                    {
+                                                        text: 'Delete',
+                                                        style: 'destructive',
+                                                        onPress: async () => {
+                                                            if (!user?.handle) return;
+                                                            await deleteConversation(user.handle, item.otherHandle);
+                                                            setConversations((prev) =>
+                                                                prev.filter((r) => !(r.kind === 'dm' && r.otherHandle === item.otherHandle))
+                                                            );
+                                                        },
+                                                    },
+                                                ])
+                                            }
+                                        >
+                                            <Text style={styles.conversationActionText}>Delete</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
+                                {(item.unread || 0) > 0 && (
+                                    <View style={styles.unreadBadge}>
+                                        <Text style={styles.unreadBadgeText}>{item.unread > 99 ? '99+' : item.unread}</Text>
+                                    </View>
+                                )}
+                            </TouchableOpacity>
+                        );
+                    }}
+                    ListEmptyComponent={
+                        <View style={styles.emptyContainer}>
+                            <Text style={styles.emptyText}>
+                                {activeTab === 'groups' ? 'No private groups yet' : 'No messages yet'}
+                            </Text>
+                        </View>
+                    }
+                />
+                </>
             )}
         </SafeAreaView>
     );
@@ -212,11 +539,19 @@ const styles = StyleSheet.create({
         padding: 16,
         borderBottomWidth: 1,
         borderBottomColor: '#1F2937',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
     },
     headerTitle: {
         fontSize: 24,
         fontWeight: 'bold',
         color: '#FFFFFF',
+    },
+    headerActionText: {
+        color: '#F8D26A',
+        fontSize: 12,
+        fontWeight: '700',
     },
     tabs: {
         flexDirection: 'row',
@@ -228,15 +563,15 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 16,
-        gap: 8,
+        paddingVertical: 13,
+        gap: 6,
     },
     tabActive: {
         borderBottomWidth: 2,
         borderBottomColor: '#8B5CF6',
     },
     tabText: {
-        fontSize: 16,
+        fontSize: 13,
         color: '#6B7280',
         fontWeight: '500',
     },
@@ -276,6 +611,85 @@ const styles = StyleSheet.create({
         backgroundColor: '#1F2937',
         justifyContent: 'center',
         alignItems: 'center',
+    },
+    rowActionIcon: {
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+    },
+    conversationSearchWrap: {
+        marginHorizontal: 12,
+        marginTop: 10,
+        marginBottom: 8,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#374151',
+        backgroundColor: '#1F2937',
+        paddingHorizontal: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    conversationSearchInput: {
+        flex: 1,
+        color: '#FFFFFF',
+        fontSize: 14,
+        paddingVertical: 8,
+    },
+    messageFiltersRow: {
+        flexDirection: 'row',
+        gap: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        borderBottomWidth: 1,
+        borderBottomColor: '#1F2937',
+    },
+    messageFilterChip: {
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: '#374151',
+        backgroundColor: '#111827',
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+    },
+    messageFilterChipActive: {
+        borderColor: '#8B5CF6',
+        backgroundColor: '#2E1065',
+    },
+    messageFilterChipText: {
+        color: '#D1D5DB',
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    messageFilterChipTextActive: {
+        color: '#DDD6FE',
+    },
+    conversationActionsCol: {
+        alignItems: 'flex-end',
+        gap: 4,
+        marginRight: 8,
+    },
+    conversationActionBtn: {
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: '#4B5563',
+        backgroundColor: '#111827',
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+    },
+    conversationDeleteBtn: {
+        borderColor: '#7F1D1D',
+        backgroundColor: '#450A0A',
+    },
+    conversationActionText: {
+        color: '#E5E7EB',
+        fontSize: 10,
+        fontWeight: '700',
+    },
+    requestBadgeText: {
+        marginTop: 4,
+        color: '#F8D26A',
+        fontSize: 11,
+        fontWeight: '700',
     },
     itemContent: {
         flex: 1,

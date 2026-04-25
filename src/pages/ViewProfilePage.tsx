@@ -23,7 +23,8 @@ import {
   canSendMessage, 
   hasPendingFollowRequest,
   createFollowRequest,
-  removeFollowRequest
+  removeFollowRequest,
+  normalizeHandleForPrivacy
 } from '../api/privacy';
 import Swal from 'sweetalert2';
 import ShareProfileModal from '../components/ShareProfileModal';
@@ -1233,10 +1234,11 @@ export default function ViewProfilePage() {
         // Use canonical handle from profile when available so API and follow state stay in sync (e.g. Bob@Cork vs bob@cork).
         const decodedHandle = decodeURIComponent(handle);
         const handleToUse = profileUser?.handle || decodedHandle;
+        const canonicalHandle = normalizeHandleForPrivacy(handleToUse);
 
         // Capture state at click time so mock path doesn't flip action after optimistic update
         const wasFollowingBeforeClick = isFollowing;
-        const profilePrivate = isProfilePrivate(decodedHandle);
+        const profilePrivate = isProfilePrivate(canonicalHandle);
 
         // Use same key as Stories/Scenes (user.id) so follow state is shared; fallback to getStableUserId when id missing
         const followUserId = user?.id != null ? String(user.id) : getStableUserId(user);
@@ -1246,13 +1248,13 @@ export default function ViewProfilePage() {
         if (!useLaravelApi) {
             const newFollowing = !wasFollowingBeforeClick;
             if (profilePrivate && newFollowing && user?.handle) {
-                createFollowRequest(user.handle, handleToUse);
+                createFollowRequest(user.handle, canonicalHandle);
                 setHasPendingRequest(true);
                 setIsFollowing(false);
                 setFollowState(followUserId, handleToUse, false);
                 try {
                     const { createNotification } = await import('../api/notifications');
-                    await createNotification({ type: 'follow_request', fromHandle: user.handle, toHandle: decodedHandle, message: `${user.handle} wants to follow you` });
+                    await createNotification({ type: 'follow_request', fromHandle: user.handle, toHandle: canonicalHandle, message: `${user.handle} wants to follow you` });
                 } catch (_) {}
                 Swal.fire(followRequestSentBottomSheet());
             } else {
@@ -1291,7 +1293,7 @@ export default function ViewProfilePage() {
         try {
             const followedUsers = await getFollowedUsers(followUserId);
             const isCurrentlyFollowing = followedUsers.some(h => h.toLowerCase() === handleToUse.toLowerCase());
-            const hasPending = hasPendingFollowRequest(user?.handle || '', decodedHandle);
+            const hasPending = hasPendingFollowRequest(user?.handle || '', canonicalHandle);
 
             let result;
             let useMockFallback = false;
@@ -1317,7 +1319,7 @@ export default function ViewProfilePage() {
                     // Private profile + trying to follow = send request only. Do NOT add to follow list.
                     // User only becomes "following" after Sarah accepts.
                     if (profilePrivate && newFollowingState && !isCurrentlyFollowing && user?.handle) {
-                        createFollowRequest(user.handle, handleToUse);
+                        createFollowRequest(user.handle, canonicalHandle);
                         setHasPendingRequest(true);
                         setIsFollowing(false);
                         setFollowState(followUserId, handleToUse, false); // never add to follow list until accepted
@@ -1418,7 +1420,7 @@ export default function ViewProfilePage() {
                 setIsFollowing(false);
                 setFollowState(followUserId, handleToUse, false);
                 setHasPendingRequest(false);
-                removeFollowRequest(user.handle, handleToUse);
+                removeFollowRequest(user.handle, canonicalHandle);
                 
                 // If profile was private, user can no longer view
                 if (profilePrivate) {
@@ -1427,7 +1429,7 @@ export default function ViewProfilePage() {
             } else if (result.status === 'pending') {
                 // Private profile - follow request sent (only if not already pending)
                 if (!hasPending && user?.handle) {
-                    createFollowRequest(user.handle, handleToUse);
+                    createFollowRequest(user.handle, canonicalHandle);
                     setHasPendingRequest(true);
                 setIsFollowing(false);
                     
@@ -1437,7 +1439,7 @@ export default function ViewProfilePage() {
                         await createNotification({
                             type: 'follow_request',
                             fromHandle: user.handle,
-                            toHandle: handleToUse,
+                            toHandle: canonicalHandle,
                             message: `${user.handle} wants to follow you`
                         });
                     } catch (error) {
@@ -1533,13 +1535,15 @@ export default function ViewProfilePage() {
 
             // Decode the handle from URL (in case it was encoded)
             const decodedHandle = decodeURIComponent(handle);
+            const handleToUse = decodedHandle;
+            const canonicalHandle = normalizeHandleForPrivacy(handleToUse);
             setLoading(true);
             setProfilePostsCursor(null);
             setProfilePostsHasMore(false);
             setProfilePostsLoadingMore(false);
             try {
                 // Check privacy using localStorage
-                const profilePrivate = isProfilePrivate(decodedHandle);
+                const profilePrivate = isProfilePrivate(canonicalHandle);
                 setProfileIsPrivate(profilePrivate);
                 
                 if (user?.id && user?.handle) {
@@ -1547,7 +1551,7 @@ export default function ViewProfilePage() {
                     const followedUsers = await getFollowedUsers(followUserId);
                     const canView = canViewProfile(user?.handle || '', decodedHandle, followedUsers);
                     const isFollowingUser = followedUsers.some(h => h.toLowerCase() === decodedHandle.toLowerCase());
-                    const hasPending = hasPendingFollowRequest(user?.handle || '', decodedHandle);
+                    const hasPending = hasPendingFollowRequest(user?.handle || '', canonicalHandle);
                     
                     // Base values from follow list
                     let effectiveCanView = canView;
@@ -1580,7 +1584,7 @@ export default function ViewProfilePage() {
                                 // If there's a stale pending request, we should NOT remove it here
                                 // because the user might have created it from a different place (like the + icon)
                                 // We'll just log it for debugging
-                                const hasPending = hasPendingFollowRequest(user?.handle || '', decodedHandle);
+                                const hasPending = hasPendingFollowRequest(user?.handle || '', canonicalHandle);
                                 if (hasPending) {
                                     console.log('Note: There is a pending follow request from a previous interaction. User clicked Cancel, so no new request was created. The existing pending request remains.');
                                 } else {

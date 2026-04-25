@@ -1,3 +1,5 @@
+import { getNotificationPreferences, isNotificationTypeEnabled } from '../services/notifications';
+
 export type NotificationType = 'sticker' | 'reply' | 'dm' | 'like' | 'comment' | 'follow' | 'follow_request';
 
 export interface Notification {
@@ -8,6 +10,8 @@ export interface Notification {
     message?: string;
     postId?: string;
     commentId?: string;
+    chatGroupId?: string;
+    groupName?: string;
     timestamp: number;
     read: boolean;
 }
@@ -31,6 +35,30 @@ export function isReplyToPost(text: string): boolean {
 }
 
 export async function createNotification(notification: Omit<Notification, 'id' | 'timestamp' | 'read'>): Promise<Notification> {
+    try {
+        const userStr = localStorage.getItem('user');
+        const current = userStr ? JSON.parse(userStr) : null;
+        const currentHandle = String(current?.handle || '').toLowerCase();
+        const targetHandle = String(notification.toHandle || '').toLowerCase();
+
+        // Enforce preferences at creation time for the signed-in recipient.
+        // (For other recipients in mock mode, we may not have their local prefs.)
+        if (currentHandle && targetHandle && currentHandle === targetHandle) {
+            const prefs = getNotificationPreferences();
+            const channel = normalizeNotificationChannel(notification as Pick<Notification, 'type' | 'chatGroupId'>);
+            if (!isNotificationTypeEnabled(prefs, channel)) {
+                return {
+                    id: `notif-skipped-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                    ...notification,
+                    timestamp: Date.now(),
+                    read: true,
+                };
+            }
+        }
+    } catch {
+        // If preference resolution fails, fall through and create notification.
+    }
+
     const notif: Notification = {
         id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         ...notification,
@@ -49,6 +77,41 @@ export async function createNotification(notification: Omit<Notification, 'id' |
     return notif;
 }
 
+function normalizeNotificationChannel(notification: Pick<Notification, 'type' | 'chatGroupId'>) {
+    if (notification.chatGroupId) return 'group_chat' as const;
+    switch (notification.type) {
+        case 'dm':
+            return 'dm' as const;
+        case 'sticker':
+            return 'sticker' as const;
+        case 'reply':
+            return 'reply' as const;
+        case 'like':
+            return 'like' as const;
+        case 'comment':
+            return 'comment' as const;
+        case 'follow':
+            return 'follow' as const;
+        case 'follow_request':
+            return 'follow_request' as const;
+        default:
+            return 'dm' as const;
+    }
+}
+
+function filterNotificationsByPreferences(forHandle: string, items: Notification[]): Notification[] {
+    try {
+        const userStr = localStorage.getItem('user');
+        const current = userStr ? JSON.parse(userStr) : null;
+        const currentHandle = (current?.handle || '').toLowerCase();
+        if (!currentHandle || currentHandle !== String(forHandle || '').toLowerCase()) return items;
+        const prefs = getNotificationPreferences();
+        return items.filter((n) => isNotificationTypeEnabled(prefs, normalizeNotificationChannel(n)));
+    } catch {
+        return items;
+    }
+}
+
 export async function getNotifications(forHandle: string): Promise<Notification[]> {
     const { isLaravelApiEnabled } = await import('../config/runtimeEnv');
     if (isLaravelApiEnabled()) {
@@ -56,7 +119,7 @@ export async function getNotifications(forHandle: string): Promise<Notification[
             const apiClient = await import('./client');
             const response = await apiClient.fetchNotifications(0, 100);
             const items = Array.isArray(response?.items) ? response.items : [];
-            return items.map((n: any) => ({
+            const normalized = items.map((n: any) => ({
                 id: n.id,
                 type: n.type,
                 fromHandle: n.from_handle || '',
@@ -64,14 +127,17 @@ export async function getNotifications(forHandle: string): Promise<Notification[
                 message: n.message || undefined,
                 postId: n.post_id || undefined,
                 commentId: n.comment_id || undefined,
+                chatGroupId: n.chat_group_id || undefined,
+                groupName: n.group_name || undefined,
                 timestamp: n.created_at ? new Date(n.created_at).getTime() : Date.now(),
                 read: !!n.read,
             }));
+            return filterNotificationsByPreferences(forHandle, normalized);
         } catch (error) {
             console.warn('Failed to fetch notifications from API, falling back to local store:', error);
         }
     }
-    return notifications.get(forHandle) || [];
+    return filterNotificationsByPreferences(forHandle, notifications.get(forHandle) || []);
 }
 
 export async function markNotificationRead(notificationId: string, forHandle: string): Promise<void> {
@@ -114,19 +180,8 @@ export async function markAllNotificationsRead(forHandle: string): Promise<void>
 }
 
 export async function getUnreadNotificationCount(forHandle: string): Promise<number> {
-    const { isLaravelApiEnabled } = await import('../config/runtimeEnv');
-    if (isLaravelApiEnabled()) {
-        try {
-            const apiClient = await import('./client');
-            const response = await apiClient.fetchUnreadNotificationCount();
-            return Number(response?.count) || 0;
-        } catch (error) {
-            console.warn('Failed to fetch unread notification count from API, falling back to local store:', error);
-        }
-    }
-
-    const userNotifications = notifications.get(forHandle) || [];
-    return userNotifications.filter(n => !n.read).length;
+    const items = await getNotifications(forHandle);
+    return items.filter(n => !n.read).length;
 }
 
 export async function deleteNotification(notificationId: string, forHandle: string): Promise<void> {

@@ -137,6 +137,8 @@ export type Comment = {
   parentId?: string; // For nested replies
   replyCount?: number; // Total number of replies
   replies_count?: number; // Backend field
+  moderationState?: 'visible' | 'hidden_by_filter';
+  moderationReason?: string;
 };
 
 export type StoryReaction = {

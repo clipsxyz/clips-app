@@ -20,7 +20,7 @@ import { useAuth } from './context/Auth';
 import { getFlagForHandle, getAvatarForHandle } from './api/users';
 import Flag from './components/Flag';
 import { useOnline } from './hooks/useOnline';
-import { getUnreadTotal, appendMessage } from './api/messages';
+import { getUnreadTotal, appendMessage, blockUser } from './api/messages';
 import { getUnreadNotificationCount } from './api/notifications';
 import { getStoryInsightsForUser } from './api/stories';
 import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost, getAvaNormalPost, postMatchesLocationTab, posts as postsStore, consumePendingCreatedPost } from './api/posts';
@@ -179,12 +179,12 @@ function BottomNav({ onCreateClick, onProfileClick }: { onCreateClick: () => voi
         <div className="relative">
           {createSquareIcon(icon, active)}
           {showContributeBadge && (
-            <span className={`contribute-badge-pop absolute -top-9 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-2xl bg-[#ff426d] text-white text-[11px] font-bold px-3.5 py-1 shadow-[0_8px_20px_rgba(255,66,109,0.55)] ${showContributeBurst ? 'contribute-badge-burst' : ''}`}>
+            <span className={`contribute-badge-pop absolute -top-9 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-2xl border border-white/80 bg-gradient-to-r from-[#f6e27a] via-[#d4af37] to-[#d8dde3] text-[#111827] text-[11px] font-bold px-3.5 py-1 shadow-[0_8px_20px_rgba(212,175,55,0.42)] ${showContributeBurst ? 'contribute-badge-burst' : ''}`}>
               <span className="inline-flex items-center gap-1">
                 <FiMapPin className="w-3.5 h-3.5" />
                 <span>Add Yours</span>
               </span>
-              <span className="absolute left-1/2 -bottom-1 -translate-x-1/2 w-2 h-2 bg-[#ff426d] rotate-45 rounded-[2px]" />
+              <span className="absolute left-1/2 -bottom-1 -translate-x-1/2 w-2 h-2 bg-[#d8dde3] rotate-45 rounded-[2px]" />
             </span>
           )}
           {showContributeBadge && showContributeBurst && (
@@ -701,9 +701,9 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
         </div>
       </div>
 
-      {showBoostPrompt && (
+      {showBoostPrompt && createPortal(
         <div
-          className="fixed inset-0 z-[220] flex items-center justify-center bg-black/75 backdrop-blur-sm px-4"
+          className="fixed inset-0 z-[11000] isolate flex items-center justify-center bg-black/75 backdrop-blur-sm px-4"
           role="presentation"
           onClick={() => setShowBoostPrompt(false)}
         >
@@ -754,9 +754,12 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                     setShowBoostPrompt(false);
                     navigate('/boost');
                   }}
-                  className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#FE2C55] px-4 py-3 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(254,44,85,0.35)] transition-colors hover:bg-[#e62850] active:scale-[0.99]"
+                  className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-white/80 bg-gradient-to-r from-[#f6e27a] via-[#d4af37] to-[#d8dde3] px-4 py-3 text-sm font-semibold text-[#111827] shadow-[0_8px_24px_rgba(212,175,55,0.35)] transition-all hover:brightness-105 active:scale-[0.99]"
                 >
-                  <FiZap className="h-4 w-4 opacity-95" aria-hidden />
+                  <span className="relative inline-flex h-4 w-4" aria-hidden>
+                    <FiZap className="absolute inset-0 h-4 w-4 text-[#d7dde3]" />
+                    <FiZap className="absolute inset-0 h-4 w-4 text-[#d4af37]" style={{ clipPath: 'inset(48% 0 0 0)' }} />
+                  </span>
                   <span>Open Boost</span>
                 </button>
                 <button
@@ -769,7 +772,8 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
     </div>
@@ -1062,6 +1066,46 @@ function PostHeader({
     }
     setProfileMenuOpen(false);
     navigate('/stories', { state: { openUserHandle: profileTargetHandle } });
+  };
+
+  const handleBlockFromQuickActions = async (e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    if (isCurrentUser || !user?.handle || !post.userHandle) return;
+    const result = await Swal.fire(bottomSheet({
+      title: `Block ${post.userHandle}?`,
+      message: "You won't see their posts in your current session and they won't be able to DM you.",
+      icon: 'alert',
+      showCancelButton: true,
+      confirmButtonText: 'Block',
+      cancelButtonText: 'Cancel',
+    }));
+    if (!result.isConfirmed) return;
+    try {
+      await blockUser(user.handle, post.userHandle);
+      window.dispatchEvent(new CustomEvent('feedUserBlocked', { detail: { handle: post.userHandle } }));
+      setProfileMenuOpen(false);
+      showToast('User blocked');
+    } catch (err) {
+      console.error('Failed to block user from feed quick actions:', err);
+      Swal.fire(bottomSheet({ title: 'Could not block user', message: 'Please try again.', icon: 'alert' }));
+    }
+  };
+
+  const handleReportFromQuickActions = async (e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    if (isCurrentUser) return;
+    setProfileMenuOpen(false);
+    await Swal.fire(bottomSheet({
+      title: 'Report submitted',
+      message: `Thanks — we will review reports about ${post.userHandle}.`,
+      icon: 'success',
+    }));
   };
 
   // Re-check active stories when the quick-actions card opens, so visibility stays accurate.
@@ -1381,6 +1425,32 @@ function PostHeader({
               </button>
             )}
 
+            {!isCurrentUser && (
+              <button
+                type="button"
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm border-t border-white/10 hover:bg-rose-500/10 transition-colors"
+                onClick={handleBlockFromQuickActions}
+              >
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-rose-500/15 border border-rose-400/30">
+                  <FiUserX className="w-3.5 h-3.5 text-rose-300" />
+                </span>
+                <span className="font-medium text-rose-300">Block user</span>
+              </button>
+            )}
+
+            {!isCurrentUser && (
+              <button
+                type="button"
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm border-t border-white/10 hover:bg-amber-500/10 transition-colors"
+                onClick={handleReportFromQuickActions}
+              >
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-500/15 border border-amber-400/30">
+                  <FiHelpCircle className="w-3.5 h-3.5 text-amber-300" />
+                </span>
+                <span className="font-medium text-amber-200">Report</span>
+              </button>
+            )}
+
             {hasAnyStory && (
               <button
                 className="w-full flex flex-row items-center gap-2.5 px-3 py-2.5 text-sm border-t border-white/10 hover:bg-violet-500/10 transition-colors"
@@ -1647,6 +1717,32 @@ function PostHeader({
                 <FiMessageSquare className="w-3.5 h-3.5 text-cyan-300" />
               </span>
               <span className="font-medium text-cyan-200">Message</span>
+            </button>
+          )}
+
+          {!isCurrentUser && (
+            <button
+              type="button"
+              className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm border-t border-white/10 hover:bg-rose-500/10 transition-colors"
+              onClick={handleBlockFromQuickActions}
+            >
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-rose-500/15 border border-rose-400/30">
+                <FiUserX className="w-3.5 h-3.5 text-rose-300" />
+              </span>
+              <span className="font-medium text-rose-300">Block user</span>
+            </button>
+          )}
+
+          {!isCurrentUser && (
+            <button
+              type="button"
+              className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm border-t border-white/10 hover:bg-amber-500/10 transition-colors"
+              onClick={handleReportFromQuickActions}
+            >
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-500/15 border border-amber-400/30">
+                <FiHelpCircle className="w-3.5 h-3.5 text-amber-300" />
+              </span>
+              <span className="font-medium text-amber-200">Report</span>
             </button>
           )}
 
@@ -5302,7 +5398,20 @@ function Stories24FeedRail({
       <div className="rounded-2xl bg-[#0a1323] p-3">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-white text-base font-semibold flex items-center gap-1.5">
-          <FiMapPin className="w-4 h-4 text-[#7A8AF0] shrink-0" aria-hidden />
+          <span className="relative inline-flex h-4 w-4 shrink-0" aria-hidden>
+            <FiMapPin
+              className="absolute inset-0 h-4 w-4"
+              style={{ color: '#d7dde3', filter: 'drop-shadow(0 0 1px rgba(255,255,255,0.45))' }}
+            />
+            <FiMapPin
+              className="absolute inset-0 h-4 w-4"
+              style={{ color: '#d4af37', clipPath: 'inset(48% 0 0 0)', filter: 'drop-shadow(0 0 1px rgba(212,175,55,0.7))' }}
+            />
+            <FiMapPin
+              className="absolute inset-0 h-4 w-4"
+              style={{ color: 'rgba(255,255,255,0.25)', clipPath: 'inset(0 0 62% 0)' }}
+            />
+          </span>
           <span>Stories 24</span>
         </h3>
         <button
@@ -5500,6 +5609,23 @@ function FeedPageWrapper() {
     phase: 'start' | 'fly';
   } | null>(null);
   const [storiesRailItems, setStoriesRailItems] = React.useState<Stories24RailItem[]>([]);
+
+  React.useEffect(() => {
+    const onFeedUserBlocked = (event: CustomEvent<{ handle?: string }>) => {
+      const blockedHandle = String(event.detail?.handle || '').trim().toLowerCase();
+      if (!blockedHandle) return;
+
+      setPages((prev) => prev.map((page) => page.filter((p) => String(p.userHandle || '').trim().toLowerCase() !== blockedHandle)));
+      setStoriesRailItems((prev) => prev.filter((item) => String(item.handle || '').trim().toLowerCase() !== blockedHandle));
+
+      setSelectedPostForScenes((prev) =>
+        prev && String(prev.userHandle || '').trim().toLowerCase() === blockedHandle ? null : prev
+      );
+    };
+
+    window.addEventListener('feedUserBlocked', onFeedUserBlocked as EventListener);
+    return () => window.removeEventListener('feedUserBlocked', onFeedUserBlocked as EventListener);
+  }, []);
 
   const readSuggestedPlacesPrefs = React.useCallback(() => {
     if (typeof window === 'undefined') {

@@ -18,6 +18,7 @@ import { toggleFollow, acceptFollowRequest, denyFollowRequest } from '../api/cli
 import { getSocket } from '../services/socketio';
 import { leaveChatGroup } from '../api/client';
 import { markGroupConversationReadById } from '../api/messages';
+import { getNotificationPreferences, isNotificationTypeEnabled } from '../services/notifications';
 
 function inboxConversationRowId(conv: ConversationSummary): string {
     if (conv.kind === 'group' && conv.chatGroupId) return `g:${conv.chatGroupId}`;
@@ -377,13 +378,56 @@ export default function InboxPage() {
     const [storyGroups, setStoryGroups] = React.useState<StoryGroup[]>([]);
     const [items, setItems] = React.useState<ConversationSummary[]>([]);
     const [loading, setLoading] = React.useState(true);
-    const [activeTab, setActiveTab] = React.useState<'insights' | 'notifications' | 'messages'>('messages');
+    const [activeTab, setActiveTab] = React.useState<'insights' | 'notifications' | 'messages' | 'groups'>('messages');
     const [messageFilter, setMessageFilter] = React.useState<'all' | 'groups' | 'unread' | 'requests' | 'pinned'>('all');
     const [conversationQuery, setConversationQuery] = React.useState('');
     const [selectedQuestionInsight, setSelectedQuestionInsight] = React.useState<StoryInsight | null>(null);
     const [openSwipeHandle, setOpenSwipeHandle] = React.useState<string | null>(null);
     const [inboxChatInfo, setInboxChatInfo] = React.useState<ConversationSummary | null>(null);
     const [compactPhone, setCompactPhone] = React.useState<boolean>(() => (typeof window !== 'undefined' ? window.innerWidth <= 390 : false));
+
+    const getInsightsSeenStorageKey = React.useCallback(
+        (handle: string) => `clips:insights-seen:${String(handle || '').trim().toLowerCase()}`,
+        []
+    );
+
+    const getSeenInsightStoryIds = React.useCallback((handle: string): Set<string> => {
+        try {
+            const raw = localStorage.getItem(getInsightsSeenStorageKey(handle));
+            const parsed = raw ? JSON.parse(raw) : [];
+            if (!Array.isArray(parsed)) return new Set<string>();
+            return new Set(parsed.filter((v) => typeof v === 'string' && v.trim().length > 0));
+        } catch {
+            return new Set<string>();
+        }
+    }, [getInsightsSeenStorageKey]);
+
+    const saveSeenInsightStoryIds = React.useCallback((handle: string, ids: Set<string>) => {
+        try {
+            localStorage.setItem(getInsightsSeenStorageKey(handle), JSON.stringify(Array.from(ids)));
+        } catch {
+            /* ignore */
+        }
+    }, [getInsightsSeenStorageKey]);
+
+    const markInsightSeen = React.useCallback((storyId?: string) => {
+        if (!user?.handle || !storyId) return;
+        const seen = getSeenInsightStoryIds(user.handle);
+        if (seen.has(storyId)) return;
+        seen.add(storyId);
+        saveSeenInsightStoryIds(user.handle, seen);
+    }, [user?.handle, getSeenInsightStoryIds, saveSeenInsightStoryIds]);
+
+    const markAllInsightsSeen = React.useCallback(() => {
+        if (!user?.handle || !insights.length) return;
+        const seen = getSeenInsightStoryIds(user.handle);
+        insights.forEach((insight) => {
+            if (insight.storyId) seen.add(insight.storyId);
+        });
+        saveSeenInsightStoryIds(user.handle, seen);
+        // Trigger rerender to refresh unseen badge/count immediately.
+        setInsights((prev) => [...prev]);
+    }, [user?.handle, insights, getSeenInsightStoryIds, saveSeenInsightStoryIds]);
 
     const openInboxChatInfo = React.useCallback((c: ConversationSummary) => {
         setOpenSwipeHandle(null);
@@ -404,11 +448,10 @@ export default function InboxPage() {
     const loadData = React.useCallback(async () => {
         if (!user?.handle) return;
         try {
-            const [notifs, storyInsights, conversations, followedUsers, followedUsersForStories] = await Promise.all([
+            const [notifs, storyInsights, conversations, followedUsers] = await Promise.all([
                 getNotifications(user.handle),
                 getStoryInsightsForUser(user.handle),
                 listConversations(user.handle),
-                user?.id ? getFollowedUsers(user.id).catch(() => [] as string[]) : Promise.resolve([] as string[]),
                 user?.id ? getFollowedUsers(user.id).catch(() => [] as string[]) : Promise.resolve([] as string[]),
             ]);
             
@@ -418,6 +461,8 @@ export default function InboxPage() {
                 isFollowing: conv.kind === 'group' ? false : (followedUsers as string[]).includes(conv.otherHandle),
             }));
             
+            const prefs = getNotificationPreferences();
+
             // Convert conversations to notifications format so they appear in Notifs tab
             // Only include conversations where the OTHER person sent the last message (not the user)
             const existingNotifHandles = new Set(notifs.filter(n => n.type === 'dm' || n.type === 'sticker' || n.type === 'reply').map(n => n.fromHandle));
@@ -427,15 +472,36 @@ export default function InboxPage() {
                     // 1. Has a last message
                     // 2. The OTHER person sent the last message (not the user)
                     // 3. Doesn't already have a notification for this handle
-                    if (conv.kind === 'group') return false;
+                    if (conv.kind === 'group') {
+                        // Group conversation activity can surface in Notifs when Group Chat notifications are enabled.
+                        if (!isNotificationTypeEnabled(prefs, 'group_chat')) return false;
+                        if (!conv.chatGroupId || !conv.lastMessage) return false;
+                        if (conv.lastMessage.senderHandle === user.handle) return false;
+                        if (conv.unread === 0) return false;
+                        return true;
+                    }
                     if (!conv.lastMessage) return false;
                     if (conv.lastMessage.senderHandle === user.handle) return false; // User sent it, don't create notification
                     if (existingNotifHandles.has(conv.otherHandle)) return false; // Already has notification
+                    if (!isNotificationTypeEnabled(prefs, 'dm')) return false;
                     return true;
                 })
                 .map(conv => {
                     // TypeScript: we know lastMessage exists and was sent by other person because of the filter above
                     const lastMsg = conv.lastMessage!;
+                    if (conv.kind === 'group' && conv.chatGroupId) {
+                        return {
+                            id: `group-conv-${conv.chatGroupId}-${lastMsg.timestamp || Date.now()}`,
+                            type: 'dm' as const,
+                            fromHandle: conv.groupName || 'Group',
+                            toHandle: user.handle,
+                            message: lastMsg.text || '',
+                            chatGroupId: conv.chatGroupId,
+                            groupName: conv.groupName,
+                            timestamp: lastMsg.timestamp || Date.now(),
+                            read: conv.unread === 0
+                        };
+                    }
                     return {
                         id: `conv-${conv.otherHandle}-${lastMsg.timestamp || Date.now()}`,
                         type: 'dm' as const,
@@ -457,7 +523,7 @@ export default function InboxPage() {
             // Load story groups for followed users (for the horizontal stories row)
             if (user?.id) {
                 try {
-                    const groups = await fetchFollowedUsersStoryGroups(user.id, followedUsersForStories as string[]);
+                    const groups = await fetchFollowedUsersStoryGroups(user.id, followedUsers as string[]);
                     // Enrich with avatar URLs (use current user's avatar or mock avatars from getAvatarForHandle)
                     const groupsWithAvatars = groups.map((group) => {
                         if (group.userId === user.id && user.avatarUrl) {
@@ -492,7 +558,7 @@ export default function InboxPage() {
             getNotifications(user!.handle!).then(setNotifications);
         };
         const onConversationUpdate = () => {
-            listConversations(user!.handle!).then(setItems);
+            void loadData();
         };
 
         window.addEventListener('notificationsUpdated', onNotificationUpdate as any);
@@ -744,6 +810,15 @@ export default function InboxPage() {
     const regularItems = queriedItems.filter(c => !c.isPinned && !c.isRequest);
     const unreadItems = queriedItems.filter(c => c.unread > 0);
     const groupItems = queriedItems.filter(c => c.kind === 'group');
+    const unreadGroupMessagesTotal = groupItems.reduce((sum, c) => sum + c.unread, 0);
+    const seenInsightIds = React.useMemo(
+        () => (user?.handle ? getSeenInsightStoryIds(user.handle) : new Set<string>()),
+        [user?.handle, insights, getSeenInsightStoryIds]
+    );
+    const unseenInsightsCount = React.useMemo(
+        () => insights.filter((insight) => !seenInsightIds.has(insight.storyId)).length,
+        [insights, seenInsightIds]
+    );
 
     const handleNotificationClick = async (notif: Notification) => {
         if (!notif.read && user?.handle) {
@@ -754,6 +829,10 @@ export default function InboxPage() {
         if (notif.type === 'sticker' || notif.type === 'reply') {
             navigate(`/messages/${encodeURIComponent(notif.fromHandle)}`);
         } else if (notif.type === 'dm') {
+            if (notif.chatGroupId) {
+                navigate(`/messages/group/${encodeURIComponent(notif.chatGroupId)}`);
+                return;
+            }
             navigate(`/messages/${encodeURIComponent(notif.fromHandle)}`);
         }
     };
@@ -982,6 +1061,20 @@ export default function InboxPage() {
                     )}
                 </button>
                 <button
+                    onClick={() => setActiveTab('groups')}
+                    className={`flex-1 py-1.5 text-xs font-medium transition-colors relative whitespace-nowrap flex items-center justify-center gap-1 ${activeTab === 'groups'
+                            ? 'text-white border-b-2 border-white'
+                            : 'text-gray-500 hover:text-gray-300'
+                        }`}
+                >
+                    <span>Groups</span>
+                    {unreadGroupMessagesTotal > 0 && (
+                        <span className="px-1 py-0.5 bg-white text-gray-900 text-[9px] rounded-full min-w-[16px] text-center leading-none font-semibold">
+                            {unreadGroupMessagesTotal > 9 ? '9+' : unreadGroupMessagesTotal}
+                        </span>
+                    )}
+                </button>
+                <button
                     onClick={() => setActiveTab('notifications')}
                     className={`flex-1 py-1.5 text-xs font-medium transition-colors relative whitespace-nowrap flex items-center justify-center gap-1 ${activeTab === 'notifications'
                             ? 'text-white border-b-2 border-white'
@@ -1003,9 +1096,9 @@ export default function InboxPage() {
                         }`}
                 >
                     <span>Insights</span>
-                    {insights && insights.length > 0 && (
+                    {unseenInsightsCount > 0 && (
                         <span className="px-1 py-0.5 bg-white text-gray-900 text-[9px] rounded-full min-w-[16px] text-center leading-none font-semibold">
-                            {insights.length > 9 ? '9+' : insights.length}
+                            {unseenInsightsCount > 9 ? '9+' : unseenInsightsCount}
                         </span>
                     )}
                 </button>
@@ -1341,12 +1434,21 @@ export default function InboxPage() {
                                         {getNotificationIcon(notif.type)}
                                     </div>
                                     <Avatar
-                                        name={notif.fromHandle}
-                                        src={getAvatarForHandle(notif.fromHandle)}
+                                        name={notif.groupName || notif.fromHandle}
+                                        src={notif.chatGroupId ? undefined : getAvatarForHandle(notif.fromHandle)}
                                         size="sm"
                                     />
                                     <div className="flex-1 min-w-0">
-                                        <div className="font-medium truncate">{notif.fromHandle}</div>
+                                        <div className="font-medium truncate flex items-center gap-1.5">
+                                            <span className="truncate">{notif.groupName || notif.fromHandle}</span>
+                                            <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-semibold leading-none ${
+                                                notif.chatGroupId
+                                                    ? 'bg-white/15 text-white/90 border border-white/20'
+                                                    : 'bg-white/10 text-white/75 border border-white/15'
+                                            }`}>
+                                                {notif.chatGroupId ? 'Group' : 'DM'}
+                                            </span>
+                                        </div>
                                         <div className="text-xs text-gray-500 truncate">
                                             {formatNotificationMessage(notif)}
                                         </div>
@@ -1380,20 +1482,78 @@ export default function InboxPage() {
                         ))}
                     </div>
                 )
+            ) : activeTab === 'groups' ? (
+                groupItems.length > 0 ? (
+                    <div
+                        className={compactPhone ? 'space-y-2.5' : 'space-y-3'}
+                        onClickCapture={(e) => {
+                            if (!openSwipeHandle) return;
+                            const target = e.target as HTMLElement | null;
+                            if (target?.closest('[data-conversation-row="true"]')) return;
+                            setOpenSwipeHandle(null);
+                        }}
+                        onTouchStartCapture={(e) => {
+                            if (!openSwipeHandle) return;
+                            const target = e.target as HTMLElement | null;
+                            if (target?.closest('[data-conversation-row="true"]')) return;
+                            setOpenSwipeHandle(null);
+                        }}
+                    >
+                        {groupItems.map(conv => (
+                            <ConversationItem
+                                key={inboxConversationRowId(conv)}
+                                conv={conv}
+                                onPin={undefined}
+                                navigate={navigate}
+                                currentUserHandle={user?.handle}
+                                onFollow={handleFollow}
+                                onToggleMute={undefined}
+                                onDeleteConversation={() => handleDeleteConversation(conv)}
+                                onMarkRead={() => handleMarkConversationRead(conv)}
+                                onMarkUnread={() => handleMarkConversationUnread(conv)}
+                                isSwipeOpen={openSwipeHandle === inboxConversationRowId(conv)}
+                                onSwipeOpenChange={setOpenSwipeHandle}
+                                onOpenChatInfo={openInboxChatInfo}
+                                compactPhone={compactPhone}
+                            />
+                        ))}
+                    </div>
+                ) : (
+                    <div className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-5 text-center text-sm text-gray-400 leading-relaxed">
+                        No group chats yet. Use <span className="text-white/90">New group</span> on your profile or{' '}
+                        <span className="text-white/90">Create group</span> on your own post (⋯ menu), then invite people from the{' '}
+                        <span className="text-white/90">+</span> button in the group or from their profile.
+                    </div>
+                )
             ) : activeTab === 'insights' ? (
                 !insights || insights.length === 0 ? (
                     <div className="text-gray-500">No story insights yet.</div>
                 ) : (
                 <div className="space-y-2">
+                    {unseenInsightsCount > 0 && (
+                        <div className="flex justify-end mb-2">
+                            <button
+                                onClick={markAllInsightsSeen}
+                                className="text-xs text-white hover:text-white/70"
+                            >
+                                Mark all seen
+                            </button>
+                        </div>
+                    )}
                     {insights.map(insight => (
                         <div
                             key={insight.storyId}
                             onClick={() => {
+                                markInsightSeen(insight.storyId);
                                 if (insight.question && insight.question.responseCount > 0) {
                                     setSelectedQuestionInsight(insight);
                                 }
                             }}
-                            className={`w-full text-left flex items-center gap-3 py-3 px-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 ${insight.question && insight.question.responseCount > 0 ? 'cursor-pointer' : ''}`}
+                            className={`w-full text-left flex items-center gap-3 py-3 px-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 ${
+                                seenInsightIds.has(insight.storyId)
+                                    ? 'opacity-80'
+                                    : 'bg-white/10 border-l-4 border-white'
+                            } ${insight.question && insight.question.responseCount > 0 ? 'cursor-pointer' : ''}`}
                         >
                             {/* Show avatar from first responder if question, otherwise from first liker */}
                             {insight.question && insight.question.responses && insight.question.responses.length > 0 ? (

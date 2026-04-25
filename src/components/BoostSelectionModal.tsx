@@ -262,7 +262,7 @@ export default function BoostSelectionModal({
 
     return (
         <div
-            className="fixed inset-0 z-50 bg-black/70 backdrop-blur-[2px] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200"
+            className="fixed inset-0 z-[10000] isolate bg-black/70 backdrop-blur-[2px] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200"
             onClick={onClose}
         >
             <div

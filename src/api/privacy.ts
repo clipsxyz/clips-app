@@ -16,6 +16,10 @@ interface FollowRequest {
   status: 'pending' | 'accepted' | 'denied';
 }
 
+export function normalizeHandleForPrivacy(handle: string): string {
+  return String(handle || '').trim().toLowerCase();
+}
+
 // Get privacy settings from localStorage
 function getPrivacySettings(): PrivacySettings {
   try {
@@ -82,13 +86,21 @@ export function initializePrivateMockUser(): void {
 // Check if a user's profile is private
 export function isProfilePrivate(handle: string): boolean {
   const settings = getPrivacySettings();
-  return settings[handle] === true;
+  const key = normalizeHandleForPrivacy(handle);
+  if (!key) return false;
+  return settings[key] === true || settings[handle] === true;
 }
 
 // Set profile privacy
 export function setProfilePrivacy(handle: string, isPrivate: boolean): void {
   const settings = getPrivacySettings();
-  settings[handle] = isPrivate;
+  const key = normalizeHandleForPrivacy(handle);
+  if (!key) return;
+  settings[key] = isPrivate;
+  if (handle && key !== handle) {
+    // Keep original-case key aligned for backward compatibility with any legacy callers.
+    settings[handle] = isPrivate;
+  }
   savePrivacySettings(settings);
 }
 
@@ -148,8 +160,12 @@ export function hasPendingFollowRequest(fromHandle: string, toHandle: string): b
     saveFollowRequests(validRequests);
   }
   
-  const matchingRequests = validRequests.filter(
-    req => req.fromHandle === fromHandle && req.toHandle === toHandle && req.status === 'pending'
+  const fromKey = normalizeHandleForPrivacy(fromHandle);
+  const toKey = normalizeHandleForPrivacy(toHandle);
+  const matchingRequests = validRequests.filter((req) =>
+    normalizeHandleForPrivacy(req.fromHandle) === fromKey &&
+    normalizeHandleForPrivacy(req.toHandle) === toKey &&
+    req.status === 'pending'
   );
   const hasPending = matchingRequests.length > 0;
   
@@ -168,10 +184,13 @@ export function hasPendingFollowRequest(fromHandle: string, toHandle: string): b
 
 // Create a follow request
 export function createFollowRequest(fromHandle: string, toHandle: string): void {
+  const fromKey = normalizeHandleForPrivacy(fromHandle);
+  const toKey = normalizeHandleForPrivacy(toHandle);
+  if (!fromKey || !toKey) return;
   const requests = getFollowRequests();
   // Remove any existing request
   const filtered = requests.filter(
-    req => !(req.fromHandle === fromHandle && req.toHandle === toHandle)
+    req => !(normalizeHandleForPrivacy(req.fromHandle) === fromKey && normalizeHandleForPrivacy(req.toHandle) === toKey)
   );
   
   const newRequest = {
@@ -195,9 +214,11 @@ export function createFollowRequest(fromHandle: string, toHandle: string): void 
 
 // Accept a follow request
 export function acceptFollowRequest(fromHandle: string, toHandle: string): void {
+  const fromKey = normalizeHandleForPrivacy(fromHandle);
+  const toKey = normalizeHandleForPrivacy(toHandle);
   const requests = getFollowRequests();
   const updated = requests.map(req => {
-    if (req.fromHandle === fromHandle && req.toHandle === toHandle && req.status === 'pending') {
+    if (normalizeHandleForPrivacy(req.fromHandle) === fromKey && normalizeHandleForPrivacy(req.toHandle) === toKey && req.status === 'pending') {
       return { ...req, status: 'accepted' as const };
     }
     return req;
@@ -207,24 +228,29 @@ export function acceptFollowRequest(fromHandle: string, toHandle: string): void 
 
 // Deny a follow request
 export function denyFollowRequest(fromHandle: string, toHandle: string): void {
+  const fromKey = normalizeHandleForPrivacy(fromHandle);
+  const toKey = normalizeHandleForPrivacy(toHandle);
   const requests = getFollowRequests();
   const filtered = requests.filter(
-    req => !(req.fromHandle === fromHandle && req.toHandle === toHandle && req.status === 'pending')
+    req => !(normalizeHandleForPrivacy(req.fromHandle) === fromKey && normalizeHandleForPrivacy(req.toHandle) === toKey && req.status === 'pending')
   );
   saveFollowRequests(filtered);
 }
 
 // Get pending follow requests for a user
 export function getPendingFollowRequests(handle: string): FollowRequest[] {
+  const key = normalizeHandleForPrivacy(handle);
   const requests = getFollowRequests();
-  return requests.filter(req => req.toHandle === handle && req.status === 'pending');
+  return requests.filter(req => normalizeHandleForPrivacy(req.toHandle) === key && req.status === 'pending');
 }
 
 // Remove follow request (when user follows directly or unfollows)
 export function removeFollowRequest(fromHandle: string, toHandle: string): void {
+  const fromKey = normalizeHandleForPrivacy(fromHandle);
+  const toKey = normalizeHandleForPrivacy(toHandle);
   const requests = getFollowRequests();
   const filtered = requests.filter(
-    req => !(req.fromHandle === fromHandle && req.toHandle === toHandle)
+    req => !(normalizeHandleForPrivacy(req.fromHandle) === fromKey && normalizeHandleForPrivacy(req.toHandle) === toKey)
   );
   console.log('removeFollowRequest: Removed follow request', {
     fromHandle,

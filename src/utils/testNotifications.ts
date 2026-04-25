@@ -176,6 +176,7 @@ export function testNotificationPreferences(): void {
   const prefs = {
     enabled: true,
     directMessages: true,
+    groupChats: true,
     likes: true,
     comments: true,
     replies: true,

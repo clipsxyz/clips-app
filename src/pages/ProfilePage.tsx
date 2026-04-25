@@ -7,7 +7,7 @@ import { FiCamera, FiBookmark, FiMessageCircle, FiLock, FiUnlock, FiX, FiUser, F
 import Flag from '../components/Flag';
 import { getUserCollections } from '../api/collections';
 import type { Collection } from '../types';
-import { deletePost, getFollowedUsers, posts } from '../api/posts';
+import { approveHiddenComment, deleteHiddenComment, deletePost, fetchHiddenCommentsForOwner, getFollowedUsers, posts, type HiddenCommentReviewItem } from '../api/posts';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 import { showToast } from '../utils/toast';
@@ -22,9 +22,15 @@ import {
   getNotificationPreferences, 
   saveNotificationPreferences, 
   type NotificationPreferences,
-  initializeNotifications
+  initializeNotifications,
+  resetNotificationPreferences
 } from '../services/notifications';
 import { testBrowserNotification, testNotificationTypes, testImageNotification } from '../utils/testNotifications';
+import {
+  getCommentModerationPreferences,
+  setCommentModerationPreferences,
+  type CommentModerationPreferences,
+} from '../utils/commentModeration';
 
 // Card image: show illustration from /profile-cards/ when present (.svg or .png), else fall back to icon
 function ProfileCardImage({ imagePath, icon }: { imagePath: string; icon: React.ReactNode }) {
@@ -115,6 +121,7 @@ export default function ProfilePage() {
   const [collections, setCollections] = React.useState<Collection[]>([]);
   const [collectionsOpen, setCollectionsOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [commentSafetyOpen, setCommentSafetyOpen] = React.useState(false);
   const [draftsOpen, setDraftsOpen] = React.useState(false);
   const [myFeedOpen, setMyFeedOpen] = React.useState(false);
   const [myFeedVisible, setMyFeedVisible] = React.useState(false);
@@ -141,6 +148,11 @@ export default function ProfilePage() {
   const [accountType, setAccountType] = React.useState<'personal' | 'business'>(user?.accountType === 'business' ? 'business' : 'personal');
   const [showProfilePictureModal, setShowProfilePictureModal] = React.useState(false);
   const [notificationPrefs, setNotificationPrefs] = React.useState<NotificationPreferences>(getNotificationPreferences());
+  const [commentModerationPrefs, setCommentModerationPrefs] = React.useState<CommentModerationPreferences>(getCommentModerationPreferences());
+  const [commentWordDraft, setCommentWordDraft] = React.useState('');
+  const [hiddenCommentQueue, setHiddenCommentQueue] = React.useState<HiddenCommentReviewItem[]>([]);
+  const [loadingHiddenCommentQueue, setLoadingHiddenCommentQueue] = React.useState(false);
+  const [hiddenQueueFilter, setHiddenQueueFilter] = React.useState<'all' | 'comments' | 'replies'>('all');
   const [isInitializingNotifications, setIsInitializingNotifications] = React.useState(false);
   const ownProfileHandle = React.useMemo(() => (user?.handle || '').replace(/^@/, ''), [user?.handle]);
   const normalizedOwnHandle = React.useMemo(
@@ -153,6 +165,31 @@ export default function ProfilePage() {
       .filter((post) => (post.userHandle || '').replace(/^@/, '').trim().toLowerCase() === normalizedOwnHandle)
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   }, [normalizedOwnHandle, myFeedRefreshTick]);
+  const filteredHiddenQueue = React.useMemo(() => {
+    if (hiddenQueueFilter === 'comments') return hiddenCommentQueue.filter((item) => !item.isReply);
+    if (hiddenQueueFilter === 'replies') return hiddenCommentQueue.filter((item) => !!item.isReply);
+    return hiddenCommentQueue;
+  }, [hiddenCommentQueue, hiddenQueueFilter]);
+
+  React.useEffect(() => {
+    if (!settingsOpen || !user?.handle) return;
+    let cancelled = false;
+    (async () => {
+      setLoadingHiddenCommentQueue(true);
+      try {
+        const items = await fetchHiddenCommentsForOwner(user.handle);
+        if (!cancelled) setHiddenCommentQueue(items);
+      } catch (error) {
+        console.error('Failed to load hidden comments review queue:', error);
+        if (!cancelled) setHiddenCommentQueue([]);
+      } finally {
+        if (!cancelled) setLoadingHiddenCommentQueue(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [settingsOpen, user?.handle]);
 
   React.useEffect(() => {
     const onLocalPostCreated = () => {
@@ -644,6 +681,13 @@ export default function ProfilePage() {
         setProfilePrivacy(user.handle, newPrivacyState);
       }
 
+      // Persist to backend profile when available (best effort).
+      try {
+        await updateAuthProfile({ is_private: newPrivacyState } as any);
+      } catch (syncError) {
+        console.warn('Failed to sync privacy setting to backend, keeping local state:', syncError);
+      }
+
       Swal.fire(bottomSheet({
         title: newPrivacyState ? 'Profile Set to Private' : 'Profile Set to Public',
         message: newPrivacyState
@@ -783,6 +827,7 @@ export default function ProfilePage() {
                   e.stopPropagation();
                   if (!ownProfileHandle) return;
                   setSettingsOpen(false);
+                  setCommentSafetyOpen(false);
                   setCollectionsOpen(false);
                   setDraftsOpen(false);
                   setMyFeedOpen(true);
@@ -850,6 +895,7 @@ export default function ProfilePage() {
                   e.preventDefault();
                   e.stopPropagation();
                   setSettingsOpen(false);
+                  setCommentSafetyOpen(false);
                   setCollectionsOpen(false);
                   loadDrafts();
                   setDraftsOpen(true);
@@ -872,6 +918,7 @@ export default function ProfilePage() {
                   e.preventDefault();
                   e.stopPropagation();
                   setSettingsOpen(false);
+                  setCommentSafetyOpen(false);
                   setDraftsOpen(false);
                   loadCollections();
                   setCollectionsOpen(true);
@@ -895,6 +942,24 @@ export default function ProfilePage() {
                   e.stopPropagation();
                   setCollectionsOpen(false);
                   setDraftsOpen(false);
+                  setSettingsOpen(false);
+                  setCommentSafetyOpen(true);
+                }}
+                className="shrink-0 min-h-[44px] px-3.5 py-2 rounded-xl border border-amber-300/40 bg-amber-900/30 text-amber-100 hover:bg-amber-900/45 transition-colors flex items-center gap-2"
+                style={{ scrollSnapAlign: 'start' }}
+              >
+                <FiLock className="w-4 h-4" />
+                <span className="text-xs font-semibold">Comment Safety</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setCollectionsOpen(false);
+                  setDraftsOpen(false);
+                  setCommentSafetyOpen(false);
                   setSettingsOpen(true);
                 }}
                 className="shrink-0 min-h-[44px] px-3.5 py-2 rounded-xl border border-white/15 bg-black/40 text-gray-100 hover:bg-white/10 transition-colors flex items-center gap-2"
@@ -2116,7 +2181,7 @@ export default function ProfilePage() {
 
         {/* Settings Modal */}
         {settingsOpen && (
-          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setSettingsOpen(false)}>
+          <div className="fixed inset-0 z-[220] isolate bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setSettingsOpen(false)}>
             <div className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
               <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
                 <h2 className="text-xl font-bold text-gray-900">Settings</h2>
@@ -2174,6 +2239,21 @@ export default function ProfilePage() {
                         title="Test multiple notification types"
                       >
                         📋 Test All
+                      </button>
+                      <button
+                        onClick={() => {
+                          const reset = resetNotificationPreferences();
+                          setNotificationPrefs(reset);
+                          Swal.fire(bottomSheet({
+                            title: 'Preferences Reset',
+                            message: 'Notification preferences were reset to defaults.',
+                            icon: 'success',
+                          }));
+                        }}
+                        className="px-3 py-1.5 text-xs font-medium bg-gray-700 hover:bg-gray-800 text-white rounded-lg transition-colors"
+                        title="Reset notification preferences"
+                      >
+                        Reset
                       </button>
                     </div>
                   </div>
@@ -2233,6 +2313,16 @@ export default function ProfilePage() {
                         enabled={notificationPrefs.directMessages}
                         onChange={(enabled) => {
                           const newPrefs = { ...notificationPrefs, directMessages: enabled };
+                          setNotificationPrefs(newPrefs);
+                          saveNotificationPreferences(newPrefs);
+                        }}
+                      />
+                      <NotificationToggle
+                        label="Group Chat"
+                        description="When there is activity in your group conversations"
+                        enabled={notificationPrefs.groupChats}
+                        onChange={(enabled) => {
+                          const newPrefs = { ...notificationPrefs, groupChats: enabled };
                           setNotificationPrefs(newPrefs);
                           saveNotificationPreferences(newPrefs);
                         }}
@@ -2342,6 +2432,245 @@ export default function ProfilePage() {
                   >
                     Logout
                   </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Comment Safety Modal */}
+        {commentSafetyOpen && (
+          <div className="fixed inset-0 z-[220] isolate bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setCommentSafetyOpen(false)}>
+            <div className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+                <h2 className="text-xl font-bold text-gray-900">Comment Safety</h2>
+                <button onClick={() => setCommentSafetyOpen(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                  <FiX className="w-6 h-6 text-gray-600" />
+                </button>
+              </div>
+              <div className="p-6 space-y-6">
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-lg font-semibold text-gray-900">Comment Filters</h3>
+                    <button
+                      onClick={() => {
+                        const resetPrefs = { strictMode: false, customHiddenWords: [] };
+                        setCommentModerationPrefs(resetPrefs);
+                        setCommentModerationPreferences(resetPrefs);
+                        setCommentWordDraft('');
+                        Swal.fire(bottomSheet({
+                          title: 'Comment Safety Reset',
+                          message: 'Strict mode and hidden words were reset.',
+                          icon: 'success',
+                        }));
+                      }}
+                      className="px-3 py-1.5 text-xs font-medium bg-gray-700 hover:bg-gray-800 text-white rounded-lg transition-colors"
+                    >
+                      Reset
+                    </button>
+                  </div>
+
+                  <NotificationToggle
+                    label="Strict filtering"
+                    description="Auto-hide warning-level negative comments"
+                    enabled={commentModerationPrefs.strictMode}
+                    onChange={(enabled) => {
+                      const next = { ...commentModerationPrefs, strictMode: enabled };
+                      setCommentModerationPrefs(next);
+                      setCommentModerationPreferences(next);
+                    }}
+                  />
+
+                  <div className="mt-3">
+                    <p className="text-sm font-medium text-gray-900 mb-2">Hidden words and phrases</p>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={commentWordDraft}
+                        onChange={(e) => setCommentWordDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const incoming = String(commentWordDraft || '').trim().toLowerCase();
+                            if (!incoming) return;
+                            const next = {
+                              ...commentModerationPrefs,
+                              customHiddenWords: Array.from(new Set([...(commentModerationPrefs.customHiddenWords || []), incoming])),
+                            };
+                            setCommentModerationPrefs(next);
+                            setCommentModerationPreferences(next);
+                            setCommentWordDraft('');
+                          }
+                        }}
+                        placeholder="Add word or phrase to auto-hide"
+                        className="flex-1 min-w-0 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                      />
+                      <button
+                        onClick={() => {
+                          const incoming = String(commentWordDraft || '').trim().toLowerCase();
+                          if (!incoming) return;
+                          const next = {
+                            ...commentModerationPrefs,
+                            customHiddenWords: Array.from(new Set([...(commentModerationPrefs.customHiddenWords || []), incoming])),
+                          };
+                          setCommentModerationPrefs(next);
+                          setCommentModerationPreferences(next);
+                          setCommentWordDraft('');
+                        }}
+                        className="px-3 py-2 rounded-lg bg-gray-900 text-white text-sm font-semibold"
+                      >
+                        Add
+                      </button>
+                    </div>
+
+                    {(commentModerationPrefs.customHiddenWords || []).length > 0 ? (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {commentModerationPrefs.customHiddenWords.map((word) => (
+                          <button
+                            key={word}
+                            onClick={() => {
+                              const next = {
+                                ...commentModerationPrefs,
+                                customHiddenWords: (commentModerationPrefs.customHiddenWords || []).filter((w) => w !== word),
+                              };
+                              setCommentModerationPrefs(next);
+                              setCommentModerationPreferences(next);
+                            }}
+                            className="rounded-full border border-gray-300 bg-gray-50 px-2.5 py-1 text-xs text-gray-700"
+                            title="Remove hidden word"
+                          >
+                            {word} x
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-500 mt-2">No hidden words added yet.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-gray-900">Hidden comments review</p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-amber-800">
+                        {hiddenCommentQueue.length} pending
+                      </span>
+                      {filteredHiddenQueue.length > 0 && (
+                        <button
+                          onClick={async () => {
+                            const result = await Swal.fire(
+                              bottomSheet({
+                                title: 'Approve all visible?',
+                                message: `This will approve ${filteredHiddenQueue.length} item(s) in the current filter.`,
+                                icon: 'alert',
+                                showCancelButton: true,
+                                confirmButtonText: 'Approve all',
+                                cancelButtonText: 'Cancel',
+                              })
+                            );
+                            if (!result.isConfirmed) return;
+                            await Promise.all(filteredHiddenQueue.map((item) => approveHiddenComment(item.id)));
+                            const approvedIds = new Set(filteredHiddenQueue.map((item) => item.id));
+                            setHiddenCommentQueue((prev) => prev.filter((row) => !approvedIds.has(row.id)));
+                            showToast('Approved all visible items');
+                          }}
+                          className="rounded-md border border-gray-300 bg-white px-2 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-50"
+                        >
+                          Approve all
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="mt-2 flex gap-2">
+                    {(['all', 'comments', 'replies'] as const).map((filterKey) => (
+                      <button
+                        key={filterKey}
+                        onClick={() => setHiddenQueueFilter(filterKey)}
+                        className={`rounded-full px-2.5 py-1 text-[11px] font-medium border ${
+                          hiddenQueueFilter === filterKey
+                            ? 'bg-gray-900 text-white border-gray-900'
+                            : 'bg-white text-gray-700 border-gray-300'
+                        }`}
+                      >
+                        {filterKey === 'all' ? 'All' : filterKey === 'comments' ? 'Comments' : 'Replies'}
+                      </button>
+                    ))}
+                  </div>
+                  {loadingHiddenCommentQueue ? (
+                    <p className="text-xs text-gray-600 mt-2">Loading review queue...</p>
+                  ) : filteredHiddenQueue.length === 0 ? (
+                    <p className="text-xs text-gray-600 mt-2">No hidden comments to review right now.</p>
+                  ) : (
+                    <div className="mt-2 space-y-2 max-h-48 overflow-y-auto pr-1">
+                      {filteredHiddenQueue.map((item) => (
+                        <div key={item.id} className="rounded-lg bg-white border border-amber-100 p-2.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-gray-900">
+                                {item.userHandle} {item.isReply ? 'replied' : 'commented'}
+                              </p>
+                              <p className="text-xs text-gray-700 truncate">{item.text}</p>
+                              {item.moderationReason ? (
+                                <p className="text-[11px] text-amber-800 mt-0.5">
+                                  Reason: {item.moderationReason}
+                                </p>
+                              ) : null}
+                            </div>
+                            <div className="shrink-0 flex items-center gap-1.5">
+                              <button
+                                onClick={() => {
+                                  const post = myFeedPosts.find((p) => String(p.id) === String(item.postId));
+                                  if (!post) {
+                                    showToast('Post not found in your feed');
+                                    return;
+                                  }
+                                  setMyFeedOpen(true);
+                                  window.setTimeout(() => openMyFeedPost(post), 220);
+                                }}
+                                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-50"
+                              >
+                                Open post
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  const ok = await approveHiddenComment(item.id);
+                                  if (!ok) return;
+                                  setHiddenCommentQueue((prev) => prev.filter((row) => row.id !== item.id));
+                                  showToast('Comment approved');
+                                }}
+                                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-50"
+                              >
+                                Approve
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  const result = await Swal.fire(
+                                    bottomSheet({
+                                      title: 'Delete hidden comment?',
+                                      message: 'This action cannot be undone.',
+                                      icon: 'alert',
+                                      showCancelButton: true,
+                                      confirmButtonText: 'Delete',
+                                      cancelButtonText: 'Cancel',
+                                    })
+                                  );
+                                  if (!result.isConfirmed) return;
+                                  const ok = await deleteHiddenComment(item.id);
+                                  if (!ok) return;
+                                  setHiddenCommentQueue((prev) => prev.filter((row) => row.id !== item.id));
+                                  showToast('Comment deleted');
+                                }}
+                                className="rounded-md border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-100"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

@@ -43,6 +43,58 @@ const lastReadByThread = new Map<string, number>();
 const pinnedConversations = new Map<string, Set<string>>();
 // Track message requests per user: userHandle => Set<senderHandle>
 const messageRequests = new Map<string, Set<string>>();
+// Persisted preference maps for DM controls
+const mutedConversations = new Map<string, Set<string>>();
+const blockedUsers = new Map<string, Set<string>>();
+
+const MUTED_STORAGE_KEY = 'clips:dm-muted-conversations';
+const BLOCKED_STORAGE_KEY = 'clips:dm-blocked-users';
+
+function readMapOfStringSets(storageKey: string): Map<string, Set<string>> {
+    try {
+        const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(storageKey) : null;
+        if (!raw) return new Map<string, Set<string>>();
+        const parsed = JSON.parse(raw) as Record<string, string[]>;
+        const out = new Map<string, Set<string>>();
+        Object.entries(parsed || {}).forEach(([k, arr]) => {
+            if (!k) return;
+            out.set(k, new Set(Array.isArray(arr) ? arr.filter((v) => typeof v === 'string' && v.trim().length > 0) : []));
+        });
+        return out;
+    } catch {
+        return new Map<string, Set<string>>();
+    }
+}
+
+function writeMapOfStringSets(storageKey: string, source: Map<string, Set<string>>): void {
+    try {
+        if (typeof localStorage === 'undefined') return;
+        const payload: Record<string, string[]> = {};
+        source.forEach((set, key) => {
+            payload[key] = Array.from(set);
+        });
+        localStorage.setItem(storageKey, JSON.stringify(payload));
+    } catch {
+        /* ignore */
+    }
+}
+
+function persistMuteMap(): void {
+    writeMapOfStringSets(MUTED_STORAGE_KEY, mutedConversations);
+}
+
+function persistBlockedMap(): void {
+    writeMapOfStringSets(BLOCKED_STORAGE_KEY, blockedUsers);
+}
+
+// Hydrate mute/block maps from local storage once on module load.
+(() => {
+    const mutedFromStorage = readMapOfStringSets(MUTED_STORAGE_KEY);
+    mutedFromStorage.forEach((set, key) => mutedConversations.set(key, set));
+
+    const blockedFromStorage = readMapOfStringSets(BLOCKED_STORAGE_KEY);
+    blockedFromStorage.forEach((set, key) => blockedUsers.set(key, set));
+})();
 
 /** In-memory chat groups when `VITE_USE_LARAVEL_API=false` (local / mock mode). */
 const mockChatGroups = new Map<string, { name: string; creatorHandle: string; conversation_id: string }>();
@@ -236,8 +288,9 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
     // Recompute unread for receiver across all threads
     unreadByHandle.set(to, await computeUnreadTotal(to));
 
-    // Create notifications for all messages (only if not a system message)
-    if (!message.isSystemMessage && message.text) {
+    // Create notifications for incoming messages unless this thread is muted by receiver.
+    const receiverMutedThread = mutedConversations.get(to)?.has(from) ?? false;
+    if (!message.isSystemMessage && message.text && !receiverMutedThread) {
         // Dynamically import to avoid circular dependency
         const { createNotification, isStickerMessage, isReplyToPost } = await import('./notifications');
         
@@ -690,17 +743,12 @@ export async function acceptMessageRequest(userHandle: string, otherHandle: stri
     }
 }
 
-// Track muted conversations per user: userHandle => Set<otherHandle>
-const mutedConversations = new Map<string, Set<string>>();
-
-// Track blocked users per user: userHandle => Set<blockedHandle>
-const blockedUsers = new Map<string, Set<string>>();
-
 // Mute/unmute conversation notifications
 export async function muteConversation(userHandle: string, otherHandle: string): Promise<void> {
     const muted = mutedConversations.get(userHandle) || new Set<string>();
     muted.add(otherHandle);
     mutedConversations.set(userHandle, muted);
+    persistMuteMap();
     window.dispatchEvent(new CustomEvent('conversationUpdated'));
 }
 
@@ -709,6 +757,7 @@ export async function unmuteConversation(userHandle: string, otherHandle: string
     if (muted) {
         muted.delete(otherHandle);
         mutedConversations.set(userHandle, muted);
+        persistMuteMap();
         const { emitConversationUpdate } = await import('../services/socketio');
         emitConversationUpdate({ participants: [userHandle, otherHandle], updateType: 'unmute' });
         window.dispatchEvent(new CustomEvent('conversationUpdated'));
@@ -725,6 +774,7 @@ export async function blockUser(userHandle: string, blockedHandle: string): Prom
     const blocked = blockedUsers.get(userHandle) || new Set<string>();
     blocked.add(blockedHandle);
     blockedUsers.set(userHandle, blocked);
+    persistBlockedMap();
     
     // Also delete the conversation when blocking
     const id = getConversationId(userHandle, blockedHandle);
@@ -740,6 +790,8 @@ export async function blockUser(userHandle: string, blockedHandle: string): Prom
     const muted = mutedConversations.get(userHandle);
     if (muted) {
         muted.delete(blockedHandle);
+        mutedConversations.set(userHandle, muted);
+        persistMuteMap();
     }
     
     // Recompute unread
@@ -753,6 +805,7 @@ export async function unblockUser(userHandle: string, blockedHandle: string): Pr
     if (blocked) {
         blocked.delete(blockedHandle);
         blockedUsers.set(userHandle, blocked);
+        persistBlockedMap();
         const { emitConversationUpdate } = await import('../services/socketio');
         emitConversationUpdate({ participants: [userHandle, blockedHandle], updateType: 'unblock' });
         window.dispatchEvent(new CustomEvent('conversationUpdated'));
@@ -781,6 +834,8 @@ export async function deleteConversation(userHandle: string, otherHandle: string
     const muted = mutedConversations.get(userHandle);
     if (muted) {
         muted.delete(otherHandle);
+        mutedConversations.set(userHandle, muted);
+        persistMuteMap();
     }
     
     // Recompute unread

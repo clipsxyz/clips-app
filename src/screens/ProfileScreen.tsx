@@ -1,14 +1,27 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, FlatList, ActivityIndicator, Modal, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, FlatList, ActivityIndicator, Modal, ScrollView, Alert, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
-import { fetchPostsByUser } from '../api/posts';
+import { approveHiddenComment, deleteHiddenComment, fetchHiddenCommentsForOwner, fetchPostsByUser, type HiddenCommentReviewItem } from '../api/posts';
 import { getUserCollections } from '../api/collections';
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
 import { getUnreadTotal } from '../api/messages';
+import { setProfilePrivacy } from '../api/privacy';
+import { updateAuthProfile } from '../api/client';
 import type { Post, Collection } from '../types';
 import Avatar from '../components/Avatar';
+import {
+    getNotificationPreferences,
+    saveNotificationPreferences,
+    resetNotificationPreferences,
+    type NotificationPreferences,
+} from '../services/notifications';
+import {
+    getCommentModerationPreferences,
+    setCommentModerationPreferences,
+    type CommentModerationPreferences,
+} from '../utils/commentModeration';
 
 const ProfileScreen: React.FC = ({ navigation }: any) => {
     const { user, logout } = useAuth();
@@ -19,12 +32,24 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [activeTab, setActiveTab] = useState<'posts' | 'collections'>('posts');
     const [collectionsOpen, setCollectionsOpen] = useState(false);
     const [draftsOpen, setDraftsOpen] = useState(false);
+    const [commentSafetyOpen, setCommentSafetyOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [unreadCount, setUnreadCount] = useState(0);
+    const [commentModerationPrefs, setCommentModerationPrefs] = useState<CommentModerationPreferences>(getCommentModerationPreferences());
+    const [commentWordDraft, setCommentWordDraft] = useState('');
+    const [hiddenCommentQueue, setHiddenCommentQueue] = useState<HiddenCommentReviewItem[]>([]);
+    const [loadingHiddenCommentQueue, setLoadingHiddenCommentQueue] = useState(false);
+    const [hiddenQueueFilter, setHiddenQueueFilter] = useState<'all' | 'comments' | 'replies'>('all');
+    const [notificationPrefs, setNotificationPrefs] = useState<NotificationPreferences>(getNotificationPreferences());
+    const [isPrivate, setIsPrivate] = useState(!!user?.is_private);
 
     useEffect(() => {
         loadData();
     }, [user?.handle]);
+
+    useEffect(() => {
+        setIsPrivate(!!user?.is_private);
+    }, [user?.is_private]);
 
     const loadData = async () => {
         if (!user?.handle) return;
@@ -45,6 +70,12 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         }
     };
 
+    const filteredHiddenQueue = React.useMemo(() => {
+        if (hiddenQueueFilter === 'comments') return hiddenCommentQueue.filter((item) => !item.isReply);
+        if (hiddenQueueFilter === 'replies') return hiddenCommentQueue.filter((item) => !!item.isReply);
+        return hiddenCommentQueue;
+    }, [hiddenCommentQueue, hiddenQueueFilter]);
+
     useEffect(() => {
         if (user?.handle) {
             const updateUnreadCount = async () => {
@@ -60,6 +91,26 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             return () => clearInterval(interval);
         }
     }, [user?.handle]);
+
+    useEffect(() => {
+        if (!commentSafetyOpen || !user?.handle) return;
+        let cancelled = false;
+        (async () => {
+            setLoadingHiddenCommentQueue(true);
+            try {
+                const items = await fetchHiddenCommentsForOwner(user.handle);
+                if (!cancelled) setHiddenCommentQueue(items);
+            } catch (error) {
+                console.error('Error loading hidden comments queue:', error);
+                if (!cancelled) setHiddenCommentQueue([]);
+            } finally {
+                if (!cancelled) setLoadingHiddenCommentQueue(false);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [commentSafetyOpen, user?.handle]);
 
     const loadCollections = async () => {
         if (!user?.id) return;
@@ -99,6 +150,18 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         );
     };
 
+    const handleTogglePrivate = async () => {
+        if (!user?.handle) return;
+        const next = !isPrivate;
+        setIsPrivate(next);
+        try {
+            setProfilePrivacy(user.handle, next);
+            await updateAuthProfile({ is_private: next } as any);
+        } catch (error) {
+            console.error('Failed to update privacy:', error);
+        }
+    };
+
     if (loading) {
         return (
             <SafeAreaView style={styles.container}>
@@ -121,7 +184,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 </TouchableOpacity>
             </View>
 
-            {/* Tabs: Messages, Drafts, Collections, Settings */}
+            {/* Tabs: Messages, Drafts, Collections, Comment Safety, Settings */}
             <View style={styles.tabsContainer}>
                 <TouchableOpacity
                     style={styles.tab}
@@ -169,6 +232,14 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             </Text>
                         </View>
                     )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={styles.tab}
+                    onPress={() => setCommentSafetyOpen(true)}
+                >
+                    <Icon name="shield-checkmark" size={20} color="#FBBF24" />
+                    <Text style={styles.tabLabel}>Comment Safety</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -330,7 +401,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                                 {new Date(draft.createdAt).toLocaleDateString()}
                                             </Text>
                                             <Text style={styles.draftText} numberOfLines={2}>
-                                                {draft.text || 'No text'}
+                                                {draft.caption || draft.textBody || 'No text'}
                                             </Text>
                                         </View>
                                         <TouchableOpacity
@@ -420,6 +491,111 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             </TouchableOpacity>
                         </View>
                         <View style={styles.modalBody}>
+                            <View style={styles.safetySection}>
+                                <Text style={styles.safetySectionTitle}>Content preferences</Text>
+                                <Text style={styles.toggleDescription}>Edit preferred locations for feed suggestions</Text>
+                                <TouchableOpacity
+                                    style={[styles.smallActionButton, { alignSelf: 'flex-start', marginTop: 10 }]}
+                                    onPress={() => {
+                                        setSettingsOpen(false);
+                                        navigation.navigate('ContentPreferences');
+                                    }}
+                                >
+                                    <Text style={styles.smallActionButtonText}>Open preferences</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.safetySection}>
+                                <Text style={styles.safetySectionTitle}>Privacy</Text>
+                                <View style={styles.toggleRow}>
+                                    <View style={styles.toggleInfo}>
+                                        <Text style={styles.toggleLabel}>Private account</Text>
+                                        <Text style={styles.toggleDescription}>Only approved followers can view your profile</Text>
+                                    </View>
+                                    <TouchableOpacity
+                                        style={[styles.toggleTrack, isPrivate && styles.toggleTrackActive]}
+                                        onPress={handleTogglePrivate}
+                                    >
+                                        <View style={[styles.toggleThumb, isPrivate && styles.toggleThumbActive]} />
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+
+                            <View style={styles.safetySection}>
+                                <View style={styles.safetySectionHeader}>
+                                    <Text style={styles.safetySectionTitle}>Push Notifications</Text>
+                                    <TouchableOpacity
+                                        style={styles.smallActionButton}
+                                        onPress={() => {
+                                            const reset = resetNotificationPreferences();
+                                            setNotificationPrefs(reset);
+                                        }}
+                                    >
+                                        <Text style={styles.smallActionButtonText}>Reset</Text>
+                                    </TouchableOpacity>
+                                </View>
+
+                                <View style={styles.toggleRow}>
+                                    <View style={styles.toggleInfo}>
+                                        <Text style={styles.toggleLabel}>Enable notifications</Text>
+                                        <Text style={styles.toggleDescription}>Master switch for alerts on this device</Text>
+                                    </View>
+                                    <TouchableOpacity
+                                        style={[styles.toggleTrack, notificationPrefs.enabled && styles.toggleTrackActive]}
+                                        onPress={() => {
+                                            const next = { ...notificationPrefs, enabled: !notificationPrefs.enabled };
+                                            setNotificationPrefs(next);
+                                            saveNotificationPreferences(next);
+                                        }}
+                                    >
+                                        <View style={[styles.toggleThumb, notificationPrefs.enabled && styles.toggleThumbActive]} />
+                                    </TouchableOpacity>
+                                </View>
+
+                                {notificationPrefs.enabled && (
+                                    <View>
+                                        {[
+                                            ['directMessages', 'Direct Messages'],
+                                            ['groupChats', 'Group Chat'],
+                                            ['likes', 'Likes'],
+                                            ['comments', 'Comments'],
+                                            ['replies', 'Replies'],
+                                            ['follows', 'Follows'],
+                                            ['followRequests', 'Follow Requests'],
+                                            ['storyInsights', 'Story Insights'],
+                                            ['questions', 'Questions'],
+                                            ['shares', 'Shares'],
+                                            ['reclips', 'Reclips'],
+                                        ].map(([key, label]) => (
+                                            <View key={key} style={styles.toggleRow}>
+                                                <Text style={styles.toggleLabel}>{label}</Text>
+                                                <TouchableOpacity
+                                                    style={[
+                                                        styles.toggleTrack,
+                                                        (notificationPrefs as any)[key] && styles.toggleTrackActive,
+                                                    ]}
+                                                    onPress={() => {
+                                                        const next = {
+                                                            ...notificationPrefs,
+                                                            [key]: !(notificationPrefs as any)[key],
+                                                        } as NotificationPreferences;
+                                                        setNotificationPrefs(next);
+                                                        saveNotificationPreferences(next);
+                                                    }}
+                                                >
+                                                    <View
+                                                        style={[
+                                                            styles.toggleThumb,
+                                                            (notificationPrefs as any)[key] && styles.toggleThumbActive,
+                                                        ]}
+                                                    />
+                                                </TouchableOpacity>
+                                            </View>
+                                        ))}
+                                    </View>
+                                )}
+                            </View>
+
                             <TouchableOpacity
                                 style={styles.logoutButton}
                                 onPress={handleLogout}
@@ -427,6 +603,171 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                 <Text style={styles.logoutButtonText}>Logout</Text>
                             </TouchableOpacity>
                         </View>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Comment Safety Modal */}
+            <Modal
+                visible={commentSafetyOpen}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => setCommentSafetyOpen(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Comment Safety</Text>
+                            <TouchableOpacity onPress={() => setCommentSafetyOpen(false)}>
+                                <Icon name="close" size={24} color="#FFFFFF" />
+                            </TouchableOpacity>
+                        </View>
+                        <ScrollView style={styles.modalBody}>
+                            <View style={styles.safetySection}>
+                                <View style={styles.safetySectionHeader}>
+                                    <Text style={styles.safetySectionTitle}>Filters</Text>
+                                    <TouchableOpacity
+                                        style={styles.smallActionButton}
+                                        onPress={() => {
+                                            const resetPrefs = { strictMode: false, customHiddenWords: [] };
+                                            setCommentModerationPrefs(resetPrefs);
+                                            setCommentModerationPreferences(resetPrefs);
+                                            setCommentWordDraft('');
+                                        }}
+                                    >
+                                        <Text style={styles.smallActionButtonText}>Reset</Text>
+                                    </TouchableOpacity>
+                                </View>
+
+                                <View style={styles.toggleRow}>
+                                    <View style={styles.toggleInfo}>
+                                        <Text style={styles.toggleLabel}>Strict filtering</Text>
+                                        <Text style={styles.toggleDescription}>Auto-hide warning-level negative comments</Text>
+                                    </View>
+                                    <TouchableOpacity
+                                        style={[styles.toggleTrack, commentModerationPrefs.strictMode && styles.toggleTrackActive]}
+                                        onPress={() => {
+                                            const next = { ...commentModerationPrefs, strictMode: !commentModerationPrefs.strictMode };
+                                            setCommentModerationPrefs(next);
+                                            setCommentModerationPreferences(next);
+                                        }}
+                                    >
+                                        <View style={[styles.toggleThumb, commentModerationPrefs.strictMode && styles.toggleThumbActive]} />
+                                    </TouchableOpacity>
+                                </View>
+
+                                <Text style={styles.inputLabel}>Hidden words and phrases</Text>
+                                <View style={styles.wordInputRow}>
+                                    <TextInput
+                                        style={styles.wordInput}
+                                        value={commentWordDraft}
+                                        onChangeText={setCommentWordDraft}
+                                        placeholder="Add hidden word or phrase"
+                                        placeholderTextColor="#6B7280"
+                                    />
+                                    <TouchableOpacity
+                                        style={styles.addWordButton}
+                                        onPress={() => {
+                                            const incoming = String(commentWordDraft || '').trim().toLowerCase();
+                                            if (!incoming) return;
+                                            const next = {
+                                                ...commentModerationPrefs,
+                                                customHiddenWords: Array.from(new Set([...(commentModerationPrefs.customHiddenWords || []), incoming])),
+                                            };
+                                            setCommentModerationPrefs(next);
+                                            setCommentModerationPreferences(next);
+                                            setCommentWordDraft('');
+                                        }}
+                                    >
+                                        <Text style={styles.addWordButtonText}>Add</Text>
+                                    </TouchableOpacity>
+                                </View>
+                                <View style={styles.wordChipWrap}>
+                                    {(commentModerationPrefs.customHiddenWords || []).map((word) => (
+                                        <TouchableOpacity
+                                            key={word}
+                                            style={styles.wordChip}
+                                            onPress={() => {
+                                                const next = {
+                                                    ...commentModerationPrefs,
+                                                    customHiddenWords: (commentModerationPrefs.customHiddenWords || []).filter((w) => w !== word),
+                                                };
+                                                setCommentModerationPrefs(next);
+                                                setCommentModerationPreferences(next);
+                                            }}
+                                        >
+                                            <Text style={styles.wordChipText}>{word} ×</Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+                            </View>
+
+                            <View style={styles.safetySection}>
+                                <View style={styles.safetySectionHeader}>
+                                    <Text style={styles.safetySectionTitle}>Hidden comments review</Text>
+                                    <Text style={styles.queueCountText}>{hiddenCommentQueue.length} pending</Text>
+                                </View>
+                                <View style={styles.filterPillsRow}>
+                                    {(['all', 'comments', 'replies'] as const).map((filterKey) => (
+                                        <TouchableOpacity
+                                            key={filterKey}
+                                            style={[
+                                                styles.filterPill,
+                                                hiddenQueueFilter === filterKey && styles.filterPillActive,
+                                            ]}
+                                            onPress={() => setHiddenQueueFilter(filterKey)}
+                                        >
+                                            <Text
+                                                style={[
+                                                    styles.filterPillText,
+                                                    hiddenQueueFilter === filterKey && styles.filterPillTextActive,
+                                                ]}
+                                            >
+                                                {filterKey === 'all' ? 'All' : filterKey === 'comments' ? 'Comments' : 'Replies'}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+                                {loadingHiddenCommentQueue ? (
+                                    <ActivityIndicator size="small" color="#8B5CF6" style={{ marginTop: 12 }} />
+                                ) : filteredHiddenQueue.length === 0 ? (
+                                    <Text style={styles.emptyText}>No hidden comments to review.</Text>
+                                ) : (
+                                    filteredHiddenQueue.map((item) => (
+                                        <View key={item.id} style={styles.queueItem}>
+                                            <View style={{ flex: 1 }}>
+                                                <Text style={styles.queueItemAuthor}>
+                                                    {item.userHandle} {item.isReply ? 'replied' : 'commented'}
+                                                </Text>
+                                                <Text style={styles.queueItemText} numberOfLines={2}>{item.text}</Text>
+                                            </View>
+                                            <View style={styles.queueActions}>
+                                                <TouchableOpacity
+                                                    style={styles.queueActionBtn}
+                                                    onPress={async () => {
+                                                        const ok = await approveHiddenComment(item.id);
+                                                        if (!ok) return;
+                                                        setHiddenCommentQueue((prev) => prev.filter((row) => row.id !== item.id));
+                                                    }}
+                                                >
+                                                    <Text style={styles.queueActionText}>Approve</Text>
+                                                </TouchableOpacity>
+                                                <TouchableOpacity
+                                                    style={[styles.queueActionBtn, styles.queueActionBtnDanger]}
+                                                    onPress={async () => {
+                                                        const ok = await deleteHiddenComment(item.id);
+                                                        if (!ok) return;
+                                                        setHiddenCommentQueue((prev) => prev.filter((row) => row.id !== item.id));
+                                                    }}
+                                                >
+                                                    <Text style={[styles.queueActionText, styles.queueActionTextDanger]}>Delete</Text>
+                                                </TouchableOpacity>
+                                            </View>
+                                        </View>
+                                    ))
+                                )}
+                            </View>
+                        </ScrollView>
                     </View>
                 </View>
             </Modal>
@@ -724,6 +1065,202 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         fontSize: 16,
         fontWeight: '600',
+    },
+    safetySection: {
+        backgroundColor: '#111827',
+        borderRadius: 10,
+        padding: 12,
+        marginBottom: 12,
+        borderWidth: 1,
+        borderColor: '#1F2937',
+    },
+    safetySectionHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 10,
+    },
+    safetySectionTitle: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: '#FFFFFF',
+    },
+    smallActionButton: {
+        backgroundColor: '#374151',
+        borderRadius: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+    },
+    smallActionButtonText: {
+        color: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    toggleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 12,
+    },
+    toggleInfo: {
+        flex: 1,
+        paddingRight: 10,
+    },
+    toggleLabel: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#FFFFFF',
+    },
+    toggleDescription: {
+        marginTop: 2,
+        fontSize: 12,
+        color: '#9CA3AF',
+    },
+    toggleTrack: {
+        width: 46,
+        height: 26,
+        borderRadius: 13,
+        backgroundColor: '#374151',
+        justifyContent: 'center',
+        paddingHorizontal: 3,
+    },
+    toggleTrackActive: {
+        backgroundColor: '#8B5CF6',
+    },
+    toggleThumb: {
+        width: 20,
+        height: 20,
+        borderRadius: 10,
+        backgroundColor: '#FFFFFF',
+    },
+    toggleThumbActive: {
+        alignSelf: 'flex-end',
+    },
+    inputLabel: {
+        fontSize: 13,
+        color: '#D1D5DB',
+        marginBottom: 8,
+    },
+    wordInputRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        columnGap: 8,
+    },
+    wordInput: {
+        flex: 1,
+        backgroundColor: '#030712',
+        borderWidth: 1,
+        borderColor: '#374151',
+        borderRadius: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        color: '#FFFFFF',
+        fontSize: 13,
+    },
+    addWordButton: {
+        backgroundColor: '#8B5CF6',
+        borderRadius: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 9,
+    },
+    addWordButtonText: {
+        color: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    wordChipWrap: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        columnGap: 6,
+        rowGap: 6,
+        marginTop: 10,
+    },
+    wordChip: {
+        backgroundColor: '#1F2937',
+        borderWidth: 1,
+        borderColor: '#374151',
+        borderRadius: 999,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+    },
+    wordChipText: {
+        fontSize: 11,
+        color: '#E5E7EB',
+    },
+    queueCountText: {
+        fontSize: 12,
+        color: '#FBBF24',
+        fontWeight: '600',
+    },
+    filterPillsRow: {
+        flexDirection: 'row',
+        columnGap: 8,
+        marginBottom: 10,
+    },
+    filterPill: {
+        borderWidth: 1,
+        borderColor: '#374151',
+        backgroundColor: '#030712',
+        borderRadius: 999,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+    },
+    filterPillActive: {
+        backgroundColor: '#8B5CF6',
+        borderColor: '#8B5CF6',
+    },
+    filterPillText: {
+        fontSize: 11,
+        color: '#9CA3AF',
+        fontWeight: '600',
+    },
+    filterPillTextActive: {
+        color: '#FFFFFF',
+    },
+    queueItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        columnGap: 8,
+        backgroundColor: '#030712',
+        borderWidth: 1,
+        borderColor: '#1F2937',
+        borderRadius: 8,
+        padding: 10,
+        marginBottom: 8,
+    },
+    queueItemAuthor: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#FFFFFF',
+        marginBottom: 3,
+    },
+    queueItemText: {
+        fontSize: 12,
+        color: '#D1D5DB',
+    },
+    queueActions: {
+        flexDirection: 'row',
+        columnGap: 6,
+    },
+    queueActionBtn: {
+        backgroundColor: '#1F2937',
+        borderWidth: 1,
+        borderColor: '#374151',
+        borderRadius: 6,
+        paddingHorizontal: 8,
+        paddingVertical: 6,
+    },
+    queueActionBtnDanger: {
+        borderColor: '#7F1D1D',
+        backgroundColor: '#450A0A',
+    },
+    queueActionText: {
+        color: '#E5E7EB',
+        fontSize: 11,
+        fontWeight: '600',
+    },
+    queueActionTextDanger: {
+        color: '#FCA5A5',
     },
 });
 

@@ -99,7 +99,7 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
                 <View style={styles.emptyContainer}>
                     <Text style={styles.emptyText}>You haven't created any posts yet.</Text>
                     <TouchableOpacity
-                        onPress={() => navigation.navigate('Create')}
+                        onPress={() => navigation.navigate('CreateComposer')}
                         style={styles.createButton}
                     >
                         <Text style={styles.createButtonText}>Create Your First Post</Text>

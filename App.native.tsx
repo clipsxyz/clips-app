@@ -15,7 +15,6 @@ import Icon from 'react-native-vector-icons/Ionicons';
 // Import screens
 import FeedScreen from './src/screens/FeedScreen';
 import BoostScreen from './src/screens/BoostScreen';
-import ClipScreen from './src/screens/ClipScreen';
 import SearchScreen from './src/screens/SearchScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import LiveStreamScreen from './src/screens/LiveStreamScreen';
@@ -25,9 +24,13 @@ import PostDetailScreen from './src/screens/PostDetailScreen';
 import StoriesScreen from './src/screens/StoriesScreen';
 import ViewProfileScreen from './src/screens/ViewProfileScreen';
 import CreateScreen from './src/screens/CreateScreen';
+import InstantCreateScreen from './src/screens/InstantCreateScreen';
+import GalleryPreviewScreen from './src/screens/GalleryPreviewScreen';
+import TextOnlyCreateScreen from './src/screens/TextOnlyCreateScreen';
 import MessagesScreen from './src/screens/MessagesScreen';
 import InboxScreen from './src/screens/InboxScreen';
 import CollectionFeedScreen from './src/screens/CollectionFeedScreen';
+import ContentPreferencesScreen from './src/screens/ContentPreferencesScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -43,15 +46,11 @@ function MainTabs() {
 
           if (route.name === 'Home') {
             iconName = focused ? 'home' : 'home-outline';
-          } else if (route.name === 'Boost') {
-            iconName = focused ? 'flash' : 'flash-outline';
-          } else if (route.name === 'Clip') {
+          } else if (route.name === 'Create') {
             iconName = focused ? 'camera' : 'camera-outline';
-          } else if (route.name === 'Live') {
-            iconName = focused ? 'radio' : 'radio-outline';
           } else if (route.name === 'Search') {
             iconName = focused ? 'search' : 'search-outline';
-          } else if (route.name === 'Profile') {
+          } else if (route.name === 'Passport') {
             iconName = focused ? 'person' : 'person-outline';
           } else {
             iconName = 'circle';
@@ -71,22 +70,12 @@ function MainTabs() {
       <Tab.Screen
         name="Home"
         component={FeedScreen}
-        options={{ title: 'Clips' }}
+        options={{ title: 'Home' }}
       />
       <Tab.Screen
-        name="Boost"
-        component={BoostScreen}
-        options={{ title: 'Boost' }}
-      />
-      <Tab.Screen
-        name="Clip"
-        component={ClipScreen}
-        options={{ title: 'Clip+' }}
-      />
-      <Tab.Screen
-        name="Live"
-        component={LiveStreamScreen}
-        options={{ title: 'Live' }}
+        name="Create"
+        component={InstantCreateScreen}
+        options={{ title: 'Create' }}
       />
       <Tab.Screen
         name="Search"
@@ -94,9 +83,9 @@ function MainTabs() {
         options={{ title: 'Search' }}
       />
       <Tab.Screen
-        name="Profile"
+        name="Passport"
         component={ProfileScreen}
-        options={{ title: 'Profile' }}
+        options={{ title: 'Passport' }}
       />
     </Tab.Navigator>
   );
@@ -123,6 +112,16 @@ function App(): React.JSX.Element {
             options={{ presentation: 'modal' }}
           />
           <Stack.Screen 
+            name="Boost" 
+            component={BoostScreen}
+            options={{ presentation: 'modal' }}
+          />
+          <Stack.Screen 
+            name="Live" 
+            component={LiveStreamScreen}
+            options={{ presentation: 'modal' }}
+          />
+          <Stack.Screen 
             name="Login" 
             component={LoginScreen}
           />
@@ -140,8 +139,23 @@ function App(): React.JSX.Element {
             component={ViewProfileScreen}
           />
           <Stack.Screen 
-            name="Create" 
+            name="CreateComposer" 
             component={CreateScreen}
+            options={{ presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="InstantCreate"
+            component={InstantCreateScreen}
+            options={{ presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="GalleryPreview"
+            component={GalleryPreviewScreen}
+            options={{ presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="TextOnlyCreate"
+            component={TextOnlyCreateScreen}
             options={{ presentation: 'modal' }}
           />
           <Stack.Screen 
@@ -155,6 +169,11 @@ function App(): React.JSX.Element {
           <Stack.Screen 
             name="CollectionFeed" 
             component={CollectionFeedScreen}
+          />
+          <Stack.Screen
+            name="ContentPreferences"
+            component={ContentPreferencesScreen}
+            options={{ presentation: 'modal' }}
           />
           </Stack.Navigator>
         </NavigationContainer>

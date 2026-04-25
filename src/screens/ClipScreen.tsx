@@ -13,7 +13,7 @@ const ClipScreen: React.FC = ({ navigation }: any) => {
             },
             (response) => {
                 if (response.assets && response.assets[0]) {
-                    navigation.navigate('Create', { mediaUrl: response.assets[0].uri, mediaType: 'image' });
+                    navigation.navigate('CreateComposer', { mediaUrl: response.assets[0].uri, mediaType: 'image' });
                 }
             }
         );
@@ -27,7 +27,7 @@ const ClipScreen: React.FC = ({ navigation }: any) => {
             },
             (response) => {
                 if (response.assets && response.assets[0]) {
-                    navigation.navigate('Create', { videoUrl: response.assets[0].uri, mediaType: 'video' });
+                    navigation.navigate('CreateComposer', { videoUrl: response.assets[0].uri, mediaType: 'video' });
                 }
             }
         );
@@ -42,7 +42,7 @@ const ClipScreen: React.FC = ({ navigation }: any) => {
             (response) => {
                 if (response.assets && response.assets[0]) {
                     const asset = response.assets[0];
-                    navigation.navigate('Create', {
+                    navigation.navigate('CreateComposer', {
                         mediaUrl: asset.uri,
                         videoUrl: asset.type?.startsWith('video') ? asset.uri : undefined,
                         mediaType: asset.type?.startsWith('video') ? 'video' : 'image',

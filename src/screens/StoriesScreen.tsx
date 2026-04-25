@@ -11,6 +11,8 @@ import {
     ActivityIndicator,
     Modal,
     TextInput,
+    ScrollView,
+    Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -24,6 +26,7 @@ import {
     addStoryReply,
 } from '../api/stories';
 import { getFollowedUsers } from '../api/posts';
+import { getAvatarForHandle } from '../api/users';
 import type { Story, StoryGroup } from '../types';
 import Avatar from '../components/Avatar';
 
@@ -42,9 +45,44 @@ export default function StoriesScreen({ route, navigation }: any) {
     const [paused, setPaused] = useState(false);
     const [isMuted, setIsMuted] = useState(true);
     const [showReplyModal, setShowReplyModal] = useState(false);
+    const [showShareModal, setShowShareModal] = useState(false);
+    const [showInsightsModal, setShowInsightsModal] = useState(false);
+    const [insightsTab, setInsightsTab] = useState<'viewers' | 'replies'>('viewers');
     const [replyText, setReplyText] = useState('');
+    const [insightsAvatarMap, setInsightsAvatarMap] = useState<Record<string, string | undefined>>({});
     const progressRef = useRef(0);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
+    const formatRelativeTime = (timestamp?: number) => {
+        if (!timestamp || Number.isNaN(timestamp)) return 'just now';
+        const diffMs = Date.now() - timestamp;
+        const diffMin = Math.max(1, Math.floor(diffMs / 60000));
+        if (diffMin < 60) return `${diffMin}m ago`;
+        const diffHr = Math.floor(diffMin / 60);
+        if (diffHr < 24) return `${diffHr}h ago`;
+        const diffDay = Math.floor(diffHr / 24);
+        return `${diffDay}d ago`;
+    };
+
+    useEffect(() => {
+        const currentGroup = storyGroups[currentGroupIndex];
+        const currentStory = currentGroup?.stories[currentStoryIndex];
+        if (!currentStory) return;
+
+        const handles = new Set<string>();
+        (currentStory.viewerHandles || []).forEach((h) => {
+            if (h) handles.add(h);
+        });
+        (currentStory.replies || []).forEach((r) => {
+            if (r?.userHandle) handles.add(r.userHandle);
+        });
+
+        if (handles.size === 0) return;
+        const updates: Record<string, string | undefined> = {};
+        handles.forEach((handle) => {
+            updates[handle] = getAvatarForHandle(handle);
+        });
+        setInsightsAvatarMap((prev) => ({ ...prev, ...updates }));
+    }, [storyGroups, currentGroupIndex, currentStoryIndex]);
 
     useEffect(() => {
         loadStories();
@@ -216,10 +254,57 @@ export default function StoriesScreen({ route, navigation }: any) {
         
         try {
             await addStoryReply(currentStory.id, user.id, user.handle, replyText);
+            setStoryGroups((prev) =>
+                prev.map((group, groupIdx) => {
+                    if (groupIdx !== currentGroupIndex) return group;
+                    return {
+                        ...group,
+                        stories: group.stories.map((story, storyIdx) => {
+                            if (storyIdx !== currentStoryIndex) return story;
+                            return {
+                                ...story,
+                                replies: [
+                                    ...(story.replies || []),
+                                    {
+                                        id: `reply-${Date.now()}`,
+                                        userId: user.id,
+                                        userHandle: user.handle,
+                                        text: replyText.trim(),
+                                        createdAt: Date.now(),
+                                    },
+                                ],
+                            };
+                        }),
+                    };
+                })
+            );
             setReplyText('');
             setShowReplyModal(false);
         } catch (error) {
             console.error('Error adding reply:', error);
+        }
+    };
+
+    const handleShareStory = async () => {
+        const currentGroup = storyGroups[currentGroupIndex];
+        const currentStory = currentGroup?.stories[currentStoryIndex];
+        if (!currentStory) return;
+
+        const textBits = [
+            `Story by ${currentGroup?.userHandle || currentStory.userHandle}`,
+            currentStory.text ? `"${currentStory.text}"` : undefined,
+            currentStory.location ? `Location: ${currentStory.location}` : undefined,
+            currentStory.mediaUrl ? currentStory.mediaUrl : undefined,
+        ].filter(Boolean);
+
+        try {
+            await Share.share({
+                message: textBits.join('\n'),
+                title: 'Share Story',
+            });
+            setShowShareModal(false);
+        } catch (error) {
+            console.error('Error sharing story:', error);
         }
     };
 
@@ -397,11 +482,28 @@ export default function StoriesScreen({ route, navigation }: any) {
                             <Icon name="chatbubble" size={28} color="#FFFFFF" />
                         </TouchableOpacity>
                         <TouchableOpacity
+                            onPress={() => setShowShareModal(true)}
+                            style={styles.actionButton}
+                        >
+                            <Icon name="paper-plane" size={24} color="#FFFFFF" />
+                        </TouchableOpacity>
+                        <TouchableOpacity
                             onPress={() => setIsMuted(!isMuted)}
                             style={styles.actionButton}
                         >
                             <Icon name={isMuted ? "volume-mute" : "volume-high"} size={28} color="#FFFFFF" />
                         </TouchableOpacity>
+                        {currentStory?.userId === user?.id && (
+                            <TouchableOpacity
+                                onPress={() => {
+                                    setInsightsTab('viewers');
+                                    setShowInsightsModal(true);
+                                }}
+                                style={styles.actionButton}
+                            >
+                                <Icon name="bar-chart" size={24} color="#FFFFFF" />
+                            </TouchableOpacity>
+                        )}
                     </View>
 
                     {/* Navigation areas */}
@@ -450,6 +552,134 @@ export default function StoriesScreen({ route, navigation }: any) {
                                 <Text style={styles.replySendText}>Send</Text>
                             </TouchableOpacity>
                         </View>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Share Modal */}
+            <Modal
+                visible={showShareModal}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setShowShareModal(false)}
+            >
+                <View style={styles.replyModal}>
+                    <View style={styles.replyModalContent}>
+                        <Text style={styles.replyModalTitle}>Share story</Text>
+                        <TouchableOpacity style={styles.sheetActionButton} onPress={handleShareStory}>
+                            <Icon name="share-social-outline" size={18} color="#FFFFFF" />
+                            <Text style={styles.sheetActionText}>Share via device apps</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={styles.sheetActionButton}
+                            onPress={() => {
+                                const mediaUrl = currentStory?.mediaUrl || '';
+                                if (mediaUrl) {
+                                    Linking.openURL(mediaUrl).catch(() => {});
+                                }
+                                setShowShareModal(false);
+                            }}
+                        >
+                            <Icon name="copy-outline" size={18} color="#FFFFFF" />
+                            <Text style={styles.sheetActionText}>Open media link</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => setShowShareModal(false)} style={styles.replyCancelButton}>
+                            <Text style={styles.replyCancelText}>Close</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Owner Insights Modal */}
+            <Modal
+                visible={showInsightsModal}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setShowInsightsModal(false)}
+            >
+                <View style={styles.replyModal}>
+                    <View style={styles.replyModalContent}>
+                        <Text style={styles.replyModalTitle}>Story insights</Text>
+                        <View style={styles.insightsTabRow}>
+                            <TouchableOpacity
+                                onPress={() => setInsightsTab('viewers')}
+                                style={[styles.insightsTabBtn, insightsTab === 'viewers' && styles.insightsTabBtnActive]}
+                            >
+                                <Text style={[styles.insightsTabBtnText, insightsTab === 'viewers' && styles.insightsTabBtnTextActive]}>
+                                    Viewers ({currentStory?.viewerHandles?.length || 0})
+                                </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                onPress={() => setInsightsTab('replies')}
+                                style={[styles.insightsTabBtn, insightsTab === 'replies' && styles.insightsTabBtnActive]}
+                            >
+                                <Text style={[styles.insightsTabBtnText, insightsTab === 'replies' && styles.insightsTabBtnTextActive]}>
+                                    Replies ({currentStory?.replies?.length || 0})
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        <ScrollView style={styles.insightsScroll} contentContainerStyle={styles.insightsScrollContent}>
+                            {insightsTab === 'viewers' ? (
+                                (currentStory?.viewerHandles?.length ? currentStory.viewerHandles : []).map((viewerHandle) => (
+                                    <TouchableOpacity
+                                        key={viewerHandle}
+                                        style={styles.insightRow}
+                                        onPress={() => navigation.navigate('ViewProfile', { handle: viewerHandle })}
+                                    >
+                                        <View style={styles.insightRowInner}>
+                                            <Avatar
+                                                src={insightsAvatarMap[viewerHandle]}
+                                                name={viewerHandle.split('@')[0] || viewerHandle}
+                                                size="sm"
+                                            />
+                                            <View style={styles.insightTextWrap}>
+                                                <Text style={styles.insightPrimary}>{viewerHandle}</Text>
+                                                <Text style={styles.insightSecondary}>Viewed this story</Text>
+                                            </View>
+                                        </View>
+                                        <Icon name="chevron-forward" size={16} color="#9CA3AF" />
+                                    </TouchableOpacity>
+                                ))
+                            ) : (
+                                (currentStory?.replies?.length ? currentStory.replies : []).map((reply) => (
+                                    <TouchableOpacity
+                                        key={reply.id}
+                                        style={styles.insightRow}
+                                        onPress={() => navigation.navigate('ViewProfile', { handle: reply.userHandle })}
+                                    >
+                                        <View style={styles.insightRowInner}>
+                                            <Avatar
+                                                src={insightsAvatarMap[reply.userHandle]}
+                                                name={reply.userHandle.split('@')[0] || reply.userHandle}
+                                                size="sm"
+                                            />
+                                            <View style={styles.insightTextWrap}>
+                                                <Text style={styles.insightPrimary}>{reply.userHandle}</Text>
+                                                <Text style={styles.insightSecondary} numberOfLines={2}>
+                                                    {reply.text}
+                                                </Text>
+                                                <Text style={styles.insightTertiary}>
+                                                    {formatRelativeTime(reply.createdAt)}
+                                                </Text>
+                                            </View>
+                                        </View>
+                                        <Icon name="chevron-forward" size={16} color="#9CA3AF" />
+                                    </TouchableOpacity>
+                                ))
+                            )}
+
+                            {insightsTab === 'viewers' && !(currentStory?.viewerHandles?.length) && (
+                                <Text style={styles.emptyInsightsText}>No viewers yet.</Text>
+                            )}
+                            {insightsTab === 'replies' && !(currentStory?.replies?.length) && (
+                                <Text style={styles.emptyInsightsText}>No replies yet.</Text>
+                            )}
+                        </ScrollView>
+
+                        <TouchableOpacity onPress={() => setShowInsightsModal(false)} style={styles.replyCancelButton}>
+                            <Text style={styles.replyCancelText}>Close</Text>
+                        </TouchableOpacity>
                     </View>
                 </View>
             </Modal>
@@ -690,6 +920,97 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         fontSize: 16,
         fontWeight: '600',
+    },
+    sheetActionButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#374151',
+        backgroundColor: '#111827',
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        marginBottom: 10,
+    },
+    sheetActionText: {
+        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    insightsTabRow: {
+        flexDirection: 'row',
+        gap: 10,
+        marginBottom: 12,
+    },
+    insightsTabBtn: {
+        flex: 1,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: '#374151',
+        backgroundColor: '#111827',
+        paddingVertical: 8,
+        alignItems: 'center',
+    },
+    insightsTabBtnActive: {
+        borderColor: '#F8D26A',
+        backgroundColor: '#3F2B07',
+    },
+    insightsTabBtnText: {
+        color: '#D1D5DB',
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    insightsTabBtnTextActive: {
+        color: '#F8D26A',
+    },
+    insightsScroll: {
+        maxHeight: 280,
+        marginBottom: 14,
+    },
+    insightsScrollContent: {
+        gap: 8,
+    },
+    insightRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#374151',
+        backgroundColor: '#111827',
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+    },
+    insightRowInner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+    },
+    insightTextWrap: {
+        marginLeft: 10,
+        flex: 1,
+    },
+    insightPrimary: {
+        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '700',
+    },
+    insightSecondary: {
+        color: '#9CA3AF',
+        fontSize: 12,
+        marginTop: 4,
+    },
+    insightTertiary: {
+        color: '#6B7280',
+        fontSize: 11,
+        marginTop: 4,
+    },
+    emptyInsightsText: {
+        color: '#9CA3AF',
+        fontSize: 13,
+        textAlign: 'center',
+        paddingVertical: 20,
     },
 });
 
