@@ -34,6 +34,7 @@ export default function CreatePage() {
     const navigate = useNavigate();
     const locationState = useLocation().state as {
         videoUrl?: string;
+        mediaType?: 'image' | 'video';
         filtered?: boolean;
         filterInfo?: {
             active: string;
@@ -384,10 +385,14 @@ export default function CreatePage() {
                 setIsProcessingMedia(true);
                 try {
                     let url = locationState.videoUrl;
-                    // If export failed upstream, try to produce a filtered video here
-                    url = await ensureFilteredVideoIfNeeded(url);
+                    const incomingMediaType = locationState?.mediaType === 'image' ? 'image' : 'video';
+                    // Only run video filter/export pipeline for actual videos.
+                    if (incomingMediaType === 'video') {
+                        // If export failed upstream, try to produce a filtered video here.
+                        url = await ensureFilteredVideoIfNeeded(url);
+                    }
                     setSelectedMedia(url);
-                    setMediaType('video');
+                    setMediaType(incomingMediaType);
                     setFilteredFromFlow(!!locationState.filtered || !!locationState.filterInfo);
                     // Focus caption for quick posting
                     setTimeout(() => captionRef.current?.focus(), 0);
@@ -400,7 +405,7 @@ export default function CreatePage() {
             }
         })();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [locationState?.videoUrl, locationState?.editedMedia, locationState?.mediaItems]);
+    }, [locationState?.videoUrl, locationState?.mediaType, locationState?.editedMedia, locationState?.mediaItems]);
 
     // Helper function to transcode video for Edge compatibility
     const transcodeVideoForEdge = useCallback(async (file: File): Promise<string> => {
@@ -791,6 +796,14 @@ export default function CreatePage() {
                     }
                 });
             } else {
+                // Notify feed/profile listeners immediately so UI can render the new post
+                // even if background refresh or persistence is delayed on mobile browsers.
+                if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('localPostCreated', {
+                        detail: { post: newPost }
+                    }));
+                }
+
                 // Reset form
                 setText('');
                 setLocation('');
@@ -803,8 +816,13 @@ export default function CreatePage() {
                 setStickers([]);
                 setTaggedUsers([]);
 
-                // Navigate back to feed
-                navigate('/feed');
+                // Navigate back to feed with created post for deterministic injection
+                navigate('/feed', {
+                    state: {
+                        createdPost: newPost,
+                        forceRefreshAt: Date.now(),
+                    },
+                });
             }
         } catch (error: any) {
             console.error('Error creating post:', error);

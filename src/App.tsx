@@ -23,7 +23,7 @@ import { useOnline } from './hooks/useOnline';
 import { getUnreadTotal, appendMessage } from './api/messages';
 import { getUnreadNotificationCount } from './api/notifications';
 import { getStoryInsightsForUser } from './api/stories';
-import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost, getAvaNormalPost, postMatchesLocationTab } from './api/posts';
+import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost, getAvaNormalPost, postMatchesLocationTab, posts as postsStore, consumePendingCreatedPost } from './api/posts';
 import { updatePost, checkFollowsMe } from './api/client';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory, fetchFollowedUsersStoryGroups } from './api/stories';
 import { enqueue, drain } from './utils/mutationQueue';
@@ -2855,7 +2855,8 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       setTimeout(() => {
         if (imageRef.current && imageRef.current.complete && imageRef.current.naturalWidth > 0) {
           setIsLoading(false);
-          setAspectRatio(imageRef.current.naturalWidth / imageRef.current.naturalHeight);
+          // Keep ratio axis consistent with all other media sizing logic (height / width).
+          setAspectRatio(imageRef.current.naturalHeight / imageRef.current.naturalWidth);
         } else {
           setIsLoading(true);
         }
@@ -3123,6 +3124,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
               alt=""
               priority={priority}
               className="w-full h-full"
+              position="top center"
               onLoad={(e) => {
                 // ProgressiveImage passes the event, use it directly
                 if (e) {
@@ -5257,16 +5259,20 @@ function Stories24FeedRail({
 
   if (stories24Items.length === 0) return null;
   return (
-    <div className="mx-3 my-3 rounded-2xl border border-slate-700/60 bg-[#0a1323] p-3 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
+    <div
+      className="mx-3 my-3 rounded-2xl p-[1.5px] shadow-[0_8px_24px_rgba(0,0,0,0.35)]"
+      style={{ background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 24%, #f4f4f4 48%, #bfc5cc 72%, #ffe8a3 100%)' }}
+    >
+      <div className="rounded-2xl bg-[#0a1323] p-3">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-white text-base font-semibold flex items-center gap-1.5">
-          <FiMapPin className="w-4 h-4 text-teal-400 shrink-0" aria-hidden />
+          <FiMapPin className="w-4 h-4 text-[#7A8AF0] shrink-0" aria-hidden />
           <span>Stories 24</span>
         </h3>
         <button
           type="button"
           onClick={() => navigate('/clip')}
-          className="inline-flex items-center gap-1 rounded-full border border-teal-400/40 bg-teal-400/10 px-2.5 py-1 text-[11px] font-semibold text-teal-100 hover:bg-sky-500/15 transition-colors"
+          className="inline-flex items-center gap-1 rounded-xl border border-white bg-white px-2.5 py-1 text-[11px] font-semibold text-[#111827] hover:bg-gray-100 transition-colors"
         >
           <FiPlus className="w-3 h-3" />
           <span>Add yours</span>
@@ -5279,18 +5285,22 @@ function Stories24FeedRail({
               key="stories24-add-yours"
               type="button"
               onClick={() => navigate('/clip')}
-              className="relative w-[112px] h-[156px] shrink-0 rounded-2xl border border-teal-400/40 overflow-hidden bg-gradient-to-br from-[#0e1a30] via-[#12243f] to-[#1a1530] text-left"
+              className="relative w-[112px] h-[156px] shrink-0 rounded-2xl border border-white/80 overflow-hidden bg-gradient-to-br from-[#0e1a30] via-[#12243f] to-[#1a1530] text-left"
             >
               <div
-                className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-teal-400/20 via-sky-500/15 to-fuchsia-500/20"
+                className="pointer-events-none absolute inset-0"
+                style={{ background: 'linear-gradient(135deg, rgba(246,226,122,0.22) 0%, rgba(212,175,55,0.2) 24%, rgba(244,244,244,0.15) 48%, rgba(191,197,204,0.2) 72%, rgba(255,232,163,0.22) 100%)' }}
                 aria-hidden
               />
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-                <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-tr from-teal-400 via-sky-500 to-fuchsia-500 text-[#021428] shadow-md">
+                <span
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full text-[#111827] shadow-md"
+                  style={{ background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 24%, #f4f4f4 48%, #bfc5cc 72%, #ffe8a3 100%)' }}
+                >
                   <FiPlus className="w-5 h-5" />
                 </span>
                 <p className="text-[12px] font-semibold text-white">Add yours</p>
-                <p className="text-[10px] text-teal-100/90">Post to Stories 24</p>
+                <p className="text-[10px] text-white/80">Post to Stories 24</p>
               </div>
             </button>
           ) : (
@@ -5330,7 +5340,7 @@ function Stories24FeedRail({
               ) : null}
               <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/45 to-transparent p-2">
                 <p className="text-[11px] text-white font-semibold leading-tight line-clamp-2">{storyItem.title}</p>
-                <p className="text-[10px] text-teal-100/90 mt-1 truncate">
+                <p className="text-[10px] text-[#7A8AF0] mt-1 truncate">
                   {storyItem.subtitle ||
                     (storyItem.handle.startsWith('@') ? storyItem.handle : `@${storyItem.handle}`)}
                 </p>
@@ -5338,6 +5348,7 @@ function Stories24FeedRail({
             </button>
           )
         ))}
+      </div>
       </div>
       {expandingStory &&
         createPortal(
@@ -6398,6 +6409,70 @@ function FeedPageWrapper() {
     updateOne(state.postId, p => ({ ...p, isBoosted: true, boostFeedType: state.feedType! }));
     navigate('/feed', { replace: true, state: {} });
   }, [routerLocation.pathname, routerLocation.state]);
+
+  // Deterministic injection path: when create flows navigate to /feed with createdPost in route state.
+  React.useEffect(() => {
+    const state = routerLocation.state as { createdPost?: Post; forceRefreshAt?: number } | null;
+    if (routerLocation.pathname !== '/feed' || !state?.createdPost) return;
+    const createdPost = state.createdPost;
+    if (!postsStore.some((p) => String(p.id) === String(createdPost.id))) {
+      postsStore.unshift(createdPost);
+    }
+    const decorated = decorateForUser(userId, createdPost);
+    pagesLoadedForFilterRef.current = currentFilter;
+    setPages((prev) => {
+      const flattened = prev.flat();
+      const withoutDuplicate = flattened.filter((p) => String(p.id) !== String(createdPost.id));
+      return [[decorated, ...withoutDuplicate]];
+    });
+    navigate('/feed', { replace: true, state: {} });
+  }, [routerLocation.pathname, routerLocation.state, currentFilter, userId]);
+
+  // Immediate UI injection for locally-created posts (mobile browser reliability)
+  React.useEffect(() => {
+    const onLocalPostCreated = (event: Event) => {
+      const customEvent = event as CustomEvent<{ post?: Post }>;
+      const createdPost = customEvent.detail?.post;
+      if (!createdPost) return;
+
+      // Keep shared store warm in case persistence is delayed/fails on phone.
+      if (!postsStore.some((p) => String(p.id) === String(createdPost.id))) {
+        postsStore.unshift(createdPost);
+      }
+
+      // If we're currently on feed, inject at top immediately.
+      if (routerLocation.pathname === '/feed') {
+        const decorated = decorateForUser(userId, createdPost);
+        // Mark this filter as loaded so the flat memo does not hide injected posts.
+        pagesLoadedForFilterRef.current = currentFilter;
+        setPages((prev) => {
+          const flattened = prev.flat();
+          const withoutDuplicate = flattened.filter((p) => String(p.id) !== String(createdPost.id));
+          return [[decorated, ...withoutDuplicate]];
+        });
+      }
+    };
+
+    window.addEventListener('localPostCreated', onLocalPostCreated as EventListener);
+    return () => window.removeEventListener('localPostCreated', onLocalPostCreated as EventListener);
+  }, [routerLocation.pathname, userId, currentFilter]);
+
+  // Last-resort recovery: consume pending created post from storage whenever feed opens.
+  React.useEffect(() => {
+    if (routerLocation.pathname !== '/feed') return;
+    const pending = consumePendingCreatedPost();
+    if (!pending) return;
+    if (!postsStore.some((p) => String(p.id) === String(pending.id))) {
+      postsStore.unshift(pending);
+    }
+    const decorated = decorateForUser(userId, pending);
+    pagesLoadedForFilterRef.current = currentFilter;
+    setPages((prev) => {
+      const flattened = prev.flat();
+      const withoutDuplicate = flattened.filter((p) => String(p.id) !== String(pending.id));
+      return [[decorated, ...withoutDuplicate]];
+    });
+  }, [routerLocation.pathname, currentFilter, userId]);
 
   // Fetch ads when filter changes
   React.useEffect(() => {

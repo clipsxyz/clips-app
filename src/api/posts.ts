@@ -3,7 +3,6 @@ import type { Post, Comment, StickerOverlay } from '../types';
 import { isLaravelApiEnabled, isViteDevMode } from '../config/runtimeEnv';
 import * as apiClient from './client';
 import { randomUUID } from '../utils/uuid';
-import { constrainImageToInstagramDataUrl } from '../utils/imageDimensions';
 import { wasEverAStory } from './stories';
 import { getActiveBoostedPostIds, activateBoost } from './boost';
 import type { BoostFeedType } from '../components/BoostSelectionModal';
@@ -134,6 +133,7 @@ const LOCATION_CITIES = new Set([
 
 // Storage key for posts
 const POSTS_STORAGE_KEY = 'clips_app_posts';
+const PENDING_CREATED_POST_KEY = 'clips_pending_created_post';
 
 /** Returns true if this id is from mock/seed data (JSON, Artane, Bob, Ava). Only these should be excluded when saving to localStorage. */
 function isMockPostId(id: string): boolean {
@@ -168,6 +168,27 @@ function savePostsToStorage(postsToSave: Post[]): void {
     console.log('💾 Saved', userCreatedPosts.length, 'user-created posts to localStorage');
   } catch (error) {
     console.error('Error saving posts to localStorage:', error);
+  }
+}
+
+function markPendingCreatedPost(post: Post): void {
+  try {
+    localStorage.setItem(PENDING_CREATED_POST_KEY, JSON.stringify(post));
+  } catch {
+    // Ignore storage failures; post creation should still succeed.
+  }
+}
+
+export function consumePendingCreatedPost(): Post | null {
+  try {
+    const raw = localStorage.getItem(PENDING_CREATED_POST_KEY);
+    if (!raw) return null;
+    localStorage.removeItem(PENDING_CREATED_POST_KEY);
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed as Post;
+  } catch {
+    return null;
   }
 }
 
@@ -1134,23 +1155,11 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
 
       const isOwn = !!_currentUserHandle && norm(p.userHandle) === norm(_currentUserHandle) && !p.isReclipped;
       if (isOwn) {
-        if (t === 'discover') return true; // Following feed: always show your posts
-
-        // For your own posts in the three core location tabs (local / regional / national),
-        // always show them – users expect to see their own posts in all of their tiers.
-        if (['finglas', 'dublin', 'ireland'].includes(t)) {
-          return true;
-        }
-
-        // For any other custom location feeds, fall back to the normal matching logic
-        // using your CURRENT profile location instead of the snapshot on the post.
-        const ownLocationPost: Post = {
-          ...p,
-          userLocal: _userLocal || p.userLocal,
-          userRegional: _userRegional || p.userRegional,
-          userNational: _userNational || p.userNational,
-        };
-        return postMatchesLocationTab(ownLocationPost, t);
+        // In mock mode, always show a user's own authored posts in their feed
+        // regardless of the currently selected location tab. This prevents
+        // "posted but not visible" confusion when profile/location values are
+        // incomplete or temporarily inconsistent during onboarding.
+        return true;
       }
 
       if (t === 'discover') {
@@ -1761,6 +1770,7 @@ export async function getPostById(postId: string, userId?: string): Promise<Post
     if (userId) {
       return decorateForUser(userId, transformed);
     }
+    markPendingCreatedPost(transformed);
     return transformed;
   } catch (e: any) {
     if (e?.status !== 404 && e?.message && !e.message.includes('404')) {
@@ -1856,6 +1866,23 @@ export async function fetchCommentsPage(
 
 export async function fetchPostsByUser(userHandle: string, limit = 30): Promise<Post[]> {
   await delay(150);
+  // Keep in-memory list synchronized with persisted user-created posts so profile/my feed
+  // can always see newly created posts even after route transitions on mobile browsers.
+  try {
+    const persisted = getPostsFromStorage().filter(p => !isMockPostId(p.id));
+    if (persisted.length > 0) {
+      const byId = new Map<string, Post>();
+      for (const p of posts) byId.set(String(p.id), p);
+      for (const p of persisted) {
+        if (!byId.has(String(p.id))) {
+          posts.unshift(p);
+          byId.set(String(p.id), p);
+        }
+      }
+    }
+  } catch {
+    // Ignore storage sync errors and proceed with in-memory posts.
+  }
   const handle = userHandle.trim().toLowerCase();
   const filtered = posts.filter(p => p.userHandle.toLowerCase() === handle);
   // newest first (ids include timestamp; also fallback to original order)
@@ -2146,16 +2173,13 @@ export async function createPost(
     }
 
     // Helper function to convert blob URL to data URL for persistence
-    async function convertBlobToDataUrl(blobUrl: string, constrainImage = false): Promise<string> {
+    async function convertBlobToDataUrl(blobUrl: string): Promise<string> {
       if (!blobUrl.startsWith('blob:')) {
         return blobUrl; // Not a blob URL, return as-is
       }
 
       try {
         console.log('Converting blob URL to data URL for persistence:', blobUrl.substring(0, 50));
-        if (constrainImage) {
-          return await constrainImageToInstagramDataUrl(blobUrl);
-        }
         const response = await fetch(blobUrl);
         const blob = await response.blob();
         const reader = new FileReader();
@@ -2283,7 +2307,7 @@ export async function createPost(
       } else {
         // For images, convert to data URL
         try {
-          persistentImageUrl = await convertBlobToDataUrl(imageUrl, true);
+          persistentImageUrl = await convertBlobToDataUrl(imageUrl);
         } catch (error) {
           console.error('Failed to convert blob URL, using original:', error);
           persistentImageUrl = imageUrl; // Fallback to original
@@ -2313,7 +2337,7 @@ export async function createPost(
             } else {
               // For images and text, convert to data URL
               try {
-                const dataUrl = await convertBlobToDataUrl(item.url, item.type === 'image');
+                const dataUrl = await convertBlobToDataUrl(item.url);
                 return { ...item, url: dataUrl };
               } catch (error) {
                 console.error('Failed to convert blob URL in mediaItems, using original:', error);
@@ -2382,6 +2406,7 @@ export async function createPost(
     // Save to localStorage for persistence
     savePostsToStorage(posts);
 
+    markPendingCreatedPost(newPost);
     return decorateForUser(userId, newPost);
   }
 }

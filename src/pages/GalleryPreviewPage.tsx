@@ -568,8 +568,6 @@ export default function GalleryPreviewPage() {
         const overlay = thumbForOverlay
             ? showUploadOverlay({ thumbUrl: thumbForOverlay, initialMessage: 'Posting to Gazetteer…' })
             : null;
-        // Immediately return user to main feed while upload runs in background
-        navigate('/feed');
         setIsUploading(true);
         try {
             let persistentMediaUrl = mediaUrl;
@@ -586,7 +584,7 @@ export default function GalleryPreviewPage() {
                 persistentMediaUrl = prepared.mediaUrl;
                 videoPosterUrl = prepared.videoPosterUrl;
             }
-            await createPost(
+            const newPost = await createPost(
                 user.id,
                 user.handle,
                 caption.trim() || '',
@@ -619,6 +617,15 @@ export default function GalleryPreviewPage() {
             clearGalleryPreviewMedia();
             showToast('Post created successfully!');
             window.dispatchEvent(new CustomEvent('postCreated'));
+            window.dispatchEvent(new CustomEvent('localPostCreated', {
+                detail: { post: newPost }
+            }));
+            navigate('/feed', {
+                state: {
+                    createdPost: newPost,
+                    forceRefreshAt: Date.now(),
+                },
+            });
             if (overlay) {
                 overlay.success('Your post is now live on the feed.');
             }

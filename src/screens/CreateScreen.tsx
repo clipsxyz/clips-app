@@ -21,9 +21,31 @@ import { prepareMediaForPostNative } from '../utils/prepareMediaForPostNative';
 export default function CreateScreen({ navigation, route }: any) {
     const { user } = useAuth();
     const passedMedia = route.params?.videoUrl || route.params?.mediaUrl;
+    const passedMediaType: 'image' | 'video' | null = route.params?.videoUrl
+        ? 'video'
+        : route.params?.mediaUrl
+            ? (route.params?.mediaType === 'video' ? 'video' : 'image')
+            : null;
+
+    const normalizeMediaUri = (uri?: string | null): string | null => {
+        if (!uri) return null;
+        const trimmed = uri.trim();
+        if (!trimmed) return null;
+        if (
+            trimmed.startsWith('file://') ||
+            trimmed.startsWith('content://') ||
+            trimmed.startsWith('ph://') ||
+            trimmed.startsWith('http://') ||
+            trimmed.startsWith('https://') ||
+            trimmed.startsWith('data:')
+        ) {
+            return trimmed;
+        }
+        return `file://${trimmed}`;
+    };
     
-    const [selectedMedia, setSelectedMedia] = useState<string | null>(passedMedia || null);
-    const [mediaType, setMediaType] = useState<'image' | 'video' | null>(passedMedia ? 'video' : null);
+    const [selectedMedia, setSelectedMedia] = useState<string | null>(normalizeMediaUri(passedMedia));
+    const [mediaType, setMediaType] = useState<'image' | 'video' | null>(passedMediaType);
     const [text, setText] = useState('');
     const [location, setLocation] = useState('');
     const [isUploading, setIsUploading] = useState(false);
@@ -44,7 +66,7 @@ export default function CreateScreen({ navigation, route }: any) {
                             cropperCancelText: 'Cancel',
                             compressImageQuality: 0.9,
                         });
-                        setSelectedMedia(image.path || null);
+                        setSelectedMedia(normalizeMediaUri(image.path || null));
                         setMediaType('image');
                     } catch (err: any) {
                         if (err?.code !== 'E_PICKER_CANCELLED') {
@@ -64,7 +86,7 @@ export default function CreateScreen({ navigation, route }: any) {
                         (response) => {
                             if (response.assets && response.assets[0]) {
                                 const asset = response.assets[0];
-                                setSelectedMedia(asset.uri || null);
+                                setSelectedMedia(normalizeMediaUri(asset.uri || null));
                                 setMediaType('video');
                             }
                         }
@@ -87,7 +109,7 @@ export default function CreateScreen({ navigation, route }: any) {
                 cropperCancelText: 'Cancel',
                 compressImageQuality: 0.9,
             });
-            setSelectedMedia(image.path || null);
+            setSelectedMedia(normalizeMediaUri(image.path || null));
             setMediaType('image');
         } catch (err: any) {
             if (err?.code !== 'E_PICKER_CANCELLED') {
@@ -145,7 +167,13 @@ export default function CreateScreen({ navigation, route }: any) {
                 preparedMedia.videoPosterUrl,
             );
             Alert.alert('Success', 'Post created successfully!', [
-                { text: 'OK', onPress: () => navigation.goBack() },
+                {
+                    text: 'OK',
+                    onPress: () =>
+                        navigation.navigate('Feed', {
+                            forceRefreshAt: Date.now(),
+                        }),
+                },
             ]);
         } catch (error: any) {
             console.error('Error creating post:', error);

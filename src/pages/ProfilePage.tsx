@@ -155,6 +155,14 @@ export default function ProfilePage() {
   }, [normalizedOwnHandle, myFeedRefreshTick]);
 
   React.useEffect(() => {
+    const onLocalPostCreated = () => {
+      setMyFeedRefreshTick((v) => v + 1);
+    };
+    window.addEventListener('localPostCreated', onLocalPostCreated);
+    return () => window.removeEventListener('localPostCreated', onLocalPostCreated);
+  }, []);
+
+  React.useEffect(() => {
     if (!myFeedOpen) {
       setMyFeedVisible(false);
       return;

@@ -382,26 +382,11 @@ export default function LoginPage() {
       }}
     >
       <div className="w-full max-w-md flex-1 flex flex-col min-h-0">
-        {/* Sign up / Log in toggle */}
-        <div className="flex-shrink-0 flex justify-center gap-6 mb-3 sm:mb-4">
-          <button
-            type="button"
-            onClick={() => { setMode('signup'); setLoginError(''); setSignupError(''); }}
-            className={`text-sm font-medium transition-colors ${mode === 'signup' ? 'text-blue-500' : 'text-gray-400 hover:text-gray-300'}`}
-          >
-            Sign up
-          </button>
-          <button
-            type="button"
-            onClick={() => { setMode('login'); setLoginError(''); }}
-            className={`text-sm font-medium transition-colors ${mode === 'login' ? 'text-blue-500' : 'text-gray-400 hover:text-gray-300'}`}
-          >
-            Log in
-          </button>
-        </div>
-
         {mode === 'login' ? (
-          <div className="max-w-md mx-auto rounded-2xl p-0.5 bg-gradient-to-tr from-teal-400 via-sky-500 to-fuchsia-500 shadow-lg">
+          <div
+            className="max-w-md mx-auto rounded-2xl p-0.5 shadow-lg"
+            style={{ background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 24%, #f4f4f4 48%, #bfc5cc 72%, #ffe8a3 100%)' }}
+          >
             {showForgotPassword ? (
               <div className="rounded-2xl bg-black px-8 py-8 flex flex-col">
                 <div className="text-center mb-6">
@@ -430,7 +415,7 @@ export default function LoginPage() {
                       value={forgotEmail}
                       onChange={e => setForgotEmail(e.target.value)}
                       placeholder="Email"
-                      className="w-full rounded-sm border border-gray-600 bg-gray-800 px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-gray-500"
+                      className="w-full rounded-xl border border-gray-600 bg-gray-800 px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-gray-500"
                       autoFocus
                     />
                     <div className="flex gap-2">
@@ -472,7 +457,7 @@ export default function LoginPage() {
                   value={loginEmail}
                   onChange={e => setLoginEmail(e.target.value)}
                   placeholder="Email"
-                  className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                  className="w-full rounded-xl border-2 border-white bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-white"
                   autoComplete="email"
                 />
                 <div className="relative">
@@ -481,7 +466,7 @@ export default function LoginPage() {
                     value={loginPassword}
                     onChange={e => setLoginPassword(e.target.value)}
                     placeholder="Password"
-                    className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                    className="w-full rounded-xl border-2 border-white bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-white"
                     autoComplete="current-password"
                   />
                   <button
@@ -497,7 +482,7 @@ export default function LoginPage() {
                   <button
                     type="button"
                     onClick={() => { setShowForgotPassword(true); setLoginError(''); }}
-                    className="text-xs text-blue-400 hover:underline"
+                    className="text-xs text-[#7A8AF0] hover:underline"
                   >
                     Forgot password?
                   </button>
@@ -508,13 +493,13 @@ export default function LoginPage() {
                 <button
                   type="submit"
                   disabled={loginLoading}
-                  className="w-full px-4 py-2 bg-gradient-to-r from-teal-400 via-sky-500 to-fuchsia-500 text-white rounded-sm hover:brightness-110 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full px-4 py-3 bg-white text-[#111827] rounded-xl transition-colors text-sm font-semibold hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {loginLoading ? 'Logging in…' : 'Log in'}
                 </button>
                 <p className="text-xs text-center text-gray-400">
                   Don&apos;t have an account?{' '}
-                  <button type="button" onClick={() => setMode('signup')} className="text-blue-500 hover:underline font-medium">
+                  <button type="button" onClick={() => setMode('signup')} className="text-[#7A8AF0] hover:underline font-medium">
                     Sign up
                   </button>
                 </p>
@@ -523,7 +508,10 @@ export default function LoginPage() {
             )}
           </div>
         ) : (
-        <div className="max-w-md mx-auto rounded-2xl p-[1.5px] bg-gradient-to-tr from-teal-400 via-sky-500 to-fuchsia-500 shadow-lg flex-shrink-0">
+        <div
+          className="max-w-md mx-auto rounded-2xl p-[1.5px] shadow-lg flex-shrink-0"
+          style={{ background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 24%, #f4f4f4 48%, #bfc5cc 72%, #ffe8a3 100%)' }}
+        >
         <form
           onSubmit={step === 1 ? handleAccountSubmit : handleLocationSubmit}
           className="rounded-2xl bg-black flex flex-col min-h-0"
@@ -560,8 +548,18 @@ export default function LoginPage() {
               
               {/* Step Indicators - two steps only */}
               <div className="flex justify-center items-center space-x-2 mb-4 sm:mb-6">
-                <div className={`h-1 rounded-full transition-all ${step >= 1 ? 'bg-gradient-to-r from-teal-400 via-sky-500 to-fuchsia-500' : 'bg-gray-300'}`} style={{ width: step >= 1 ? '80px' : '40px' }}></div>
-                <div className={`h-1 rounded-full transition-all ${step >= 2 ? 'bg-gradient-to-r from-teal-400 via-sky-500 to-fuchsia-500' : 'bg-gray-300'}`} style={{ width: step >= 2 ? '80px' : '40px' }}></div>
+                <div
+                  className={`h-1 rounded-full transition-all ${step >= 1 ? '' : 'bg-gray-300'}`}
+                  style={step >= 1
+                    ? { width: '80px', background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 24%, #f4f4f4 48%, #bfc5cc 72%, #ffe8a3 100%)' }
+                    : { width: '40px' }}
+                ></div>
+                <div
+                  className={`h-1 rounded-full transition-all ${step >= 2 ? '' : 'bg-gray-300'}`}
+                  style={step >= 2
+                    ? { width: '80px', background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 24%, #f4f4f4 48%, #bfc5cc 72%, #ffe8a3 100%)' }
+                    : { width: '40px' }}
+                ></div>
               </div>
             </div>
           </div>
@@ -629,7 +627,7 @@ export default function LoginPage() {
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                className="w-full rounded-xl border-2 border-white bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-white"
                 placeholder="Email"
                 required
                 autoComplete="email"
@@ -645,7 +643,7 @@ export default function LoginPage() {
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={e => setPassword(e.target.value)}
-                  className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                  className="w-full rounded-xl border-2 border-white bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-white"
                   placeholder="Password"
                   required
                   autoComplete="new-password"
@@ -693,7 +691,7 @@ export default function LoginPage() {
                 type={showConfirmPassword ? 'text' : 'password'}
                 value={confirmPassword}
                 onChange={e => setConfirmPassword(e.target.value)}
-                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                className="w-full rounded-xl border-2 border-white bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-white"
                 placeholder="Confirm Password"
                 required
                 autoComplete="new-password"
@@ -725,7 +723,7 @@ export default function LoginPage() {
               <input
                 value={name}
                 onChange={e => setName(e.target.value)}
-                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                className="w-full rounded-xl border-2 border-white bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-white"
                 placeholder="Full Name"
                 required
                 autoComplete="name"
@@ -741,7 +739,7 @@ export default function LoginPage() {
                   <select
                     value={birthMonth}
                     onChange={e => setBirthMonth(e.target.value)}
-                    className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2.5 pr-8 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500 appearance-none"
+                    className="w-full rounded-xl border-2 border-white bg-gray-50 dark:bg-gray-900 px-3 py-2.5 pr-8 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-white appearance-none"
                     required
                   >
                     <option value="">Month</option>
@@ -760,7 +758,7 @@ export default function LoginPage() {
                     value={birthDay}
                     onChange={e => setBirthDay(e.target.value.replace(/\D/g, '').slice(0, 2))}
                     placeholder="Day"
-                    className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                    className="w-full rounded-xl border-2 border-white bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-white"
                     maxLength={2}
                   />
                 </div>
@@ -771,7 +769,7 @@ export default function LoginPage() {
                     value={birthYear}
                     onChange={e => setBirthYear(e.target.value.replace(/\D/g, '').slice(0, 4))}
                     placeholder="Year"
-                    className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                    className="w-full rounded-xl border-2 border-white bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-white"
                     maxLength={4}
                   />
                 </div>
@@ -784,7 +782,7 @@ export default function LoginPage() {
               <select
                 value={national}
                 onChange={e => setNational(e.target.value)}
-                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500 appearance-none"
+                className="w-full rounded-xl border-2 border-white bg-gray-50 dark:bg-gray-900 px-3 py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-white appearance-none"
                 required
               >
                 <option value="">National Area</option>
@@ -806,7 +804,7 @@ export default function LoginPage() {
                 value={regional}
                 onChange={e => setRegional(e.target.value)}
                 disabled={!national || loadingRegions}
-                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500 disabled:opacity-50 disabled:cursor-not-allowed appearance-none"
+                className="w-full rounded-xl border-2 border-white bg-gray-50 dark:bg-gray-900 px-3 py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-white disabled:opacity-50 disabled:cursor-not-allowed appearance-none"
                 required
               >
                 <option value="">
@@ -830,7 +828,7 @@ export default function LoginPage() {
                 value={local}
                 onChange={e => setLocal(e.target.value)}
                 disabled={!regional || loadingCities}
-                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500 disabled:opacity-50 disabled:cursor-not-allowed appearance-none"
+                className="w-full rounded-xl border-2 border-white bg-gray-50 dark:bg-gray-900 px-3 py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-white disabled:opacity-50 disabled:cursor-not-allowed appearance-none"
                 required
               >
                 <option value="">
@@ -872,7 +870,7 @@ export default function LoginPage() {
               <textarea
                 value={preferredLocationsInput}
                 onChange={e => setPreferredLocationsInput(e.target.value)}
-                className="w-full rounded-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-gray-500"
+                className="w-full rounded-xl border-2 border-white bg-gray-50 dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-white"
                 placeholder="Dublin, Barcelona, New York"
                 rows={2}
               />
@@ -885,7 +883,7 @@ export default function LoginPage() {
             <div className="pt-6 mt-4 border-t border-gray-700 space-y-3">
               <button
                 type="submit"
-                className="w-full px-4 py-2 bg-gradient-to-r from-teal-400 via-sky-500 to-fuchsia-500 text-white rounded-sm hover:brightness-110 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full px-4 py-3 bg-white text-[#111827] rounded-xl transition-colors text-sm font-semibold hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {step === 1 ? 'Continue' : 'Create account'}
               </button>
@@ -894,7 +892,7 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={() => updateStep(step - 1)}
-                  className="w-full px-4 py-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm font-semibold"
+                  className="w-full px-4 py-3 bg-white text-[#111827] rounded-xl hover:bg-gray-100 transition-colors text-sm font-semibold border border-white"
                 >
                   Back
                 </button>
@@ -902,7 +900,7 @@ export default function LoginPage() {
 
               <p className="text-xs text-center text-gray-400 mt-4">
                 Already have an account?{' '}
-                <button type="button" onClick={() => setMode('login')} className="text-blue-500 hover:underline font-medium">
+                <button type="button" onClick={() => setMode('login')} className="text-[#7A8AF0] hover:underline font-medium">
                   Log in
                 </button>
               </p>
@@ -915,7 +913,7 @@ export default function LoginPage() {
                     to="/terms"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-1 hover:text-blue-400"
+                    className="flex items-center gap-1 hover:text-[#7A8AF0]"
                   >
                     <FiFileText className="w-3.5 h-3.5" />
                     <span>Terms</span>
@@ -924,7 +922,7 @@ export default function LoginPage() {
                     to="/terms#community-guidelines"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-1 hover:text-blue-400"
+                    className="flex items-center gap-1 hover:text-[#7A8AF0]"
                   >
                     <FiShield className="w-3.5 h-3.5" />
                     <span>Community Guidelines</span>

@@ -5,6 +5,8 @@ interface ProgressiveImageProps {
     alt?: string;
     className?: string;
     style?: React.CSSProperties;
+    fit?: 'cover' | 'contain';
+    position?: string;
     onLoad?: (e?: React.SyntheticEvent<HTMLImageElement>) => void;
     onError?: () => void;
     priority?: boolean; // If true, load immediately (for first 1-3 images)
@@ -22,6 +24,8 @@ export default function ProgressiveImage({
     alt = '',
     className = '',
     style,
+    fit = 'cover',
+    position = 'center',
     onLoad,
     onError,
     priority = false,
@@ -177,6 +181,8 @@ export default function ProgressiveImage({
                     alt=""
                     className="absolute inset-0 w-full h-full object-cover"
                     style={{
+                        objectFit: fit,
+                        objectPosition: position,
                         opacity: isLoaded ? 0 : 1,
                         transition: 'opacity 0.3s ease-out'
                     }}
@@ -194,6 +200,8 @@ export default function ProgressiveImage({
                     alt={alt}
                     className="absolute inset-0 w-full h-full object-cover"
                     style={{
+                        objectFit: fit,
+                        objectPosition: position,
                         opacity: isLoaded ? 1 : 0,
                         transition: 'opacity 0.3s ease-out'
                     }}

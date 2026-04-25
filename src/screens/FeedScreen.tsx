@@ -839,7 +839,7 @@ const FeedCard = React.memo(function FeedCard({
     );
 });
 
-function FeedScreen({ navigation }: { navigation?: any }) {
+function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const { user } = useAuth();
     const userId = user?.id ?? 'anon';
     const defaultNational = user?.national || 'Ireland';
@@ -860,6 +860,7 @@ function FeedScreen({ navigation }: { navigation?: any }) {
     const [selectedPostForShare, setSelectedPostForShare] = useState<Post | null>(null);
     const [unreadCount, setUnreadCount] = useState(0);
     const [hasInbox, setHasInbox] = useState(false);
+    const [reloadTick, setReloadTick] = useState(0);
     const requestTokenRef = useRef(0);
 
     const currentFilter = showFollowingFeed ? 'discover' : active;
@@ -891,7 +892,7 @@ function FeedScreen({ navigation }: { navigation?: any }) {
         if (cursor !== null && pages.length === 0) {
             loadMore();
         }
-    }, [cursor, currentFilter]);
+    }, [cursor, currentFilter, reloadTick]);
 
     // Update unread count function
     const updateUnreadCount = React.useCallback(async () => {
@@ -941,9 +942,27 @@ function FeedScreen({ navigation }: { navigation?: any }) {
     // Refresh unread count when screen comes into focus
     useFocusEffect(
         React.useCallback(() => {
+            // Always refresh feed when returning to this screen (e.g. after creating a post)
+            // so newly created mock-mode posts appear immediately.
+            setPages([]);
+            setCursor(0);
+            setEnd(false);
+            setError(null);
+            requestTokenRef.current++;
+            setReloadTick(prev => prev + 1);
             updateUnreadCount();
         }, [updateUnreadCount])
     );
+
+    useEffect(() => {
+        if (!route?.params?.forceRefreshAt) return;
+        setPages([]);
+        setCursor(0);
+        setEnd(false);
+        setError(null);
+        requestTokenRef.current++;
+        setReloadTick(prev => prev + 1);
+    }, [route?.params?.forceRefreshAt]);
 
     async function loadMore() {
         if (loading || end || cursor === null) {

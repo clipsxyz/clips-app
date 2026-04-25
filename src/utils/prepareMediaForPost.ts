@@ -1,6 +1,5 @@
 import { uploadFile } from '../api/client';
 import { captureVideoFrameDataUrl } from './captureVideoFrame';
-import { constrainImageToInstagramDataUrl } from './imageDimensions';
 
 type MediaKind = 'image' | 'video' | 'text';
 
@@ -54,6 +53,20 @@ async function uploadVideoUrlToBackend(mediaUrl: string): Promise<string> {
   throw new Error(uploadResult?.error || 'Upload failed');
 }
 
+async function blobUrlToDataUrl(url: string): Promise<string> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch media: ${response.status} ${response.statusText}`);
+  }
+  const blob = await response.blob();
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Failed to read blob as data URL'));
+    reader.readAsDataURL(blob);
+  });
+}
+
 export async function prepareMediaForPost({
   mediaUrl,
   mediaType,
@@ -82,7 +95,8 @@ export async function prepareMediaForPost({
       if (!isConnectionError(error)) throw error;
     }
   } else if (mediaUrl.startsWith('blob:') && !isVideo) {
-    persistentMediaUrl = await constrainImageToInstagramDataUrl(mediaUrl);
+    // Keep full photo; do not crop to Instagram aspect constraints.
+    persistentMediaUrl = await blobUrlToDataUrl(mediaUrl);
   }
 
   return { mediaUrl: persistentMediaUrl, videoPosterUrl };
@@ -96,8 +110,9 @@ export async function prepareMediaItemsForPost(items: MediaItemInput[]): Promise
     items.map(async (item) => {
       if (!item.url?.startsWith('blob:')) return item;
       if (item.type === 'image') {
-        const constrained = await constrainImageToInstagramDataUrl(item.url);
-        return { ...item, url: constrained };
+        // Keep full photo; do not crop to Instagram aspect constraints.
+        const dataUrl = await blobUrlToDataUrl(item.url);
+        return { ...item, url: dataUrl };
       }
       return item;
     }),
