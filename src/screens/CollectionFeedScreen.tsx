@@ -11,9 +11,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
-import { getCollection, getCollectionPosts, type Collection } from '../api/collections';
-import { decorateForUser } from '../api/posts';
-import type { Post } from '../types';
+import { getCollection, getCollectionPosts } from '../api/collections';
+import type { Collection, Post } from '../types';
 
 export default function CollectionFeedScreen({ route, navigation }: any) {
     const { collectionId, collectionName } = route.params;
@@ -35,8 +34,7 @@ export default function CollectionFeedScreen({ route, navigation }: any) {
             
             // Fetch posts for this collection
             const collectionPosts = await getCollectionPosts(collectionId);
-            const decorated = collectionPosts.map(p => decorateForUser(user.id, p));
-            setPosts(decorated);
+            setPosts(collectionPosts);
         } catch (error) {
             console.error('Error loading collection:', error);
         } finally {

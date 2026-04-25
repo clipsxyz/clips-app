@@ -48,7 +48,7 @@ import CreateGroupModal from './components/CreateGroupModal';
 import PickGroupToInviteFeedUserModal from './components/PickGroupToInviteFeedUserModal';
 import EditPostModal from './components/EditPostModal';
 import ShareToStoriesModal from './components/ShareToStoriesModal';
-import { getCollectionsForPost } from './api/collections';
+import { getCollectionsForPost, savePostToDefaultCollection } from './api/collections';
 import type { Post, Ad, StickerOverlay } from './types';
 import StickerOverlayComponent from './components/StickerOverlay';
 import EffectWrapper from './components/EffectWrapper';
@@ -4102,7 +4102,7 @@ function EngagementBar({
     <>
       <div className="px-3 pb-2.5 pt-2 border-t min-w-0" style={{ borderColor: '#030712' }}>
         <div className="flex items-center justify-between min-w-0">
-        {/* Left group: Like, Views, Comment, Share to Stories, Reclip (Instagram order) */}
+        {/* Left group: Like, Comment, Share to Stories, Reclip, Save */}
         <div className={`flex items-center min-w-0 flex-shrink ${rowGap}`}>
           {/* Like */}
           <button
@@ -4175,6 +4175,20 @@ function EngagementBar({
               <FiRepeat className={`${iconSize} text-gray-600 dark:text-gray-400`} />
             )}
             <span className="text-xs text-gray-700 dark:text-gray-300 tabular-nums">{reclips}</span>
+          </button>
+
+          {/* Save */}
+          <button
+            className={`flex items-center ${iconGap} min-h-[40px] px-1 -mx-1 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0 ${
+              !onSave ? 'opacity-40 cursor-not-allowed' : ''
+            }`}
+            onClick={() => onSave?.()}
+            disabled={!onSave}
+            aria-label={isSaved ? 'Saved' : 'Save post'}
+            title={isSaved ? 'Saved' : 'Save post'}
+          >
+            <FiBookmark className={`${iconSize} ${isSaved ? 'text-yellow-400 fill-yellow-400' : 'text-white'}`} />
+            <span className="text-xs text-white tabular-nums">{isSaved ? 'Saved' : 'Save'}</span>
           </button>
 
         </div>
@@ -4513,6 +4527,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   const [inviteToGroupOpen, setInviteToGroupOpen] = React.useState(false);
   const [editModalOpen, setEditModalOpen] = React.useState(false);
   const [isSaved, setIsSaved] = React.useState(false);
+  const [isQuickSaving, setIsQuickSaving] = React.useState(false);
   const [carouselIndex, setCarouselIndex] = React.useState(0);
   const [showTaggedUsersModal, setShowTaggedUsersModal] = React.useState(false);
   const [heartAnimation, setHeartAnimation] = React.useState<{ startX: number; startY: number } | null>(null);
@@ -4632,6 +4647,25 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
     !!user?.handle &&
     post.userHandle.replace(/^@/, '').trim().toLowerCase() ===
       user.handle.replace(/^@/, '').trim().toLowerCase();
+
+  const handleQuickSaveFromMenu = React.useCallback(async () => {
+    if (!user?.id || isQuickSaving) return;
+    setIsQuickSaving(true);
+    try {
+      await savePostToDefaultCollection(user.id, post.id, post);
+      setIsSaved(true);
+      window.dispatchEvent(new CustomEvent(`postSaved-${post.id}`));
+      showToast('Saved', 2600, {
+        actionLabel: 'Save to collection',
+        onAction: () => setSaveModalOpen(true),
+      });
+    } catch (error) {
+      console.error('Error quick-saving post:', error);
+      showToast('Could not save post');
+    } finally {
+      setIsQuickSaving(false);
+    }
+  }, [user?.id, isQuickSaving, post.id]);
 
   const textOnlyFeedBylineRaw =
     post.isReclipped &&
@@ -4845,6 +4879,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             onShare={onShare}
             onOpenComments={onOpenComments}
             onReclip={onReclip}
+            onSave={() => setSaveModalOpen(true)}
             currentUserHandle={user?.handle}
             currentUserId={user?.id}
             showMetricsIcon={showBoostIcon && isBoosted}
@@ -4942,7 +4977,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             isMuted={false} // TODO: Check if muted
             isBlocked={false} // TODO: Check if blocked
             hasNotifications={false} // TODO: Check notifications
-            onOpenSave={() => setSaveModalOpen(true)}
+            onOpenSave={handleQuickSaveFromMenu}
             onCreateGroup={
               user?.id && user?.handle === post.userHandle
                 ? () => {

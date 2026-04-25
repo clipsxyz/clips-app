@@ -466,6 +466,19 @@ export default function ProfilePage() {
   }, [user?.id]);
 
   React.useEffect(() => {
+    if (!user?.id) return;
+    const normalizedUserId = String(user.id);
+    const handleCollectionsUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ userId?: string }>).detail;
+      if (!detail?.userId || detail.userId === normalizedUserId) {
+        loadCollections();
+      }
+    };
+    window.addEventListener('collectionsUpdated', handleCollectionsUpdated as EventListener);
+    return () => window.removeEventListener('collectionsUpdated', handleCollectionsUpdated as EventListener);
+  }, [user?.id]);
+
+  React.useEffect(() => {
     loadDrafts();
   }, []);
 
@@ -597,6 +610,8 @@ export default function ProfilePage() {
       console.error('Error loading drafts:', error);
     }
   }
+
+  const isVideoUrl = React.useCallback((url: string) => /\.(mp4|webm|mov)(\?.*)?$/i.test(url), []);
 
   async function handleDeleteDraft(draftId: string) {
     try {
@@ -2150,11 +2165,21 @@ export default function ProfilePage() {
                         >
                           <div className="flex items-center gap-3">
                             {collection.thumbnailUrl ? (
-                              <img
-                                src={collection.thumbnailUrl}
-                                alt={collection.name}
-                                className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
-                              />
+                              isVideoUrl(collection.thumbnailUrl) ? (
+                                <video
+                                  src={collection.thumbnailUrl}
+                                  className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
+                                  muted
+                                  playsInline
+                                  preload="metadata"
+                                />
+                              ) : (
+                                <img
+                                  src={collection.thumbnailUrl}
+                                  alt={collection.name}
+                                  className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
+                                />
+                              )
                             ) : (
                               <div className="w-16 h-16 rounded-lg bg-gray-200 flex items-center justify-center flex-shrink-0">
                                 <FiBookmark className="w-8 h-8 text-gray-400" />

@@ -1,8 +1,9 @@
 import React from 'react';
 import { Collection, Post } from '../types';
-import { FiX, FiPlus, FiBookmark } from 'react-icons/fi';
-import { createCollection, getUserCollections, addPostToCollection, removePostFromCollection, getCollectionsForPost } from '../api/collections';
+import { FiX, FiPlus, FiBookmark, FiCheck } from 'react-icons/fi';
+import { createCollection, getUserCollections, addPostToCollection, removePostFromCollection, getCollectionsForPost, savePostToDefaultCollection } from '../api/collections';
 import { posts } from '../api/posts';
+const DEFAULT_COLLECTION_NAME = 'All Posts';
 
 interface SavePostModalProps {
     post: Post;
@@ -19,13 +20,36 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
     const [newCollectionName, setNewCollectionName] = React.useState('');
     const [isLoading, setIsLoading] = React.useState(false);
     const [isSaving, setIsSaving] = React.useState<string | null>(null); // Collection ID being saved to
+    const [showSavedToast, setShowSavedToast] = React.useState(false);
+    const autoSavedOnceRef = React.useRef(false);
 
     // Load collections and check which ones contain this post
     React.useEffect(() => {
         if (isOpen && userId) {
             loadCollections();
+            autoSavedOnceRef.current = false;
         }
     }, [isOpen, userId, post.id]);
+
+    React.useEffect(() => {
+        if (!isOpen || !userId || isLoading || autoSavedOnceRef.current) return;
+        const defaultCollection = collections.find((c) => c.name === DEFAULT_COLLECTION_NAME);
+        if (!defaultCollection) return;
+        const alreadySaved = postCollections.includes(defaultCollection.id);
+        if (alreadySaved) return;
+        autoSavedOnceRef.current = true;
+        (async () => {
+            try {
+                await savePostToDefaultCollection(userId, post.id, post);
+                await loadCollections();
+                setShowSavedToast(true);
+                window.dispatchEvent(new CustomEvent(`postSaved-${post.id}`));
+                window.setTimeout(() => setShowSavedToast(false), 2200);
+            } catch (error) {
+                console.error('Error auto-saving post to default collection:', error);
+            }
+        })();
+    }, [isOpen, userId, post.id, collections, postCollections, isLoading]);
 
     async function loadCollections() {
         setIsLoading(true);
@@ -49,7 +73,7 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
         setIsLoading(true);
         try {
             // Create collection with the post already added (so thumbnail is set immediately)
-            const newCollection = await createCollection(userId, newCollectionName.trim(), true, post.id);
+            const newCollection = await createCollection(userId, newCollectionName.trim(), true, post.id, post);
 
             // Refresh collections
             await loadCollections();
@@ -78,7 +102,7 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
             if (isInCollection) {
                 await removePostFromCollection(collectionId, post.id);
             } else {
-                await addPostToCollection(collectionId, post.id);
+                await addPostToCollection(collectionId, post.id, post);
             }
 
             // Refresh collections
@@ -90,6 +114,8 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
             if (onSaved) {
                 onSaved();
             }
+            setShowSavedToast(true);
+            window.setTimeout(() => setShowSavedToast(false), 2200);
         } catch (error) {
             console.error('Error toggling collection:', error);
         } finally {
@@ -98,6 +124,10 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
     }
 
     if (!isOpen) return null;
+    const isLikelyVideoUrl = (url: string) => /\.(mp4|webm|mov)(\?.*)?$/i.test(url);
+    const defaultCollection = collections.find((c) => c.name === DEFAULT_COLLECTION_NAME);
+    const customCollections = collections.filter((c) => c.name !== DEFAULT_COLLECTION_NAME);
+    const isInDefaultCollection = !!defaultCollection && postCollections.includes(defaultCollection.id);
 
     return (
         <div className="fixed inset-0 z-[200] flex items-end">
@@ -118,23 +148,21 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
                 <div className="px-6 py-4 border-b border-gray-700 dark:border-gray-600 flex items-center justify-between">
                     <h2 className="text-xl font-semibold text-white">Save Post</h2>
                     <button
-                        onClick={onClose}
+                        onClick={() => setIsCreatingCollection(true)}
                         className="p-2 rounded-full hover:bg-gray-700 dark:hover:bg-gray-600 transition-colors"
-                        aria-label="Close"
+                        aria-label="New collection"
                     >
-                        <FiX className="w-5 h-5 text-gray-300" />
+                        <FiPlus className="w-5 h-5 text-gray-300" />
                     </button>
                 </div>
 
                 {/* Content */}
                 <div className="flex-1 overflow-y-auto px-6 py-4">
                     {/* Saved Section (Default collection) */}
-                    <div className="mb-6">
+                    <div className="mb-6" id={`save-collections-${post.id}`}>
                         <div
                             className="flex items-center gap-4 p-4 rounded-xl hover:bg-gray-700/50 dark:hover:bg-gray-600/50 transition-colors cursor-pointer"
                             onClick={() => {
-                                // Handle default "Saved" collection
-                                const defaultCollection = collections.find(c => c.name === 'Saved');
                                 if (defaultCollection) {
                                     handleToggleCollection(defaultCollection.id);
                                 }
@@ -168,10 +196,10 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
                                 )}
                             </div>
                             <div className="flex-1 min-w-0">
-                                <div className="font-semibold text-white">Saved</div>
-                                <div className="text-sm text-gray-400">Private</div>
+                                <div className="font-semibold text-white">All Posts</div>
+                                <div className="text-sm text-gray-400">Private - every saved post</div>
                             </div>
-                            {postCollections.length > 0 && (
+                            {isInDefaultCollection && (
                                 <FiBookmark className="w-5 h-5 text-yellow-400 fill-yellow-400 flex-shrink-0" />
                             )}
                         </div>
@@ -185,7 +213,7 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
                                 onClick={() => setIsCreatingCollection(true)}
                                 className="text-blue-400 hover:text-blue-300 text-sm font-medium"
                             >
-                                New collection
+                                Create new
                             </button>
                         </div>
 
@@ -232,13 +260,13 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
                         {/* Collections List */}
                         {isLoading && collections.length === 0 ? (
                             <div className="text-center py-8 text-gray-400">Loading collections...</div>
-                        ) : collections.length === 0 ? (
+                        ) : customCollections.length === 0 ? (
                             <div className="text-center py-8 text-gray-400">
                                 No collections yet. Create one to get started!
                             </div>
                         ) : (
                             <div className="space-y-2">
-                                {collections.map(collection => {
+                                {customCollections.map(collection => {
                                     const isInCollection = postCollections.includes(collection.id);
                                     const isSavingToThis = isSaving === collection.id;
 
@@ -254,10 +282,7 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
                                                         const firstPost = collection.postIds.length > 0
                                                             ? posts.find(p => p.id === collection.postIds[0])
                                                             : null;
-                                                        const isVideo = firstPost?.mediaType === 'video' ||
-                                                            collection.thumbnailUrl.toLowerCase().endsWith('.mp4') ||
-                                                            collection.thumbnailUrl.toLowerCase().endsWith('.webm') ||
-                                                            collection.thumbnailUrl.toLowerCase().endsWith('.mov');
+                                                        const isVideo = isLikelyVideoUrl(collection.thumbnailUrl);
                                                         return isVideo ? (
                                                             <video
                                                                 src={collection.thumbnailUrl}
@@ -307,8 +332,8 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
                                             <button
                                                 onClick={() => handleToggleCollection(collection.id)}
                                                 disabled={isSavingToThis}
-                                                className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors flex-shrink-0 ${isInCollection
-                                                    ? 'bg-blue-500 hover:bg-blue-600'
+                                                className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors flex-shrink-0 border ${isInCollection
+                                                    ? 'bg-blue-500 hover:bg-blue-600 border-blue-500'
                                                     : 'bg-gray-600 hover:bg-gray-500'
                                                     } disabled:opacity-50 disabled:cursor-not-allowed`}
                                                 aria-label={isInCollection ? 'Remove from collection' : 'Add to collection'}
@@ -316,7 +341,7 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
                                                 {isSavingToThis ? (
                                                     <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                                                 ) : isInCollection ? (
-                                                    <FiX className="w-5 h-5 text-white" />
+                                                    <FiCheck className="w-5 h-5 text-white" />
                                                 ) : (
                                                     <FiPlus className="w-5 h-5 text-white" />
                                                 )}
@@ -337,6 +362,28 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
                         <span className="text-white font-medium">Add New Collection</span>
                     </button>
                 </div>
+                <button
+                    onClick={onClose}
+                    className="absolute right-5 top-5 p-2 rounded-full hover:bg-gray-700 dark:hover:bg-gray-600 transition-colors"
+                    aria-label="Close"
+                >
+                    <FiX className="w-5 h-5 text-gray-300" />
+                </button>
+                {showSavedToast && (
+                    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-black/90 border border-white/15 px-4 py-2 flex items-center gap-3 shadow-xl">
+                        <span className="text-sm font-medium text-white">Saved</span>
+                        <button
+                            onClick={() => {
+                                setShowSavedToast(false);
+                                const section = document.getElementById(`save-collections-${post.id}`);
+                                section?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            }}
+                            className="text-sm font-semibold text-blue-300 hover:text-blue-200"
+                        >
+                            Save to collection
+                        </button>
+                    </div>
+                )}
             </div>
         </div>
     );

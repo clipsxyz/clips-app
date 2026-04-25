@@ -1,4 +1,9 @@
-export function showToast(message: string, durationMs = 2000) {
+type ToastOptions = {
+    actionLabel?: string;
+    onAction?: () => void;
+};
+
+export function showToast(message: string, durationMs = 2000, options?: ToastOptions) {
     try {
         const containerId = 'app-toast-container';
         let container = document.getElementById(containerId);
@@ -28,6 +33,35 @@ export function showToast(message: string, durationMs = 2000) {
         toast.style.opacity = '0';
         toast.style.transition = 'opacity 200ms ease, transform 200ms ease';
         toast.style.transform = 'translateY(8px)';
+
+        if (options?.actionLabel && options.onAction) {
+            toast.textContent = '';
+            toast.style.display = 'flex';
+            toast.style.alignItems = 'center';
+            toast.style.gap = '10px';
+
+            const text = document.createElement('span');
+            text.textContent = message;
+            toast.appendChild(text);
+
+            const action = document.createElement('button');
+            action.textContent = options.actionLabel;
+            action.style.background = 'transparent';
+            action.style.color = '#93c5fd';
+            action.style.border = 'none';
+            action.style.padding = '0';
+            action.style.margin = '0';
+            action.style.cursor = 'pointer';
+            action.style.fontSize = '13px';
+            action.style.fontWeight = '700';
+            action.onclick = () => {
+                options.onAction?.();
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(8px)';
+                setTimeout(() => toast.remove(), 220);
+            };
+            toast.appendChild(action);
+        }
 
         container.appendChild(toast);
 
