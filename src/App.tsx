@@ -2913,7 +2913,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
 
   // Calculate container style with Instagram aspect ratio clamping
   const containerStyle: React.CSSProperties = React.useMemo(() => {
-    const FEED_TARGET_ASPECT = 4 / 5; // portrait-first feed look
+    const FEED_TARGET_ASPECT = 5 / 4; // Instagram portrait max in height/width terms
     const FEED_MIN_ASPECT = 3 / 4; // avoid tiny landscape cards in feed
     if (tileMode) {
       return {
@@ -2927,6 +2927,22 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
         boxSizing: 'border-box',
       };
     }
+
+    // Feed images: force Instagram-style 4:5 frame so cards are consistently tall.
+    // (Fullscreen/Scenes behavior is separate and remains unchanged.)
+    if (currentItem?.type === 'image') {
+      return {
+        width: '100%',
+        height: window.innerWidth * FEED_TARGET_ASPECT,
+        maxHeight: '82vh',
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        boxSizing: 'border-box'
+      };
+    }
+
     // Portrait-first feed policy:
     // - keep tall media at 4:5 max
     // - keep normal/square media near natural height
@@ -2959,7 +2975,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       justifyContent: 'center',
       boxSizing: 'border-box'
     };
-  }, [aspectRatio, carouselFrameAspectRatio, hasMultipleItems]);
+  }, [aspectRatio, carouselFrameAspectRatio, hasMultipleItems, currentItem?.type]);
 
   return (
     <div className={tileMode ? 'mx-0 my-0 select-none w-full h-full' : 'mx-0 my-0 select-none'}>
@@ -3197,7 +3213,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
 
               {/* Scenes: icon — touchend must stopPropagation: outer media div's touchend+preventDefault blocks synthetic click on phones */}
               {!isLoading && !hasError && (currentItem.type === 'video' || currentItem.type === 'image') && onOpenScenes && (
-                <div className="absolute bottom-4 right-4 z-20 pointer-events-auto" style={{ touchAction: 'manipulation' }}>
+                <div className="absolute bottom-4 right-4 z-30 pointer-events-auto" style={{ touchAction: 'manipulation' }}>
                   <button
                     type="button"
                     onClick={(e) => {
@@ -4404,6 +4420,26 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   const [carouselIndex, setCarouselIndex] = React.useState(0);
   const [showTaggedUsersModal, setShowTaggedUsersModal] = React.useState(false);
   const [heartAnimation, setHeartAnimation] = React.useState<{ startX: number; startY: number } | null>(null);
+  const displayCaption = React.useMemo(() => {
+    const pick = (...vals: Array<unknown>): string => {
+      for (const v of vals) {
+        if (typeof v === 'string') {
+          const s = v.trim();
+          if (s.length > 0) return s;
+        }
+      }
+      return '';
+    };
+    return pick(
+      (post as any).captionText,
+      post.caption,
+      post.text,
+      post.imageText,
+      (post as any).text_content,
+      (post as any).caption_text,
+      (post as any).captionText
+    );
+  }, [post.caption, post.text, post.imageText, post]);
   const likeButtonRef = React.useRef<HTMLButtonElement>(null);
   const articleRef = React.useRef<HTMLElement>(null);
 
@@ -4702,8 +4738,8 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         <>
           {(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0)) && (
             <div className="px-3 py-2.5">
-              {(post.caption || post.text) && (
-                <CaptionText caption={post.caption || post.text || ''} />
+              {displayCaption.length > 0 && (
+                <CaptionText caption={displayCaption} />
               )}
             </div>
           )}
@@ -6367,6 +6403,7 @@ function FeedPageWrapper() {
           const next = updater({ ...p });
           // Never lose id (incrementViews etc can return minimal objects without id)
           const preserved = {
+            ...p,
             ...next,
             id: next.id ?? p.id,
             isBoosted: next.isBoosted ?? p.isBoosted,
@@ -6391,6 +6428,7 @@ function FeedPageWrapper() {
         if (String(row.post.id) !== idStr) return row;
         const next = updater({ ...row.post } as Post);
         const preserved = {
+          ...row.post,
           ...next,
           id: next.id ?? row.post.id,
           isBoosted: next.isBoosted ?? row.post.isBoosted,

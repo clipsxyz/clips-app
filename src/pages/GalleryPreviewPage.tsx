@@ -18,7 +18,7 @@ import UserTaggingModal from '../components/UserTaggingModal';
 import { getStickers, STICKER_CATEGORIES } from '../api/stickers';
 import { getGalleryPreviewMedia, clearGalleryPreviewMedia } from '../utils/galleryPreviewCache';
 import { showUploadOverlay } from '../utils/uploadOverlay';
-import { prepareMediaForPost } from '../utils/prepareMediaForPost';
+import { prepareMediaForPost, prepareMediaItemsForPost } from '../utils/prepareMediaForPost';
 
 const FILTER_NAMES = ['None', 'B&W', 'Sepia', 'Vivid', 'Cool', 'Vignette', 'Beauty'];
 const CAROUSEL_MAX = 10;
@@ -573,6 +573,27 @@ export default function GalleryPreviewPage() {
             let persistentMediaUrl = mediaUrl;
             let videoPosterUrl: string | undefined;
             const isVideo = mediaType === 'video';
+            let mediaItemsForPost: Array<{ url: string; type: 'image' | 'video'; duration?: number }> | undefined;
+
+            // Preserve all carousel items when posting to newsfeed.
+            if (carouselItems.length > 1) {
+                const preparedItems = await prepareMediaItemsForPost(
+                    carouselItems.map((item) => ({
+                        url: item.url,
+                        type: item.type,
+                        duration: item.duration,
+                    }))
+                );
+                mediaItemsForPost = preparedItems.items.map((item) => ({
+                    url: item.url,
+                    type: item.type,
+                    duration: item.duration,
+                }));
+                if (!videoPosterUrl) {
+                    videoPosterUrl = preparedItems.videoPosterUrl;
+                }
+            }
+
             if (mediaUrl.startsWith('blob:')) {
                 const useBackend = import.meta.env.VITE_USE_LARAVEL_API !== 'false' && import.meta.env.VITE_DEV_MODE !== 'true';
                 const prepared = await prepareMediaForPost({
@@ -584,21 +605,22 @@ export default function GalleryPreviewPage() {
                 persistentMediaUrl = prepared.mediaUrl;
                 videoPosterUrl = prepared.videoPosterUrl;
             }
-            const newPost = await createPost(
+            const typedCaption = caption.trim();
+            const createdPost = await createPost(
                 user.id,
                 user.handle,
-                caption.trim() || '',
+                typedCaption || '',
                 storyLocation.trim() || '',
                 persistentMediaUrl,
                 mediaType,
                 undefined, // imageText
-                caption.trim() || undefined,
+                typedCaption || undefined,
                 user.local,
                 user.regional,
                 user.national,
                 stickers.length > 0 ? stickers : undefined,
                 undefined, // templateId
-                undefined, // mediaItems
+                mediaItemsForPost, // mediaItems (carousel)
                 undefined, // bannerText
                 undefined, // textStyle
                 taggedUsers.length > 0 ? taggedUsers : undefined,
@@ -614,6 +636,11 @@ export default function GalleryPreviewPage() {
                 undefined, // videoFrameMode
                 videoPosterUrl
             );
+            const newPost = {
+                ...createdPost,
+                caption: typedCaption || createdPost.caption,
+                text: typedCaption || createdPost.text,
+            };
             clearGalleryPreviewMedia();
             showToast('Post created successfully!');
             window.dispatchEvent(new CustomEvent('postCreated'));

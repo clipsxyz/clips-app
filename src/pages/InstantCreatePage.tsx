@@ -1563,12 +1563,7 @@ export default function InstantCreatePage() {
                                     }}
                                 >
                                     <div className="relative z-[20] h-full min-h-0 w-full">
-                                        <div className="absolute left-1/2 top-1/2 z-[19] h-[56px] w-[56px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white p-[1px] shadow-[0_0_30px_rgba(255,255,255,0.35)]">
-                                            <div className="pointer-events-none absolute -left-3 top-[55px] rounded-lg border border-white/90 bg-black/72 px-1.5 py-0.5 text-[10px] font-semibold leading-tight text-white backdrop-blur-[1px] shadow-lg shadow-black/45">
-                                                <span className="block">What's</span>
-                                                <span className="block">up?</span>
-                                                <span className="absolute -top-[6px] left-4 h-[10px] w-[10px] rotate-45 border-l border-t border-white/90 bg-black/72" aria-hidden />
-                                            </div>
+                                        <div className="absolute left-1/2 top-1/2 z-[19] h-[88px] w-[88px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white p-[1px] shadow-[0_0_30px_rgba(255,255,255,0.35)]">
                                             <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-black">
                                                 {user?.avatarUrl ? (
                                                     <img

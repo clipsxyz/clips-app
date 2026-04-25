@@ -689,6 +689,34 @@ export function decorateForUser(userId: string, p: Post): Post {
   return decorated;
 }
 
+function normalizeCaptionFields<T extends Post>(post: T): T {
+  const pick = (...vals: Array<unknown>): string | undefined => {
+    for (const v of vals) {
+      if (typeof v === 'string') {
+        const s = v.trim();
+        if (s.length > 0) return s;
+      }
+    }
+    return undefined;
+  };
+
+  const normalized = { ...post } as T & { captionText?: string; text_content?: string; caption_text?: string };
+  const display = pick(
+    normalized.caption,
+    normalized.text,
+    normalized.imageText,
+    normalized.captionText,
+    normalized.text_content,
+    normalized.caption_text
+  );
+  if (display) {
+    normalized.caption = normalized.caption && normalized.caption.trim().length > 0 ? normalized.caption : display;
+    normalized.text = normalized.text && normalized.text.trim().length > 0 ? normalized.text : display;
+    normalized.captionText = display;
+  }
+  return normalized as T;
+}
+
 /** Rewrite localhost media URLs so they work when opening app from phone on network */
 function rewriteMediaUrlForNetwork(url: string): string {
   if (!url || typeof url !== 'string') return url;
@@ -746,9 +774,11 @@ export function transformLaravelPost(response: any): Post {
     mediaType: resolvedMediaType,
     videoFrameMode: resolvedVideoFrameMode,
     mediaItems: processedMediaItems ?? mediaItems,
-    text: response.text_content || response.text,
+    // Some endpoints may return caption but omit text_content/text (or vice versa).
+    // Keep both mapped so feed/fullscreen always have display copy.
+    text: response.text_content || response.text || response.caption || existing?.text,
     imageText: response.image_text || response.imageText,
-    caption: response.caption,
+    caption: response.caption || response.text_content || response.text || existing?.caption,
     createdAt: (() => {
       const raw = response.created_at || response.createdAt;
       const ts = raw ? new Date(raw).getTime() : Date.now();
@@ -1115,7 +1145,7 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       items = items.map(p => decorateForUser(uid, p));
 
       return {
-        items,
+        items: items.map(normalizeCaptionFields),
         nextCursor: response?.nextCursor ?? null,
         fromMock: false
       };
@@ -1155,11 +1185,22 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
 
       const isOwn = !!_currentUserHandle && norm(p.userHandle) === norm(_currentUserHandle) && !p.isReclipped;
       if (isOwn) {
-        // In mock mode, always show a user's own authored posts in their feed
-        // regardless of the currently selected location tab. This prevents
-        // "posted but not visible" confusion when profile/location values are
-        // incomplete or temporarily inconsistent during onboarding.
-        return true;
+        if (t === 'discover') return true; // Following feed: always show your posts
+
+        // For your own posts in the three core location tabs (local / regional / national),
+        // always show them – users expect to see their own posts in all of their tiers.
+        if (['finglas', 'dublin', 'ireland'].includes(t)) {
+          return true;
+        }
+
+        // For custom location feeds, match against current profile location values.
+        const ownLocationPost: Post = {
+          ...p,
+          userLocal: _userLocal || p.userLocal,
+          userRegional: _userRegional || p.userRegional,
+          userNational: _userNational || p.userNational,
+        };
+        return postMatchesLocationTab(ownLocationPost, t);
       }
 
       if (t === 'discover') {
@@ -1380,7 +1421,7 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
 
     const next = start + slice.length < sortedWithMock.length ? start + slice.length : null;
 
-    return { items, nextCursor: next, fromMock: true };
+    return { items: items.map(normalizeCaptionFields), nextCursor: next, fromMock: true };
   } catch (error) {
     console.error('Error in fetchPostsPage:', error);
     throw error;
@@ -2113,8 +2154,21 @@ export async function createPost(
     // Ensure we preserve/override location from the current user when available,
     // and always keep the venue/landmark that the creator entered so the metadata carousel
     // and feeds can rely on them even if the API omits them.
+    const pickNonEmptyString = (...vals: Array<unknown>): string | undefined => {
+      for (const v of vals) {
+        if (typeof v === 'string') {
+          const s = v.trim();
+          if (s.length > 0) return s;
+        }
+      }
+      return undefined;
+    };
+
     transformed = {
       ...transformed,
+      // Preserve user-entered copy even if API response omits it on create.
+      text: pickNonEmptyString(transformed.text, text),
+      caption: pickNonEmptyString(transformed.caption, caption, text),
       userLocal: userLocal ?? transformed.userLocal,
       userRegional: userRegional ?? transformed.userRegional,
       userNational: userNational ?? transformed.userNational,
@@ -2124,7 +2178,9 @@ export async function createPost(
       socialFormat: socialFormat ?? transformed.socialFormat,
       videoFrameMode: videoFrameMode ?? transformed.videoFrameMode ?? 'crop',
       videoPosterUrl: videoPosterUrl ?? transformed.videoPosterUrl,
+      mediaItems: transformed.mediaItems ?? mediaItems ?? undefined,
     };
+    (transformed as any).captionText = pickNonEmptyString((transformed as any).captionText, caption, text);
 
     // Also store newly created posts in the local in-memory array + localStorage
     // so Boost page and mock-mode feeds can see them immediately.
@@ -2399,6 +2455,7 @@ export async function createPost(
       userAccountType: currentUserAccountType,
       ...locationData
     };
+    (newPost as any).captionText = caption || text || undefined;
 
     // Add to posts array (at the beginning for newest first)
     posts.unshift(newPost);

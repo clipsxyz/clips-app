@@ -2110,11 +2110,40 @@ export default function ScenesModal({
                                         </div>
                                     </div>
 
-                                    {/* Caption - Only show if media is not a generated text image (data URL) */}
-                                    {post.caption && post.mediaUrl && !post.mediaUrl.startsWith('data:image') && (
+                                    {/* Caption for media posts */}
+                                    {(() => {
+                                        const displayCaption = [
+                                            (post as any).captionText,
+                                            post.caption,
+                                            post.text,
+                                            (post as any).imageText,
+                                            (post as any).text_content,
+                                            (post as any).caption_text,
+                                            (post as any).captionText,
+                                        ].find((v) => typeof v === 'string' && v.trim().length > 0);
+                                        return !!displayCaption && (post.mediaUrl || post.mediaItems?.length);
+                                    })() && (
                                         <div className="text-white text-sm mb-2 text-left w-full">
-                                            <span className="line-clamp-1">{post.caption}</span>
-                                            {post.caption.length > 50 && (
+                                            <span className="line-clamp-1">
+                                                {[
+                                                    (post as any).captionText,
+                                                    post.caption,
+                                                    post.text,
+                                                    (post as any).imageText,
+                                                    (post as any).text_content,
+                                                    (post as any).caption_text,
+                                                    (post as any).captionText,
+                                                ].find((v) => typeof v === 'string' && v.trim().length > 0)}
+                                            </span>
+                                            {(([
+                                                (post as any).captionText,
+                                                post.caption,
+                                                post.text,
+                                                (post as any).imageText,
+                                                (post as any).text_content,
+                                                (post as any).caption_text,
+                                                (post as any).captionText,
+                                            ].find((v) => typeof v === 'string' && v.trim().length > 0)?.length) || 0) > 50 && (
                                                 <button
                                                     onClick={openCommentsSheet}
                                                     className="text-white/80 hover:text-white font-medium ml-1"

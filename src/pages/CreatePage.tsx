@@ -1046,26 +1046,28 @@ export default function CreatePage() {
                     </div>
                 </div>
 
-                {/* Text Input - Enhanced with better UX */}
-                <div className="px-4 py-4 border-b border-gray-100 dark:border-gray-800">
-                    <textarea
-                        ref={captionRef}
-                        value={text}
-                        onChange={(e) => setText(e.target.value)}
-                        placeholder={selectedMedia ? "Write a caption..." : "What's on your mind?"}
-                        className="w-1/2 min-h-[60px] text-gray-900 dark:text-gray-100 bg-transparent border-none resize-none placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none text-[15px] leading-relaxed transition-all duration-200"
-                        maxLength={500}
-                        rows={2}
-                    />
-                    <div className="flex justify-end mt-2">
-                        <span className={`text-xs transition-colors duration-200 ${text.length > 450
-                            ? 'text-red-500 dark:text-red-400'
-                            : 'text-gray-400 dark:text-gray-500'
-                            }`}>
-                            {text.length}/500
-                        </span>
+                {/* Caption Input (only after media is selected) */}
+                {selectedMedia && (
+                    <div className="px-4 py-4 border-b border-gray-100 dark:border-gray-800">
+                        <textarea
+                            ref={captionRef}
+                            value={text}
+                            onChange={(e) => setText(e.target.value)}
+                            placeholder="Write a caption..."
+                            className="w-full min-h-[60px] text-gray-900 dark:text-gray-100 bg-transparent border-none resize-none placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none text-[15px] leading-relaxed transition-all duration-200"
+                            maxLength={500}
+                            rows={2}
+                        />
+                        <div className="flex justify-end mt-2">
+                            <span className={`text-xs transition-colors duration-200 ${text.length > 450
+                                ? 'text-red-500 dark:text-red-400'
+                                : 'text-gray-400 dark:text-gray-500'
+                                }`}>
+                                {text.length}/500
+                            </span>
+                        </div>
                     </div>
-                </div>
+                )}
 
                 {/* (Template card-style selector removed – revert to original layout) */}
 

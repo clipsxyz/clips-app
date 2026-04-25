@@ -102,7 +102,7 @@ export default function EditPostModal({
                         <textarea
                             value={text}
                             onChange={(e) => setText(e.target.value)}
-                            placeholder="What's on your mind?"
+                            placeholder=""
                             className="w-full px-3 py-2.5 rounded-lg bg-[#1f1f23] border border-white/10 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-white/30 resize-none"
                             rows={4}
                             maxLength={500}
