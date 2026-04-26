@@ -20,6 +20,7 @@ import {
     Alert,
     Share,
     Linking,
+    Pressable,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -806,7 +807,10 @@ const FeedCard = React.memo(function FeedCard({
     const [imageDimensions, setImageDimensions] = React.useState<{ width: number; height: number } | null>(null);
     const [profileMenuVisible, setProfileMenuVisible] = React.useState(false);
     const [headerHasStory, setHeaderHasStory] = React.useState(false);
+    const lastMediaTapRef = React.useRef(0);
+    const singleMediaTapTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const screenWidth = Dimensions.get('window').width;
+    const DOUBLE_TAP_DELAY_MS = 260;
 
     // Auto-detect image dimensions if not provided
     React.useEffect(() => {
@@ -847,6 +851,35 @@ const FeedCard = React.memo(function FeedCard({
         };
     }, [imageDimensions, screenWidth]);
 
+    const handleMediaPress = React.useCallback(() => {
+        const now = Date.now();
+        if (now - lastMediaTapRef.current <= DOUBLE_TAP_DELAY_MS) {
+            if (singleMediaTapTimerRef.current) {
+                clearTimeout(singleMediaTapTimerRef.current);
+                singleMediaTapTimerRef.current = null;
+            }
+            lastMediaTapRef.current = 0;
+            // Match web behavior: double tap should only like, not unlike.
+            if (!post.userLiked) {
+                onLike().catch((error) => console.error('Error in media double-tap like:', error));
+            }
+            return;
+        }
+        lastMediaTapRef.current = now;
+        singleMediaTapTimerRef.current = setTimeout(() => {
+            onPostPress?.();
+            singleMediaTapTimerRef.current = null;
+        }, DOUBLE_TAP_DELAY_MS + 20);
+    }, [DOUBLE_TAP_DELAY_MS, onLike, onPostPress, post.userLiked]);
+
+    React.useEffect(() => {
+        return () => {
+            if (singleMediaTapTimerRef.current) {
+                clearTimeout(singleMediaTapTimerRef.current);
+            }
+        };
+    }, []);
+
     return (
         <TouchableOpacity
             style={styles.feedCard}
@@ -871,15 +904,17 @@ const FeedCard = React.memo(function FeedCard({
             )}
 
             {post.mediaUrl && (
-                <Image
-                    source={{ uri: post.mediaUrl }}
-                    style={imageStyle}
-                    onLoad={onView}
-                    resizeMode="cover"
-                // Performance optimizations
-                // Note: React Native Image automatically caches and lazy loads
-                // Progressive rendering is handled by the platform
-                />
+                <Pressable onPress={handleMediaPress}>
+                    <Image
+                        source={{ uri: post.mediaUrl }}
+                        style={imageStyle}
+                        onLoad={onView}
+                        resizeMode="cover"
+                    // Performance optimizations
+                    // Note: React Native Image automatically caches and lazy loads
+                    // Progressive rendering is handled by the platform
+                    />
+                </Pressable>
             )}
 
             {post.text && (
@@ -950,7 +985,7 @@ const FeedCard = React.memo(function FeedCard({
                         <Icon
                             name={post.isBookmarked ? "bookmark" : "bookmark-outline"}
                             size={FEED_UI.icon.action}
-                            color={post.isBookmarked ? "#8B5CF6" : "#6B7280"}
+                            color={post.isBookmarked ? "#7A8AF0" : "#6B7280"}
                         />
                     </TouchableOpacity>
                 </View>
