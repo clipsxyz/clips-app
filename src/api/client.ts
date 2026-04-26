@@ -531,6 +531,59 @@ export async function declineChatGroupInvite(inviteId: string) {
     return apiRequest(`/chat-groups/invites/${encodeURIComponent(inviteId)}/decline`, { method: 'POST' });
 }
 
+// Collections API
+export async function fetchCollections() {
+    return apiRequest('/collections');
+}
+
+export async function fetchCollection(collectionId: string) {
+    return apiRequest(`/collections/${encodeURIComponent(collectionId)}`);
+}
+
+export async function createCollectionApi(data: {
+    name: string;
+    isPrivate?: boolean;
+    is_private?: boolean;
+    postId?: string;
+    post_id?: string;
+}) {
+    return apiRequest('/collections', {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function updateCollectionApi(collectionId: string, data: {
+    name?: string;
+    isPrivate?: boolean;
+    is_private?: boolean;
+}) {
+    return apiRequest(`/collections/${encodeURIComponent(collectionId)}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function deleteCollectionApi(collectionId: string) {
+    return apiRequest(`/collections/${encodeURIComponent(collectionId)}`, {
+        method: 'DELETE',
+    });
+}
+
+export async function addPostToCollectionApi(collectionId: string, postId: string) {
+    return apiRequest(`/collections/${encodeURIComponent(collectionId)}/posts`, {
+        method: 'POST',
+        body: JSON.stringify({ postId, post_id: postId }),
+    });
+}
+
+export async function removePostFromCollectionApi(collectionId: string, postId: string) {
+    return apiRequest(`/collections/${encodeURIComponent(collectionId)}/posts`, {
+        method: 'DELETE',
+        body: JSON.stringify({ postId, post_id: postId }),
+    });
+}
+
 export async function estimateBoostPriceApi(params: {
     feedType: 'local' | 'regional' | 'national';
     userId: string;

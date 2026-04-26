@@ -1,4 +1,6 @@
 import { Collection, Post } from '../types';
+import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import * as apiClient from './client';
 import { posts, getPostById } from './posts';
 
 // Storage key for collections
@@ -9,6 +11,36 @@ const MAX_INLINE_PREVIEW_URL_LENGTH = 4000;
 type CollectionWithPreviewMap = Collection & {
     postPreviewMap?: Record<string, Partial<Post>>;
 };
+
+function mapApiCollection(raw: any, fallbackUserId?: string): Collection {
+    const createdAtRaw = raw?.created_at ?? raw?.createdAt;
+    const updatedAtRaw = raw?.updated_at ?? raw?.updatedAt;
+    const postIdsRaw = raw?.post_ids ?? raw?.postIds;
+    const userIdRaw = raw?.user_id ?? raw?.userId ?? fallbackUserId ?? 'me';
+    return {
+        id: String(raw?.id ?? `collection-${Date.now()}`),
+        userId: normalizeUserId(userIdRaw),
+        name: String(raw?.name ?? 'Untitled Collection'),
+        isPrivate: Boolean(raw?.is_private ?? raw?.isPrivate ?? true),
+        thumbnailUrl: typeof (raw?.thumbnail_url ?? raw?.thumbnailUrl) === 'string'
+            ? (raw?.thumbnail_url ?? raw?.thumbnailUrl)
+            : undefined,
+        postIds: Array.isArray(postIdsRaw) ? postIdsRaw.map((id: any) => String(id)) : [],
+        createdAt: typeof createdAtRaw === 'number' ? createdAtRaw : Date.parse(createdAtRaw || '') || Date.now(),
+        updatedAt: typeof updatedAtRaw === 'number' ? updatedAtRaw : Date.parse(updatedAtRaw || '') || Date.now(),
+    };
+}
+
+function mapApiCollections(payload: any, fallbackUserId?: string): Collection[] {
+    const list = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.data)
+            ? payload.data
+            : Array.isArray(payload?.collections)
+                ? payload.collections
+                : [];
+    return list.map((item: any) => mapApiCollection(item, fallbackUserId));
+}
 
 // Get collections from localStorage
 function getCollectionsFromStorage(): CollectionWithPreviewMap[] {
@@ -216,6 +248,22 @@ function ensureDefaultCollection(collections: Collection[], userId: string): Col
  * Create a new collection
  */
 export async function createCollection(userId: string, name: string, isPrivate: boolean = true, initialPostId?: string, initialPost?: Partial<Post>): Promise<Collection> {
+    if (isLaravelApiEnabled()) {
+        try {
+            const payload = await apiClient.createCollectionApi({
+                name: name.trim(),
+                isPrivate,
+                is_private: isPrivate,
+                ...(initialPostId ? { postId: initialPostId, post_id: initialPostId } : {}),
+            });
+            const mapped = mapApiCollection(payload?.data ?? payload?.collection ?? payload, userId);
+            emitCollectionsUpdated(userId);
+            return mapped;
+        } catch (error) {
+            console.warn('Laravel createCollection failed, falling back to local collections:', error);
+        }
+    }
+
     await delay(200);
     const normalizedUserId = normalizeUserId(userId);
 
@@ -269,6 +317,15 @@ export async function createCollection(userId: string, name: string, isPrivate: 
  * Get all collections for a user
  */
 export async function getUserCollections(userId: string): Promise<Collection[]> {
+    if (isLaravelApiEnabled()) {
+        try {
+            const payload = await apiClient.fetchCollections();
+            return mapApiCollections(payload, userId).sort((a, b) => b.updatedAt - a.updatedAt);
+        } catch (error) {
+            console.warn('Laravel getUserCollections failed, falling back to local collections:', error);
+        }
+    }
+
     await delay(100);
     const normalizedUserId = normalizeUserId(userId);
 
@@ -303,6 +360,17 @@ export async function getUserCollections(userId: string): Promise<Collection[]> 
  * Add a post to a collection
  */
 export async function addPostToCollection(collectionId: string, postId: string, postSnapshot?: Partial<Post>): Promise<Collection> {
+    if (isLaravelApiEnabled()) {
+        try {
+            const payload = await apiClient.addPostToCollectionApi(collectionId, postId);
+            const mapped = mapApiCollection(payload?.data ?? payload?.collection ?? payload);
+            emitCollectionsUpdated(mapped.userId);
+            return mapped;
+        } catch (error) {
+            console.warn('Laravel addPostToCollection failed, falling back to local collections:', error);
+        }
+    }
+
     await delay(150);
 
     const collections = getCollectionsFromStorage();
@@ -344,6 +412,17 @@ export async function addPostToCollection(collectionId: string, postId: string, 
  * Remove a post from a collection
  */
 export async function removePostFromCollection(collectionId: string, postId: string): Promise<Collection> {
+    if (isLaravelApiEnabled()) {
+        try {
+            const payload = await apiClient.removePostFromCollectionApi(collectionId, postId);
+            const mapped = mapApiCollection(payload?.data ?? payload?.collection ?? payload);
+            emitCollectionsUpdated(mapped.userId);
+            return mapped;
+        } catch (error) {
+            console.warn('Laravel removePostFromCollection failed, falling back to local collections:', error);
+        }
+    }
+
     await delay(150);
 
     const collections = getCollectionsFromStorage();
@@ -378,6 +457,15 @@ export async function removePostFromCollection(collectionId: string, postId: str
 }
 
 export async function getCollection(collectionId: string): Promise<Collection | null> {
+    if (isLaravelApiEnabled()) {
+        try {
+            const payload = await apiClient.fetchCollection(collectionId);
+            return mapApiCollection(payload?.data ?? payload?.collection ?? payload);
+        } catch (error) {
+            console.warn('Laravel getCollection failed, falling back to local collections:', error);
+        }
+    }
+
     await delay(50);
     const collections = getCollectionsFromStorage();
     return collections.find((c) => c.id === collectionId) || null;
@@ -406,6 +494,22 @@ export async function savePostToDefaultCollection(userId: string, postId: string
  * Get all posts in a collection
  */
 export async function getCollectionPosts(collectionId: string): Promise<Post[]> {
+    if (isLaravelApiEnabled()) {
+        try {
+            const payload = await apiClient.fetchCollection(collectionId);
+            const list = Array.isArray(payload?.posts)
+                ? payload.posts
+                : Array.isArray(payload?.data?.posts)
+                    ? payload.data.posts
+                    : [];
+            if (Array.isArray(list) && list.length > 0) {
+                return list as Post[];
+            }
+        } catch (error) {
+            console.warn('Laravel getCollectionPosts failed, falling back to local collections:', error);
+        }
+    }
+
     await delay(100);
 
     const collections = getCollectionsFromStorage();
@@ -465,6 +569,17 @@ export async function isPostInCollection(collectionId: string, postId: string): 
  * Get collections that contain a specific post
  */
 export async function getCollectionsForPost(userId: string, postId: string): Promise<Collection[]> {
+    if (isLaravelApiEnabled()) {
+        try {
+            const payload = await apiClient.fetchCollections();
+            return mapApiCollections(payload, userId)
+                .filter((c) => c.postIds.includes(postId))
+                .sort((a, b) => b.updatedAt - a.updatedAt);
+        } catch (error) {
+            console.warn('Laravel getCollectionsForPost failed, falling back to local collections:', error);
+        }
+    }
+
     await delay(100);
     const normalizedUserId = normalizeUserId(userId);
 
@@ -478,6 +593,15 @@ export async function getCollectionsForPost(userId: string, postId: string): Pro
  * Delete a collection
  */
 export async function deleteCollection(collectionId: string): Promise<void> {
+    if (isLaravelApiEnabled()) {
+        try {
+            await apiClient.deleteCollectionApi(collectionId);
+            return;
+        } catch (error) {
+            console.warn('Laravel deleteCollection failed, falling back to local collections:', error);
+        }
+    }
+
     await delay(150);
 
     const collections = getCollectionsFromStorage();
