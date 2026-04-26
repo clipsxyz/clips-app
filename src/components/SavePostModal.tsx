@@ -3,6 +3,7 @@ import { Collection, Post } from '../types';
 import { FiX, FiPlus, FiBookmark, FiCheck } from 'react-icons/fi';
 import { createCollection, getUserCollections, addPostToCollection, removePostFromCollection, getCollectionsForPost, savePostToDefaultCollection } from '../api/collections';
 import { posts } from '../api/posts';
+import { showToast } from '../utils/toast';
 const DEFAULT_COLLECTION_NAME = 'All Posts';
 
 interface SavePostModalProps {
@@ -89,6 +90,7 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
             }
         } catch (error) {
             console.error('Error creating collection:', error);
+            showToast('Could not create collection. Try a shorter name or smaller media.');
         } finally {
             setIsLoading(false);
         }
@@ -118,6 +120,7 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
             window.setTimeout(() => setShowSavedToast(false), 2200);
         } catch (error) {
             console.error('Error toggling collection:', error);
+            showToast('Could not save this post to collection.');
         } finally {
             setIsSaving(null);
         }
@@ -125,6 +128,14 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
 
     if (!isOpen) return null;
     const isLikelyVideoUrl = (url: string) => /\.(mp4|webm|mov)(\?.*)?$/i.test(url);
+    const firstPreviewMedia =
+        post.mediaItems?.find((item) => (item.type === 'image' || item.type === 'video') && !!item.url) || post.mediaItems?.[0];
+    const previewUrl = post.videoPosterUrl || post.mediaUrl || firstPreviewMedia?.url;
+    const previewType: 'image' | 'video' =
+        post.mediaType ||
+        (firstPreviewMedia?.type === 'video' || firstPreviewMedia?.type === 'image'
+            ? firstPreviewMedia.type
+            : (isLikelyVideoUrl(previewUrl || '') ? 'video' : 'image'));
     const defaultCollection = collections.find((c) => c.name === DEFAULT_COLLECTION_NAME);
     const customCollections = collections.filter((c) => c.name !== DEFAULT_COLLECTION_NAME);
     const isInDefaultCollection = !!defaultCollection && postCollections.includes(defaultCollection.id);
@@ -147,13 +158,24 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
                 {/* Header */}
                 <div className="px-6 py-4 border-b border-gray-700 dark:border-gray-600 flex items-center justify-between">
                     <h2 className="text-xl font-semibold text-white">Save Post</h2>
-                    <button
-                        onClick={() => setIsCreatingCollection(true)}
-                        className="p-2 rounded-full hover:bg-gray-700 dark:hover:bg-gray-600 transition-colors"
-                        aria-label="New collection"
-                    >
-                        <FiPlus className="w-5 h-5 text-gray-300" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setIsCreatingCollection(true)}
+                            className="p-2 rounded-full hover:bg-gray-700 dark:hover:bg-gray-600 transition-colors"
+                            aria-label="New collection"
+                            title="New collection"
+                        >
+                            <FiPlus className="w-5 h-5 text-gray-300" />
+                        </button>
+                        <button
+                            onClick={onClose}
+                            className="p-2 rounded-full hover:bg-gray-700 dark:hover:bg-gray-600 transition-colors"
+                            aria-label="Close"
+                            title="Close"
+                        >
+                            <FiX className="w-5 h-5 text-gray-300" />
+                        </button>
+                    </div>
                 </div>
 
                 {/* Content */}
@@ -169,10 +191,10 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
                             }}
                         >
                             <div className="w-16 h-16 rounded-lg bg-gray-700 dark:bg-gray-600 flex items-center justify-center overflow-hidden flex-shrink-0">
-                                {post.mediaUrl && post.mediaUrl.trim() !== '' ? (
-                                    post.mediaType === 'video' ? (
+                                {previewUrl && previewUrl.trim() !== '' ? (
+                                    previewType === 'video' ? (
                                         <video
-                                            src={post.mediaUrl}
+                                            src={previewUrl}
                                             className="w-full h-full object-cover"
                                             muted
                                             playsInline
@@ -180,7 +202,7 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
                                         />
                                     ) : (
                                         <img
-                                            src={post.mediaUrl}
+                                            src={previewUrl}
                                             alt="Post thumbnail"
                                             className="w-full h-full object-cover"
                                         />
@@ -362,13 +384,6 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
                         <span className="text-white font-medium">Add New Collection</span>
                     </button>
                 </div>
-                <button
-                    onClick={onClose}
-                    className="absolute right-5 top-5 p-2 rounded-full hover:bg-gray-700 dark:hover:bg-gray-600 transition-colors"
-                    aria-label="Close"
-                >
-                    <FiX className="w-5 h-5 text-gray-300" />
-                </button>
                 {showSavedToast && (
                     <div className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-black/90 border border-white/15 px-4 py-2 flex items-center gap-3 shadow-xl">
                         <span className="text-sm font-medium text-white">Saved</span>

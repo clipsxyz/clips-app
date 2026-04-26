@@ -1,10 +1,11 @@
 import { Collection, Post } from '../types';
-import { posts } from './posts';
+import { posts, getPostById } from './posts';
 
 // Storage key for collections
 const COLLECTIONS_STORAGE_KEY = 'clips_app_collections';
 const DEFAULT_COLLECTION_NAME = 'All Posts';
 const normalizeUserId = (value: string | number | undefined | null): string => String(value ?? '').trim();
+const MAX_INLINE_PREVIEW_URL_LENGTH = 4000;
 type CollectionWithPreviewMap = Collection & {
     postPreviewMap?: Record<string, Partial<Post>>;
 };
@@ -22,10 +23,75 @@ function getCollectionsFromStorage(): CollectionWithPreviewMap[] {
 
 // Save collections to localStorage
 function saveCollectionsToStorage(collections: CollectionWithPreviewMap[]): void {
+    const attemptWrite = (payload: CollectionWithPreviewMap[]) => {
+        localStorage.setItem(COLLECTIONS_STORAGE_KEY, JSON.stringify(payload));
+    };
+    const sanitizeForStorage = (input: CollectionWithPreviewMap[]): CollectionWithPreviewMap[] => {
+        return input.map((collection) => {
+            const next: CollectionWithPreviewMap = { ...collection };
+            if (typeof next.thumbnailUrl === 'string' && next.thumbnailUrl.startsWith('data:') && next.thumbnailUrl.length > MAX_INLINE_PREVIEW_URL_LENGTH) {
+                next.thumbnailUrl = undefined;
+            }
+            if (!next.postPreviewMap) return next;
+            const compactMap: Record<string, Partial<Post>> = {};
+            for (const [postId, preview] of Object.entries(next.postPreviewMap)) {
+                const safePreview: Partial<Post> = { ...preview };
+                if (typeof safePreview.mediaUrl === 'string' && safePreview.mediaUrl.startsWith('data:') && safePreview.mediaUrl.length > MAX_INLINE_PREVIEW_URL_LENGTH) {
+                    safePreview.mediaUrl = undefined;
+                }
+                if (typeof safePreview.videoPosterUrl === 'string' && safePreview.videoPosterUrl.startsWith('data:') && safePreview.videoPosterUrl.length > MAX_INLINE_PREVIEW_URL_LENGTH) {
+                    safePreview.videoPosterUrl = undefined;
+                }
+                // mediaItems can be very large for carousel data URLs; keep only the first lightweight item.
+                const candidate = Array.isArray(safePreview.mediaItems) && safePreview.mediaItems.length > 0
+                    ? safePreview.mediaItems.find((item) => !!item?.url) || safePreview.mediaItems[0]
+                    : undefined;
+                const candidateUrl = compactPersistedMediaUrl(candidate?.url);
+                if (candidate && candidateUrl && candidate.type && (candidate.type === 'image' || candidate.type === 'video')) {
+                    safePreview.mediaItems = [{ url: candidateUrl, type: candidate.type, duration: candidate.duration }];
+                    if (!safePreview.mediaUrl) safePreview.mediaUrl = candidateUrl;
+                } else {
+                    safePreview.mediaItems = undefined;
+                }
+                compactMap[postId] = safePreview;
+            }
+            next.postPreviewMap = compactMap;
+            return next;
+        });
+    };
+    const ultraCompactForStorage = (input: CollectionWithPreviewMap[]): CollectionWithPreviewMap[] => {
+        return input.map((collection) => {
+            const next: CollectionWithPreviewMap = {
+                ...collection,
+                // Preserve membership first; thumbnails/previews are optional.
+                thumbnailUrl:
+                    typeof collection.thumbnailUrl === 'string' &&
+                    (collection.thumbnailUrl.startsWith('http://') ||
+                        collection.thumbnailUrl.startsWith('https://') ||
+                        collection.thumbnailUrl.startsWith('blob:'))
+                        ? collection.thumbnailUrl
+                        : undefined,
+                postPreviewMap: undefined,
+            };
+            return next;
+        });
+    };
+
     try {
-        localStorage.setItem(COLLECTIONS_STORAGE_KEY, JSON.stringify(collections));
+        attemptWrite(collections);
     } catch (error) {
-        console.error('Error saving collections to localStorage:', error);
+        try {
+            const compacted = sanitizeForStorage(collections);
+            attemptWrite(compacted);
+        } catch (retryError) {
+            try {
+                const ultraCompacted = ultraCompactForStorage(collections);
+                attemptWrite(ultraCompacted);
+            } catch (finalError) {
+                console.error('Error saving collections to localStorage:', finalError);
+                throw new Error('Failed to save collection data.');
+            }
+        }
     }
 }
 
@@ -36,7 +102,20 @@ function delay(ms: number): Promise<void> {
 
 function resolvePostThumbnail(post?: Partial<Post>): string | undefined {
     if (!post) return undefined;
-    return post.videoPosterUrl || post.mediaUrl || undefined;
+    const firstMediaItem =
+        Array.isArray(post.mediaItems) && post.mediaItems.length > 0
+            ? post.mediaItems.find((item) => (item?.type === 'image' || item?.type === 'video') && !!item.url) || post.mediaItems[0]
+            : undefined;
+    return compactPersistedMediaUrl(post.videoPosterUrl || post.mediaUrl || firstMediaItem?.url || undefined);
+}
+
+function compactPersistedMediaUrl(url?: string): string | undefined {
+    if (!url || typeof url !== 'string') return undefined;
+    const trimmed = url.trim();
+    if (!trimmed) return undefined;
+    // Keep blob/data/http URLs so collection cards can always render media.
+    // Blob URLs are ephemeral across browser restarts but valid in-session.
+    return trimmed;
 }
 
 function emitCollectionsUpdated(userId: string): void {
@@ -51,19 +130,61 @@ function findDefaultCollection(collections: Collection[], userId: string): Colle
 }
 
 function buildPostPreview(post: Partial<Post> | undefined, postId: string): Partial<Post> {
+    const compactMediaItems: Array<{ url: string; type: 'image' | 'video'; duration?: number }> = [];
+    if (Array.isArray(post?.mediaItems) && post.mediaItems.length > 0) {
+        for (const item of post.mediaItems) {
+            if (!item || (item.type !== 'image' && item.type !== 'video')) continue;
+            const compactUrl = compactPersistedMediaUrl(item.url);
+            if (!compactUrl) continue;
+            compactMediaItems.push({
+                url: compactUrl,
+                type: item.type,
+                duration: item.duration,
+            });
+        }
+    }
+    const firstMediaItem = compactMediaItems[0];
+    const resolvedMediaUrl = compactPersistedMediaUrl(post?.mediaUrl) || firstMediaItem?.url || compactPersistedMediaUrl(post?.videoPosterUrl);
+    const resolvedMediaType =
+        post?.mediaType ||
+        (firstMediaItem?.type === 'video' || firstMediaItem?.type === 'image'
+            ? firstMediaItem.type
+            : ((resolvedMediaUrl || '').includes('video') ? 'video' : 'image'));
     return {
         id: post?.id || postId,
         userHandle: post?.userHandle || 'unknown@clips',
-        mediaUrl: post?.mediaUrl,
-        mediaType: post?.mediaType || ((post?.mediaUrl || '').includes('video') ? 'video' : 'image'),
+        locationLabel: post?.locationLabel || 'Unknown Location',
+        tags: Array.isArray(post?.tags) ? post!.tags : [],
+        mediaUrl: resolvedMediaUrl,
+        mediaType: resolvedMediaType,
         videoPosterUrl: post?.videoPosterUrl,
+        mediaItems: compactMediaItems.length > 0 ? compactMediaItems : undefined,
+        // Keep collection preview lightweight to avoid localStorage bloat.
+        // Full carousel media remains available from live in-memory posts.
         text: post?.text,
         caption: post?.caption,
         createdAt: post?.createdAt || Date.now(),
         stats: post?.stats || { likes: 0, views: 0, comments: 0, shares: 0, reclips: 0 },
+        isBookmarked: !!post?.isBookmarked,
+        isFollowing: !!post?.isFollowing,
         userLiked: !!post?.userLiked,
         userReclipped: !!post?.userReclipped,
     };
+}
+
+function cachePostSnapshot(postId: string, post?: Partial<Post>): void {
+    if (!post) return;
+    const existingIndex = posts.findIndex((p) => p.id === postId);
+    const cached = buildPostPreview(post, postId) as Post;
+    if (existingIndex >= 0) {
+        posts[existingIndex] = {
+            ...posts[existingIndex],
+            ...cached,
+            id: postId,
+        };
+        return;
+    }
+    posts.unshift(cached);
 }
 
 function savePreviewForPost(collection: CollectionWithPreviewMap, postId: string, post?: Partial<Post>): void {
@@ -103,6 +224,7 @@ export async function createCollection(userId: string, name: string, isPrivate: 
     // If an initial post is provided, set it as the thumbnail
     if (initialPostId) {
         const post = initialPost || posts.find(p => p.id === initialPostId);
+        cachePostSnapshot(initialPostId, post);
         thumbnailUrl = resolvePostThumbnail(post);
     }
 
@@ -198,6 +320,7 @@ export async function addPostToCollection(collectionId: string, postId: string, 
 
         // Always use the latest saved post as collection thumbnail.
         const post = postSnapshot || posts.find(p => p.id === postId);
+        cachePostSnapshot(postId, post);
         collection.thumbnailUrl = resolvePostThumbnail(post);
         savePreviewForPost(collection as CollectionWithPreviewMap, postId, post);
     }
@@ -270,6 +393,7 @@ export async function savePostToDefaultCollection(userId: string, postId: string
         defaults.updatedAt = Date.now();
     }
     const post = postSnapshot || posts.find((p) => p.id === postId);
+    cachePostSnapshot(postId, post);
     const resolved = resolvePostThumbnail(post);
     if (resolved) defaults.thumbnailUrl = resolved;
     savePreviewForPost(defaults as CollectionWithPreviewMap, postId, post);
@@ -291,14 +415,31 @@ export async function getCollectionPosts(collectionId: string): Promise<Post[]> 
     }
 
     const collectionWithPreview = collection as CollectionWithPreviewMap;
-    const collectionPosts = collection.postIds
-        .map(postId => {
+    const resolvedPosts = await Promise.all(
+        collection.postIds.map(async (postId) => {
             const live = posts.find(p => p.id === postId);
             if (live) return live;
+
             const preview = collectionWithPreview.postPreviewMap?.[postId];
+            const previewHasRenderableMedia = !!(
+                preview?.mediaUrl ||
+                (Array.isArray(preview?.mediaItems) && preview!.mediaItems!.length > 0)
+            );
+            if (!previewHasRenderableMedia) {
+                try {
+                    const fetched = await getPostById(postId);
+                    if (fetched) return fetched;
+                } catch (error) {
+                    console.warn('Collection fallback fetch failed for post:', postId, error);
+                }
+            }
+
             if (!preview) return undefined;
             return buildPostPreview(preview, postId) as Post;
         })
+    );
+
+    const collectionPosts = resolvedPosts
         .filter((p): p is Post => p !== undefined)
         .sort((a, b) => b.createdAt - a.createdAt); // Newest first
 

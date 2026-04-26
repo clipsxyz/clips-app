@@ -341,7 +341,7 @@ export default function App() {
           && loc.pathname !== '/login' && (
             <BottomNav
             onCreateClick={() => navigate('/create/instant')}
-            onProfileClick={() => setShowAboutProfileModal(true)}
+            onProfileClick={() => navigate('/profile')}
           />
           )}
       </main>
@@ -353,7 +353,7 @@ export default function App() {
         onNavigate={(path) => navigate(path)}
       />
 
-      {/* About your profile card (after sign-up or when tapping profile in footer) */}
+      {/* About your profile card (after sign-up only) */}
       <AboutProfileModal
         isOpen={showAboutProfileModal}
         onClose={() => setShowAboutProfileModal(false)}
@@ -4747,7 +4747,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
     >
       {/* overflow-visible: PostHeader quick-actions (absolute) must not be clipped by the card */}
       {/* Text-only: author chrome sits in a narrow column beside the bubble (see below). */}
-      {!isTileBoostMode && <TagRow tags={post.tags} />}
+      {!isTileBoostMode && <TagRow tags={Array.isArray(post.tags) ? post.tags : []} />}
       {!isTileBoostMode && post.isBoosted && (
         <div className="px-4 pt-2 pb-1.5 flex items-center gap-2">
           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-500/20 text-amber-400 border border-amber-500/40">

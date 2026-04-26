@@ -88,7 +88,7 @@ export default function CollectionFeedPage() {
     return (
         <div className="min-h-screen bg-gradient-to-br from-brand-50 to-brand-100 dark:from-gray-900 dark:to-gray-800 pb-20">
             {/* Header */}
-            <div className="sticky top-0 z-10 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 shadow-sm">
+            <div className="sticky top-0 z-[80] bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 shadow-sm">
                 <div className="max-w-2xl mx-auto px-4 py-4 flex items-center gap-4">
                     <button
                         onClick={() => nav('/profile')}
