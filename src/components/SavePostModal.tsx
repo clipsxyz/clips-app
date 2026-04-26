@@ -222,7 +222,7 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
                                 <div className="text-sm text-gray-400">Private - every saved post</div>
                             </div>
                             {isInDefaultCollection && (
-                                <FiBookmark className="w-5 h-5 text-yellow-400 fill-yellow-400 flex-shrink-0" />
+                                <FiBookmark className="w-5 h-5 text-[#7A8AF0] fill-[#7A8AF0] flex-shrink-0" />
                             )}
                         </div>
                     </div>

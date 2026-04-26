@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { FiX, FiSend, FiMessageSquare, FiThumbsUp, FiChevronDown, FiChevronUp, FiSmile } from 'react-icons/fi';
 import { useAuth } from '../context/Auth';
 import { useOnline } from '../hooks/useOnline';
@@ -55,6 +56,41 @@ function formatPostRelative(timestamp: number): string {
     return `${weeks} week${weeks === 1 ? '' : 's'} ago`;
 }
 
+const HANDLE_REGEX = /\b[A-Za-z0-9._-]+@[A-Za-z0-9_-]+\b/g;
+
+function renderTextWithMentions(
+    text: string,
+    onHandleClick: (handle: string) => void
+): React.ReactNode[] {
+    const nodes: React.ReactNode[] = [];
+    let cursor = 0;
+    let key = 0;
+    let match: RegExpExecArray | null;
+    while ((match = HANDLE_REGEX.exec(text)) !== null) {
+        const start = match.index;
+        const end = start + match[0].length;
+        if (start > cursor) nodes.push(<React.Fragment key={`t-${key++}`}>{text.slice(cursor, start)}</React.Fragment>);
+        const handle = match[0];
+        nodes.push(
+            <button
+                key={`h-${key++}`}
+                type="button"
+                className="inline p-0 m-0 bg-transparent border-none text-[#7A8AF0] hover:underline"
+                onClick={(e) => {
+                    e.stopPropagation();
+                    onHandleClick(handle);
+                }}
+                aria-label={`View ${handle} profile`}
+            >
+                {handle}
+            </button>
+        );
+        cursor = end;
+    }
+    if (cursor < text.length) nodes.push(<React.Fragment key={`t-${key++}`}>{text.slice(cursor)}</React.Fragment>);
+    return nodes;
+}
+
 function CommentItem({
     comment,
     onLikeComment,
@@ -75,6 +111,7 @@ function CommentItem({
     postId: string;
 }) {
     const { user } = useAuth(); // Add useAuth hook
+    const navigate = useNavigate();
     const [liked, setLiked] = React.useState(comment.userLiked);
     const [likes, setLikes] = React.useState(comment.likes);
     const [busy, setBusy] = React.useState(false);
@@ -136,7 +173,9 @@ function CommentItem({
                     </span>
                 </div>
                 <p className="text-sm text-gray-900 mb-2">
-                    {isHiddenForViewer ? 'Comment hidden for safety.' : comment.text}
+                    {isHiddenForViewer
+                        ? 'Comment hidden for safety.'
+                        : renderTextWithMentions(comment.text, (handle) => navigate(`/user/${encodeURIComponent(handle)}`))}
                 </p>
                 {comment.moderationState === 'hidden_by_filter' && String(comment.userHandle || '').trim().toLowerCase() === String(user?.handle || '').trim().toLowerCase() && (
                     <p className="mb-2 text-[11px] text-amber-700">Hidden from others by safety filter</p>
@@ -254,7 +293,9 @@ function CommentItem({
                                                     {formatTime(reply.createdAt)}
                                                 </span>
                                             </div>
-                                            <p className="text-xs text-gray-900 mb-1">{reply.text}</p>
+                                            <p className="text-xs text-gray-900 mb-1">
+                                                {renderTextWithMentions(reply.text, (handle) => navigate(`/user/${encodeURIComponent(handle)}`))}
+                                            </p>
                                             <button
                                                 onClick={() => onLikeReply(comment.id, reply.id)}
                                                 className="flex items-center gap-1 text-xs text-gray-500 hover:text-red-500 transition-colors"
@@ -351,6 +392,7 @@ function CommentInput({
 }
 
 export default function CommentsModal({ postId, isOpen, onClose }: CommentsModalProps) {
+    const navigate = useNavigate();
     const { user } = useAuth();
     const online = useOnline();
     const [post, setPost] = React.useState<Post | null>(null);
@@ -861,7 +903,7 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                             {storyText ? (
                                 <div className="px-4 py-3 border-b border-gray-100">
                                     <p className="text-sm text-gray-900 whitespace-pre-wrap leading-relaxed">
-                                        {storyText}
+                                        {renderTextWithMentions(storyText, (handle) => navigate(`/user/${encodeURIComponent(handle)}`))}
                                     </p>
                                     {post?.createdAt != null && (
                                         <p className="text-xs text-gray-500 mt-2">

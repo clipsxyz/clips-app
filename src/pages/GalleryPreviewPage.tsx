@@ -16,6 +16,7 @@ import type { StickerOverlay, Sticker } from '../types';
 import StickerOverlayComponent from '../components/StickerOverlay';
 import UserTaggingModal from '../components/UserTaggingModal';
 import { getStickers, STICKER_CATEGORIES } from '../api/stickers';
+import { getKnownUserHandles } from '../api/users';
 import { getGalleryPreviewMedia, clearGalleryPreviewMedia } from '../utils/galleryPreviewCache';
 import { showUploadOverlay } from '../utils/uploadOverlay';
 import { prepareMediaForPost, prepareMediaItemsForPost } from '../utils/prepareMediaForPost';
@@ -217,6 +218,18 @@ export default function GalleryPreviewPage() {
     const [pulsingPickerTab, setPulsingPickerTab] = useState<'caption' | 'filters' | 'location' | 'carousel' | null>(null);
     const pulseTimerRef = useRef<number | null>(null);
     const prevCenteredPickerRef = useRef<'caption' | 'filters' | 'location' | 'carousel' | null>(null);
+    const captionInputRef = useRef<HTMLTextAreaElement | null>(null);
+    const [mentionSuggestions, setMentionSuggestions] = useState<string[]>([]);
+    const [showMentionSuggestions, setShowMentionSuggestions] = useState(false);
+    const [mentionRange, setMentionRange] = useState<{ start: number; end: number } | null>(null);
+    const knownHandles = useMemo(() => {
+        const unique = new Set<string>([
+            ...getKnownUserHandles(),
+            user?.handle || '',
+            ...taggedUsers,
+        ]);
+        return Array.from(unique).filter(Boolean);
+    }, [user?.handle, taggedUsers]);
 
     const pickerTabs = useMemo(() => ([
         { id: 'caption' as const, title: 'Caption', icon: FiType },
@@ -224,6 +237,41 @@ export default function GalleryPreviewPage() {
         { id: 'carousel' as const, title: 'Add photos/videos (carousel, max 10)', icon: FiLayers },
         { id: 'filters' as const, title: 'Filters', icon: FiFilter },
     ]), []);
+
+    const updateMentionSuggestions = useCallback((value: string, cursorPos: number) => {
+        if (cursorPos < 0 || cursorPos > value.length) {
+            setShowMentionSuggestions(false);
+            setMentionRange(null);
+            return;
+        }
+        let start = cursorPos;
+        while (start > 0 && !/\s/.test(value[start - 1])) start -= 1;
+        let end = cursorPos;
+        while (end < value.length && !/\s/.test(value[end])) end += 1;
+        const token = value.slice(start, end);
+        if (!token || !token.includes('@')) {
+            setShowMentionSuggestions(false);
+            setMentionRange(null);
+            return;
+        }
+        const query = token.replace(/^@/, '').trim().toLowerCase();
+        if (!query) {
+            setShowMentionSuggestions(false);
+            setMentionRange(null);
+            return;
+        }
+        const matches = knownHandles
+            .filter((handle) => handle.toLowerCase().includes(query))
+            .slice(0, 6);
+        if (matches.length === 0) {
+            setShowMentionSuggestions(false);
+            setMentionRange(null);
+            return;
+        }
+        setMentionRange({ start, end });
+        setMentionSuggestions(matches);
+        setShowMentionSuggestions(true);
+    }, [knownHandles]);
 
     const updateCenteredPickerTab = useCallback(() => {
         const rail = pickerRailRef.current;
@@ -967,15 +1015,56 @@ export default function GalleryPreviewPage() {
                                 className="rounded-2xl p-[1.5px]"
                                 style={{ background: 'linear-gradient(135deg,#404040,#d4d4d4)' }}
                             >
-                                <div className="rounded-[1rem] bg-[#020617]">
+                                <div className="rounded-[1rem] bg-[#020617] relative">
                                     <textarea
+                                        ref={captionInputRef}
                                         value={caption}
-                                        onChange={(e) => setCaption(e.target.value)}
+                                        onChange={(e) => {
+                                            const value = e.target.value;
+                                            setCaption(value);
+                                            updateMentionSuggestions(value, e.target.selectionStart ?? value.length);
+                                        }}
+                                        onClick={(e) => updateMentionSuggestions(caption, e.currentTarget.selectionStart ?? caption.length)}
+                                        onKeyUp={(e) => updateMentionSuggestions(caption, e.currentTarget.selectionStart ?? caption.length)}
+                                        onBlur={() => {
+                                            window.setTimeout(() => setShowMentionSuggestions(false), 120);
+                                        }}
                                         placeholder="Write a caption..."
                                         rows={3}
                                         maxLength={500}
                                         className="w-full rounded-[1rem] bg-transparent border-none px-3 py-2 text-sm text-white placeholder-white/40 focus:outline-none focus:ring-0 resize-none"
                                     />
+                                    {showMentionSuggestions && mentionSuggestions.length > 0 && (
+                                        <div className="absolute left-2 right-2 top-full mt-1 z-30 rounded-xl border border-white/20 bg-[#0B1220] shadow-2xl overflow-hidden">
+                                            {mentionSuggestions.map((handle) => (
+                                                <button
+                                                    key={handle}
+                                                    type="button"
+                                                    onMouseDown={(e) => e.preventDefault()}
+                                                    onClick={() => {
+                                                        if (!mentionRange) return;
+                                                        const before = caption.slice(0, mentionRange.start);
+                                                        const after = caption.slice(mentionRange.end);
+                                                        const needsSpace = after.length > 0 && !/^\s/.test(after);
+                                                        const inserted = `${before}${handle}${needsSpace ? ' ' : ''}${after}`;
+                                                        setCaption(inserted);
+                                                        setShowMentionSuggestions(false);
+                                                        setMentionRange(null);
+                                                        window.setTimeout(() => {
+                                                            const el = captionInputRef.current;
+                                                            if (!el) return;
+                                                            const nextPos = (before + handle + (needsSpace ? ' ' : '')).length;
+                                                            el.focus();
+                                                            el.setSelectionRange(nextPos, nextPos);
+                                                        }, 0);
+                                                    }}
+                                                    className="w-full px-3 py-2 text-left text-sm text-white hover:bg-white/10"
+                                                >
+                                                    {handle}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                             <div className="flex justify-end">

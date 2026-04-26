@@ -256,6 +256,37 @@ export default function ScenesModal({
     const { user } = useAuth();
     const online = useOnline();
     const navigate = useNavigate();
+    const renderTextWithMentions = React.useCallback((value?: string): React.ReactNode[] => {
+        const safeValue = value || '';
+        const regex = /\b[A-Za-z0-9._-]+@[A-Za-z0-9_-]+\b/g;
+        const nodes: React.ReactNode[] = [];
+        let cursor = 0;
+        let key = 0;
+        let match: RegExpExecArray | null;
+        while ((match = regex.exec(safeValue)) !== null) {
+            const start = match.index;
+            const end = start + match[0].length;
+            if (start > cursor) nodes.push(<React.Fragment key={`txt-${key++}`}>{safeValue.slice(cursor, start)}</React.Fragment>);
+            const handle = match[0];
+            nodes.push(
+                <button
+                    key={`h-${key++}`}
+                    type="button"
+                    className="inline p-0 m-0 bg-transparent border-none text-[#7A8AF0] hover:underline"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        navigate(`/user/${encodeURIComponent(handle)}`);
+                    }}
+                    aria-label={`View ${handle} profile`}
+                >
+                    {handle}
+                </button>
+            );
+            cursor = end;
+        }
+        if (cursor < safeValue.length) nodes.push(<React.Fragment key={`txt-${key++}`}>{safeValue.slice(cursor)}</React.Fragment>);
+        return nodes;
+    }, [navigate]);
     const [saveModalOpen, setSaveModalOpen] = React.useState(false);
     const [isSaved, setIsSaved] = React.useState(false);
     const [menuOpen, setMenuOpen] = React.useState(false);
@@ -1818,7 +1849,7 @@ export default function ScenesModal({
                                                             fontFamily: fontFamily || undefined
                                                         }}
                                                     >
-                                                        {post.text}
+                                                        {renderTextWithMentions(post.text)}
                                                     </div>
                                                 </div>
                                             </div>
@@ -1847,7 +1878,7 @@ export default function ScenesModal({
                                                     }`}
                                                 style={{ color: post.textStyle?.color || 'white', wordBreak: 'break-word', overflowWrap: 'anywhere', maxWidth: '100%' }}
                                             >
-                                                {post.text}
+                                                {renderTextWithMentions(post.text)}
                                             </div>
                                         )}
                                     </div>
@@ -2120,12 +2151,12 @@ export default function ScenesModal({
                                             (post as any).text_content,
                                             (post as any).caption_text,
                                             (post as any).captionText,
-                                        ].find((v) => typeof v === 'string' && v.trim().length > 0);
+                                        ].find((v) => typeof v === 'string' && v.trim().length > 0) as string | undefined;
                                         return !!displayCaption && (post.mediaUrl || post.mediaItems?.length);
                                     })() && (
                                         <div className="text-white text-sm mb-2 text-left w-full">
                                             <span className="line-clamp-1">
-                                                {[
+                                                {renderTextWithMentions(([
                                                     (post as any).captionText,
                                                     post.caption,
                                                     post.text,
@@ -2133,7 +2164,7 @@ export default function ScenesModal({
                                                     (post as any).text_content,
                                                     (post as any).caption_text,
                                                     (post as any).captionText,
-                                                ].find((v) => typeof v === 'string' && v.trim().length > 0)}
+                                                ].find((v) => typeof v === 'string' && v.trim().length > 0) as string | undefined))}
                                             </span>
                                             {(([
                                                 (post as any).captionText,
@@ -2162,7 +2193,7 @@ export default function ScenesModal({
                                     ) : !post.mediaUrl && post.text ? (
                                         // Other text-only cases (if any) - show text
                                         <div className="text-white text-sm opacity-90 mb-2 text-left w-full">
-                                            <span className="line-clamp-1">{post.text}</span>
+                                            <span className="line-clamp-1">{renderTextWithMentions(post.text)}</span>
                                             {post.text.length > 50 && (
                                                 <button
                                                     onClick={openCommentsSheet}
@@ -2402,7 +2433,7 @@ export default function ScenesModal({
                                     {(post.caption || post.text) && (
                                         <div className="px-4 py-3 border-b border-gray-100">
                                             <p className="text-gray-900 text-sm whitespace-pre-line break-words">
-                                                {post.caption || post.text}
+                                                {renderTextWithMentions(post.caption || post.text)}
                                             </p>
                                         </div>
                                     )}
@@ -2437,7 +2468,7 @@ export default function ScenesModal({
                                                                 {timeAgo(comment.createdAt)}
                                                             </span>
                                                         </div>
-                                                        <p className="text-sm text-gray-900 mb-2">{comment.text}</p>
+                                                        <p className="text-sm text-gray-900 mb-2">{renderTextWithMentions(comment.text)}</p>
                                                         <div className="flex items-center justify-between">
                                                             <button
                                                                 type="button"
@@ -2518,7 +2549,7 @@ export default function ScenesModal({
                                                                                         <span className="font-semibold text-xs text-gray-900">{reply.userHandle}</span>
                                                                                         <span className="text-xs text-gray-400">{timeAgo(reply.createdAt)}</span>
                                                                                     </div>
-                                                                                    <p className="text-xs text-gray-900 mb-1">{reply.text}</p>
+                                                                                    <p className="text-xs text-gray-900 mb-1">{renderTextWithMentions(reply.text)}</p>
                                                                                     <button
                                                                                         type="button"
                                                                                         onClick={() => handleLikeReply(comment.id, reply.id)}

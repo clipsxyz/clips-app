@@ -2176,12 +2176,49 @@ function TileTextCard({
 }
 
 function CaptionText({ caption }: { caption: string }) {
+  const navigate = useNavigate();
   const [isExpanded, setIsExpanded] = React.useState(false);
   const hasMore = caption.length > 120 || caption.includes('\n');
+  const handleRegex = /\b[A-Za-z0-9._-]+@[A-Za-z0-9_-]+\b/g;
+
+  const captionNodes = React.useMemo(() => {
+    const nodes: React.ReactNode[] = [];
+    let cursor = 0;
+    let match: RegExpExecArray | null;
+    let key = 0;
+    while ((match = handleRegex.exec(caption)) !== null) {
+      const start = match.index;
+      const end = start + match[0].length;
+      if (start > cursor) {
+        nodes.push(<React.Fragment key={`text-${key++}`}>{caption.slice(cursor, start)}</React.Fragment>);
+      }
+      const handle = match[0];
+      nodes.push(
+        <button
+          key={`handle-${key++}`}
+          type="button"
+          className="inline p-0 m-0 bg-transparent border-none text-[#7A8AF0] hover:underline"
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate(`/user/${encodeURIComponent(handle)}`);
+          }}
+          title={`View ${handle}`}
+          aria-label={`View ${handle} profile`}
+        >
+          {handle}
+        </button>
+      );
+      cursor = end;
+    }
+    if (cursor < caption.length) {
+      nodes.push(<React.Fragment key={`text-${key++}`}>{caption.slice(cursor)}</React.Fragment>);
+    }
+    return nodes;
+  }, [caption, navigate]);
 
   return (
     <div className="text-gray-100 text-[13px] leading-snug">
-      <p className={isExpanded ? 'whitespace-pre-wrap' : 'whitespace-pre-wrap line-clamp-2'}>{caption}</p>
+      <p className={isExpanded ? 'whitespace-pre-wrap' : 'whitespace-pre-wrap line-clamp-2'}>{captionNodes}</p>
       {hasMore && (
         <button
           onClick={() => setIsExpanded(!isExpanded)}
@@ -4197,7 +4234,7 @@ function EngagementBar({
             aria-label={isSaved ? 'Saved' : 'Save post'}
             title={isSaved ? 'Saved' : 'Save post'}
           >
-            <FiBookmark className={`${iconSize} ${isSaved ? 'text-yellow-400 fill-yellow-400' : 'text-white'}`} />
+            <FiBookmark className={`${iconSize} ${isSaved ? 'text-[#7A8AF0] fill-[#7A8AF0]' : 'text-white'}`} />
             <span className="text-xs text-white tabular-nums">{isSaved ? 'Saved' : 'Save'}</span>
           </button>
 

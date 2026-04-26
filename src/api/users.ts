@@ -7,6 +7,10 @@ const handleToAvatar: Record<string, string> = {
     'Noah@london': 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400&h=400&fit=crop',
 };
 
+export function getKnownUserHandles(): string[] {
+    return Object.keys(handleToAvatar);
+}
+
 export function getAvatarForHandle(handle: string | undefined | null): string | undefined {
     if (!handle) return undefined;
     if (handleToAvatar[handle]) return handleToAvatar[handle];
