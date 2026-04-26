@@ -302,6 +302,15 @@ function CommentsModal({
         }
     }, [isOpen, postId]);
 
+    useEffect(() => {
+        if (!isOpen) {
+            setCommentText('');
+            setReplyingToCommentId(null);
+            setReplyInputText('');
+            setSortMode('top');
+        }
+    }, [isOpen, postId]);
+
     const loadComments = async () => {
         setLoading(true);
         try {
@@ -714,15 +723,14 @@ function ShareModal({
     const handleShare = async () => {
         if (!post) return;
         try {
-            const result = await Share.share({
+            await Share.share({
                 message: post.text ? `${post.text} by ${post.userHandle}` : `Check out this post by ${post.userHandle}`,
                 url: post.mediaUrl,
             });
-            if (result.action === Share.sharedAction) {
-                onClose();
-            }
         } catch (err: any) {
             console.error('Error sharing:', err);
+        } finally {
+            onClose();
         }
     };
 
