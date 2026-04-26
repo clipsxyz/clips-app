@@ -665,7 +665,7 @@ export default function GalleryPreviewPage() {
         } finally {
             setIsUploading(false);
         }
-    }, [user, mediaUrl, mediaType, carouselItems, stickers, storyLocation, venue, landmark, taggedUsers, navigate, videoFrameDataUrl, socialUploadTarget]);
+    }, [user, mediaUrl, mediaType, carouselItems, stickers, storyLocation, caption, venue, landmark, taggedUsers, navigate, videoFrameDataUrl, socialUploadTarget]);
 
     const content = (
         <div

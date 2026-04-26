@@ -1748,8 +1748,7 @@ export default function StoriesPage() {
                                                 {isVideo ? (
                                                     <video
                                                         src={currentStory.mediaUrl}
-                                                        className="absolute inset-0 w-full h-full object-cover scale-110 opacity-70 pointer-events-none"
-                                                        style={{ filter: 'blur(46px)' }}
+                                                        className="absolute inset-0 w-full h-full object-cover opacity-58 pointer-events-none"
                                                         autoPlay
                                                         muted
                                                         loop
@@ -1760,11 +1759,10 @@ export default function StoriesPage() {
                                                         src={sharedStoryBackdrop.imageUrl || currentStory.mediaUrl}
                                                         alt=""
                                                         aria-hidden
-                                                        className="absolute inset-0 w-full h-full object-cover scale-110 opacity-70 pointer-events-none"
-                                                        style={{ filter: 'blur(46px)' }}
+                                                        className="absolute inset-0 w-full h-full object-cover opacity-58 pointer-events-none"
                                                     />
                                                 )}
-                                                <div className="absolute inset-0 bg-black/40 pointer-events-none" />
+                                                <div className="absolute inset-0 bg-black/35 pointer-events-none" />
                                                 <div className="relative z-10 w-full max-w-xs rounded-2xl overflow-hidden bg-white shadow-[0_8px_32px_rgba(0,0,0,0.4)] border-2 border-white/20">
                                                     {isVideo ? (
                                                         <video
@@ -1802,9 +1800,15 @@ export default function StoriesPage() {
                                         const hasRealMedia = Boolean((originalPost.mediaUrl && originalPost.mediaUrl.trim() !== '') || (originalPost.mediaItems && originalPost.mediaItems.length > 0));
                                         
                                         if (hasRealMedia) {
-                                            // Shared post with media - Instagram style: blurred background with centered card
+                                            // Shared post with media - centered post card with dimmed backdrop
                                             const mediaIsVideo = originalPost.mediaType === 'video' || originalPost.mediaItems?.[0]?.type === 'video';
                                             const mediaUrl = originalPost.mediaUrl || originalPost.mediaItems?.[0]?.url;
+                                            const sharedCaptionSnippet = (
+                                                originalPost.caption ||
+                                                originalPost.text ||
+                                                (originalPost as any).captionText ||
+                                                ''
+                                            ).trim();
                                             
                                             return (
                                                 <div
@@ -1816,8 +1820,7 @@ export default function StoriesPage() {
                                                     {mediaIsVideo ? (
                                                         <video
                                                             src={mediaUrl}
-                                                            className="absolute inset-0 w-full h-full object-cover scale-110 opacity-70 pointer-events-none"
-                                                            style={{ filter: 'blur(46px)' }}
+                                                            className="absolute inset-0 w-full h-full object-cover opacity-58 pointer-events-none"
                                                             autoPlay
                                                             muted
                                                             loop
@@ -1828,24 +1831,23 @@ export default function StoriesPage() {
                                                             src={sharedStoryBackdrop.imageUrl}
                                                             alt=""
                                                             aria-hidden
-                                                            className="absolute inset-0 w-full h-full object-cover scale-110 opacity-70 pointer-events-none"
-                                                            style={{ filter: 'blur(46px)' }}
+                                                            className="absolute inset-0 w-full h-full object-cover opacity-58 pointer-events-none"
                                                         />
                                                     ) : null}
-                                                    <div className="absolute inset-0 bg-black/40 pointer-events-none" />
+                                                    <div className="absolute inset-0 bg-black/35 pointer-events-none" />
                                                     
                                                     {/* Container for card and attribution - centered column */}
                                                     <div className="relative z-10 flex flex-col items-center">
-                                                        {/* Nested story card - the original post embedded within (TikTok style) */}
+                                                        {/* Nested story card - embedded post with Instagram-style handle + caption snippet */}
                                                         <div 
-                                                            className="relative w-full max-w-xs rounded-2xl overflow-hidden bg-white shadow-[0_8px_32px_rgba(0,0,0,0.4)] cursor-pointer transform transition-transform hover:scale-[1.02] active:scale-[0.98] border-2 border-white/20"
+                                                            className="relative w-full max-w-xs rounded-2xl overflow-hidden bg-white shadow-[0_10px_34px_rgba(0,0,0,0.45)] cursor-pointer transform transition-transform hover:scale-[1.02] active:scale-[0.98] border border-white/70"
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
                                                                 setShowSharedPostModal(true);
                                                             }}
                                                             style={{
                                                                 maxHeight: '60vh',
-                                                                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1)'
+                                                                boxShadow: '0 12px 36px rgba(0, 0, 0, 0.52), 0 0 0 1px rgba(255, 255, 255, 0.55)'
                                                             }}
                                                         >
                                                             {mediaIsVideo ? (
@@ -1910,6 +1912,30 @@ export default function StoriesPage() {
                                                                     }}
                                                                 />
                                                             )}
+
+                                                            {/* Top creator chip inside card */}
+                                                            <div className="absolute left-3 top-3 right-3 z-10 pointer-events-none">
+                                                                <div className="inline-flex max-w-full items-center gap-2 rounded-full bg-white px-2.5 py-1.5 shadow-[0_2px_10px_rgba(0,0,0,0.18)] border border-black/5">
+                                                                    <Avatar
+                                                                        src={getAvatarForHandle(originalPost.userHandle)}
+                                                                        name={originalPost.userHandle.split('@')[0]}
+                                                                        size={22}
+                                                                    />
+                                                                    <span className="truncate text-[12px] font-semibold text-gray-900 leading-none">
+                                                                        {originalPost.userHandle}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Bottom caption snippet panel inside card */}
+                                                            {sharedCaptionSnippet ? (
+                                                                <div className="absolute left-0 right-0 bottom-0 z-10 pointer-events-none bg-white px-3 py-2.5 border-t border-gray-200/90">
+                                                                    <p className="text-[12px] text-gray-900 leading-[1.25rem] line-clamp-2 break-words">
+                                                                        <span className="font-semibold mr-1 text-gray-950">{originalPost.userHandle}</span>
+                                                                        {sharedCaptionSnippet}
+                                                                    </p>
+                                                                </div>
+                                                            ) : null}
                                                         </div>
                                                         
                                                         {/* Original creator attribution - centered directly below the card */}

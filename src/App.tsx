@@ -2281,7 +2281,7 @@ function ShortsLikeBurstLines() {
   );
 }
 
-function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onCarouselIndexChange, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled: _videoCaptionsEnabled, videoCaptionText: _videoCaptionText, subtitlesEnabled, subtitleText: _subtitleText, postUserHandle, postLocationLabel: _postLocationLabel, postCreatedAt, postId, videoPosterUrl, priority = false, tileMode = false }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onCarouselIndexChange?: (index: number) => void; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string; postId?: string; videoPosterUrl?: string; priority?: boolean; tileMode?: boolean }) {
+function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onCarouselIndexChange, activeCarouselIndex, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled: _videoCaptionsEnabled, videoCaptionText: _videoCaptionText, subtitlesEnabled, subtitleText: _subtitleText, postUserHandle, postLocationLabel: _postLocationLabel, postCreatedAt, postId, videoPosterUrl, priority = false, tileMode = false }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onCarouselIndexChange?: (index: number) => void; activeCarouselIndex?: number; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string; postId?: string; videoPosterUrl?: string; priority?: boolean; tileMode?: boolean }) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [burst, setBurst] = React.useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -2406,6 +2406,16 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       onCarouselIndexChange(currentIndex);
     }
   }, [currentIndex, hasMultipleItems, onCarouselIndexChange]);
+
+  // Allow parent FeedCard to drive active carousel item (thumbnail rail tap).
+  React.useEffect(() => {
+    if (!hasMultipleItems) return;
+    if (typeof activeCarouselIndex !== 'number') return;
+    const safeIndex = Math.max(0, Math.min(activeCarouselIndex, items.length - 1));
+    if (safeIndex !== currentIndex) {
+      setCurrentIndex(safeIndex);
+    }
+  }, [activeCarouselIndex, hasMultipleItems, items.length, currentIndex]);
 
   // Update container size for stickers
   React.useEffect(() => {
@@ -4531,6 +4541,34 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   const [carouselIndex, setCarouselIndex] = React.useState(0);
   const [showTaggedUsersModal, setShowTaggedUsersModal] = React.useState(false);
   const [heartAnimation, setHeartAnimation] = React.useState<{ startX: number; startY: number } | null>(null);
+  const carouselThumbRailRef = React.useRef<HTMLDivElement | null>(null);
+  const rewriteMediaUrlForThumbs = React.useCallback((u?: string): string => {
+    if (!u || typeof u !== 'string') return '';
+    const h = typeof window !== 'undefined' ? window.location.hostname : '';
+    if (h === 'localhost' || h === '127.0.0.1') return u;
+    if (u.startsWith('blob:')) return u;
+    return u
+      .replace(/http:\/\/localhost:8000\//g, `http://${h}:8000/`)
+      .replace(/https:\/\/localhost:8000\//g, `https://${h}:8000/`)
+      .replace(/http:\/\/127\.0\.0\.1:8000\//g, `http://${h}:8000/`);
+  }, []);
+  const carouselThumbItems = React.useMemo(
+    () =>
+      (post.mediaItems || []).filter((item) => item?.type === 'image' || item?.type === 'video').map((item) => ({
+        ...item,
+        url: rewriteMediaUrlForThumbs(item.url),
+      })),
+    [post.mediaItems, rewriteMediaUrlForThumbs]
+  );
+
+  React.useEffect(() => {
+    if (!carouselThumbRailRef.current || carouselThumbItems.length <= 1) return;
+    const rail = carouselThumbRailRef.current;
+    const activeThumb = rail.querySelector<HTMLButtonElement>(`[data-carousel-thumb-index="${carouselIndex}"]`);
+    if (!activeThumb) return;
+    const targetLeft = activeThumb.offsetLeft - rail.clientWidth / 2 + activeThumb.clientWidth / 2;
+    rail.scrollTo({ left: Math.max(0, targetLeft), behavior: 'smooth' });
+  }, [carouselIndex, carouselThumbItems.length]);
   const displayCaption = React.useMemo(() => {
     const pick = (...vals: Array<unknown>): string => {
       for (const v of vals) {
@@ -4826,43 +4864,58 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             postCreatedAt={post.createdAt?.toString()}
             videoPosterUrl={post.videoPosterUrl}
             priority={priority}
-          tileMode={isTileBoostMode}
+            tileMode={isTileBoostMode}
+            activeCarouselIndex={carouselIndex}
           />
         )}
-        {/* Carousel Indicator - Overlaid on media with scrim */}
-        {/* Show row if: multiple media items exist */}
-        {!isTileBoostMode && post.mediaItems && post.mediaItems.length > 1 ? (
-          <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none">
-            {/* Scrim effect - gradient overlay for better readability */}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/45 to-transparent pointer-events-none z-0" />
-
-            {/* Content layer - above scrim */}
-            <div className="relative z-10 px-3 py-2.5 pointer-events-auto">
-              <div className="flex items-center justify-center">
-                {/* Center - Carousel Display (Dots and Number) */}
-                <div className="flex items-center gap-3">
-                  {/* Baby Blue Dots */}
-                  <div className="flex gap-1.5">
-                    {post.mediaItems.map((_, index) => (
-                      <div
-                        key={index}
-                        className={`h-2 rounded-full transition-all ${index === carouselIndex
-                          ? 'w-6 bg-white'
-                          : 'w-2 bg-white/50'
-                          }`}
-                      />
-                    ))}
-                  </div>
-                  {/* Number Indicator */}
-                  <span className="text-sm font-medium text-white drop-shadow-md">
-                    {carouselIndex + 1} / {post.mediaItems.length}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : null}
       </div>
+      {!isTileBoostMode && carouselThumbItems.length > 1 ? (
+        <div className="px-3 py-2 bg-black/95 border-t border-white/10">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-semibold text-white/85 tracking-wide uppercase">Carousel</span>
+            <span className="text-xs font-medium text-white/80">
+              {carouselIndex + 1} / {carouselThumbItems.length}
+            </span>
+          </div>
+          <div ref={carouselThumbRailRef} className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
+            {carouselThumbItems.map((item, index) => {
+              const isActive = index === carouselIndex;
+              return (
+                <button
+                  key={`${post.id}-thumb-${index}`}
+                  data-carousel-thumb-index={index}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCarouselIndex(index);
+                  }}
+                  className={`relative w-14 h-14 shrink-0 overflow-hidden rounded-lg border transition-all ${
+                    isActive ? 'border-white shadow-[0_0_0_1px_rgba(255,255,255,0.55)]' : 'border-white/25'
+                  }`}
+                  aria-label={`Show carousel item ${index + 1}`}
+                  title={`Item ${index + 1}`}
+                >
+                  {item.type === 'video' ? (
+                    <>
+                      <video
+                        src={item.url}
+                        className="w-full h-full object-cover pointer-events-none"
+                        muted
+                        playsInline
+                        preload="metadata"
+                      />
+                      <div className="absolute inset-0 bg-black/20 pointer-events-none" />
+                      <div className="absolute right-1 bottom-1 text-white text-[9px] font-bold bg-black/60 rounded px-1">VID</div>
+                    </>
+                  ) : (
+                    <img src={item.url} alt="" className="w-full h-full object-cover pointer-events-none" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
       {/* Caption + engagement are intentionally hidden for tile-grid boost posts (phone Instagram style). */}
       {!isTileBoostMode && (
         <>
