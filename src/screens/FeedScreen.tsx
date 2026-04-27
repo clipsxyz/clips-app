@@ -110,7 +110,7 @@ function PillTabs({
                                     <Icon
                                         name={t === 'Following' ? 'person-add' : 'location'}
                                         size={12}
-                                        color={t === 'Following' ? '#D4AF37' : t === userRegional ? '#7A8AF0' : '#4ADE80'}
+                                        color={t === 'Following' ? '#4ADE80' : t === userRegional ? '#7A8AF0' : '#F87171'}
                                         style={styles.activeMainFeedLocationIcon}
                                     />
                                 )}

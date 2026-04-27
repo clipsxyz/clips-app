@@ -643,10 +643,10 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                     <span className="inline-flex items-center gap-2">
                       {active && isMainFeedTab && (
                         t === 'Following'
-                          ? <FiUserPlus className="w-3 h-3 text-[#D4AF37] shrink-0" />
+                          ? <FiUserPlus className="w-3 h-3 text-green-400 shrink-0" />
                           : t === regional
                             ? <FiMapPin className="w-3 h-3 text-[#7A8AF0] shrink-0" />
-                            : <FiMapPin className="w-3 h-3 text-green-400 shrink-0" />
+                            : <FiMapPin className="w-3 h-3 text-red-400 shrink-0" />
                       )}
                       <span
                         className="truncate"
@@ -668,10 +668,10 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                     <span className="inline-flex items-center gap-2">
                       {active && isMainFeedTab && (
                         t === 'Following'
-                          ? <FiUserPlus className="w-3 h-3 text-[#D4AF37] shrink-0" />
+                          ? <FiUserPlus className="w-3 h-3 text-green-400 shrink-0" />
                           : t === regional
                             ? <FiMapPin className="w-3 h-3 text-[#7A8AF0] shrink-0" />
-                            : <FiMapPin className="w-3 h-3 text-green-400 shrink-0" />
+                            : <FiMapPin className="w-3 h-3 text-red-400 shrink-0" />
                       )}
                       <span className="truncate">{tabLabel}</span>
                     </span>
