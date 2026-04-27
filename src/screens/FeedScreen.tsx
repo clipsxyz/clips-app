@@ -8,6 +8,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import {
     View,
     Text,
+    Animated,
+    Easing,
     StyleSheet,
     FlatList,
     RefreshControl,
@@ -67,13 +69,33 @@ function PillTabs({
     userRegional?: string;
     userNational?: string;
 }) {
-    const tabs: Tab[] = [userRegional, userNational, 'Clips', 'Discover', 'Following'];
+    const shimmerAnim = React.useRef(new Animated.Value(0)).current;
+    React.useEffect(() => {
+        const loop = Animated.loop(
+            Animated.timing(shimmerAnim, {
+                toValue: 1,
+                duration: 1800,
+                easing: Easing.linear,
+                useNativeDriver: false,
+            })
+        );
+        loop.start();
+        return () => loop.stop();
+    }, [shimmerAnim]);
+
+    const mainFeedTabs: Tab[] = [userRegional, userNational, 'Following'];
+    const activeMainFeedTab = mainFeedTabs.includes(active) ? active : null;
+    const orderedMainFeedTabs = activeMainFeedTab
+        ? [activeMainFeedTab, ...mainFeedTabs.filter((tab) => tab !== activeMainFeedTab)]
+        : mainFeedTabs;
+    const tabs: Tab[] = [...orderedMainFeedTabs, 'Clips', 'Discover'];
 
     return (
         <View style={styles.tabContainer}>
             <View style={styles.tabGrid}>
                 {tabs.map(t => {
                     const isActive = active === t;
+                    const isMainFeedTab = mainFeedTabs.includes(t);
                     return (
                         <TouchableOpacity
                             key={t}
@@ -83,16 +105,48 @@ function PillTabs({
                                 isActive ? styles.activeTabButton : styles.inactiveTabButton,
                             ]}
                         >
-                            <Text
-                                style={[
-                                    styles.tabText,
-                                    isActive ? styles.activeTabText : styles.inactiveTabText,
-                                ]}
-                            >
-                                {t}
-                            </Text>
-                            {isActive && (
-                                <Icon name="eye" size={15} color="#FFFFFF" style={styles.eyeIcon} />
+                            <View style={styles.tabLabelRow}>
+                                {isActive && isMainFeedTab && (
+                                    <Icon
+                                        name={t === 'Following' ? 'person-add' : 'location'}
+                                        size={12}
+                                        color={t === 'Following' ? '#D4AF37' : t === userRegional ? '#7A8AF0' : '#4ADE80'}
+                                        style={styles.activeMainFeedLocationIcon}
+                                    />
+                                )}
+                                {isActive && isMainFeedTab ? (
+                                    <Animated.Text
+                                        style={[
+                                            styles.tabText,
+                                            styles.activeTabText,
+                                            {
+                                                color: shimmerAnim.interpolate({
+                                                    inputRange: [0, 0.5, 1],
+                                                    outputRange: ['rgba(255,255,255,0.45)', '#FFFFFF', 'rgba(255,255,255,0.45)'],
+                                                }),
+                                            },
+                                        ]}
+                                    >
+                                        {t}
+                                    </Animated.Text>
+                                ) : (
+                                    <Text
+                                        style={[
+                                            styles.tabText,
+                                            isActive ? styles.activeTabText : styles.inactiveTabText,
+                                        ]}
+                                    >
+                                        {t}
+                                    </Text>
+                                )}
+                                {isActive && !isMainFeedTab && (
+                                    <Icon name="eye" size={15} color="#FFFFFF" style={styles.eyeIcon} />
+                                )}
+                            </View>
+                            {isActive && isMainFeedTab && (
+                                <View style={styles.activeMainFeedTailOuter}>
+                                    <View style={styles.activeMainFeedTailInner} />
+                                </View>
                             )}
                         </TouchableOpacity>
                     );
@@ -1692,6 +1746,13 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
         paddingVertical: 6,
         borderRadius: 20,
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        position: 'relative',
+        overflow: 'visible',
+    },
+    tabLabelRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
@@ -1715,6 +1776,36 @@ const styles = StyleSheet.create({
     },
     eyeIcon: {
         marginLeft: 4,
+    },
+    activeMainFeedLocationIcon: {
+        marginRight: 2,
+    },
+    activeMainFeedTailOuter: {
+        position: 'absolute',
+        bottom: -7,
+        left: '50%',
+        marginLeft: -6,
+        width: 0,
+        height: 0,
+        borderLeftWidth: 6,
+        borderRightWidth: 6,
+        borderTopWidth: 7,
+        borderLeftColor: 'transparent',
+        borderRightColor: 'transparent',
+        borderTopColor: '#FFFFFF',
+    },
+    activeMainFeedTailInner: {
+        position: 'absolute',
+        left: -5,
+        top: -7,
+        width: 0,
+        height: 0,
+        borderLeftWidth: 5,
+        borderRightWidth: 5,
+        borderTopWidth: 6,
+        borderLeftColor: 'transparent',
+        borderRightColor: 'transparent',
+        borderTopColor: '#000000',
     },
     feedContent: {
         paddingBottom: 20,

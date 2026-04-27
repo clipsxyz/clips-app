@@ -641,7 +641,13 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                     <FeedBoostTabBadge active />
                   ) : shouldShimmer ? (
                     <span className="inline-flex items-center gap-2">
-                      {active && isMainFeedTab && <span className="inline-block w-2 h-2 rounded-full bg-red-500 shrink-0" />}
+                      {active && isMainFeedTab && (
+                        t === 'Following'
+                          ? <FiUserPlus className="w-3 h-3 text-[#D4AF37] shrink-0" />
+                          : t === regional
+                            ? <FiMapPin className="w-3 h-3 text-[#7A8AF0] shrink-0" />
+                            : <FiMapPin className="w-3 h-3 text-green-400 shrink-0" />
+                      )}
                       <span
                         className="truncate"
                         style={{
@@ -660,7 +666,13 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-2">
-                      {active && isMainFeedTab && <span className="inline-block w-2 h-2 rounded-full bg-red-500 shrink-0" />}
+                      {active && isMainFeedTab && (
+                        t === 'Following'
+                          ? <FiUserPlus className="w-3 h-3 text-[#D4AF37] shrink-0" />
+                          : t === regional
+                            ? <FiMapPin className="w-3 h-3 text-[#7A8AF0] shrink-0" />
+                            : <FiMapPin className="w-3 h-3 text-green-400 shrink-0" />
+                      )}
                       <span className="truncate">{tabLabel}</span>
                     </span>
                   )}
