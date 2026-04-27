@@ -183,6 +183,7 @@ export default function StoriesPage() {
     const navigate = useNavigate();
     const location = useLocation();
     const openUserHandle = location.state?.openUserHandle;
+    const openStoryId = location.state?.openStoryId;
     const fromStories24Rail = location.state?.fromStories24Rail === true;
     const railHandles = Array.isArray(location.state?.railHandles)
         ? (location.state.railHandles as string[])
@@ -612,21 +613,21 @@ export default function StoriesPage() {
             const target = openUserHandle.trim().toLowerCase();
             const targetGroup = storyGroups.find(g => (g.userHandle || '').trim().toLowerCase() === target);
             if (targetGroup) {
-                startViewingStories(targetGroup);
+                startViewingStories(targetGroup, openStoryId);
                 return;
             }
             // If handle is missing, allow fallback to story list UI.
             setAutoOpeningStory(false);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [openUserHandle, storyGroups]);
+    }, [openUserHandle, openStoryId, storyGroups]);
 
     React.useEffect(() => {
         setAutoOpeningStory(!!openUserHandle);
     }, [openUserHandle]);
 
     // Handle starting to view stories for a specific user
-    async function startViewingStories(group: StoryGroup) {
+    async function startViewingStories(group: StoryGroup, preferredStoryId?: string) {
         if (!group || !user?.id) return;
 
         // Special handling for Gazetteer world highlights - use local mock stories only
@@ -635,11 +636,14 @@ export default function StoriesPage() {
                 g => g.userId === GAZETTEER_WORLD_USER_ID || g.userHandle === GAZETTEER_WORLD_HANDLE
             );
             if (groupIndex === -1) return;
+            const initialStoryIndex = preferredStoryId
+                ? Math.max(0, (group.stories || []).findIndex((story) => story.id === preferredStoryId))
+                : 0;
 
             setCurrentGroupIndex(groupIndex);
             currentGroupIndexRef.current = groupIndex;
-            setCurrentStoryIndex(0);
-            currentStoryIndexRef.current = 0;
+            setCurrentStoryIndex(initialStoryIndex);
+            currentStoryIndexRef.current = initialStoryIndex;
             setViewingStories(true);
             setAutoOpeningStory(false);
             setProgress(0);
@@ -653,10 +657,13 @@ export default function StoriesPage() {
         if (group.stories && group.stories.length > 0) {
             const existingIdx = storyGroups.findIndex(g => g.userId === group.userId || g.userHandle === group.userHandle);
             const groupIndex = existingIdx >= 0 ? existingIdx : 0;
+            const initialStoryIndex = preferredStoryId
+                ? Math.max(0, group.stories.findIndex((story) => story.id === preferredStoryId))
+                : 0;
             setCurrentGroupIndex(groupIndex);
             currentGroupIndexRef.current = groupIndex;
-            setCurrentStoryIndex(0);
-            currentStoryIndexRef.current = 0;
+            setCurrentStoryIndex(initialStoryIndex);
+            currentStoryIndexRef.current = initialStoryIndex;
             setViewingStories(true);
             setAutoOpeningStory(false);
             setProgress(0);
@@ -673,6 +680,9 @@ export default function StoriesPage() {
         // Find the group index in the original array, or add it if not found
         setStoryGroups(prev => {
             let groupIndex = prev.findIndex(g => g.userId === group.userId);
+            const initialStoryIndex = preferredStoryId
+                ? Math.max(0, stories.findIndex((story) => story.id === preferredStoryId))
+                : 0;
             
             if (groupIndex === -1) {
                 // Group not found, add it to the array
@@ -683,8 +693,8 @@ export default function StoriesPage() {
                 setTimeout(() => {
                     setCurrentGroupIndex(groupIndex);
                     currentGroupIndexRef.current = groupIndex;
-                    setCurrentStoryIndex(0);
-                    currentStoryIndexRef.current = 0;
+                    setCurrentStoryIndex(initialStoryIndex);
+                    currentStoryIndexRef.current = initialStoryIndex;
                     setViewingStories(true);
                     setAutoOpeningStory(false);
                     setProgress(0);
@@ -702,8 +712,8 @@ export default function StoriesPage() {
                 // Set the index immediately
                 setCurrentGroupIndex(groupIndex);
                 currentGroupIndexRef.current = groupIndex;
-                setCurrentStoryIndex(0);
-                currentStoryIndexRef.current = 0;
+                setCurrentStoryIndex(initialStoryIndex);
+                currentStoryIndexRef.current = initialStoryIndex;
                 setViewingStories(true);
                 setAutoOpeningStory(false);
                 setProgress(0);
@@ -1175,6 +1185,7 @@ export default function StoriesPage() {
                 await appendMessage(user.handle, toHandle, {
                     text: replyText,
                     imageUrl: storyThumb,
+                    storyId: currentStory.id,
                 });
                 // Optional: system echo for owner (kept same conversation id)
                 await appendMessage(toHandle, user.handle, { text: `You replied to their story`, isSystemMessage: true });

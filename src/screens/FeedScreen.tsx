@@ -8,8 +8,6 @@ import { useFocusEffect } from '@react-navigation/native';
 import {
     View,
     Text,
-    Animated,
-    Easing,
     StyleSheet,
     FlatList,
     RefreshControl,
@@ -69,20 +67,6 @@ function PillTabs({
     userRegional?: string;
     userNational?: string;
 }) {
-    const shimmerAnim = React.useRef(new Animated.Value(0)).current;
-    React.useEffect(() => {
-        const loop = Animated.loop(
-            Animated.timing(shimmerAnim, {
-                toValue: 1,
-                duration: 1800,
-                easing: Easing.linear,
-                useNativeDriver: false,
-            })
-        );
-        loop.start();
-        return () => loop.stop();
-    }, [shimmerAnim]);
-
     const mainFeedTabs: Tab[] = [userRegional, userNational, 'Following'];
     const activeMainFeedTab = mainFeedTabs.includes(active) ? active : null;
     const orderedMainFeedTabs = activeMainFeedTab
@@ -114,31 +98,14 @@ function PillTabs({
                                         style={styles.activeMainFeedLocationIcon}
                                     />
                                 )}
-                                {isActive && isMainFeedTab ? (
-                                    <Animated.Text
-                                        style={[
-                                            styles.tabText,
-                                            styles.activeTabText,
-                                            {
-                                                color: shimmerAnim.interpolate({
-                                                    inputRange: [0, 0.5, 1],
-                                                    outputRange: ['rgba(255,255,255,0.45)', '#FFFFFF', 'rgba(255,255,255,0.45)'],
-                                                }),
-                                            },
-                                        ]}
-                                    >
-                                        {t}
-                                    </Animated.Text>
-                                ) : (
-                                    <Text
-                                        style={[
-                                            styles.tabText,
-                                            isActive ? styles.activeTabText : styles.inactiveTabText,
-                                        ]}
-                                    >
-                                        {t}
-                                    </Text>
-                                )}
+                                <Text
+                                    style={[
+                                        styles.tabText,
+                                        isActive ? styles.activeTabText : styles.inactiveTabText,
+                                    ]}
+                                >
+                                    {t}
+                                </Text>
                                 {isActive && !isMainFeedTab && (
                                     <Icon name="eye" size={15} color="#FFFFFF" style={styles.eyeIcon} />
                                 )}

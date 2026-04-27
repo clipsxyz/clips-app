@@ -10,6 +10,8 @@ export interface Notification {
     message?: string;
     postId?: string;
     commentId?: string;
+    storyId?: string;
+    imageUrl?: string;
     chatGroupId?: string;
     groupName?: string;
     timestamp: number;
@@ -127,6 +129,8 @@ export async function getNotifications(forHandle: string): Promise<Notification[
                 message: n.message || undefined,
                 postId: n.post_id || undefined,
                 commentId: n.comment_id || undefined,
+                storyId: n.story_id || undefined,
+                imageUrl: n.image_url || undefined,
                 chatGroupId: n.chat_group_id || undefined,
                 groupName: n.group_name || undefined,
                 timestamp: n.created_at ? new Date(n.created_at).getTime() : Date.now(),

@@ -5,7 +5,7 @@ import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { getAvatarForHandle } from '../api/users';
 import { getNotifications, type Notification, type NotificationType, markNotificationRead, markAllNotificationsRead, getUnreadNotificationCount, deleteNotification } from '../api/notifications';
-import { getStoryInsightsForUser, type StoryInsight, fetchFollowedUsersStoryGroups } from '../api/stories';
+import { getStoryInsightsForUser, type StoryInsight, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle } from '../api/stories';
 import { listConversations, seedMockDMs, type ConversationSummary, pinConversation, unpinConversation, acceptMessageRequest, muteConversation, unmuteConversation, deleteConversation, markConversationRead, markConversationUnread } from '../api/messages';
 import { timeAgo } from '../utils/timeAgo';
 import Swal from 'sweetalert2';
@@ -375,6 +375,7 @@ export default function InboxPage() {
     const { user } = useAuth();
     const [notifications, setNotifications] = React.useState<Notification[]>([]);
     const [insights, setInsights] = React.useState<StoryInsight[]>([]);
+    const [unavailableStoryIds, setUnavailableStoryIds] = React.useState<Set<string>>(new Set());
     const [storyGroups, setStoryGroups] = React.useState<StoryGroup[]>([]);
     const [items, setItems] = React.useState<ConversationSummary[]>([]);
     const [loading, setLoading] = React.useState(true);
@@ -508,6 +509,8 @@ export default function InboxPage() {
                         fromHandle: conv.otherHandle,
                         toHandle: user.handle,
                         message: lastMsg.text || '',
+                        storyId: lastMsg.storyId,
+                        imageUrl: lastMsg.storyId ? lastMsg.imageUrl : undefined,
                         timestamp: lastMsg.timestamp || Date.now(),
                         read: conv.unread === 0 // Mark as read if no unread messages
                     };
@@ -515,6 +518,39 @@ export default function InboxPage() {
             
             // Combine notifications and conversations, sorted by timestamp (newest first)
             const allNotifications = [...notifs, ...conversationNotifications].sort((a, b) => b.timestamp - a.timestamp);
+
+            // Resolve whether story-reply notifications still point to active stories.
+            const storyReplyNotifs = allNotifications.filter((n) => !!n.storyId && !!n.fromHandle && !n.chatGroupId);
+            if (storyReplyNotifs.length > 0) {
+                const handles = Array.from(new Set(storyReplyNotifs.map((n) => n.fromHandle)));
+                const groups = await Promise.all(
+                    handles.map(async (handle) => {
+                        try {
+                            const g = await fetchStoryGroupByHandle(handle);
+                            return { handle, group: g };
+                        } catch {
+                            return { handle, group: null };
+                        }
+                    })
+                );
+                const activeStoryIdsByHandle = new Map<string, Set<string>>();
+                groups.forEach(({ handle, group }) => {
+                    activeStoryIdsByHandle.set(
+                        handle,
+                        new Set((group?.stories || []).map((s) => s.id))
+                    );
+                });
+                const unavailable = new Set<string>();
+                storyReplyNotifs.forEach((n) => {
+                    const storyId = n.storyId;
+                    if (!storyId) return;
+                    const activeIds = activeStoryIdsByHandle.get(n.fromHandle);
+                    if (!activeIds || !activeIds.has(storyId)) unavailable.add(storyId);
+                });
+                setUnavailableStoryIds(unavailable);
+            } else {
+                setUnavailableStoryIds(new Set());
+            }
             
             setNotifications(allNotifications);
             setInsights(storyInsights);
@@ -792,10 +828,6 @@ export default function InboxPage() {
         }
     }, [user?.handle, loadData]);
 
-    if (!user) {
-        return <div className="p-6">Please sign in to view notifications.</div>;
-    }
-
     const unreadNotifications = notifications.filter(n => !n.read).length;
     const unreadMessagesTotal = items.reduce((sum, c) => sum + c.unread, 0);
     const normalizedQuery = conversationQuery.trim().toLowerCase();
@@ -820,6 +852,10 @@ export default function InboxPage() {
         [insights, seenInsightIds]
     );
 
+    if (!user) {
+        return <div className="p-6">Please sign in to view notifications.</div>;
+    }
+
     const handleNotificationClick = async (notif: Notification) => {
         if (!notif.read && user?.handle) {
             await markNotificationRead(notif.id, user.handle);
@@ -838,6 +874,13 @@ export default function InboxPage() {
     };
 
     const formatNotificationMessage = (notif: Notification): string => {
+        if (notif.storyId) {
+            if (unavailableStoryIds.has(notif.storyId)) {
+                return 'Story unavailable';
+            }
+            const replyPreview = (notif.message || '').trim();
+            return replyPreview ? `Replied to your 24hr story: ${replyPreview}` : 'Replied to your 24hr story';
+        }
         switch (notif.type) {
             case 'sticker':
                 return `Sent you a sticker: ${notif.message || ''}`;
@@ -1452,6 +1495,35 @@ export default function InboxPage() {
                                         <div className="text-xs text-gray-500 truncate">
                                             {formatNotificationMessage(notif)}
                                         </div>
+                                        {notif.storyId && (
+                                            unavailableStoryIds.has(notif.storyId) ? (
+                                                <div className="mt-1 inline-flex items-center gap-1.5 rounded-md border border-red-500/30 bg-red-500/10 px-1.5 py-1">
+                                                    <span className="text-[10px] text-red-300">Story unavailable</span>
+                                                </div>
+                                            ) : notif.imageUrl ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        navigate('/stories', {
+                                                            state: {
+                                                                openUserHandle: notif.fromHandle,
+                                                                openStoryId: notif.storyId,
+                                                            },
+                                                        });
+                                                    }}
+                                                    className="mt-1 inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-1.5 py-1 hover:bg-white/10 transition-colors"
+                                                    aria-label="Open story that was replied to"
+                                                >
+                                                    <img
+                                                        src={notif.imageUrl}
+                                                        alt="Story replied to"
+                                                        className="h-7 w-7 rounded object-cover"
+                                                    />
+                                                    <span className="text-[10px] text-white/70">Story context</span>
+                                                </button>
+                                            ) : null
+                                        )}
                                     </div>
                                     <div className="flex flex-col items-end gap-1">
                                         <div className="text-[10px] text-gray-400">
