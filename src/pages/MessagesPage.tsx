@@ -62,14 +62,25 @@ interface MessageUI extends ChatMessage {
     read?: boolean;
 }
 
-function isDmVideoAttachmentUrl(url: string | undefined): boolean {
+function isLikelyImageUrl(url: string | undefined): boolean {
     if (!url) return false;
-    return /\.(mp4|webm|m4v|mov)(\?|#|$)/i.test(url.trim());
+    const trimmed = url.trim();
+    return /^data:image\//i.test(trimmed) || /\.(png|jpe?g|gif|webp|avif|bmp|svg)(\?|#|$)/i.test(trimmed);
 }
 
-/** Story-reply may send a raw MP4 when a frame cannot be captured (CORS); `<img>` would be blank. */
+function isLikelyVideoUrl(url: string | undefined): boolean {
+    if (!url) return false;
+    const trimmed = url.trim();
+    return /^data:video\//i.test(trimmed) || /\.(mp4|webm|m4v|mov)(\?|#|$)/i.test(trimmed);
+}
+
+/** Story-reply media can be mp4 URL without extension; try video first unless clearly image. */
 function DmImageOrVideoAttachment({ url, alt, className }: { url: string; alt: string; className?: string }) {
-    if (isDmVideoAttachmentUrl(url)) {
+    const [videoFailed, setVideoFailed] = React.useState(false);
+    const likelyImage = isLikelyImageUrl(url);
+    const likelyVideo = isLikelyVideoUrl(url);
+
+    if (!likelyImage && !videoFailed) {
         return (
             <video
                 src={url}
@@ -77,8 +88,12 @@ function DmImageOrVideoAttachment({ url, alt, className }: { url: string; alt: s
                 muted
                 playsInline
                 preload="metadata"
+                onError={() => setVideoFailed(true)}
             />
         );
+    }
+    if (likelyVideo && videoFailed) {
+        return <div className={`${className || ''} flex items-center justify-center text-[10px] font-semibold text-white/85 bg-black/50`}>MP4</div>;
     }
     return <img src={url} alt={alt} className={className} />;
 }
@@ -2675,18 +2690,18 @@ export default function MessagesPage() {
                                                                     <div className="flex items-start gap-2">
                                                                         {msg.replyTo.imageUrl && (
                                                                             <div className="w-12 h-12 rounded overflow-hidden flex-shrink-0 border border-white/20 bg-black">
-                                                                                {(msg.replyTo as { mediaType?: 'image' | 'video' }).mediaType === 'video' ? (
-                                                                                    <video src={msg.replyTo.imageUrl} className="w-full h-full object-cover" muted playsInline preload="metadata" />
-                                                                                ) : (
-                                                                                    <img src={msg.replyTo.imageUrl} alt="Reply preview" className="w-full h-full object-cover" />
-                                                                                )}
+                                                                                <DmImageOrVideoAttachment
+                                                                                    url={msg.replyTo.imageUrl}
+                                                                                    alt="Reply preview"
+                                                                                    className="w-full h-full object-cover"
+                                                                                />
                                                                             </div>
                                                                         )}
                                                                         <div className="flex-1 min-w-0">
                                                                             <div className="text-xs text-white/70 font-medium mb-0.5">{msg.replyTo.senderHandle}</div>
                                                                             <div className="text-xs text-white/60 truncate">
                                                                                 {msg.replyTo.imageUrl
-                                                                                    ? ((msg.replyTo as { mediaType?: 'image' | 'video' }).mediaType === 'video' ? 'Video' : 'Photo')
+                                                                                    ? (isLikelyImageUrl(msg.replyTo.imageUrl) ? 'Photo' : 'Video')
                                                                                     : (msg.replyTo.text || 'Message')}
                                                                             </div>
                                                                         </div>
@@ -3129,18 +3144,18 @@ export default function MessagesPage() {
                                                                         <div className="flex items-start gap-2">
                                                                             {msg.replyTo.imageUrl && (
                                                                                 <div className="w-12 h-12 rounded overflow-hidden flex-shrink-0 border border-white/20 bg-black">
-                                                                                    {(msg.replyTo as { mediaType?: 'image' | 'video' }).mediaType === 'video' ? (
-                                                                                        <video src={msg.replyTo.imageUrl} className="w-full h-full object-cover" muted playsInline preload="metadata" />
-                                                                                    ) : (
-                                                                                        <img src={msg.replyTo.imageUrl} alt="Reply preview" className="w-full h-full object-cover" />
-                                                                                    )}
+                                                                                    <DmImageOrVideoAttachment
+                                                                                        url={msg.replyTo.imageUrl}
+                                                                                        alt="Reply preview"
+                                                                                        className="w-full h-full object-cover"
+                                                                                    />
                                                                                 </div>
                                                                             )}
                                                                             <div className="flex-1 min-w-0">
                                                                                 <div className="text-xs text-white/70 font-medium mb-0.5">{msg.replyTo.senderHandle}</div>
                                                                                 <div className="text-xs text-white/60 truncate">
                                                                                     {msg.replyTo.imageUrl
-                                                                                        ? ((msg.replyTo as { mediaType?: 'image' | 'video' }).mediaType === 'video' ? 'Video' : 'Photo')
+                                                                                        ? (isLikelyImageUrl(msg.replyTo.imageUrl) ? 'Photo' : 'Video')
                                                                                         : (msg.replyTo.text || 'Message')}
                                                                                 </div>
                                                                             </div>

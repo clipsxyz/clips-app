@@ -25,6 +25,43 @@ function inboxConversationRowId(conv: ConversationSummary): string {
     return conv.otherHandle;
 }
 
+function StoryReplyThumb({ imageUrl }: { imageUrl: string }) {
+    const isDataImage = /^data:image\//i.test(imageUrl);
+    const isDataVideo = /^data:video\//i.test(imageUrl);
+    const looksLikeImageFile = /\.(png|jpe?g|gif|webp|avif|bmp|svg)(\?|#|$)/i.test(imageUrl);
+    const shouldUseImage = isDataImage || (!isDataVideo && looksLikeImageFile);
+    const [videoErrored, setVideoErrored] = React.useState(false);
+
+    if (!shouldUseImage) {
+        return (
+            <div className="relative h-7 w-7 rounded overflow-hidden bg-black/50">
+                {!videoErrored ? (
+                    <video
+                        src={imageUrl}
+                        className="h-full w-full object-cover"
+                        muted
+                        playsInline
+                        preload="metadata"
+                        onError={() => setVideoErrored(true)}
+                    />
+                ) : (
+                    <div className="h-full w-full flex items-center justify-center text-white/80 text-[10px] font-semibold">
+                        MP4
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    return (
+        <img
+            src={imageUrl}
+            alt="Story replied to"
+            className="h-7 w-7 rounded object-cover"
+        />
+    );
+}
+
 // Conversation Item Component
 function ConversationItem({ 
     conv, 
@@ -1521,11 +1558,7 @@ export default function InboxPage() {
                                                     className="mt-1 inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-1.5 py-1 hover:bg-white/10 transition-colors"
                                                     aria-label="Open story that was replied to"
                                                 >
-                                                    <img
-                                                        src={notif.imageUrl}
-                                                        alt="Story replied to"
-                                                        className="h-7 w-7 rounded object-cover"
-                                                    />
+                                                    <StoryReplyThumb imageUrl={notif.imageUrl} />
                                                     <span className="text-[10px] text-white/70">
                                                         {notif.storyContextOwner ? `Shared from @${notif.storyContextOwner}` : 'Story context'}
                                                     </span>
