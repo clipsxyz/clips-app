@@ -1,6 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { FiHome, FiUser, FiUserPlus, FiUserX, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiHeart, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX, FiClock, FiSend } from 'react-icons/fi';
 import { GiGreekTemple } from 'react-icons/gi';
 import { LuFlame, LuPlus } from 'react-icons/lu';
@@ -483,7 +484,12 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
   // Main location / feed tabs
   const hasAnyNotifications = notificationCount > 0 || insightsCount > 0 || questionsCount > 0;
   const showNotificationsTab = true;
-  const tabs: Tab[] = [regional, national, 'Following', 'Boost', ...(showNotificationsTab ? ['__notifications__'] : [])];
+  const coreFeedTabs: Tab[] = [regional, national, 'Following'];
+  const activeCoreFeedTab = coreFeedTabs.includes(props.active) ? props.active : null;
+  const orderedCoreFeedTabs: Tab[] = activeCoreFeedTab
+    ? [activeCoreFeedTab, ...coreFeedTabs.filter((tab) => tab !== activeCoreFeedTab)]
+    : coreFeedTabs;
+  const tabs: Tab[] = [...orderedCoreFeedTabs, 'Boost', ...(showNotificationsTab ? ['__notifications__'] : [])];
 
 
   // Easing function for smooth animation (ease-out cubic)
@@ -546,6 +552,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
           {tabs.map(t => {
           const isNotificationsTab = t === '__notifications__';
           const isBoostTab = t === 'Boost';
+          const isMainFeedTab = t === regional || t === national || t === 'Following';
           const active = props.active === t || (isNotificationsTab && location.pathname === '/inbox');
           const id = `tab-${t}`;
           const panelId = `panel-${t}`;
@@ -577,11 +584,13 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
 
           if (active) {
             // Check if this tab should have shimmer animation (regional, national, or Following)
-            const shouldShimmer = t === regional || t === national || t === 'Following' || t === 'Boost';
+            const shouldShimmer = isMainFeedTab || t === 'Boost';
 
             return (
-              <button
+              <motion.button
                 key={t}
+                layout
+                transition={{ type: 'spring', stiffness: 420, damping: 34, mass: 0.7 }}
                 id={id}
                 role="tab"
                 aria-selected={active}
@@ -631,32 +640,63 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                   ) : isBoostTab ? (
                     <FeedBoostTabBadge active />
                   ) : shouldShimmer ? (
-                    <span
-                      className="truncate"
-                      style={{
-                        background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
-                        backgroundSize: '200% 100%',
-                        WebkitBackgroundClip: 'text',
-                        backgroundClip: 'text',
-                        WebkitTextFillColor: 'transparent',
-                        color: 'transparent',
-                        animation: 'shimmer 6s linear infinite',
-                        display: 'inline-block'
-                      }}
-                    >
-                      {tabLabel}
+                    <span className="inline-flex items-center gap-2">
+                      {active && isMainFeedTab && <span className="inline-block w-2 h-2 rounded-full bg-red-500 shrink-0" />}
+                      <span
+                        className="truncate"
+                        style={{
+                          background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
+                          backgroundSize: '200% 100%',
+                          WebkitBackgroundClip: 'text',
+                          backgroundClip: 'text',
+                          WebkitTextFillColor: 'transparent',
+                          color: 'transparent',
+                          animation: 'shimmer 6s linear infinite',
+                          display: 'inline-block'
+                        }}
+                      >
+                        {tabLabel}
+                      </span>
                     </span>
                   ) : (
-                    <span className="truncate">{tabLabel}</span>
+                    <span className="inline-flex items-center gap-2">
+                      {active && isMainFeedTab && <span className="inline-block w-2 h-2 rounded-full bg-red-500 shrink-0" />}
+                      <span className="truncate">{tabLabel}</span>
+                    </span>
                   )}
                 </span>
-              </button>
+                {active && isMainFeedTab && (
+                  <span
+                    className="pointer-events-none absolute left-1/2 -bottom-2 z-20 -translate-x-1/2"
+                    style={{
+                      width: 0,
+                      height: 0,
+                      borderLeft: '6px solid transparent',
+                      borderRight: '6px solid transparent',
+                      borderTop: '7px solid white',
+                    }}
+                  >
+                    <span
+                      className="absolute -left-[5px] -top-[7px]"
+                      style={{
+                        width: 0,
+                        height: 0,
+                        borderLeft: '5px solid transparent',
+                        borderRight: '5px solid transparent',
+                        borderTop: '6px solid #000',
+                      }}
+                    />
+                  </span>
+                )}
+              </motion.button>
             );
           }
 
           return (
-            <button
+            <motion.button
               key={t}
+              layout
+              transition={{ type: 'spring', stiffness: 420, damping: 34, mass: 0.7 }}
               id={id}
               role="tab"
               aria-selected={active}
@@ -692,10 +732,12 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                 ) : isBoostTab ? (
                   <FeedBoostTabBadge />
                 ) : (
-                  tabLabel
+                  <span className="inline-flex items-center gap-2">
+                    <span className="truncate">{tabLabel}</span>
+                  </span>
                 )}
               </span>
-            </button>
+            </motion.button>
           );
           })}
         </div>
