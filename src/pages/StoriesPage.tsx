@@ -418,10 +418,10 @@ export default function StoriesPage() {
             setPaused(true);
             pausedRef.current = true;
         } else {
-            setPaused(false);
-            pausedRef.current = false;
+            // Keep paused if delivery animation or profile card is still active.
+            resumeStoryIfAllowed();
         }
-    }, [showReplyComposer, viewingStories]);
+    }, [showReplyComposer, viewingStories, deliveryFx, showStoryProfileCard]);
 
     React.useEffect(() => {
         if (viewingStories) {
@@ -1264,8 +1264,7 @@ export default function StoriesPage() {
             }
             setReplyText('');
             setShowReplyComposer(false);
-            setPaused(false);
-            pausedRef.current = false;
+            // Do not unpause here; delivery animation controls resume timing.
         } catch (error) {
             console.error('Error adding reply:', error);
         }

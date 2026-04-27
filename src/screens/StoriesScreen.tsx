@@ -46,6 +46,7 @@ export default function StoriesScreen({ route, navigation }: any) {
     const [paused, setPaused] = useState(false);
     const [isMuted, setIsMuted] = useState(true);
     const [showReplyModal, setShowReplyModal] = useState(false);
+    const [isSendingReply, setIsSendingReply] = useState(false);
     const [showShareModal, setShowShareModal] = useState(false);
     const [showInsightsModal, setShowInsightsModal] = useState(false);
     const [insightsTab, setInsightsTab] = useState<'viewers' | 'replies'>('viewers');
@@ -254,9 +255,11 @@ export default function StoriesScreen({ route, navigation }: any) {
     const handleReply = async () => {
         const currentGroup = storyGroups[currentGroupIndex];
         const currentStory = currentGroup?.stories[currentStoryIndex];
-        if (!currentStory || !user?.id || !user?.handle || !replyText.trim()) return;
+        if (!currentStory || !user?.id || !user?.handle || !replyText.trim() || isSendingReply) return;
         
         try {
+            setIsSendingReply(true);
+            setPaused(true);
             await addStoryReply(currentStory.id, user.id, user.handle, replyText);
             if (currentGroup?.userHandle) {
                 const sharedPost =
@@ -329,6 +332,11 @@ export default function StoriesScreen({ route, navigation }: any) {
             setShowReplyModal(false);
         } catch (error) {
             console.error('Error adding reply:', error);
+        } finally {
+            setTimeout(() => {
+                setIsSendingReply(false);
+                setPaused(false);
+            }, 900);
         }
     };
 
@@ -363,6 +371,13 @@ export default function StoriesScreen({ route, navigation }: any) {
         markStoryViewed(currentStory.id, user.id, user.handle).catch(console.error);
         incrementStoryViews(currentStory.id).catch(console.error);
     }, [currentGroupIndex, currentStoryIndex, viewingStories]);
+
+    useEffect(() => {
+        if (!viewingStories) return;
+        if (showReplyModal || isSendingReply) {
+            setPaused(true);
+        }
+    }, [viewingStories, showReplyModal, isSendingReply]);
 
     useEffect(() => {
         if (viewingStories && !paused) {
@@ -584,7 +599,11 @@ export default function StoriesScreen({ route, navigation }: any) {
                 visible={showReplyModal}
                 transparent
                 animationType="slide"
-                onRequestClose={() => setShowReplyModal(false)}
+                onRequestClose={() => {
+                    if (isSendingReply) return;
+                    setShowReplyModal(false);
+                    setPaused(false);
+                }}
             >
                 <View style={styles.replyModal}>
                     <View style={styles.replyModalContent}>
@@ -599,16 +618,22 @@ export default function StoriesScreen({ route, navigation }: any) {
                         />
                         <View style={styles.replyModalActions}>
                             <TouchableOpacity
-                                onPress={() => setShowReplyModal(false)}
+                                onPress={() => {
+                                    if (isSendingReply) return;
+                                    setShowReplyModal(false);
+                                    setPaused(false);
+                                }}
                                 style={styles.replyCancelButton}
+                                disabled={isSendingReply}
                             >
                                 <Text style={styles.replyCancelText}>Cancel</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 onPress={handleReply}
-                                style={styles.replySendButton}
+                                style={[styles.replySendButton, isSendingReply && styles.replySendButtonDisabled]}
+                                disabled={isSendingReply || !replyText.trim()}
                             >
-                                <Text style={styles.replySendText}>Send</Text>
+                                <Text style={styles.replySendText}>{isSendingReply ? 'Sending...' : 'Send'}</Text>
                             </TouchableOpacity>
                         </View>
                     </View>
@@ -1000,6 +1025,9 @@ const styles = StyleSheet.create({
         borderRadius: 8,
         backgroundColor: '#3B82F6',
         alignItems: 'center',
+    },
+    replySendButtonDisabled: {
+        opacity: 0.6,
     },
     replySendText: {
         color: '#FFFFFF',
