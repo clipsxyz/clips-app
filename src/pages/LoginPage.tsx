@@ -4,6 +4,7 @@ import { useAuth } from '../context/Auth';
 import { FiMapPin, FiUser, FiGlobe, FiX, FiEye, FiEyeOff, FiFileText, FiShield, FiCheck } from 'react-icons/fi';
 import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMaps';
 import { loginUser } from '../api/client';
+import { consumePublicShareReturnPath } from '../utils/publicShare';
 
 const LOCAL_REGISTRATIONS_KEY = 'gazetteer_local_registrations';
 
@@ -46,6 +47,21 @@ export default function LoginPage() {
   const [loginLoading, setLoginLoading] = React.useState(false);
   const [loginEmail, setLoginEmail] = React.useState('');
   const [loginPassword, setLoginPassword] = React.useState('');
+
+  React.useEffect(() => {
+    const modeParam = searchParams.get('mode');
+    if (modeParam === 'login' || modeParam === 'signup') {
+      setMode(modeParam);
+    }
+  }, [searchParams]);
+
+  const getPostAuthRedirect = React.useCallback(() => {
+    const returnPath = consumePublicShareReturnPath();
+    if (returnPath && returnPath.startsWith('/p/')) {
+      return returnPath;
+    }
+    return '/feed';
+  }, []);
   
   // Get step from URL parameter, default to 1 - use URL as source of truth
   const stepFromUrl = parseInt(searchParams.get('step') || '1', 10);
@@ -295,7 +311,7 @@ export default function LoginPage() {
       const userDataForStorage = { ...userData, avatarUrl: undefined };
       saveLocalRegistration(email.trim(), password, userDataForStorage);
       login(userData);
-      nav('/feed', { replace: true, state: { fromSignup: true } });
+      nav(getPostAuthRedirect(), { replace: true, state: { fromSignup: true } });
     } catch (err: any) {
       console.error('Sign up error:', err);
       setSignupError(err?.message || 'Something went wrong. Try again.');
@@ -331,7 +347,7 @@ export default function LoginPage() {
               : 'personal',
         };
         login(userData);
-        nav('/feed', { replace: true });
+        nav(getPostAuthRedirect(), { replace: true });
       }
     } catch (err: any) {
       const isConnectionError =
@@ -346,7 +362,7 @@ export default function LoginPage() {
       const stored = localReg[key];
       if (stored && stored.password === loginPassword) {
         login(stored.userData);
-        nav('/feed', { replace: true });
+        nav(getPostAuthRedirect(), { replace: true });
         return;
       }
       // Also try current user in localStorage (e.g. signed up before we stored localRegistrations)
@@ -356,7 +372,7 @@ export default function LoginPage() {
           const u = JSON.parse(savedUser);
           if (u?.email?.toLowerCase() === key && u?.password === loginPassword) {
             login(u);
-            nav('/feed', { replace: true });
+            nav(getPostAuthRedirect(), { replace: true });
             return;
           }
         }

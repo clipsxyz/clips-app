@@ -20,6 +20,11 @@ use Carbon\Carbon;
 
 class PostController extends Controller
 {
+    private function buildPublicShareUrl(string $token): string
+    {
+        $base = rtrim((string) (config('app.frontend_url') ?: config('app.url') ?: ''), '/');
+        return $base !== '' ? ($base . '/p/' . $token) : ('/p/' . $token);
+    }
     /**
      * Normalize a post model for feed / suggestion API responses (snake_case + relations).
      */
@@ -27,6 +32,7 @@ class PostController extends Controller
     {
         $postData = $post->toArray();
         $attrs = $post->getAttributes();
+        $postData['public_share_token'] = $post->public_share_token;
         $postData['venue'] = $post->venue;
         $postData['landmark'] = $post->landmark;
         $postData['taggedUsers'] = $post->relationLoaded('taggedUsers')
@@ -291,6 +297,50 @@ class PostController extends Controller
         $post = $query->findOrFail($id);
         $userModel = $hasViewer ? User::find($userId) : null;
         return response()->json(self::toApiArray($post, $userModel));
+    }
+
+    /**
+     * Get public post preview by share token.
+     */
+    public function showPublicByToken(Request $request, string $token): JsonResponse
+    {
+        if (!is_string($token) || strlen($token) < 16) {
+            return response()->json(['error' => 'Post not found'], 404);
+        }
+
+        $post = Post::query()
+            ->with(['user:id,handle,display_name,avatar_url'])
+            ->withCount(['likes', 'comments', 'shares', 'views', 'reclips'])
+            ->where('public_share_token', $token)
+            ->first();
+
+        if (!$post) {
+            return response()->json(['error' => 'Post not found'], 404);
+        }
+
+        // Public preview payload only (safe guest fields).
+        return response()->json([
+            'id' => $post->id,
+            'public_share_token' => $post->public_share_token,
+            'user_handle' => $post->user_handle,
+            'display_name' => $post->user?->display_name,
+            'avatar_url' => $post->user?->avatar_url,
+            'text_content' => $post->text_content,
+            'caption' => $post->caption,
+            'image_text' => $post->image_text,
+            'media_url' => $post->media_url,
+            'media_type' => $post->media_type,
+            'media_items' => $post->media_items,
+            'location_label' => $post->location_label,
+            'venue' => $post->venue,
+            'landmark' => $post->landmark,
+            'likes_count' => (int) $post->likes_count,
+            'comments_count' => (int) $post->comments_count,
+            'shares_count' => (int) $post->shares_count,
+            'views_count' => (int) $post->views_count,
+            'reclips_count' => (int) $post->reclips_count,
+            'created_at' => optional($post->created_at)->toISOString(),
+        ]);
     }
 
     /**
@@ -640,14 +690,56 @@ class PostController extends Controller
 
         $user = Auth::user();
         $post = Post::findOrFail($id);
+        if (empty($post->public_share_token)) {
+            $post->public_share_token = Str::random(48);
+            $post->save();
+        }
 
         DB::transaction(function () use ($user, $post) {
-            $user->shares()->create(['post_id' => $post->id]);
+            if ($user instanceof User) {
+                $user->shares()->syncWithoutDetaching([$post->id]);
+            }
             $post->increment('shares_count');
             BoostAnalyticsService::incrementForPost($post->id, 'shares_count');
         });
 
-        return response()->json(['success' => true]);
+        $post->load(['user:id,handle,display_name,avatar_url', 'taggedUsers:id,handle,display_name,avatar_url']);
+        $post->loadCount(['likes', 'comments', 'shares', 'views', 'reclips']);
+        $postData = self::toApiArray($post, $user instanceof User ? $user : null);
+        $postData['public_share_url'] = $this->buildPublicShareUrl($post->public_share_token);
+        $postData['success'] = true;
+
+        return response()->json($postData);
+    }
+
+    /**
+     * Regenerate a post's public share token.
+     */
+    public function regenerateShareToken(Request $request, string $id): JsonResponse
+    {
+        $validator = Validator::make(['id' => $id], [
+            'id' => 'required|uuid|exists:posts,id'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $user = Auth::user();
+        $post = Post::findOrFail($id);
+
+        if (!$user instanceof User || $post->user_id !== $user->id) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        $post->public_share_token = Str::random(48);
+        $post->save();
+
+        return response()->json([
+            'success' => true,
+            'public_share_token' => $post->public_share_token,
+            'public_share_url' => $this->buildPublicShareUrl($post->public_share_token),
+        ]);
     }
 
     /**

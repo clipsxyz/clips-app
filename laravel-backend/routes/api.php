@@ -204,6 +204,10 @@ Route::prefix('posts')->group(function () {
     Route::post('/{id}/view', [PostController::class, 'incrementView']); // Public - track views without auth
 });
 
+// Public permanent share-link preview endpoint (guest-safe payload).
+Route::get('/public/posts/{token}', [PostController::class, 'showPublicByToken'])
+    ->middleware('throttle:30,1');
+
 // Protected routes
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/boost/analytics/{postId}', [BoostController::class, 'analytics']);
@@ -222,6 +226,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/{id}', [PostController::class, 'destroy']);
         Route::post('/{id}/like', [PostController::class, 'toggleLike']);
         Route::post('/{id}/share', [PostController::class, 'share']);
+        Route::post('/{id}/share-token/regenerate', [PostController::class, 'regenerateShareToken']);
         Route::post('/{id}/reclip', [PostController::class, 'reclip']);
     });
 

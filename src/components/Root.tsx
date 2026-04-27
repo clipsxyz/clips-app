@@ -32,6 +32,7 @@ import GalleryPreviewPage from '../pages/GalleryPreviewPage';
 import ReplyQuestionPage from '../pages/ReplyQuestionPage';
 import TermsPage from '../pages/TermsPage';
 import ContentPreferencesPage from '../pages/ContentPreferencesPage';
+import PublicPostPage from '../pages/PublicPostPage';
 import PortraitEnforcer from './PortraitEnforcer';
 
 
@@ -64,6 +65,8 @@ export default function Root() {
                         <Routes>
                             <Route path="/splash" element={<SplashPage />} />
                             <Route path="/landing" element={<LandingPage />} />
+                            <Route path="/p/:token" element={<PublicPostPage />} />
+                            <Route path="/post/:id" element={<PublicPostPage />} />
                             <Route path="/" element={<App />}>
                                 <Route index element={<Navigate to="/splash" replace />} />
                                 <Route path="feed" element={<FeedPage />} />

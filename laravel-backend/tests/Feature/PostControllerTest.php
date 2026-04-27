@@ -126,6 +126,89 @@ class PostControllerTest extends TestCase
         $this->assertEquals($post->id, $response->json('id'));
     }
 
+    public function test_can_get_public_post_preview_by_token(): void
+    {
+        $user = User::factory()->create();
+        $post = Post::factory()->create([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+            'public_share_token' => 'public-token-1234567890',
+        ]);
+
+        $response = $this->getJson("/api/public/posts/{$post->public_share_token}");
+
+        $response->assertStatus(200)
+            ->assertJsonStructure([
+                'id',
+                'public_share_token',
+                'user_handle',
+                'text_content',
+                'media_url',
+                'likes_count',
+                'comments_count',
+                'shares_count',
+                'views_count',
+                'created_at',
+            ]);
+
+        $this->assertEquals($post->id, $response->json('id'));
+        $this->assertEquals($post->public_share_token, $response->json('public_share_token'));
+    }
+
+    public function test_returns_404_for_invalid_public_post_token(): void
+    {
+        $response = $this->getJson('/api/public/posts/invalid-token-not-found');
+        $response->assertStatus(404);
+    }
+
+    public function test_share_assigns_public_token_and_returns_public_url(): void
+    {
+        $user = User::factory()->create();
+        $post = Post::factory()->create([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+            'public_share_token' => null,
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')->postJson("/api/posts/{$post->id}/share");
+
+        $response->assertStatus(200)
+            ->assertJsonStructure([
+                'id',
+                'public_share_token',
+                'public_share_url',
+                'shares_count',
+                'success',
+            ]);
+
+        $post->refresh();
+        $this->assertNotNull($post->public_share_token);
+        $this->assertSame($post->public_share_token, $response->json('public_share_token'));
+    }
+
+    public function test_owner_can_regenerate_share_token(): void
+    {
+        $user = User::factory()->create();
+        $post = Post::factory()->create([
+            'user_id' => $user->id,
+            'user_handle' => $user->handle,
+            'public_share_token' => 'oldtoken1234567890',
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson("/api/posts/{$post->id}/share-token/regenerate");
+
+        $response->assertStatus(200)
+            ->assertJsonStructure([
+                'success',
+                'public_share_token',
+                'public_share_url',
+            ]);
+
+        $post->refresh();
+        $this->assertNotSame('oldtoken1234567890', $post->public_share_token);
+    }
+
     public function test_returns_404_for_nonexistent_post(): void
     {
         $response = $this->getJson('/api/posts/' . (string) \Illuminate\Support\Str::uuid());

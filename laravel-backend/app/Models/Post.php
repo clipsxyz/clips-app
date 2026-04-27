@@ -21,10 +21,14 @@ class Post extends Model
             if (empty($model->id)) {
                 $model->id = (string) Str::uuid();
             }
+            if (empty($model->public_share_token)) {
+                $model->public_share_token = Str::random(48);
+            }
         });
     }
 
     protected $fillable = [
+        'public_share_token',
         'user_id',
         'user_handle',
         'text_content',

@@ -175,6 +175,10 @@ export async function fetchPost(postId: string, userId?: string) {
     return apiRequest(`/posts/${postId}?${params}`);
 }
 
+export async function fetchPublicPostByToken(token: string) {
+    return apiRequest(`/public/posts/${encodeURIComponent(token)}`);
+}
+
 export async function fetchStoriesPage(cursor: string | null = null, limit: number = 20, userId?: string) {
     const params = new URLSearchParams({
         limit: limit.toString(),
@@ -263,6 +267,12 @@ export async function incrementView(postId: string) {
 
 export async function sharePost(postId: string) {
     return apiRequest(`/posts/${postId}/share`, {
+        method: 'POST',
+    });
+}
+
+export async function regeneratePostShareToken(postId: string) {
+    return apiRequest(`/posts/${postId}/share-token/regenerate`, {
         method: 'POST',
     });
 }

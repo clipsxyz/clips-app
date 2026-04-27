@@ -7,10 +7,11 @@ import { createStory } from '../api/stories';
 import { showToast } from '../utils/toast';
 import { updateMetaTags, clearMetaTags } from '../utils/metaTags';
 import { getAvatarForHandle } from '../api/users';
-import { getFollowedUsers } from '../api/posts';
+import { getFollowedUsers, regeneratePublicShareToken } from '../api/posts';
 import * as apiClient from '../api/client';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { showUploadOverlay } from '../utils/uploadOverlay';
+import { buildPublicPostUrl } from '../utils/publicShare';
 import Avatar from './Avatar';
 import type { Post } from '../types';
 
@@ -25,10 +26,17 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
     const [searchQuery, setSearchQuery] = useState('');
     const [followedHandles, setFollowedHandles] = useState<string[]>([]);
     const [loadingFollowed, setLoadingFollowed] = useState(false);
+    const [activeShareToken, setActiveShareToken] = useState<string | undefined>(post.publicShareToken);
+    const [regeneratingToken, setRegeneratingToken] = useState(false);
+    const [showResetConfirm, setShowResetConfirm] = useState(false);
     const navigate = useNavigate();
     const { user } = useAuth();
 
-    const postUrl = `${window.location.origin}/post/${post.id}`;
+    useEffect(() => {
+        setActiveShareToken(post.publicShareToken);
+    }, [post.id, post.publicShareToken]);
+
+    const postUrl = buildPublicPostUrl(activeShareToken, post.id);
     const postTitle = post.text ? post.text.substring(0, 100) + (post.text.length > 100 ? '...' : '') : 'Check out this post';
     const shareText = `${postTitle} by ${post.userHandle}`;
 
@@ -97,6 +105,29 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
             setTimeout(() => setCopied(false), 2000);
         } catch (err) {
             console.error('Failed to copy link:', err);
+        }
+    };
+
+    const handleRegenerateLink = async () => {
+        if (!post.id || regeneratingToken) return;
+        setRegeneratingToken(true);
+        try {
+            const updated = await regeneratePublicShareToken(post.id);
+            if (!updated) {
+                showToast?.('Could not reset link. Try again.');
+                return;
+            }
+            setActiveShareToken(updated.token);
+            await navigator.clipboard.writeText(updated.url);
+            setCopied(true);
+            showToast?.('Shared link reset and copied.');
+            setTimeout(() => setCopied(false), 2000);
+        } catch (err) {
+            console.error('Failed to regenerate share token:', err);
+            showToast?.('Could not reset link. Try again.');
+        } finally {
+            setRegeneratingToken(false);
+            setShowResetConfirm(false);
         }
     };
 
@@ -368,7 +399,17 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
 
                 {/* Share to – social logos row (always visible at bottom) */}
                 <div className="border-t border-gray-800 flex-shrink-0 bg-gray-900/95">
-                    <p className="px-4 pt-3 pb-2 text-xs font-medium text-gray-500 uppercase tracking-wide">Share to</p>
+                    <div className="px-4 pt-3 pb-2 flex items-center justify-between gap-3">
+                        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Share to</p>
+                        <button
+                            type="button"
+                            onClick={() => setShowResetConfirm(true)}
+                            disabled={regeneratingToken}
+                            className="text-[11px] text-sky-400 hover:text-sky-300 disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                            {regeneratingToken ? 'Resetting…' : 'Reset shared link'}
+                        </button>
+                    </div>
                     <div className="px-2 pb-4 overflow-x-auto overflow-y-hidden scrollbar-hide">
                         <div className="flex items-center gap-5 sm:gap-6 min-w-max px-2">
                             {shareOptions.map(({ id, label, icon, action }) => (
@@ -392,6 +433,34 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
                     </div>
                 </div>
             </div>
+            {showResetConfirm && (
+                <div className="absolute inset-0 bg-black/70 flex items-center justify-center px-4 z-[210]">
+                    <div className="w-full max-w-sm rounded-xl border border-gray-700 bg-gray-900 p-4 shadow-2xl">
+                        <h3 className="text-sm font-semibold text-white">Reset shared link?</h3>
+                        <p className="mt-2 text-xs text-gray-300">
+                            Existing shared URLs for this post will stop working. A new link will be created and copied.
+                        </p>
+                        <div className="mt-4 flex items-center justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setShowResetConfirm(false)}
+                                disabled={regeneratingToken}
+                                className="px-3 py-1.5 text-xs rounded-md border border-gray-600 text-gray-200 hover:border-gray-500 disabled:opacity-60"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleRegenerateLink}
+                                disabled={regeneratingToken}
+                                className="px-3 py-1.5 text-xs rounded-md bg-sky-500 text-white hover:bg-sky-400 disabled:opacity-60"
+                            >
+                                {regeneratingToken ? 'Resetting…' : 'Reset link'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

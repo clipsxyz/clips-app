@@ -762,6 +762,7 @@ export function transformLaravelPost(response: any): Post {
 
   return {
     id: response.id,
+    publicShareToken: response.public_share_token || response.publicShareToken,
     userHandle: response.user_handle || response.userHandle,
     locationLabel: response.location_label || response.locationLabel || 'Unknown Location',
     venue: existing?.venue || response.venue || undefined,
@@ -1818,6 +1819,45 @@ export async function getPostById(postId: string, userId?: string): Promise<Post
     if (e?.status !== 404 && e?.message && !e.message.includes('404')) {
       console.warn('getPostById API fallback failed:', postId, e);
     }
+    return null;
+  }
+}
+
+export async function getPublicPostByToken(token: string): Promise<Post | null> {
+  await delay(0);
+  const useLaravelAPI = isLaravelApiEnabled();
+  if (!useLaravelAPI || !token) return null;
+
+  try {
+    const response = await apiClient.fetchPublicPostByToken(token);
+    const transformed = transformLaravelPost(response);
+    if (!posts.find(p => p.id === transformed.id)) {
+      posts.push(transformed);
+    }
+    return transformed;
+  } catch (e: any) {
+    if (e?.status !== 404 && e?.message && !e.message.includes('404')) {
+      console.warn('getPublicPostByToken failed:', token, e);
+    }
+    return null;
+  }
+}
+
+export async function regeneratePublicShareToken(postId: string): Promise<{ token: string; url: string } | null> {
+  const useLaravelAPI = isLaravelApiEnabled();
+  if (!useLaravelAPI || !postId) return null;
+  try {
+    const response = await apiClient.regeneratePostShareToken(postId);
+    const token = response?.public_share_token || response?.publicShareToken;
+    const url = response?.public_share_url || response?.publicShareUrl;
+    if (!token || !url) return null;
+    const existing = posts.find((p) => String(p.id) === String(postId));
+    if (existing) {
+      existing.publicShareToken = token;
+    }
+    return { token, url };
+  } catch (error) {
+    console.warn('regeneratePublicShareToken failed:', postId, error);
     return null;
   }
 }

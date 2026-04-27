@@ -37,6 +37,7 @@ export type User = {
 
 export type Post = {
   id: string;
+  publicShareToken?: string;
   user_id?: string; // Backend field
   userHandle: string;
   locationLabel: string;
