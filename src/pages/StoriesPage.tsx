@@ -1125,48 +1125,66 @@ export default function StoriesPage() {
     }
 
     // Handle reply
-    async function generateStoryReplyThumbnail(): Promise<string | undefined> {
+    /** Resolve media URL for DM preview — story may only have `sharedFromPost` until the card loads. */
+    function getEffectiveStoryMediaUrlForReply(story: Story | undefined): string | undefined {
+        if (!story) return undefined;
+        const fromStory = (story.mediaUrl || '').trim();
+        if (fromStory) return fromStory;
+        if (story.sharedFromPost && originalPost) {
+            const fromPost = (originalPost.mediaUrl || '').trim();
+            if (fromPost) return fromPost;
+            const item = originalPost.mediaItems?.find((m) => m?.type === 'image' || m?.type === 'video');
+            return (item?.url || '').trim() || undefined;
+        }
+        return undefined;
+    }
+
+    /** JPEG/data URL for videos when capture works; otherwise raw mp4 URL so DM can render `<video>`. */
+    async function generateStoryReplyThumbnail(): Promise<{ previewUrl: string } | undefined> {
         try {
             const group = storyGroups[currentGroupIndex];
             const story = group?.stories?.[currentStoryIndex];
             if (!story) return undefined;
 
-            const mediaUrl = story.mediaUrl;
+            const mediaUrl = getEffectiveStoryMediaUrlForReply(story);
             if (!mediaUrl) return undefined;
-            const looksLikeVideoUrl = /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(mediaUrl);
-            const isVideoStory = story.mediaType === 'video' || looksLikeVideoUrl;
 
-            // Video stories must send an image frame thumbnail, never raw video URL.
+            const looksLikeVideoUrl = /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(mediaUrl);
+            const isVideoFromOriginal =
+                !!originalPost &&
+                (originalPost.mediaType === 'video' || originalPost.mediaItems?.[0]?.type === 'video');
+            const isVideoStory =
+                story.mediaType === 'video' || looksLikeVideoUrl || (story.sharedFromPost && isVideoFromOriginal);
+
             if (isVideoStory) {
                 if (videoRef.current) {
                     const fromPlayer = captureVideoFrameFromElement(videoRef.current);
-                    if (fromPlayer) return fromPlayer;
+                    if (fromPlayer) return { previewUrl: fromPlayer };
                 }
-                return captureVideoFrameDataUrl(mediaUrl);
+                const fromRemote = await captureVideoFrameDataUrl(mediaUrl);
+                if (fromRemote) return { previewUrl: fromRemote };
+                // CORS or decode failure: send the video URL; Messages uses <video> for .mp4 in DMs.
+                return { previewUrl: mediaUrl };
             }
 
-            // For non-blob image URLs (https/data), use directly.
             if (!mediaUrl.startsWith('blob:')) {
-                return mediaUrl;
+                return { previewUrl: mediaUrl };
             }
 
-            // Fallback for image blobs.
-            if (!isVideoStory) {
-                const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-                    const el = new Image();
-                    el.onload = () => resolve(el);
-                    el.onerror = () => reject(new Error('IMAGE_LOAD_FAILED'));
-                    el.src = mediaUrl;
-                });
-                if (!img.width || !img.height) return undefined;
-                const canvas = document.createElement('canvas');
-                canvas.width = Math.min(720, img.width);
-                canvas.height = Math.round((canvas.width / img.width) * img.height);
-                const ctx = canvas.getContext('2d');
-                if (!ctx) return undefined;
-                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                return canvas.toDataURL('image/jpeg', 0.82);
-            }
+            const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+                const el = new Image();
+                el.onload = () => resolve(el);
+                el.onerror = () => reject(new Error('IMAGE_LOAD_FAILED'));
+                el.src = mediaUrl;
+            });
+            if (!img.width || !img.height) return undefined;
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.min(720, img.width);
+            canvas.height = Math.round((canvas.width / img.width) * img.height);
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return undefined;
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            return { previewUrl: canvas.toDataURL('image/jpeg', 0.82) };
         } catch (error) {
             console.warn('Failed to generate story reply thumbnail:', error);
         }
@@ -1181,11 +1199,64 @@ export default function StoriesPage() {
             const toHandle = currentGroup?.userHandle;
             if (toHandle) {
                 // Attach a stable thumbnail so DM shows which story was replied to.
-                const storyThumb = await generateStoryReplyThumbnail();
+                const storyPreview = await generateStoryReplyThumbnail();
+                let storyThumb = storyPreview?.previewUrl;
+                const sharedPostForContext =
+                    currentStory.sharedFromPost && !originalPost
+                        ? await getPostById(currentStory.sharedFromPost, user.id)
+                        : null;
+                const postForContext = originalPost || sharedPostForContext;
+                // If the story only had `sharedFromPost` and `originalPost` was not loaded yet, resolve media for the preview.
+                if (!storyThumb && postForContext) {
+                    const u = (postForContext.mediaUrl || '').trim() || (postForContext.mediaItems?.find((m) => m.type === 'image' || m.type === 'video')?.url || '').trim();
+                    if (u) {
+                        const isVid =
+                            /\.(mp4|webm|m4v|mov)(\?|#|$)/i.test(u) ||
+                            postForContext.mediaType === 'video' ||
+                            postForContext.mediaItems?.[0]?.type === 'video';
+                        if (isVid) {
+                            const cap = await captureVideoFrameDataUrl(u);
+                            storyThumb = cap || u;
+                        } else {
+                            storyThumb = u;
+                        }
+                    }
+                }
+                const contextOwner = (currentStory.sharedFromUser || '').trim()
+                    || (currentStory.sharedFromPost ? (postForContext?.userHandle || toHandle) : toHandle);
+                const rawContextText = currentStory.sharedFromPost
+                    ? (postForContext?.text || currentStory.text || '')
+                    : (currentStory.text || '');
+                const storyContextText = rawContextText.trim().slice(0, 120);
+                const normalizedReply = replyText.trim();
+                const isVisualStory =
+                    !!currentStory.mediaUrl ||
+                    currentStory.mediaType === 'image' ||
+                    currentStory.mediaType === 'video' ||
+                    (currentStory.sharedFromPost &&
+                        !!((postForContext?.mediaUrl && postForContext.mediaUrl.trim() !== '') ||
+                            (postForContext?.mediaItems && postForContext.mediaItems.length > 0)));
+                if (storyThumb) {
+                    await appendMessage(user.handle, toHandle, {
+                        imageUrl: storyThumb,
+                        storyId: currentStory.id,
+                        storyContextOwner: contextOwner || undefined,
+                    });
+                } else {
+                    const contextBubbleText = storyContextText
+                        ? `Replying to @${contextOwner}'s story:\n"${storyContextText}"`
+                        : `Replying to @${contextOwner}'s story`;
+                    await appendMessage(user.handle, toHandle, {
+                        text: contextBubbleText,
+                        isSystemMessage: true,
+                    });
+                }
                 await appendMessage(user.handle, toHandle, {
-                    text: replyText,
-                    imageUrl: storyThumb,
+                    text: normalizedReply,
+                    imageUrl: isVisualStory ? undefined : storyThumb,
                     storyId: currentStory.id,
+                    storyContextText: isVisualStory ? undefined : (storyContextText || undefined),
+                    storyContextOwner: contextOwner || undefined,
                 });
                 // Optional: system echo for owner (kept same conversation id)
                 await appendMessage(toHandle, user.handle, { text: `You replied to their story`, isSystemMessage: true });
@@ -1666,6 +1737,21 @@ export default function StoriesPage() {
         || (((currentStory as any)?.mediaItems || []).find((m: any) => m?.type === 'text')?.text)
         || ''
     ).trim();
+    // Image/MP4 (or any story with real media): author is already on the post card or in the frame—no extra "Shared from" bar.
+    // Text-only shares: keep the explicit credit (no handle on a full-bleed image like a reposted clip).
+    const isCurrentStoryVisualShare =
+        !!currentStory?.mediaUrl || currentStory?.mediaType === 'image' || currentStory?.mediaType === 'video';
+    const hasOriginalPostWithImageOrVideo = Boolean(
+        originalPost &&
+            ((originalPost.mediaUrl && originalPost.mediaUrl.trim() !== '') ||
+                (originalPost.mediaItems && originalPost.mediaItems.length > 0))
+    );
+    const showExtraSharedFromBar =
+        !isCurrentStoryVisualShare && !(currentStory?.sharedFromPost && hasOriginalPostWithImageOrVideo);
+    const sharedStoryAuthor = (currentStory?.sharedFromUser || '').trim();
+    const sharedStoryAuthorDisplay = sharedStoryAuthor.startsWith('@') ? sharedStoryAuthor.slice(1) : sharedStoryAuthor;
+    const showSharedStoryCredit =
+        !!sharedStoryAuthor && sharedStoryAuthor !== currentGroup?.userHandle && showExtraSharedFromBar;
     const isViewingOwnStory = !!(currentGroup && user && (currentGroup.userId === user.id || currentGroup.userHandle === user.handle));
     const storyViewsCount = Number(currentStory?.views || 0);
     const storyRepliesCount = Number(currentStory?.replies?.length || 0);
@@ -1723,20 +1809,6 @@ export default function StoriesPage() {
                         <div className="relative w-full h-full flex items-center justify-center">
                             <div className="relative w-full h-full overflow-hidden bg-black">
                                 {(() => {
-                                    // Debug logging
-                                    if (currentStory?.sharedFromPost) {
-                                        // This block intentionally left for debugging
-                                        console.log('Rendering shared post story:', {
-                                            sharedFromPost: currentStory.sharedFromPost,
-                                            hasOriginalPost: !!originalPost,
-                                            storyHasMediaUrl: !!currentStory.mediaUrl,
-                                            storyHasText: !!currentStory.text,
-                                            originalPostText: originalPost?.text,
-                                            originalPostMediaUrl: originalPost?.mediaUrl,
-                                            originalPostHasMediaItems: !!(originalPost?.mediaItems && originalPost.mediaItems.length > 0)
-                                        });
-                                    }
-                                    
                                     if (currentStory?.sharedFromPost && !originalPost && !sharedPostFetchFailed) {
                                         // Loading state while fetching original post
                                         return (
@@ -1991,6 +2063,10 @@ export default function StoriesPage() {
                                                     style={{ backgroundColor: '#000000' }}
                                                 >
                                                     <div className="relative z-10 flex flex-col items-center">
+                                                        <div className="mb-3 inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-black/60 px-3 py-1 text-xs text-white/90">
+                                                            <span>Shared from</span>
+                                                            <span className="font-semibold">@{originalPost.userHandle}</span>
+                                                        </div>
                                                         <div
                                                             className="relative w-full max-w-xs cursor-pointer overflow-hidden rounded-2xl border-2 border-white/20 bg-white shadow-[0_8px_32px_rgba(0,0,0,0.4)] transition-transform hover:scale-[1.02] active:scale-[0.98]"
                                                             onClick={(e) => {
@@ -3556,6 +3632,17 @@ export default function StoriesPage() {
                                 </div>
                         </div>
                     </div>
+
+                    {showSharedStoryCredit && currentStoryText && (
+                        <div className="absolute bottom-[7.9rem] left-1/2 -translate-x-1/2 z-[75] inline-flex items-center gap-2 rounded-full border border-white/25 bg-black/60 px-3 py-1 text-xs text-white/90 backdrop-blur-md">
+                            <img
+                                src={getAvatarForHandle(sharedStoryAuthor)}
+                                alt={sharedStoryAuthorDisplay}
+                                className="h-5 w-5 rounded-full object-cover border border-white/30"
+                            />
+                            <span>Shared from <span className="font-semibold">{sharedStoryAuthorDisplay}</span></span>
+                        </div>
+                    )}
 
                     {showStoryProfileCard && (
                         <div className="absolute top-16 left-4 z-[70]" data-story-interactive>

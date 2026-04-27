@@ -20,7 +20,7 @@ import {
     markAllNotificationsRead,
     deleteNotification,
 } from '../api/notifications';
-import { getStoryInsightsForUser, type StoryInsight } from '../api/stories';
+import { getStoryInsightsForUser, type StoryInsight, fetchStoryGroupByHandle } from '../api/stories';
 import { getAvatarForHandle } from '../api/users';
 import { timeAgo } from '../utils/timeAgo';
 import Avatar from '../components/Avatar';
@@ -42,6 +42,7 @@ export default function InboxScreen({ navigation }: any) {
     const { user } = useAuth();
     const [insights, setInsights] = useState<StoryInsight[]>([]);
     const [notifications, setNotifications] = useState<Notification[]>([]);
+    const [unavailableStoryIds, setUnavailableStoryIds] = useState<Set<string>>(new Set());
     const [conversations, setConversations] = useState<ConversationSummary[]>([]);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<'insights' | 'notifications' | 'messages' | 'groups'>('notifications');
@@ -61,6 +62,33 @@ export default function InboxScreen({ navigation }: any) {
                 getNotifications(user.handle),
                 getStoryInsightsForUser(user.handle),
             ]);
+            const storyReplyNotifs = notifs.filter((n) => !!n.storyId && !!n.fromHandle && !n.chatGroupId);
+            if (storyReplyNotifs.length > 0) {
+                const handles = Array.from(new Set(storyReplyNotifs.map((n) => n.fromHandle)));
+                const groups = await Promise.all(
+                    handles.map(async (handle) => {
+                        try {
+                            const g = await fetchStoryGroupByHandle(handle);
+                            return { handle, group: g };
+                        } catch {
+                            return { handle, group: null };
+                        }
+                    })
+                );
+                const activeStoryIdsByHandle = new Map<string, Set<string>>();
+                groups.forEach(({ handle, group }) => {
+                    activeStoryIdsByHandle.set(handle, new Set((group?.stories || []).map((s) => s.id)));
+                });
+                const unavailable = new Set<string>();
+                storyReplyNotifs.forEach((n) => {
+                    if (!n.storyId) return;
+                    const activeIds = activeStoryIdsByHandle.get(n.fromHandle);
+                    if (!activeIds || !activeIds.has(n.storyId)) unavailable.add(n.storyId);
+                });
+                setUnavailableStoryIds(unavailable);
+            } else {
+                setUnavailableStoryIds(new Set());
+            }
             setNotifications(notifs);
             setInsights(storyInsights);
             const convs = await listConversations(user.handle);
@@ -87,6 +115,10 @@ export default function InboxScreen({ navigation }: any) {
             setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
         }
 
+        if (notif.storyId && !unavailableStoryIds.has(notif.storyId)) {
+            navigation.navigate('Stories', { openUserHandle: notif.fromHandle, openStoryId: notif.storyId });
+            return;
+        }
         if (notif.type === 'sticker' || notif.type === 'reply' || notif.type === 'dm') {
             navigation.navigate('Messages', { handle: notif.fromHandle });
         }
@@ -136,13 +168,26 @@ export default function InboxScreen({ navigation }: any) {
     };
 
     const formatNotificationMessage = (notif: Notification): string => {
+        if (notif.storyId) {
+            if (unavailableStoryIds.has(notif.storyId)) {
+                const ownerLabel = notif.storyContextOwner ? `@${notif.storyContextOwner}` : 'story';
+                return `Story unavailable (${ownerLabel})`;
+            }
+            const ownerLabel = notif.storyContextOwner ? `@${notif.storyContextOwner}` : 'a story';
+            const snippet = (notif.storyContextText || '').trim();
+            const replyBody = (notif.message || '').trim();
+            if (snippet && replyBody) return `Reply to ${ownerLabel}: "${snippet}" - ${replyBody}`;
+            if (snippet) return `Reply to ${ownerLabel}: "${snippet}"`;
+            if (replyBody) return `Reply to ${ownerLabel}: ${replyBody}`;
+            return `Reply to ${ownerLabel}`;
+        }
         switch (notif.type) {
             case 'sticker':
                 return `Sent you a sticker: ${notif.message || ''}`;
             case 'reply':
-                return `Replied to your post`;
+                return notif.message || 'Replied to your post';
             case 'dm':
-                return `Sent you a message`;
+                return notif.message || 'Sent you a message';
             case 'follow_request':
                 return `wants to follow you`;
             default:
@@ -290,6 +335,11 @@ export default function InboxScreen({ navigation }: any) {
                             <View style={styles.itemContent}>
                                 <Text style={styles.itemTitle}>{item.fromHandle}</Text>
                                 <Text style={styles.itemMessage}>{formatNotificationMessage(item)}</Text>
+                                {!!item.storyId && unavailableStoryIds.has(item.storyId) && (
+                                    <View style={styles.storyUnavailableChip}>
+                                        <Text style={styles.storyUnavailableChipText}>Story unavailable</Text>
+                                    </View>
+                                )}
                                 <Text style={styles.itemTime}>{timeAgo(item.timestamp)}</Text>
                             </View>
                             <TouchableOpacity
@@ -713,6 +763,21 @@ const styles = StyleSheet.create({
     itemTime: {
         fontSize: 12,
         color: '#6B7280',
+    },
+    storyUnavailableChip: {
+        alignSelf: 'flex-start',
+        marginTop: 6,
+        borderWidth: 1,
+        borderColor: 'rgba(248, 113, 113, 0.45)',
+        backgroundColor: 'rgba(239, 68, 68, 0.15)',
+        borderRadius: 999,
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+    },
+    storyUnavailableChipText: {
+        color: '#FCA5A5',
+        fontSize: 10,
+        fontWeight: '700',
     },
     unreadDot: {
         width: 8,

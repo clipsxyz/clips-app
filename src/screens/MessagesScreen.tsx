@@ -127,6 +127,22 @@ export default function MessagesScreen({ route, navigation }: any) {
     const renderMessage = ({ item }: { item: ChatMessage }) => {
         const isFromMe = item.senderHandle === user?.handle;
         const senderAvatar = getAvatarForHandle(item.senderHandle);
+        const isStoryReplyContext =
+            !!item.isSystemMessage &&
+            typeof item.text === 'string' &&
+            item.text.trim().toLowerCase().startsWith('replying to @') &&
+            item.text.toLowerCase().includes('story');
+
+        if (isStoryReplyContext) {
+            return (
+                <View style={styles.storyContextWrap}>
+                    <View style={styles.storyContextCard}>
+                        <Text style={styles.storyContextLabel}>Story context</Text>
+                        <Text style={styles.storyContextText}>{item.text}</Text>
+                    </View>
+                </View>
+            );
+        }
 
         return (
             <View style={[
@@ -357,6 +373,32 @@ const styles = StyleSheet.create({
     },
     messageTimeFromOther: {
         color: '#9CA3AF',
+    },
+    storyContextWrap: {
+        alignItems: 'center',
+        marginBottom: 12,
+    },
+    storyContextCard: {
+        maxWidth: '86%',
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: 'rgba(103, 232, 249, 0.3)',
+        backgroundColor: 'rgba(6, 182, 212, 0.12)',
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+    },
+    storyContextLabel: {
+        fontSize: 10,
+        color: '#A5F3FC',
+        textTransform: 'uppercase',
+        letterSpacing: 0.8,
+        fontWeight: '700',
+        marginBottom: 4,
+    },
+    storyContextText: {
+        fontSize: 13,
+        color: '#F9FAFB',
+        lineHeight: 18,
     },
     inputContainer: {
         flexDirection: 'row',

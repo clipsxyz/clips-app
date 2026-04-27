@@ -12,6 +12,8 @@ export interface Notification {
     commentId?: string;
     storyId?: string;
     imageUrl?: string;
+    storyContextText?: string;
+    storyContextOwner?: string;
     chatGroupId?: string;
     groupName?: string;
     timestamp: number;
@@ -131,6 +133,8 @@ export async function getNotifications(forHandle: string): Promise<Notification[
                 commentId: n.comment_id || undefined,
                 storyId: n.story_id || undefined,
                 imageUrl: n.image_url || undefined,
+                storyContextText: n.story_context_text || undefined,
+                storyContextOwner: n.story_context_owner || undefined,
                 chatGroupId: n.chat_group_id || undefined,
                 groupName: n.group_name || undefined,
                 timestamp: n.created_at ? new Date(n.created_at).getTime() : Date.now(),

@@ -511,6 +511,8 @@ export default function InboxPage() {
                         message: lastMsg.text || '',
                         storyId: lastMsg.storyId,
                         imageUrl: lastMsg.storyId ? lastMsg.imageUrl : undefined,
+                        storyContextText: lastMsg.storyContextText,
+                        storyContextOwner: lastMsg.storyContextOwner,
                         timestamp: lastMsg.timestamp || Date.now(),
                         read: conv.unread === 0 // Mark as read if no unread messages
                     };
@@ -875,19 +877,23 @@ export default function InboxPage() {
 
     const formatNotificationMessage = (notif: Notification): string => {
         if (notif.storyId) {
+            const ownerSuffix = notif.storyContextOwner ? ` from @${notif.storyContextOwner}` : '';
+            const contextSuffix = notif.storyContextText ? ` - "${notif.storyContextText}"` : '';
             if (unavailableStoryIds.has(notif.storyId)) {
-                return 'Story unavailable';
+                return `Story unavailable${ownerSuffix}${contextSuffix}`;
             }
             const replyPreview = (notif.message || '').trim();
-            return replyPreview ? `Replied to your 24hr story: ${replyPreview}` : 'Replied to your 24hr story';
+            return replyPreview
+                ? `Replied to your 24hr story${ownerSuffix}: ${replyPreview}${contextSuffix}`
+                : `Replied to your 24hr story${ownerSuffix}${contextSuffix}`;
         }
         switch (notif.type) {
             case 'sticker':
                 return `Sent you a sticker: ${notif.message || ''}`;
             case 'reply':
-                return `Replied to your post`;
+                return notif.message || 'Replied to your post';
             case 'dm':
-                return `Sent you a message`;
+                return notif.message || 'Sent you a message';
             case 'follow_request':
                 return `wants to follow you`;
             default:
@@ -1520,7 +1526,9 @@ export default function InboxPage() {
                                                         alt="Story replied to"
                                                         className="h-7 w-7 rounded object-cover"
                                                     />
-                                                    <span className="text-[10px] text-white/70">Story context</span>
+                                                    <span className="text-[10px] text-white/70">
+                                                        {notif.storyContextOwner ? `Shared from @${notif.storyContextOwner}` : 'Story context'}
+                                                    </span>
                                                 </button>
                                             ) : null
                                         )}

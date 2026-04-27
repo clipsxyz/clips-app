@@ -25,8 +25,9 @@ import {
     addStoryReaction,
     addStoryReply,
 } from '../api/stories';
-import { getFollowedUsers } from '../api/posts';
+import { getFollowedUsers, getPostById } from '../api/posts';
 import { getAvatarForHandle } from '../api/users';
+import { appendMessage } from '../api/messages';
 import type { Story, StoryGroup } from '../types';
 import Avatar from '../components/Avatar';
 
@@ -34,7 +35,7 @@ const { width, height } = Dimensions.get('window');
 const STORY_DURATION = 15000; // 15 seconds
 
 export default function StoriesScreen({ route, navigation }: any) {
-    const { openUserHandle } = route.params || {};
+    const { openUserHandle, openStoryId } = route.params || {};
     const { user } = useAuth();
     const [storyGroups, setStoryGroups] = useState<StoryGroup[]>([]);
     const [currentGroupIndex, setCurrentGroupIndex] = useState(0);
@@ -92,10 +93,10 @@ export default function StoriesScreen({ route, navigation }: any) {
         if (openUserHandle && storyGroups.length > 0) {
             const targetGroup = storyGroups.find(g => g.userHandle === openUserHandle);
             if (targetGroup) {
-                startViewingStories(targetGroup);
+                startViewingStories(targetGroup, openStoryId);
             }
         }
-    }, [openUserHandle, storyGroups.length]);
+    }, [openUserHandle, openStoryId, storyGroups.length]);
 
     const loadStories = async () => {
         if (!user?.id) {
@@ -123,7 +124,7 @@ export default function StoriesScreen({ route, navigation }: any) {
         }
     };
 
-    const startViewingStories = async (group: StoryGroup) => {
+    const startViewingStories = async (group: StoryGroup, preferredStoryId?: string) => {
         if (!group || !user?.id || !group.stories || group.stories.length === 0) return;
 
         const followedUserHandles = await getFollowedUsers(user.id);
@@ -139,8 +140,11 @@ export default function StoriesScreen({ route, navigation }: any) {
             return updated;
         });
 
+        const initialStoryIndex = preferredStoryId
+            ? Math.max(0, stories.findIndex((s) => s.id === preferredStoryId))
+            : 0;
         setCurrentGroupIndex(groupIndex);
-        setCurrentStoryIndex(0);
+        setCurrentStoryIndex(initialStoryIndex);
         setViewingStories(true);
         setProgress(0);
         setPaused(false);
@@ -254,6 +258,49 @@ export default function StoriesScreen({ route, navigation }: any) {
         
         try {
             await addStoryReply(currentStory.id, user.id, user.handle, replyText);
+            if (currentGroup?.userHandle) {
+                const sharedPost =
+                    currentStory.sharedFromPost && !currentStory.mediaUrl
+                        ? await getPostById(currentStory.sharedFromPost, user.id)
+                        : null;
+                const mediaUrl = (
+                    (currentStory.mediaUrl || '').trim() ||
+                    (sharedPost?.mediaUrl || '').trim() ||
+                    (sharedPost?.mediaItems?.find((m) => m.type === 'image' || m.type === 'video')?.url || '').trim() ||
+                    ''
+                );
+                const contextOwner =
+                    (currentStory.sharedFromUser || sharedPost?.userHandle || currentGroup.userHandle) as string;
+                const contextSnippet = (
+                    (sharedPost?.text || sharedPost?.caption || currentStory.text || '') as string
+                )
+                    .trim()
+                    .slice(0, 120);
+                const normalizedReply = replyText.trim();
+                const isVisualStory = !!mediaUrl;
+                if (isVisualStory && mediaUrl) {
+                    await appendMessage(user.handle, currentGroup.userHandle, {
+                        imageUrl: mediaUrl,
+                        storyId: currentStory.id,
+                        storyContextOwner: contextOwner,
+                        storyContextText: contextSnippet || undefined,
+                    });
+                } else {
+                    const contextBubbleText = contextSnippet
+                        ? `Replying to @${contextOwner}'s story:\n"${contextSnippet}"`
+                        : `Replying to @${contextOwner}'s story`;
+                    await appendMessage(user.handle, currentGroup.userHandle, {
+                        text: contextBubbleText,
+                        isSystemMessage: true,
+                    });
+                }
+                await appendMessage(user.handle, currentGroup.userHandle, {
+                    text: normalizedReply,
+                    storyId: currentStory.id,
+                    storyContextOwner: contextOwner,
+                    storyContextText: isVisualStory ? undefined : (contextSnippet || undefined),
+                });
+            }
             setStoryGroups((prev) =>
                 prev.map((group, groupIdx) => {
                     if (groupIdx !== currentGroupIndex) return group;
@@ -424,11 +471,23 @@ export default function StoriesScreen({ route, navigation }: any) {
                             <Icon name="close" size={24} color="#FFFFFF" />
                         </TouchableOpacity>
                     </View>
-
                     {/* Story text overlay */}
                     {currentStory.text && (
                         <View style={styles.storyTextOverlay}>
                             <Text style={styles.storyText}>{currentStory.text}</Text>
+                        </View>
+                    )}
+                    {!!currentStory.sharedFromUser && !currentStory.mediaUrl && currentStory.mediaType !== 'image' && currentStory.mediaType !== 'video' && (
+                        <View style={styles.sharedAuthorInline}>
+                            <Image
+                                source={{ uri: getAvatarForHandle(currentStory.sharedFromUser) }}
+                                style={styles.sharedAuthorAvatar}
+                            />
+                            <Text style={styles.storyTextCredit}>
+                                Shared from {(currentStory.sharedFromUser || '').startsWith('@')
+                                    ? currentStory.sharedFromUser.slice(1)
+                                    : currentStory.sharedFromUser}
+                            </Text>
                         </View>
                     )}
 
@@ -793,6 +852,32 @@ const styles = StyleSheet.create({
         textShadowColor: 'rgba(0, 0, 0, 0.75)',
         textShadowOffset: { width: 0, height: 1 },
         textShadowRadius: 3,
+    },
+    storyTextCredit: {
+        fontSize: 12,
+        color: 'rgba(255,255,255,0.9)',
+        fontWeight: '700',
+        textShadowColor: 'rgba(0, 0, 0, 0.65)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 2,
+    },
+    sharedAuthorInline: {
+        position: 'absolute',
+        left: 16,
+        right: 16,
+        bottom: 128,
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: 8,
+        zIndex: 24,
+    },
+    sharedAuthorAvatar: {
+        width: 20,
+        height: 20,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.35)',
     },
     storyActions: {
         position: 'absolute',

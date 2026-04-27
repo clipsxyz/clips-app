@@ -16,6 +16,8 @@ export interface ChatMessage {
     commentId?: string; // For comment notifications - the comment ID
     commentText?: string; // For comment notifications - the comment text
     storyId?: string; // For story-reply notifications/context
+    storyContextText?: string; // Story text snippet for notification context
+    storyContextOwner?: string; // Original story/post owner for attribution
     replyTo?: { messageId: string; text: string; senderHandle: string; imageUrl?: string; mediaType?: 'image' | 'video' }; // Reply to another message; imageUrl = thumbnail/media URL, mediaType for video screenshot
 }
 
@@ -281,6 +283,8 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
         commentId: message.commentId, // Preserve commentId for comment notifications
         commentText: message.commentText, // Preserve commentText for comment notifications
         storyId: message.storyId, // Preserve story context for notifications
+        storyContextText: message.storyContextText, // Preserve story context copy for notifications
+        storyContextOwner: message.storyContextOwner, // Preserve attribution for notifications
         replyTo: message.replyTo // Preserve replyTo data
     };
     list.push(msg);
@@ -314,6 +318,8 @@ export async function appendMessage(from: string, to: string, message: Omit<Chat
             message: message.text,
             storyId: message.storyId,
             imageUrl: message.storyId ? message.imageUrl : undefined,
+            storyContextText: message.storyContextText,
+            storyContextOwner: message.storyContextOwner,
         });
     }
 

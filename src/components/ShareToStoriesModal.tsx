@@ -139,7 +139,7 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
         undefined, // textColor
         undefined, // textSize
         isTextOnlyShare ? undefined : post.id, // sharedFromPost (text-only uses normal story path)
-        isTextOnlyShare ? undefined : post.userHandle, // sharedFromUser
+        post.userHandle, // sharedFromUser (always keep author credit, including text-only shares)
         post.textStyle ?? {
           color: '#ffffff',
           size: 'medium',

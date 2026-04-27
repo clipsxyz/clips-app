@@ -62,6 +62,27 @@ interface MessageUI extends ChatMessage {
     read?: boolean;
 }
 
+function isDmVideoAttachmentUrl(url: string | undefined): boolean {
+    if (!url) return false;
+    return /\.(mp4|webm|m4v|mov)(\?|#|$)/i.test(url.trim());
+}
+
+/** Story-reply may send a raw MP4 when a frame cannot be captured (CORS); `<img>` would be blank. */
+function DmImageOrVideoAttachment({ url, alt, className }: { url: string; alt: string; className?: string }) {
+    if (isDmVideoAttachmentUrl(url)) {
+        return (
+            <video
+                src={url}
+                className={className}
+                muted
+                playsInline
+                preload="metadata"
+            />
+        );
+    }
+    return <img src={url} alt={alt} className={className} />;
+}
+
 // Helper function to parse question messages
 function parseQuestionMessage(text: string | undefined): { question: string; answer: string } | null {
     if (!text || !text.startsWith('QUESTION:')) return null;
@@ -2434,6 +2455,11 @@ export default function MessagesPage() {
                         const showTimestamp = idx === 0 ||
                             (msg.timestamp - messages[idx - 1].timestamp) > 60000; // gap > 1 minute
                         const isLastMessage = idx === messages.length - 1;
+                        const isStoryReplyContext =
+                            !!msg.isSystemMessage &&
+                            typeof msg.text === 'string' &&
+                            msg.text.trim().toLowerCase().startsWith('replying to @') &&
+                            msg.text.toLowerCase().includes('story');
 
                         return (
                             <React.Fragment key={msg.id}>
@@ -2443,9 +2469,18 @@ export default function MessagesPage() {
                                     </div>
                                 )}
                                 {msg.isSystemMessage && (
-                                    <div className="text-center">
-                                        <p className="text-white text-sm">{msg.text}</p>
-                                    </div>
+                                    isStoryReplyContext ? (
+                                        <div className="flex justify-center">
+                                            <div className="max-w-[86%] rounded-2xl border border-cyan-300/30 bg-cyan-500/10 px-3 py-2 text-left">
+                                                <p className="text-[11px] uppercase tracking-wide text-cyan-200/90 font-semibold">Story context</p>
+                                                <p className="mt-1 text-sm text-white/95 whitespace-pre-wrap">{msg.text}</p>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="text-center">
+                                            <p className="text-white text-sm">{msg.text}</p>
+                                        </div>
+                                    )
                                 )}
                                 {!msg.isSystemMessage && (
                                     <div
@@ -2664,7 +2699,11 @@ export default function MessagesPage() {
                                                                         ? 'rounded-[18px]'
                                                                         : 'mb-2 -mx-2 -mt-2 first:mt-0 rounded-t-2xl rounded-tr-sm'
                                                                 }`}>
-                                                                    <img src={msg.imageUrl} alt="Sent image" className="block w-full max-w-full max-h-[380px] object-contain bg-black/10" />
+                                                                    <DmImageOrVideoAttachment
+                                                                        url={msg.imageUrl}
+                                                                        alt="Sent image"
+                                                                        className="block w-full max-w-full max-h-[380px] object-contain bg-black/10"
+                                                                    />
                                                                     {msg.imageUrl && wasEverAStory(msg.imageUrl) && storyActiveByUrl[msg.imageUrl] === false && (
                                                                         <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
                                                                             <span className="text-[10px] text-white/90 px-2 py-1 rounded">Story unavailable</span>
@@ -3114,7 +3153,11 @@ export default function MessagesPage() {
                                                                             ? 'rounded-[18px]'
                                                                             : 'mb-2 -mx-2 -mt-2 first:mt-0 rounded-t-2xl rounded-tl-sm'
                                                                     }`}>
-                                                                        <img src={msg.imageUrl} alt="Received image" className="block w-full max-w-full max-h-[380px] object-contain bg-black/10" />
+                                                                        <DmImageOrVideoAttachment
+                                                                            url={msg.imageUrl}
+                                                                            alt="Received image"
+                                                                            className="block w-full max-w-full max-h-[380px] object-contain bg-black/10"
+                                                                        />
                                                                         {msg.imageUrl && wasEverAStory(msg.imageUrl) && storyActiveByUrl[msg.imageUrl] === false && (
                                                                             <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
                                                                                 <span className="text-[10px] text-white/90 px-2 py-1 rounded">Story unavailable</span>

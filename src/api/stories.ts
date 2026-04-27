@@ -800,6 +800,7 @@ export async function createStory(
                 text_color: textColor || undefined,
                 text_size: textSize || undefined,
                 shared_from_post_id: sharedFromPost || undefined,
+                shared_from_user_handle: sharedFromUser || undefined,
                 textStyle: textStyle || undefined, // Only color, size, background - no taggedUsersPositions
                 stickers: stickers || undefined,
                 taggedUsers: taggedUsers || undefined, // Send tagged users to backend
