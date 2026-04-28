@@ -3408,7 +3408,7 @@ export default function MessagesPage() {
                                 className="absolute left-3 top-1/2 -translate-y-1/2 inline-flex items-center justify-center text-white/90 hover:text-white transition-colors"
                                 aria-label="Add photo"
                             >
-                                <FiImage className="w-5 h-5" />
+                                <FiPlus className="w-5 h-5" />
                             </button>
                             <input
                                 type="text"

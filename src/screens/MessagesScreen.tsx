@@ -605,7 +605,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                 <View style={styles.inputContainer}>
                     <View style={styles.inputShell}>
                         <TouchableOpacity style={styles.inputIconInside} onPress={handleImageClick}>
-                            <Icon name="image-outline" size={20} color="#FFFFFF" />
+                            <Icon name="add" size={22} color="#FFFFFF" />
                         </TouchableOpacity>
                         <TextInput
                             value={messageText}
