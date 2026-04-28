@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
     View,
     Text,
@@ -37,6 +37,7 @@ import {
     acceptMessageRequest,
     type ConversationSummary,
 } from '../api/messages';
+import { getNotificationPreferences, isNotificationTypeEnabled } from '../services/notifications';
 
 export default function InboxScreen({ navigation, route }: any) {
     const { user } = useAuth();
@@ -45,7 +46,7 @@ export default function InboxScreen({ navigation, route }: any) {
     const [unavailableStoryIds, setUnavailableStoryIds] = useState<Set<string>>(new Set());
     const [conversations, setConversations] = useState<ConversationSummary[]>([]);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState<'insights' | 'notifications' | 'messages' | 'groups'>('notifications');
+    const [activeTab, setActiveTab] = useState<'insights' | 'notifications' | 'messages' | 'groups'>('messages');
     const [messageFilter, setMessageFilter] = useState<'all' | 'unread' | 'requests' | 'pinned'>('all');
     const [conversationQuery, setConversationQuery] = useState('');
     const [refreshing, setRefreshing] = useState(false);
@@ -117,11 +118,17 @@ export default function InboxScreen({ navigation, route }: any) {
     };
 
     const handleNotificationPress = async (notif: Notification) => {
-        if (!notif.read && user?.handle) {
+        const isSyntheticConvNotif = notif.id.startsWith('conv-notif-');
+        if (!notif.read && user?.handle && !isSyntheticConvNotif) {
             await markNotificationRead(notif.id, user.handle);
             setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
         }
 
+        if (notif.chatGroupId && user?.handle) {
+            await markGroupConversationReadById(notif.chatGroupId, user.handle);
+            navigation.navigate('Messages', { chatGroupId: notif.chatGroupId, kind: 'group' });
+            return;
+        }
         if (notif.storyId && !unavailableStoryIds.has(notif.storyId)) {
             navigation.navigate('Stories', { openUserHandle: notif.fromHandle, openStoryId: notif.storyId });
             return;
@@ -217,7 +224,42 @@ export default function InboxScreen({ navigation, route }: any) {
         }
     };
 
-    const unreadNotifications = notifications.filter(n => !n.read).length;
+    const notificationPrefs = useMemo(() => getNotificationPreferences(), []);
+    const activityNotifications = useMemo<Notification[]>(() => {
+        return conversations
+            .filter((conv) => {
+                if (!conv.lastMessage || !conv.unread) return false;
+                if (conv.kind === 'group' && conv.chatGroupId) {
+                    return isNotificationTypeEnabled(notificationPrefs, 'group_chat');
+                }
+                if (!conv.otherHandle) return false;
+                const ownMessage = conv.lastMessage.senderHandle === user?.handle;
+                if (ownMessage) return false;
+                return isNotificationTypeEnabled(notificationPrefs, 'dm');
+            })
+            .map((conv) => {
+                const lastMsg = conv.lastMessage!;
+                return {
+                    id: `conv-notif-${conv.kind === 'group' ? conv.chatGroupId : conv.otherHandle}-${lastMsg.id}`,
+                    type: 'dm' as const,
+                    fromHandle: conv.kind === 'group' ? (conv.groupName || 'Group') : conv.otherHandle,
+                    toHandle: user?.handle || '',
+                    message: lastMsg.text,
+                    storyId: lastMsg.storyId,
+                    imageUrl: lastMsg.storyId ? lastMsg.imageUrl : undefined,
+                    storyContextText: lastMsg.storyContextText,
+                    storyContextOwner: lastMsg.storyContextOwner,
+                    chatGroupId: conv.kind === 'group' ? conv.chatGroupId : undefined,
+                    groupName: conv.kind === 'group' ? conv.groupName : undefined,
+                    timestamp: lastMsg.timestamp,
+                    read: conv.unread === 0,
+                };
+            });
+    }, [conversations, notificationPrefs, user?.handle]);
+    const allNotifications = useMemo(() => {
+        return [...notifications, ...activityNotifications].sort((a, b) => b.timestamp - a.timestamp);
+    }, [notifications, activityNotifications]);
+    const unreadNotifications = allNotifications.filter(n => !n.read).length;
     const sortedConversations = [...conversations].sort((a, b) => {
         if (a.isPinned && !b.isPinned) return -1;
         if (!a.isPinned && b.isPinned) return 1;
@@ -325,7 +367,7 @@ export default function InboxScreen({ navigation, route }: any) {
             {/* Content */}
             {activeTab === 'notifications' ? (
                 <FlatList
-                    data={notifications}
+                    data={allNotifications}
                     keyExtractor={(item) => item.id}
                     renderItem={({ item }) => (
                         <TouchableOpacity
@@ -349,17 +391,19 @@ export default function InboxScreen({ navigation, route }: any) {
                                 )}
                                 <Text style={styles.itemTime}>{timeAgo(item.timestamp)}</Text>
                             </View>
-                            <TouchableOpacity
-                                onPress={() =>
-                                    Alert.alert('Delete notification', 'Remove this notification?', [
-                                        { text: 'Cancel', style: 'cancel' },
-                                        { text: 'Delete', style: 'destructive', onPress: () => { void handleDeleteNotification(item.id); } },
-                                    ])
-                                }
-                                style={styles.rowActionIcon}
-                            >
-                                <Icon name="trash-outline" size={18} color="#6B7280" />
-                            </TouchableOpacity>
+                            {!item.id.startsWith('conv-notif-') && (
+                                <TouchableOpacity
+                                    onPress={() =>
+                                        Alert.alert('Delete notification', 'Remove this notification?', [
+                                            { text: 'Cancel', style: 'cancel' },
+                                            { text: 'Delete', style: 'destructive', onPress: () => { void handleDeleteNotification(item.id); } },
+                                        ])
+                                    }
+                                    style={styles.rowActionIcon}
+                                >
+                                    <Icon name="trash-outline" size={18} color="#6B7280" />
+                                </TouchableOpacity>
+                            )}
                             {!item.read && <View style={styles.unreadDot} />}
                         </TouchableOpacity>
                     )}
