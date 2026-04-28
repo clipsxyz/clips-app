@@ -345,9 +345,17 @@ export default function MessagesScreen({ route, navigation }: any) {
                     />
                     <Text style={styles.headerName}>{isGroupThread ? groupName : handle}</Text>
                 </View>
-                <TouchableOpacity>
-                    <Icon name="ellipsis-vertical" size={24} color="#FFFFFF" />
-                </TouchableOpacity>
+                <View style={styles.headerActions}>
+                    <TouchableOpacity
+                        onPress={() => navigation.navigate('Inbox', { initialTab: 'insights' })}
+                        style={styles.headerActionButton}
+                    >
+                        <Icon name="bar-chart-outline" size={20} color="#FFFFFF" />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.headerActionButton}>
+                        <Icon name="ellipsis-vertical" size={22} color="#FFFFFF" />
+                    </TouchableOpacity>
+                </View>
             </View>
 
             <KeyboardAvoidingView
@@ -467,6 +475,18 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '600',
         color: '#FFFFFF',
+    },
+    headerActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    headerActionButton: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     keyboardView: {
         flex: 1,

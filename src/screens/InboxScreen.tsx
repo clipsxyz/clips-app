@@ -38,7 +38,7 @@ import {
     type ConversationSummary,
 } from '../api/messages';
 
-export default function InboxScreen({ navigation }: any) {
+export default function InboxScreen({ navigation, route }: any) {
     const { user } = useAuth();
     const [insights, setInsights] = useState<StoryInsight[]>([]);
     const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -53,6 +53,13 @@ export default function InboxScreen({ navigation }: any) {
     useEffect(() => {
         loadData();
     }, [user?.handle]);
+
+    useEffect(() => {
+        const requestedTab = route?.params?.initialTab;
+        if (requestedTab === 'insights' || requestedTab === 'notifications' || requestedTab === 'messages' || requestedTab === 'groups') {
+            setActiveTab(requestedTab);
+        }
+    }, [route?.params?.initialTab]);
 
     const loadData = async () => {
         if (!user?.handle) return;
