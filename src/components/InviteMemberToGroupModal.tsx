@@ -69,7 +69,7 @@ export default function InviteMemberToGroupModal({
               className="flex-shrink-0 border border-white/20"
             />
             <div className="flex items-center gap-2 text-white font-semibold text-sm min-w-0">
-              <FiUserPlus className="w-5 h-5 text-cyan-400 shrink-0" />
+              <FiUserPlus className="w-5 h-5 text-white shrink-0" />
               <span className="truncate">Invite to “{groupName}”</span>
             </div>
           </div>
@@ -90,7 +90,7 @@ export default function InviteMemberToGroupModal({
             placeholder="e.g. jane or @jane"
             autoCapitalize="off"
             autoCorrect="off"
-            className="w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2.5 text-white placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-cyan-500/40"
+            className="w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2.5 text-white placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-white/40"
             disabled={busy}
             onKeyDown={(e) => {
               if (e.key === 'Enter') void submit();
@@ -104,7 +104,7 @@ export default function InviteMemberToGroupModal({
             type="button"
             disabled={busy}
             onClick={() => void submit()}
-            className="w-full py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white font-semibold text-sm"
+            className="w-full py-3 rounded-xl bg-white hover:bg-white/90 disabled:opacity-50 text-black font-semibold text-sm"
           >
             {busy ? 'Sending…' : 'Send invite'}
           </button>

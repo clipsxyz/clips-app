@@ -63,7 +63,7 @@ export default function InviteToGroupModal({
               className="flex-shrink-0 border border-white/20"
             />
             <div className="flex items-center gap-2 text-white font-semibold text-sm min-w-0">
-              <FiUsers className="w-5 h-5 text-cyan-400 shrink-0" />
+              <FiUsers className="w-5 h-5 text-white shrink-0" />
               <span className="truncate">Invite to group</span>
             </div>
           </div>
@@ -95,7 +95,7 @@ export default function InviteToGroupModal({
                       <div className="text-[11px] text-white/45">{g.member_count} members</div>
                     </div>
                     {invitingId === g.id ? (
-                      <span className="text-xs text-cyan-300">…</span>
+                      <span className="text-xs text-white/70">…</span>
                     ) : (
                       <FiChevronRight className="w-5 h-5 text-white/35 shrink-0" />
                     )}

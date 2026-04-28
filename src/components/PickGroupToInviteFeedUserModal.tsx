@@ -88,7 +88,7 @@ export default function PickGroupToInviteFeedUserModal({
       <div className="relative w-full max-w-md mx-3 sm:mx-4 rounded-t-2xl sm:rounded-2xl border border-white/15 bg-black shadow-2xl overflow-hidden max-h-[min(85vh,520px)] flex flex-col">
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 gap-3 shrink-0">
           <div className="flex items-center gap-3 min-w-0 flex-1">
-            <FiUsers className="w-5 h-5 text-cyan-400 shrink-0" aria-hidden />
+            <FiUsers className="w-5 h-5 text-white shrink-0" aria-hidden />
             <div className="min-w-0">
               <p className="text-white font-semibold text-sm truncate">Invite to a group</p>
               <p className="text-[11px] text-white/50 truncate">
