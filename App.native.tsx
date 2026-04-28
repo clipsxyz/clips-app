@@ -107,24 +107,28 @@ function App(): React.JSX.Element {
   const handleNotificationPress = React.useCallback((data: Record<string, any>) => {
     if (!navigationRef.isReady()) return;
     const nav = navigationRef as any;
+    const chatGroupId = data.chatGroupId || data.chat_group_id || data.groupId || data.group_id;
+    const fromHandle = data.fromHandle || data.from_handle || data.senderHandle || data.sender_handle;
+    const storyId = data.storyId || data.story_id;
+    const postId = data.postId || data.post_id;
 
-    if (data.chatGroupId) {
-      nav.navigate('Messages', { chatGroupId: data.chatGroupId, kind: 'group' });
+    if (chatGroupId) {
+      nav.navigate('Messages', { chatGroupId, kind: 'group' });
       return;
     }
 
-    if (data.fromHandle && data.storyId) {
-      nav.navigate('Stories', { openUserHandle: data.fromHandle, openStoryId: data.storyId });
+    if (fromHandle && storyId) {
+      nav.navigate('Stories', { openUserHandle: fromHandle, openStoryId: storyId });
       return;
     }
 
-    if (data.fromHandle) {
-      nav.navigate('Messages', { handle: data.fromHandle });
+    if (fromHandle) {
+      nav.navigate('Messages', { handle: fromHandle });
       return;
     }
 
-    if (data.postId) {
-      nav.navigate('PostDetail', { postId: data.postId });
+    if (postId) {
+      nav.navigate('PostDetail', { postId });
       return;
     }
 
