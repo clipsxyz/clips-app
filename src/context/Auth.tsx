@@ -192,6 +192,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = () => {
     // Disconnect Socket.IO when user logs out
     disconnectSocket();
+    import('../services/notifications')
+      .then(({ clearNotificationSession }) => clearNotificationSession?.())
+      .catch(() => {});
     setUser(null);
     localStorage.removeItem('user');
     try {

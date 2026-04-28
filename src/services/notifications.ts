@@ -395,3 +395,7 @@ export async function initializeNotifications(_options?: NotificationInitOptions
 export function teardownNotifications(): void {
   // Web implementation currently does not retain long-lived listeners here.
 }
+
+export async function clearNotificationSession(): Promise<void> {
+  teardownNotifications();
+}

@@ -58,6 +58,8 @@ let inMemoryNotificationPrefs: NotificationPreferences = { ...defaultPreferences
 let hydrated = false;
 let unsubscribeForeground: (() => void) | null = null;
 let unsubscribeOpened: (() => void) | null = null;
+let unsubscribeTokenRefresh: (() => void) | null = null;
+let currentFcmToken: string | null = null;
 
 function getDynamicRequire(): ((name: string) => any) | null {
   try {
@@ -108,6 +110,23 @@ async function saveTokenToBackend(token: string): Promise<void> {
     });
   } catch (error) {
     console.warn('Failed to save FCM token to backend:', error);
+  }
+}
+
+async function removeTokenFromBackend(token: string): Promise<void> {
+  try {
+    const user = await getCurrentUserIdentity();
+    await apiRequest('/notifications/fcm-token', {
+      method: 'POST',
+      body: JSON.stringify({
+        token,
+        userId: user?.id || user?.handle || 'unknown',
+        userHandle: user?.handle || '',
+        remove: true,
+      }),
+    });
+  } catch (error) {
+    console.warn('Failed to remove FCM token from backend:', error);
   }
 }
 
@@ -203,6 +222,7 @@ export async function getFCMToken(): Promise<string | null> {
     const token = await messaging.getToken();
     if (token) {
       await saveTokenToBackend(token);
+      currentFcmToken = token;
     }
     return token || null;
   } catch (error) {
@@ -267,6 +287,10 @@ export async function initializeNotifications(options?: NotificationInitOptions)
     unsubscribeOpened();
     unsubscribeOpened = null;
   }
+  if (unsubscribeTokenRefresh) {
+    unsubscribeTokenRefresh();
+    unsubscribeTokenRefresh = null;
+  }
 
   unsubscribeForeground = await onForegroundMessage(() => {
     // Keep listener active for future in-app badges/refresh hooks.
@@ -288,6 +312,13 @@ export async function initializeNotifications(options?: NotificationInitOptions)
       console.warn('Failed to read initial notification:', error);
     }
   }
+
+  if (typeof messaging.onTokenRefresh === 'function') {
+    unsubscribeTokenRefresh = messaging.onTokenRefresh((token: string) => {
+      currentFcmToken = token;
+      void saveTokenToBackend(token);
+    });
+  }
 }
 
 export function teardownNotifications(): void {
@@ -299,4 +330,24 @@ export function teardownNotifications(): void {
     unsubscribeOpened();
     unsubscribeOpened = null;
   }
+  if (unsubscribeTokenRefresh) {
+    unsubscribeTokenRefresh();
+    unsubscribeTokenRefresh = null;
+  }
+}
+
+export async function clearNotificationSession(): Promise<void> {
+  const messaging = await getMessagingInstance();
+  if (currentFcmToken) {
+    await removeTokenFromBackend(currentFcmToken);
+    currentFcmToken = null;
+  }
+  if (messaging && typeof messaging.deleteToken === 'function') {
+    try {
+      await messaging.deleteToken();
+    } catch (error) {
+      console.warn('Failed to delete local FCM token:', error);
+    }
+  }
+  teardownNotifications();
 }

@@ -117,6 +117,7 @@ class NotificationController extends Controller
             'token' => 'required|string',
             'userId' => 'required|string',
             'userHandle' => 'required|string',
+            'remove' => 'sometimes|boolean',
         ]);
 
         if ($validator->fails()) {
@@ -127,6 +128,19 @@ class NotificationController extends Controller
         }
 
         try {
+            if ($request->boolean('remove')) {
+                DB::table('fcm_tokens')
+                    ->where('user_id', $request->userId)
+                    ->where('user_handle', $request->userHandle)
+                    ->where('token', $request->token)
+                    ->delete();
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'FCM token removed successfully'
+                ]);
+            }
+
             // Store FCM token in database
             // You can create a migration for this table: fcm_tokens
             DB::table('fcm_tokens')->updateOrInsert(

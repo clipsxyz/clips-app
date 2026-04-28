@@ -45,6 +45,40 @@ class NotificationControllerTest extends TestCase
             ->assertJsonStructure(['success', 'errors']);
     }
 
+    public function test_can_remove_fcm_token(): void
+    {
+        $user = User::factory()->create();
+        DB::table('fcm_tokens')->insert([
+            'user_id' => (string) $user->id,
+            'user_handle' => $user->handle,
+            'token' => 'test-token-remove',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $payload = [
+            'token' => 'test-token-remove',
+            'userId' => (string) $user->id,
+            'userHandle' => $user->handle,
+            'remove' => true,
+        ];
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/notifications/fcm-token', $payload);
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'success' => true,
+                'message' => 'FCM token removed successfully',
+            ]);
+
+        $this->assertDatabaseMissing('fcm_tokens', [
+            'user_id' => (string) $user->id,
+            'user_handle' => $user->handle,
+            'token' => 'test-token-remove',
+        ]);
+    }
+
     public function test_can_save_and_get_notification_preferences(): void
     {
         $user = User::factory()->create();
