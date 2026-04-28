@@ -28,6 +28,7 @@ class ChatGroup extends Model
 
     protected $fillable = [
         'name',
+        'avatar_url',
         'creator_id',
         'conversation_id',
     ];

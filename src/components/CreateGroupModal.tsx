@@ -14,14 +14,20 @@ export default function CreateGroupModal({
 }: {
   isOpen: boolean;
   onClose: () => void;
-  onCreated?: (group: { id: string; name: string; conversation_id: string }) => void;
+  onCreated?: (group: { id: string; name: string; avatar_url?: string | null; conversation_id: string }) => void;
 }) {
   const { user } = useAuth();
   const [name, setName] = React.useState('');
+  const [avatarDataUrl, setAvatarDataUrl] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   React.useEffect(() => {
-    if (isOpen) setName('');
+    if (isOpen) {
+      setName('');
+      setAvatarDataUrl(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -39,7 +45,7 @@ export default function CreateGroupModal({
     }
     setBusy(true);
     try {
-      const g = await createChatGroup(trimmed, creatorHandle ?? null);
+      const g = await createChatGroup(trimmed, creatorHandle ?? null, avatarDataUrl);
       if (g) {
         onCreated?.(g);
         onClose();
@@ -96,6 +102,58 @@ export default function CreateGroupModal({
               if (e.key === 'Enter') void submit();
             }}
           />
+          <div className="space-y-2">
+            <label className="block text-xs font-medium text-white/60 uppercase tracking-wide">Group photo (optional)</label>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => fileInputRef.current?.click()}
+                className="rounded-lg border border-white/20 bg-black/40 px-3 py-2 text-xs font-semibold text-white hover:bg-white/10 disabled:opacity-50"
+              >
+                {avatarDataUrl ? 'Change photo' : 'Choose photo'}
+              </button>
+              {avatarDataUrl ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setAvatarDataUrl(null);
+                    if (fileInputRef.current) fileInputRef.current.value = '';
+                  }}
+                  className="rounded-lg border border-white/20 bg-black/40 px-3 py-2 text-xs font-semibold text-white/80 hover:bg-white/10 disabled:opacity-50"
+                >
+                  Remove
+                </button>
+              ) : null}
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const result = typeof reader.result === 'string' ? reader.result : null;
+                  if (!result) {
+                    showToast('Could not read image file');
+                    return;
+                  }
+                  setAvatarDataUrl(result);
+                };
+                reader.onerror = () => showToast('Could not read image file');
+                reader.readAsDataURL(file);
+              }}
+            />
+            {avatarDataUrl ? (
+              <div className="w-16 h-16 rounded-full overflow-hidden border border-white/20">
+                <img src={avatarDataUrl} alt="Group avatar preview" className="w-full h-full object-cover" />
+              </div>
+            ) : null}
+          </div>
           <button
             type="button"
             disabled={busy}

@@ -52,6 +52,7 @@ class ChatGroupController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|min:1|max:120',
+            'avatar_url' => 'nullable|string|max:65535',
         ]);
 
         if ($validator->fails()) {
@@ -63,6 +64,7 @@ class ChatGroupController extends Controller
         $group = DB::transaction(function () use ($request, $user) {
             $group = ChatGroup::create([
                 'name' => trim($request->name),
+                'avatar_url' => $request->input('avatar_url'),
                 'creator_id' => $user->id,
             ]);
 

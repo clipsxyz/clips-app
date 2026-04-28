@@ -8,6 +8,7 @@ function hasToken(): boolean {
 export interface ChatGroupSummary {
   id: string;
   name: string;
+  avatar_url?: string | null;
   conversation_id: string;
   creator_id: string;
   is_admin: boolean;
@@ -43,7 +44,8 @@ export async function fetchMyChatGroups(viewerHandle?: string | null): Promise<C
 export async function createChatGroup(
   name: string,
   creatorHandle?: string | null,
-): Promise<{ id: string; name: string; conversation_id: string } | null> {
+  avatarUrl?: string | null,
+): Promise<{ id: string; name: string; avatar_url?: string | null; conversation_id: string } | null> {
   if (!isLaravelApiEnabled()) {
     const h = creatorHandle?.trim();
     if (!h) return null;
@@ -51,7 +53,7 @@ export async function createChatGroup(
     return createMockChatGroup(name, h);
   }
   if (!hasToken()) return null;
-  return client.createChatGroupApi(name) as Promise<{ id: string; name: string; conversation_id: string }>;
+  return client.createChatGroupApi(name, avatarUrl) as Promise<{ id: string; name: string; avatar_url?: string | null; conversation_id: string }>;
 }
 
 export async function inviteUserToChatGroup(groupId: string, inviteeHandle: string): Promise<unknown> {

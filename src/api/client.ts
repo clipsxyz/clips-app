@@ -502,10 +502,13 @@ export async function fetchChatGroups() {
     return apiRequest('/chat-groups');
 }
 
-export async function createChatGroupApi(name: string) {
+export async function createChatGroupApi(name: string, avatarUrl?: string | null) {
     return apiRequest('/chat-groups', {
         method: 'POST',
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({
+            name,
+            ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
+        }),
     });
 }
 
