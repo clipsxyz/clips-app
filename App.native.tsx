@@ -31,6 +31,8 @@ import MessagesScreen from './src/screens/MessagesScreen';
 import InboxScreen from './src/screens/InboxScreen';
 import CollectionFeedScreen from './src/screens/CollectionFeedScreen';
 import ContentPreferencesScreen from './src/screens/ContentPreferencesScreen';
+import PaymentScreen from './src/screens/PaymentScreen';
+import PaymentSuccessScreen from './src/screens/PaymentSuccessScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -173,6 +175,16 @@ function App(): React.JSX.Element {
           <Stack.Screen
             name="ContentPreferences"
             component={ContentPreferencesScreen}
+            options={{ presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="Payment"
+            component={PaymentScreen}
+            options={{ presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="PaymentSuccess"
+            component={PaymentSuccessScreen}
             options={{ presentation: 'modal' }}
           />
           </Stack.Navigator>

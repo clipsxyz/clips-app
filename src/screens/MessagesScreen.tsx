@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { launchImageLibrary } from 'react-native-image-picker';
 import { useAuth } from '../context/Auth';
 import {
     fetchConversationMessagesPage,
@@ -227,7 +228,50 @@ export default function MessagesScreen({ route, navigation }: any) {
     };
 
     const handleImageClick = () => {
-        Alert.alert('Add photo', 'Photo picker for RN DM composer is coming next.');
+        if (!user?.handle) return;
+        launchImageLibrary(
+            {
+                mediaType: 'photo',
+                selectionLimit: 1,
+                includeBase64: true,
+                quality: 0.8,
+            },
+            async (response) => {
+                if (response.didCancel) return;
+                if (response.errorCode) {
+                    Alert.alert('Image error', response.errorMessage || 'Could not open your photo library.');
+                    return;
+                }
+                const asset = response.assets?.[0];
+                if (!asset) return;
+                const mime = asset.type || 'image/jpeg';
+                const imageUrl = asset.base64
+                    ? `data:${mime};base64,${asset.base64}`
+                    : asset.uri;
+                if (!imageUrl) return;
+
+                const optimistic: ChatMessage = {
+                    id: `${Date.now()}-img`,
+                    senderHandle: user.handle,
+                    imageUrl,
+                    timestamp: Date.now(),
+                };
+                shouldAutoScrollRef.current = true;
+                setMessages((prev) => [...prev, optimistic]);
+
+                try {
+                    if (isGroupThread && chatGroupId) {
+                        await appendGroupChatMessage(user.handle, chatGroupId, { imageUrl });
+                    } else {
+                        await appendMessage(user.handle, handle, { imageUrl });
+                    }
+                    await loadMessages(true);
+                } catch (error) {
+                    console.error('Error sending image message:', error);
+                    Alert.alert('Send failed', 'Could not send image message.');
+                }
+            },
+        );
     };
 
     const renderMessage = ({ item }: { item: ChatMessage }) => {
