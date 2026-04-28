@@ -33,6 +33,12 @@ import CollectionFeedScreen from './src/screens/CollectionFeedScreen';
 import ContentPreferencesScreen from './src/screens/ContentPreferencesScreen';
 import PaymentScreen from './src/screens/PaymentScreen';
 import PaymentSuccessScreen from './src/screens/PaymentSuccessScreen';
+import SplashScreen from './src/screens/SplashScreen';
+import LandingScreen from './src/screens/LandingScreen';
+import TermsScreen from './src/screens/TermsScreen';
+import PublicPostScreen from './src/screens/PublicPostScreen';
+import ReplyQuestionScreen from './src/screens/ReplyQuestionScreen';
+import ClipScreen from './src/screens/ClipScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -187,6 +193,12 @@ function App(): React.JSX.Element {
             component={PaymentSuccessScreen}
             options={{ presentation: 'modal' }}
           />
+          <Stack.Screen name="Splash" component={SplashScreen} />
+          <Stack.Screen name="Landing" component={LandingScreen} />
+          <Stack.Screen name="Terms" component={TermsScreen} />
+          <Stack.Screen name="PublicPost" component={PublicPostScreen} />
+          <Stack.Screen name="ReplyQuestion" component={ReplyQuestionScreen} />
+          <Stack.Screen name="Clip" component={ClipScreen} />
           </Stack.Navigator>
         </NavigationContainer>
       </SafeAreaProvider>

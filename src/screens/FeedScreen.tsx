@@ -1248,26 +1248,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         // Poll for updates every 10 seconds
         const interval = setInterval(updateUnreadCount, 10000);
 
-        // Try to listen for events (works in React Native Web)
-        const handleUnreadChanged = (event: any) => {
-            const handle = event.detail?.handle;
-            const unread = event.detail?.unread ?? 0;
-            if (handle === user.handle) {
-                setHasInbox(unread > 0);
-                setUnreadCount(unread);
-            }
-        };
-
-        // Only add listeners if window is available (React Native Web)
-        if (typeof window !== 'undefined') {
-            window.addEventListener('inboxUnreadChanged', handleUnreadChanged);
-        }
-
         return () => {
             clearInterval(interval);
-            if (typeof window !== 'undefined') {
-                window.removeEventListener('inboxUnreadChanged', handleUnreadChanged);
-            }
         };
     }, [user?.handle, updateUnreadCount]);
 

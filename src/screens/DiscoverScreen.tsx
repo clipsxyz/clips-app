@@ -35,9 +35,9 @@ type DiscoverHistoryItem = {
     ts: number;
 };
 
-function readDiscoverHistory(key: string): DiscoverHistoryItem[] {
+async function readDiscoverHistory(key: string): Promise<DiscoverHistoryItem[]> {
     try {
-        const raw = localStorage.getItem(key);
+        const raw = await AsyncStorage.getItem(key);
         if (!raw) return [];
         const parsed = JSON.parse(raw);
         if (!Array.isArray(parsed)) return [];
@@ -47,9 +47,9 @@ function readDiscoverHistory(key: string): DiscoverHistoryItem[] {
     }
 }
 
-function writeDiscoverHistory(key: string, items: DiscoverHistoryItem[]) {
+async function writeDiscoverHistory(key: string, items: DiscoverHistoryItem[]) {
     try {
-        localStorage.setItem(key, JSON.stringify(items));
+        await AsyncStorage.setItem(key, JSON.stringify(items));
     } catch {
         // ignore
     }
@@ -62,13 +62,31 @@ export default function DiscoverScreen({ navigation }: any) {
     const [loading, setLoading] = useState(false);
     const [activeIndex, setActiveIndex] = useState<number>(-1);
     const [discoverMode, setDiscoverMode] = useState<'city' | 'landmark' | 'venue'>('city');
-    const [recentSearches, setRecentSearches] = useState<DiscoverHistoryItem[]>(() => readDiscoverHistory(DISCOVER_RECENT_KEY));
-    const [savedSearches, setSavedSearches] = useState<DiscoverHistoryItem[]>(() => readDiscoverHistory(DISCOVER_SAVED_KEY));
+    const [recentSearches, setRecentSearches] = useState<DiscoverHistoryItem[]>([]);
+    const [savedSearches, setSavedSearches] = useState<DiscoverHistoryItem[]>([]);
     const [topSections, setTopSections] = useState<SearchSections>({});
 
     const results = popularCities.filter(city => 
         city.toLowerCase().includes(query.toLowerCase())
     );
+
+    useEffect(() => {
+        let mounted = true;
+        Promise.all([readDiscoverHistory(DISCOVER_RECENT_KEY), readDiscoverHistory(DISCOVER_SAVED_KEY)])
+            .then(([recent, saved]) => {
+                if (!mounted) return;
+                setRecentSearches(recent);
+                setSavedSearches(saved);
+            })
+            .catch(() => {
+                if (!mounted) return;
+                setRecentSearches([]);
+                setSavedSearches([]);
+            });
+        return () => {
+            mounted = false;
+        };
+    }, []);
 
     useEffect(() => {
         if (!query.trim()) {
@@ -113,7 +131,7 @@ export default function DiscoverScreen({ navigation }: any) {
         setRecentSearches((prev) => {
             const next = [{ q: queryText, mode, ts: Date.now() }, ...prev.filter((x) => !(x.q.toLowerCase() === queryText.toLowerCase() && x.mode === mode))]
                 .slice(0, MAX_DISCOVER_HISTORY);
-            writeDiscoverHistory(DISCOVER_RECENT_KEY, next);
+            void writeDiscoverHistory(DISCOVER_RECENT_KEY, next);
             return next;
         });
     };
@@ -126,7 +144,7 @@ export default function DiscoverScreen({ navigation }: any) {
             const next = exists
                 ? prev.filter((x) => !(x.q.toLowerCase() === queryText.toLowerCase() && x.mode === mode))
                 : [{ q: queryText, mode, ts: Date.now() }, ...prev].slice(0, MAX_DISCOVER_HISTORY);
-            writeDiscoverHistory(DISCOVER_SAVED_KEY, next);
+            void writeDiscoverHistory(DISCOVER_SAVED_KEY, next);
             return next;
         });
     };

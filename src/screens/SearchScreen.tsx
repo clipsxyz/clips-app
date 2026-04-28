@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Image, ActivityIndicator, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { unifiedSearch, type SearchSections } from '../api/search';
 import { fetchPostsByUser } from '../api/posts';
 import { toggleFollow } from '../api/client';
@@ -17,9 +18,9 @@ const RECENT_SEARCHES_KEY = 'searchRecentQueriesV1';
 const SAVED_SEARCHES_KEY = 'searchSavedQueriesV1';
 const MAX_RECENT_SEARCHES = 8;
 
-function readSearchList(key: string): RecentSearchItem[] {
+async function readSearchList(key: string): Promise<RecentSearchItem[]> {
     try {
-        const raw = localStorage.getItem(key);
+        const raw = await AsyncStorage.getItem(key);
         if (!raw) return [];
         const parsed = JSON.parse(raw);
         if (!Array.isArray(parsed)) return [];
@@ -29,9 +30,9 @@ function readSearchList(key: string): RecentSearchItem[] {
     }
 }
 
-function writeSearchList(key: string, items: RecentSearchItem[]) {
+async function writeSearchList(key: string, items: RecentSearchItem[]) {
     try {
-        localStorage.setItem(key, JSON.stringify(items));
+        await AsyncStorage.setItem(key, JSON.stringify(items));
     } catch {
         // ignore storage errors
     }
@@ -50,14 +51,32 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
         locations: false,
         posts: false,
     });
-    const [recentSearches, setRecentSearches] = useState<RecentSearchItem[]>(() => readSearchList(RECENT_SEARCHES_KEY));
-    const [savedSearches, setSavedSearches] = useState<RecentSearchItem[]>(() => readSearchList(SAVED_SEARCHES_KEY));
+    const [recentSearches, setRecentSearches] = useState<RecentSearchItem[]>([]);
+    const [savedSearches, setSavedSearches] = useState<RecentSearchItem[]>([]);
     const [followBusyHandle, setFollowBusyHandle] = useState<string | null>(null);
     const [localFollowState, setLocalFollowState] = useState<Record<string, boolean>>({});
     const [suggestedUsers, setSuggestedUsers] = useState<Array<{ handle: string; display_name?: string; avatar_url?: string }>>([]);
 
     useEffect(() => {
         fetchPostsByUser('Sarah@Artane', 30).then(setPreloadPosts).catch(() => setPreloadPosts([]));
+    }, []);
+
+    useEffect(() => {
+        let mounted = true;
+        Promise.all([readSearchList(RECENT_SEARCHES_KEY), readSearchList(SAVED_SEARCHES_KEY)])
+            .then(([recent, saved]) => {
+                if (!mounted) return;
+                setRecentSearches(recent);
+                setSavedSearches(saved);
+            })
+            .catch(() => {
+                if (!mounted) return;
+                setRecentSearches([]);
+                setSavedSearches([]);
+            });
+        return () => {
+            mounted = false;
+        };
     }, []);
 
     useEffect(() => {
@@ -107,7 +126,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
         setRecentSearches((prev) => {
             const next = [{ q: query, mode, ts: Date.now() }, ...prev.filter((x) => !(x.q.toLowerCase() === query.toLowerCase() && x.mode === mode))]
                 .slice(0, MAX_RECENT_SEARCHES);
-            writeSearchList(RECENT_SEARCHES_KEY, next);
+            void writeSearchList(RECENT_SEARCHES_KEY, next);
             return next;
         });
     };
@@ -120,7 +139,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
             const next = exists
                 ? prev.filter((x) => !(x.q.toLowerCase() === query.toLowerCase() && x.mode === mode))
                 : [{ q: query, mode, ts: Date.now() }, ...prev].slice(0, MAX_RECENT_SEARCHES);
-            writeSearchList(SAVED_SEARCHES_KEY, next);
+            void writeSearchList(SAVED_SEARCHES_KEY, next);
             return next;
         });
     };
@@ -402,7 +421,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                             </TouchableOpacity>
                         ))}
                         {!!recentSearches.length && (
-                            <TouchableOpacity onPress={() => { setRecentSearches([]); writeSearchList(RECENT_SEARCHES_KEY, []); }}>
+                            <TouchableOpacity onPress={() => { setRecentSearches([]); void writeSearchList(RECENT_SEARCHES_KEY, []); }}>
                                 <Text style={styles.clearText}>Clear recent</Text>
                             </TouchableOpacity>
                         )}
