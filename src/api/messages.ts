@@ -168,6 +168,7 @@ function buildMockGroupConversationSummaries(forHandle: string): ConversationSum
             kind: 'group',
             chatGroupId: id,
             groupName: meta.name,
+            groupAvatarUrl: meta.avatar_url || null,
             otherHandle: '',
             lastMessage: last,
             unread,
@@ -436,6 +437,7 @@ export interface ConversationSummary {
     kind?: 'dm' | 'group';
     chatGroupId?: string;
     groupName?: string;
+    groupAvatarUrl?: string | null;
     lastMessage?: ChatMessage;
     unread: number;
     isPinned?: boolean;
@@ -631,7 +633,7 @@ export async function listConversations(forHandle: string): Promise<Conversation
                     async (row: {
                         type?: string;
                         chat_group_id?: string;
-                        group?: { id: string; name: string; creator_id?: string };
+                        group?: { id: string; name: string; avatar_url?: string | null; avatarUrl?: string | null; creator_id?: string };
                         other_user?: { handle: string };
                         latest_message?: any;
                         unread_count?: number;
@@ -643,6 +645,7 @@ export async function listConversations(forHandle: string): Promise<Conversation
                                 kind: 'group' as const,
                                 chatGroupId: row.chat_group_id,
                                 groupName: row.group?.name ?? 'Group',
+                                groupAvatarUrl: row.group?.avatar_url || row.group?.avatarUrl || null,
                                 otherHandle: '',
                                 lastMessage,
                                 unread,

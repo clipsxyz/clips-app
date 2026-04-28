@@ -512,7 +512,7 @@ export default function InboxScreen({ navigation, route }: any) {
                             <TouchableOpacity onPress={() => { void openConversation(item); }} style={styles.item}>
                                 <View style={styles.itemIcon}>
                                     {isGroup ? (
-                                        <Icon name="people" size={22} color="#8B5CF6" />
+                                        <Avatar src={item.groupAvatarUrl || undefined} name={title} size={40} />
                                     ) : (
                                         <Avatar src={getAvatarForHandle(item.otherHandle)} name={item.otherHandle} size={40} />
                                     )}

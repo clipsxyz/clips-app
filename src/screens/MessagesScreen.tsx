@@ -26,7 +26,9 @@ import {
     editMessage,
     type ChatMessage,
 } from '../api/messages';
+import { createChatGroup, inviteUserToChatGroup } from '../api/chatGroups';
 import { getAvatarForHandle } from '../api/users';
+import { unifiedSearch } from '../api/search';
 import { timeAgo } from '../utils/timeAgo';
 import Avatar from '../components/Avatar';
 
@@ -38,6 +40,7 @@ export default function MessagesScreen({ route, navigation }: any) {
     const isGroupThread = Boolean(chatGroupId);
     const { user } = useAuth();
     const [groupName, setGroupName] = useState('Group');
+    const [groupAvatarUrl, setGroupAvatarUrl] = useState<string | undefined>(undefined);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [messageText, setMessageText] = useState('');
     const [loading, setLoading] = useState(true);
@@ -46,6 +49,15 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [loadingOlder, setLoadingOlder] = useState(false);
     const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
     const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null);
+    const [createGroupOpen, setCreateGroupOpen] = useState(false);
+    const [newGroupName, setNewGroupName] = useState('');
+    const [newGroupAvatarDataUrl, setNewGroupAvatarDataUrl] = useState<string | undefined>(undefined);
+    const [creatingGroup, setCreatingGroup] = useState(false);
+    const [inviteOpen, setInviteOpen] = useState(false);
+    const [inviteHandle, setInviteHandle] = useState('');
+    const [inviteBusy, setInviteBusy] = useState(false);
+    const [inviteSuggestions, setInviteSuggestions] = useState<Array<{ handle: string; displayName?: string; avatarUrl?: string }>>([]);
+    const [inviteSearching, setInviteSearching] = useState(false);
     const flatListRef = useRef<FlatList>(null);
     const shouldAutoScrollRef = useRef(true);
 
@@ -56,8 +68,50 @@ export default function MessagesScreen({ route, navigation }: any) {
     };
 
     useEffect(() => {
+        if (!isGroupThread) {
+            setGroupAvatarUrl(undefined);
+        }
         loadMessages(true);
     }, [handle, chatGroupId]);
+
+    useEffect(() => {
+        if (!inviteOpen) return;
+        const q = inviteHandle.trim().replace(/^@/, '');
+        if (q.length < 2) {
+            setInviteSuggestions([]);
+            setInviteSearching(false);
+            return;
+        }
+        let cancelled = false;
+        const timer = setTimeout(async () => {
+            setInviteSearching(true);
+            try {
+                const result = await unifiedSearch({ q, types: 'users', usersLimit: 6 });
+                const items = ((result as any)?.sections?.users?.items || []) as any[];
+                if (!cancelled) {
+                    setInviteSuggestions(
+                        items
+                            .map((u) => ({
+                                handle: String(u?.handle || '').trim(),
+                                displayName: String(u?.display_name || u?.displayName || '').trim() || undefined,
+                                avatarUrl: (u?.avatar_url || u?.avatarUrl) as string | undefined,
+                            }))
+                            .filter((u) => !!u.handle)
+                            .slice(0, 6),
+                    );
+                }
+            } catch {
+                if (!cancelled) setInviteSuggestions([]);
+            } finally {
+                if (!cancelled) setInviteSearching(false);
+            }
+        }, 220);
+
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+        };
+    }, [inviteHandle, inviteOpen]);
 
     useEffect(() => {
         if (messages.length > 0 && user?.handle) {
@@ -92,6 +146,7 @@ export default function MessagesScreen({ route, navigation }: any) {
             setMessages(page.items);
             if (isGroupThread && 'groupName' in page && typeof page.groupName === 'string' && page.groupName) {
                 setGroupName(page.groupName);
+                setGroupAvatarUrl((page as any).groupAvatarUrl || undefined);
             }
             setThreadCursor(page.nextCursor);
             setThreadHasMore(page.hasMore);
@@ -127,6 +182,7 @@ export default function MessagesScreen({ route, navigation }: any) {
             }
             if (isGroupThread && 'groupName' in page && typeof page.groupName === 'string' && page.groupName) {
                 setGroupName(page.groupName);
+                setGroupAvatarUrl((page as any).groupAvatarUrl || undefined);
             }
             setThreadCursor(page.nextCursor);
             setThreadHasMore(page.hasMore);
@@ -225,6 +281,92 @@ export default function MessagesScreen({ route, navigation }: any) {
             ],
             { cancelable: true },
         );
+    };
+
+    const pickGroupAvatar = () => {
+        launchImageLibrary(
+            {
+                mediaType: 'photo',
+                selectionLimit: 1,
+                includeBase64: true,
+                quality: 0.8,
+            },
+            (response) => {
+                if (response.didCancel) return;
+                if (response.errorCode) {
+                    Alert.alert('Photo error', response.errorMessage || 'Could not open your photo library.');
+                    return;
+                }
+                const asset = response.assets?.[0];
+                if (!asset) return;
+                const mime = asset.type || 'image/jpeg';
+                const dataUrl = asset.base64 ? `data:${mime};base64,${asset.base64}` : asset.uri;
+                if (!dataUrl) return;
+                setNewGroupAvatarDataUrl(dataUrl);
+            },
+        );
+    };
+
+    const handleCreateGroup = async () => {
+        if (!user?.handle || creatingGroup) return;
+        const trimmed = newGroupName.trim();
+        if (!trimmed) {
+            Alert.alert('Group name required', 'Enter a group name to continue.');
+            return;
+        }
+        setCreatingGroup(true);
+        try {
+            const created = await createChatGroup(trimmed, user.handle, newGroupAvatarDataUrl || null);
+            if (!created?.id) {
+                Alert.alert('Create failed', 'Could not create group right now.');
+                return;
+            }
+            setCreateGroupOpen(false);
+            setNewGroupName('');
+            setNewGroupAvatarDataUrl(undefined);
+            navigation.navigate('Messages', { chatGroupId: created.id, kind: 'group' });
+        } catch (error) {
+            console.error('Error creating group:', error);
+            Alert.alert('Create failed', 'Could not create group right now.');
+        } finally {
+            setCreatingGroup(false);
+        }
+    };
+
+    const handleInviteMember = async () => {
+        if (!chatGroupId || inviteBusy) return;
+        const normalized = inviteHandle.trim().replace(/^@/, '');
+        if (!normalized) {
+            Alert.alert('Handle required', 'Type a handle to invite.');
+            return;
+        }
+        setInviteBusy(true);
+        try {
+            await inviteUserToChatGroup(chatGroupId, normalized);
+            setInviteOpen(false);
+            setInviteHandle('');
+            setInviteSuggestions([]);
+            Alert.alert('Invite sent', `@${normalized} will see this invite in notifications.`);
+        } catch (error) {
+            console.error('Invite failed:', error);
+            Alert.alert('Invite failed', 'Could not send invite right now.');
+        } finally {
+            setInviteBusy(false);
+        }
+    };
+
+    const openHeaderActions = () => {
+        if (isGroupThread) {
+            Alert.alert('Group actions', 'Choose an action', [
+                { text: 'Invite member', onPress: () => setInviteOpen(true) },
+                { text: 'Cancel', style: 'cancel' },
+            ]);
+            return;
+        }
+        Alert.alert('Chat actions', 'Choose an action', [
+            { text: 'Create group', onPress: () => setCreateGroupOpen(true) },
+            { text: 'Cancel', style: 'cancel' },
+        ]);
     };
 
     const handleImageClick = () => {
@@ -383,7 +525,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                 </TouchableOpacity>
                 <View style={styles.headerInfo}>
                     <Avatar
-                        src={isGroupThread ? undefined : getAvatarForHandle(handle)}
+                        src={isGroupThread ? groupAvatarUrl : getAvatarForHandle(handle)}
                         name={isGroupThread ? (groupName || 'Group') : (handle?.split('@')[0] || 'User')}
                         size={32}
                     />
@@ -396,7 +538,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                     >
                         <Icon name="bar-chart-outline" size={20} color="#FFFFFF" />
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.headerActionButton}>
+                    <TouchableOpacity style={styles.headerActionButton} onPress={openHeaderActions}>
                         <Icon name="ellipsis-vertical" size={22} color="#FFFFFF" />
                     </TouchableOpacity>
                 </View>
@@ -491,6 +633,104 @@ export default function MessagesScreen({ route, navigation }: any) {
                     </TouchableOpacity>
                 </View>
             </KeyboardAvoidingView>
+
+            <View style={[styles.sheetOverlay, !createGroupOpen && styles.hidden]}>
+                <View style={styles.sheetCard}>
+                    <Text style={styles.sheetTitle}>Create group</Text>
+                    <Text style={styles.sheetLabel}>Group name</Text>
+                    <TextInput
+                        value={newGroupName}
+                        onChangeText={setNewGroupName}
+                        placeholder="e.g. Dublin creators"
+                        placeholderTextColor="#6B7280"
+                        style={styles.sheetInput}
+                        maxLength={80}
+                    />
+                    <Text style={styles.sheetLabel}>Group photo (optional)</Text>
+                    <View style={styles.groupPhotoRow}>
+                        <Avatar src={newGroupAvatarDataUrl} name={newGroupName || 'Group'} size={42} />
+                        <TouchableOpacity style={styles.sheetSecondaryBtn} onPress={pickGroupAvatar}>
+                            <Text style={styles.sheetSecondaryBtnText}>{newGroupAvatarDataUrl ? 'Change photo' : 'Choose photo'}</Text>
+                        </TouchableOpacity>
+                        {!!newGroupAvatarDataUrl && (
+                            <TouchableOpacity style={styles.sheetSecondaryBtn} onPress={() => setNewGroupAvatarDataUrl(undefined)}>
+                                <Text style={styles.sheetSecondaryBtnText}>Remove</Text>
+                            </TouchableOpacity>
+                        )}
+                    </View>
+                    <View style={styles.sheetActionsRow}>
+                        <TouchableOpacity
+                            style={styles.sheetSecondaryBtn}
+                            onPress={() => {
+                                setCreateGroupOpen(false);
+                                setNewGroupName('');
+                                setNewGroupAvatarDataUrl(undefined);
+                            }}
+                        >
+                            <Text style={styles.sheetSecondaryBtnText}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.sheetPrimaryBtn, creatingGroup && styles.sheetPrimaryBtnDisabled]}
+                            onPress={handleCreateGroup}
+                            disabled={creatingGroup}
+                        >
+                            <Text style={styles.sheetPrimaryBtnText}>{creatingGroup ? 'Creating...' : 'Create'}</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </View>
+
+            <View style={[styles.sheetOverlay, !inviteOpen && styles.hidden]}>
+                <View style={styles.sheetCard}>
+                    <Text style={styles.sheetTitle}>Invite member</Text>
+                    <Text style={styles.sheetLabel}>Handle</Text>
+                    <TextInput
+                        value={inviteHandle}
+                        onChangeText={setInviteHandle}
+                        placeholder="@username"
+                        placeholderTextColor="#6B7280"
+                        style={styles.sheetInput}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                    />
+                    {inviteSearching ? (
+                        <Text style={styles.suggestionsHint}>Searching...</Text>
+                    ) : inviteSuggestions.length > 0 ? (
+                        <View style={styles.suggestionsList}>
+                            {inviteSuggestions.map((u) => (
+                                <TouchableOpacity key={u.handle} style={styles.suggestionRow} onPress={() => setInviteHandle(u.handle)}>
+                                    <Avatar src={u.avatarUrl} name={u.handle} size={28} />
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.suggestionHandle}>{u.handle}</Text>
+                                        {!!u.displayName && <Text style={styles.suggestionName}>{u.displayName}</Text>}
+                                    </View>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    ) : (
+                        <Text style={styles.suggestionsHint}>Type at least 2 characters to see suggestions.</Text>
+                    )}
+                    <View style={styles.sheetActionsRow}>
+                        <TouchableOpacity
+                            style={styles.sheetSecondaryBtn}
+                            onPress={() => {
+                                setInviteOpen(false);
+                                setInviteHandle('');
+                                setInviteSuggestions([]);
+                            }}
+                        >
+                            <Text style={styles.sheetSecondaryBtnText}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.sheetPrimaryBtn, inviteBusy && styles.sheetPrimaryBtnDisabled]}
+                            onPress={handleInviteMember}
+                            disabled={inviteBusy}
+                        >
+                            <Text style={styles.sheetPrimaryBtnText}>{inviteBusy ? 'Sending...' : 'Send invite'}</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </View>
         </SafeAreaView>
     );
 }
@@ -750,6 +990,117 @@ const styles = StyleSheet.create({
     replyPreviewText: {
         color: 'rgba(255,255,255,0.65)',
         fontSize: 12,
+    },
+    hidden: {
+        display: 'none',
+    },
+    sheetOverlay: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0,0,0,0.45)',
+        justifyContent: 'flex-end',
+        zIndex: 20,
+    },
+    sheetCard: {
+        backgroundColor: '#030712',
+        borderTopLeftRadius: 18,
+        borderTopRightRadius: 18,
+        borderTopWidth: 1,
+        borderColor: '#1F2937',
+        padding: 16,
+    },
+    sheetTitle: {
+        color: '#FFFFFF',
+        fontSize: 18,
+        fontWeight: '700',
+        marginBottom: 12,
+    },
+    sheetLabel: {
+        color: '#D1D5DB',
+        fontSize: 13,
+        marginBottom: 6,
+    },
+    sheetInput: {
+        backgroundColor: '#111827',
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#FFFFFF',
+        color: '#FFFFFF',
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        fontSize: 14,
+        marginBottom: 12,
+    },
+    groupPhotoRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 14,
+    },
+    sheetActionsRow: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        gap: 8,
+    },
+    sheetSecondaryBtn: {
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#FFFFFF',
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+    },
+    sheetSecondaryBtnText: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '600',
+    },
+    sheetPrimaryBtn: {
+        borderRadius: 8,
+        backgroundColor: '#FFFFFF',
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+    },
+    sheetPrimaryBtnDisabled: {
+        opacity: 0.6,
+    },
+    sheetPrimaryBtnText: {
+        color: '#030712',
+        fontSize: 13,
+        fontWeight: '700',
+    },
+    suggestionsList: {
+        marginBottom: 12,
+        backgroundColor: '#111827',
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#374151',
+        overflow: 'hidden',
+    },
+    suggestionRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: '#1F2937',
+    },
+    suggestionHandle: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '600',
+    },
+    suggestionName: {
+        color: '#9CA3AF',
+        fontSize: 12,
+    },
+    suggestionsHint: {
+        color: '#9CA3AF',
+        fontSize: 12,
+        marginBottom: 12,
     },
 });
 
