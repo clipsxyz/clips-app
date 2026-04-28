@@ -1532,7 +1532,7 @@ export default function ScenesModal({
                     role="dialog"
                     aria-modal="true"
                     aria-label="Scenes fullscreen viewer"
-                    className="fixed inset-0 z-[100] bg-black flex items-center justify-center"
+                    className="fixed inset-0 z-[220] bg-black flex items-center justify-center"
                 >
                     {effectivePosts.length > 0 ? (
                         <div
