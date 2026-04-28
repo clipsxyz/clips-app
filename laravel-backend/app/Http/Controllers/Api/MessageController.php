@@ -177,6 +177,7 @@ class MessageController extends Controller
                 'group' => [
                     'id' => $group->id,
                     'name' => $group->name,
+                    'avatar_url' => $group->avatar_url,
                     'creator_id' => $group->creator_id,
                 ],
                 'other_user' => null,
@@ -330,6 +331,7 @@ class MessageController extends Controller
             'group' => [
                 'id' => $group->id,
                 'name' => $group->name,
+                'avatar_url' => $group->avatar_url,
                 'conversation_id' => $group->conversation_id,
                 'creator_id' => $group->creator_id,
             ],
@@ -397,6 +399,7 @@ class MessageController extends Controller
             'group' => [
                 'id' => $group->id,
                 'name' => $group->name,
+                'avatar_url' => $group->avatar_url,
                 'conversation_id' => $group->conversation_id,
                 'creator_id' => $group->creator_id,
             ],

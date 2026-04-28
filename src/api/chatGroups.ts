@@ -50,7 +50,7 @@ export async function createChatGroup(
     const h = creatorHandle?.trim();
     if (!h) return null;
     const { createMockChatGroup } = await import('./messages');
-    return createMockChatGroup(name, h);
+        return createMockChatGroup(name, h, avatarUrl);
   }
   if (!hasToken()) return null;
   return client.createChatGroupApi(name, avatarUrl) as Promise<{ id: string; name: string; avatar_url?: string | null; conversation_id: string }>;

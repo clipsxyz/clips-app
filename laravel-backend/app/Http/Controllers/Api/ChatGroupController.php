@@ -36,6 +36,7 @@ class ChatGroupController extends Controller
             return [
                 'id' => $g->id,
                 'name' => $g->name,
+                'avatar_url' => $g->avatar_url,
                 'conversation_id' => $g->conversation_id,
                 'creator_id' => $g->creator_id,
                 'is_admin' => $g->creator_id === Auth::id(),

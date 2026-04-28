@@ -678,6 +678,7 @@ export default function MessagesPage() {
     const [compactPhone, setCompactPhone] = useState<boolean>(() => (typeof window !== 'undefined' ? window.innerWidth <= 390 : false));
     const threadCardMaxWidth = compactPhone ? '86vw' : '448px';
     const [groupDisplayName, setGroupDisplayName] = useState<string>('Group');
+    const [groupAvatarUrl, setGroupAvatarUrl] = useState<string | undefined>(undefined);
 
     const appendToThread = React.useCallback(
         (payload: Omit<ChatMessage, 'id' | 'timestamp' | 'senderHandle'> & { timestamp?: number }) => {
@@ -1158,7 +1159,7 @@ export default function MessagesPage() {
         if (groupId) {
             setLoading(true);
             fetchGroupThreadMessagesPage(groupId, null, 50)
-                .then(({ groupName, items, nextCursor, hasMore }) => {
+                .then(({ groupName, groupAvatarUrl, items, nextCursor, hasMore }) => {
                     if (DEBUG_MESSAGE_PAGING) {
                         console.info('[Messages][group][initial-page]', {
                             groupId,
@@ -1168,6 +1169,7 @@ export default function MessagesPage() {
                         });
                     }
                     setGroupDisplayName(groupName);
+                    setGroupAvatarUrl(groupAvatarUrl || undefined);
                     const sorted = [...items].sort((a, b) => a.timestamp - b.timestamp);
                     const mapped: MessageUI[] = sorted.map((m) => ({
                         ...m,
@@ -1242,7 +1244,8 @@ export default function MessagesPage() {
                     });
                     return;
                 }
-                fetchGroupThreadMessagesPage(groupId, null, 50).then(({ items, nextCursor, hasMore }) => {
+                fetchGroupThreadMessagesPage(groupId, null, 50).then(({ groupAvatarUrl, items, nextCursor, hasMore }) => {
+                    setGroupAvatarUrl(groupAvatarUrl || undefined);
                     const sorted = [...items].sort((a, b) => a.timestamp - b.timestamp);
                     setMessages((prev) => {
                         const replyToMap = new Map(prev.map((m) => [m.id, m.replyTo]));
@@ -2286,7 +2289,7 @@ export default function MessagesPage() {
                     </button>
                     {isGroupThread && (
                         <div className="flex items-center ml-3 flex-1 min-w-0">
-                            <Avatar name={groupDisplayName} size="sm" className="flex-shrink-0" />
+                            <Avatar src={groupAvatarUrl} name={groupDisplayName} size="sm" className="flex-shrink-0" />
                             <div className="ml-3 flex-1 min-w-0">
                                 <span className="font-semibold text-white truncate block">{groupDisplayName}</span>
                                 <span className="text-xs text-gray-400">Group chat</span>
@@ -2438,7 +2441,7 @@ export default function MessagesPage() {
                         {isGroupThread && groupId ? (
                             <button
                                 type="button"
-                                className={`${compactPhone ? 'p-1.5' : 'p-2'} hover:bg-gray-900 rounded-full transition-colors text-cyan-400`}
+                                className={`${compactPhone ? 'p-1.5' : 'p-2'} hover:bg-gray-900 rounded-full transition-colors text-violet-300`}
                                 onClick={() => setInviteMemberOpen(true)}
                                 title="Invite someone by username"
                                 aria-label="Invite to group"

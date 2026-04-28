@@ -100,24 +100,29 @@ function persistBlockedMap(): void {
 })();
 
 /** In-memory chat groups when `VITE_USE_LARAVEL_API=false` (local / mock mode). */
-const mockChatGroups = new Map<string, { name: string; creatorHandle: string; conversation_id: string }>();
+const mockChatGroups = new Map<string, { name: string; avatar_url?: string | null; creatorHandle: string; conversation_id: string }>();
 const mockGroupMessageLists = new Map<string, ChatMessage[]>();
 const mockGroupLastReadByUser = new Map<string, number>();
 
-export function createMockChatGroup(name: string, creatorHandle: string): { id: string; name: string; conversation_id: string } {
+export function createMockChatGroup(
+    name: string,
+    creatorHandle: string,
+    avatarUrl?: string | null,
+): { id: string; name: string; avatar_url?: string | null; conversation_id: string } {
     const trimmed = name.trim();
     const id = `mock-cg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     const conversation_id = `mock-conv-${id}`;
-    mockChatGroups.set(id, { name: trimmed, creatorHandle, conversation_id });
+    mockChatGroups.set(id, { name: trimmed, avatar_url: avatarUrl || null, creatorHandle, conversation_id });
     mockGroupMessageLists.set(id, []);
     window.dispatchEvent(new CustomEvent('conversationUpdated'));
-    return { id, name: trimmed, conversation_id };
+    return { id, name: trimmed, avatar_url: avatarUrl || null, conversation_id };
 }
 
 /** ChatGroupSummary-shaped rows for InviteToGroupModal / fetchMyChatGroups in mock mode. */
 export function listMockChatGroupsAsSummaries(viewerHandle: string): Array<{
     id: string;
     name: string;
+    avatar_url?: string | null;
     conversation_id: string;
     creator_id: string;
     is_admin: boolean;
@@ -130,6 +135,7 @@ export function listMockChatGroupsAsSummaries(viewerHandle: string): Array<{
         .map(([id, meta]) => ({
             id,
             name: meta.name,
+            avatar_url: meta.avatar_url || null,
             conversation_id: meta.conversation_id,
             creator_id: 'mock',
             is_admin: true,
@@ -441,6 +447,7 @@ export interface ConversationSummary {
 
 export type GroupThreadMessagesPage = {
     groupName: string;
+    groupAvatarUrl?: string | null;
     items: ChatMessage[];
     nextCursor: string | null;
     hasMore: boolean;
@@ -455,17 +462,19 @@ export async function fetchGroupThreadMessagesPage(
         try {
             const apiClient = await import('./client');
             const page = (await apiClient.fetchGroupConversationPage(groupId, cursor, limit)) as {
-                group?: { id?: string; name?: string };
+                group?: { id?: string; name?: string; avatar_url?: string | null; avatarUrl?: string | null };
                 items?: unknown[];
                 nextCursor?: string | null;
                 hasMore?: boolean;
             };
             const groupName = page?.group?.name?.trim() || 'Group';
+            const groupAvatarUrl = page?.group?.avatar_url || page?.group?.avatarUrl || null;
             const items = Array.isArray(page?.items) ? page.items.map((m) => laravelMsgToChatMessage(m as any)) : [];
             const nextCursor = typeof page?.nextCursor === 'string' ? page.nextCursor : null;
             const hasMore = Boolean(page?.hasMore) || nextCursor !== null;
             return {
                 groupName,
+                groupAvatarUrl,
                 items: items.sort((m1, m2) => m1.timestamp - m2.timestamp),
                 nextCursor,
                 hasMore,
@@ -479,6 +488,7 @@ export async function fetchGroupThreadMessagesPage(
     const fallback = await fetchGroupThread(groupId);
     return {
         groupName: fallback.groupName,
+        groupAvatarUrl: fallback.groupAvatarUrl || null,
         items: fallback.messages,
         nextCursor: null,
         hasMore: false,
@@ -492,7 +502,7 @@ export async function fetchGroupChatMessages(_viewerHandle: string, groupId: str
 }
 
 /** Group thread payload from GET /messages/group/:id (name + messages). */
-export async function fetchGroupThread(groupId: string): Promise<{ groupName: string; messages: ChatMessage[] }> {
+export async function fetchGroupThread(groupId: string): Promise<{ groupName: string; groupAvatarUrl?: string | null; messages: ChatMessage[] }> {
     if (isLaravelApiEnabled() && hasAuthToken()) {
         try {
             const apiClient = await import('./client');
@@ -500,17 +510,19 @@ export async function fetchGroupThread(groupId: string): Promise<{ groupName: st
             let cursor: string | null = null;
             const stitched: ChatMessage[] = [];
             let groupName = 'Group';
+            let groupAvatarUrl: string | null = null;
             let pages = 0;
             const maxPages = 20;
 
             do {
                 const page = await apiClient.fetchGroupConversationPage(groupId, cursor, 100) as {
-                    group?: { id?: string; name?: string };
+                    group?: { id?: string; name?: string; avatar_url?: string | null; avatarUrl?: string | null };
                     items?: unknown[];
                     nextCursor?: string | null;
                     hasMore?: boolean;
                 };
                 groupName = page?.group?.name?.trim() || groupName;
+                groupAvatarUrl = page?.group?.avatar_url || page?.group?.avatarUrl || groupAvatarUrl;
                 const items = Array.isArray(page?.items) ? page.items.map((m) => laravelMsgToChatMessage(m as any)) : [];
                 stitched.push(...items);
                 cursor = typeof page?.nextCursor === 'string' ? page.nextCursor : null;
@@ -519,26 +531,31 @@ export async function fetchGroupThread(groupId: string): Promise<{ groupName: st
             } while (cursor && pages < maxPages);
 
             if (stitched.length > 0) {
-                return { groupName, messages: stitched.sort((m1, m2) => m1.timestamp - m2.timestamp) };
+                return { groupName, groupAvatarUrl, messages: stitched.sort((m1, m2) => m1.timestamp - m2.timestamp) };
             }
 
             // Fallback for older backend nodes that don't have /paged yet.
             const raw = (await apiClient.fetchGroupConversation(groupId)) as {
-                group?: { id?: string; name?: string };
+                group?: { id?: string; name?: string; avatar_url?: string | null; avatarUrl?: string | null };
                 messages?: unknown[];
             };
             groupName = raw?.group?.name?.trim() || 'Group';
+            groupAvatarUrl = raw?.group?.avatar_url || raw?.group?.avatarUrl || null;
             const list = Array.isArray(raw?.messages) ? raw.messages.map((m) => laravelMsgToChatMessage(m as any)) : [];
-            return { groupName, messages: list.sort((m1, m2) => m1.timestamp - m2.timestamp) };
+            return { groupName, groupAvatarUrl, messages: list.sort((m1, m2) => m1.timestamp - m2.timestamp) };
         } catch (e) {
             if ((e as any)?.name === 'ConnectionRefused' || (e as any)?.message === 'CONNECTION_REFUSED') throw e;
             console.warn('Laravel fetchGroupThread failed:', e);
         }
     }
     const meta = mockChatGroups.get(groupId);
-    if (!meta) return { groupName: 'Group', messages: [] };
+    if (!meta) return { groupName: 'Group', groupAvatarUrl: null, messages: [] };
     const list = mockGroupMessageLists.get(groupId) ?? [];
-    return { groupName: meta.name, messages: list.slice().sort((m1, m2) => m1.timestamp - m2.timestamp) };
+    return {
+        groupName: meta.name,
+        groupAvatarUrl: meta.avatar_url || null,
+        messages: list.slice().sort((m1, m2) => m1.timestamp - m2.timestamp),
+    };
 }
 
 export async function appendGroupChatMessage(
