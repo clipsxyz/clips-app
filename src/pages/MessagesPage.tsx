@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { FiChevronLeft, FiSend, FiCornerUpLeft, FiMoreHorizontal, FiMapPin, FiEdit3, FiX, FiMic, FiUserPlus, FiPlus, FiCheck } from 'react-icons/fi';
-import { IoMdPhotos } from 'react-icons/io';
+import { FiChevronLeft, FiSend, FiCornerUpLeft, FiMoreHorizontal, FiMapPin, FiEdit3, FiX, FiMic, FiUserPlus, FiPlus, FiCheck, FiImage } from 'react-icons/fi';
 import { BsEmojiSmile } from 'react-icons/bs';
 import { FaPaperPlane, FaExclamationCircle } from 'react-icons/fa';
 import { MdStickyNote2, MdTranslate } from 'react-icons/md';
@@ -3398,35 +3397,35 @@ export default function MessagesPage() {
                     </div>
                 )}
                 <div className={`flex items-end ${compactPhone ? 'gap-2 px-2.5 py-3' : 'gap-2.5 px-3 py-3.5 sm:px-4'}`}>
-                    {!messageText.trim() && (
-                        <button
-                            type="button"
-                            onClick={handleImageClick}
-                            className={`${compactPhone ? 'p-2' : 'p-2.5'} rounded-full text-neutral-400 hover:text-neutral-200 hover:bg-white/5 active:bg-white/10 transition-colors flex-shrink-0`}
-                            aria-label="Add photo"
-                        >
-                            <IoMdPhotos className="w-5 h-5 sm:w-6 sm:h-6" />
-                        </button>
-                    )}
                     <div className="flex-1 flex items-center gap-2 min-w-0 pb-px">
-                        <input
-                            type="text"
-                            value={messageText}
-                            onChange={(e) => {
-                                setMessageText(e.target.value);
-                                // Simulate typing indicator (in real app, this would be sent to server)
-                                // For now, we'll just show it when user is typing
-                            }}
-                            onKeyPress={(e) => {
-                                if (e.key === 'Enter') {
-                                    handleSend();
-                                }
-                            }}
-                            placeholder={editingMessage ? "Edit message…" : replyingTo ? "Message…" : "Message…"}
-                            className={`flex-1 min-h-[44px] ${DM_INPUT_FIELD} text-white placeholder:text-neutral-500 rounded-[24px] border border-white/[0.12] shadow-inner shadow-black/30 focus:outline-none focus:ring-1 focus:ring-white/20 focus:border-white/[0.18] min-w-0 ${
-                                compactPhone ? 'px-4 py-2.5 text-[15px]' : 'px-5 py-3 text-[15px] sm:text-base'
-                            }`}
-                        />
+                        <div className="relative flex-1 min-w-0">
+                            <button
+                                type="button"
+                                onClick={handleImageClick}
+                                className="absolute left-3 top-1/2 -translate-y-1/2 inline-flex items-center justify-center text-white/90 hover:text-white transition-colors"
+                                aria-label="Add photo"
+                            >
+                                <FiImage className="w-5 h-5" />
+                            </button>
+                            <input
+                                type="text"
+                                value={messageText}
+                                onChange={(e) => {
+                                    setMessageText(e.target.value);
+                                    // Simulate typing indicator (in real app, this would be sent to server)
+                                    // For now, we'll just show it when user is typing
+                                }}
+                                onKeyPress={(e) => {
+                                    if (e.key === 'Enter') {
+                                        handleSend();
+                                    }
+                                }}
+                                placeholder={editingMessage ? "Edit message…" : replyingTo ? "Message…" : "Message…"}
+                                className={`w-full min-h-[44px] ${DM_INPUT_FIELD} text-white placeholder:text-neutral-500 rounded-[24px] border-2 border-white shadow-inner shadow-black/30 focus:outline-none focus:ring-1 focus:ring-white/20 focus:border-white ${
+                                    compactPhone ? 'pl-11 pr-4 py-2.5 text-[15px]' : 'pl-12 pr-5 py-3 text-[15px] sm:text-base'
+                                }`}
+                            />
+                        </div>
                         {messageText.trim() && (
                             <button
                                 type="button"

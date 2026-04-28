@@ -411,6 +411,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
   const [questionsCount, setQuestionsCount] = React.useState(0);
   const [showBoostPrompt, setShowBoostPrompt] = React.useState(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const [isInFullscreen, setIsInFullscreen] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
 
   // Use user location from props or context, with fallback to defaults
@@ -498,6 +499,37 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
     document.addEventListener('mousedown', handleOutsideClick);
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [menuOpen]);
+
+  React.useEffect(() => {
+    const syncFullscreenState = () => {
+      const doc = document as Document & {
+        webkitFullscreenElement?: Element | null;
+        mozFullScreenElement?: Element | null;
+        msFullscreenElement?: Element | null;
+      };
+      const activeFullscreenEl =
+        doc.fullscreenElement ||
+        doc.webkitFullscreenElement ||
+        doc.mozFullScreenElement ||
+        doc.msFullscreenElement ||
+        null;
+      setIsInFullscreen(Boolean(activeFullscreenEl));
+    };
+
+    syncFullscreenState();
+    document.addEventListener('fullscreenchange', syncFullscreenState);
+    document.addEventListener('webkitfullscreenchange', syncFullscreenState as EventListener);
+    document.addEventListener('mozfullscreenchange', syncFullscreenState as EventListener);
+    document.addEventListener('MSFullscreenChange', syncFullscreenState as EventListener);
+    return () => {
+      document.removeEventListener('fullscreenchange', syncFullscreenState);
+      document.removeEventListener('webkitfullscreenchange', syncFullscreenState as EventListener);
+      document.removeEventListener('mozfullscreenchange', syncFullscreenState as EventListener);
+      document.removeEventListener('MSFullscreenChange', syncFullscreenState as EventListener);
+    };
+  }, []);
+
+  if (isInFullscreen) return null;
 
   const menuItems: Array<{
     key: string;
