@@ -336,6 +336,26 @@ export function teardownNotifications(): void {
   }
 }
 
+export async function registerBackgroundMessageHandler(
+  handler?: (payload: Record<string, any>) => Promise<void> | void
+): Promise<boolean> {
+  const messaging = await getMessagingInstance();
+  if (!messaging || typeof messaging.setBackgroundMessageHandler !== 'function') {
+    return false;
+  }
+  try {
+    messaging.setBackgroundMessageHandler(async (remoteMessage: NotificationPayload) => {
+      if (handler) {
+        await handler(remoteMessage?.data || {});
+      }
+    });
+    return true;
+  } catch (error) {
+    console.warn('Failed to register background message handler:', error);
+    return false;
+  }
+}
+
 export async function clearNotificationSession(): Promise<void> {
   const messaging = await getMessagingInstance();
   if (currentFcmToken) {

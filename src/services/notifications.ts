@@ -399,3 +399,9 @@ export function teardownNotifications(): void {
 export async function clearNotificationSession(): Promise<void> {
   teardownNotifications();
 }
+
+export async function registerBackgroundMessageHandler(
+  _handler?: (payload: Record<string, any>) => Promise<void> | void
+): Promise<boolean> {
+  return false;
+}

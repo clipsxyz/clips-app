@@ -33,5 +33,9 @@ import { AppRegistry } from 'react-native';
 import './global.css';
 import App from './App.native';
 import { name as appName } from './app.json';
+import { registerBackgroundMessageHandler } from './src/services/notifications';
+
+// Register once at app entry so background notifications can be handled when supported.
+registerBackgroundMessageHandler().catch(() => {});
 
 AppRegistry.registerComponent(appName, () => App);
