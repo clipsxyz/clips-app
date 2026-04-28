@@ -10,11 +10,12 @@ import {
     KeyboardAvoidingView,
     Platform,
     ActivityIndicator,
+    Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
-import { fetchConversationMessagesPage, appendMessage, markConversationRead, type ChatMessage } from '../api/messages';
+import { fetchConversationMessagesPage, appendMessage, markConversationRead, editMessage, type ChatMessage } from '../api/messages';
 import { getAvatarForHandle } from '../api/users';
 import { timeAgo } from '../utils/timeAgo';
 import Avatar from '../components/Avatar';
@@ -31,8 +32,16 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [threadCursor, setThreadCursor] = useState<string | null>(null);
     const [threadHasMore, setThreadHasMore] = useState(false);
     const [loadingOlder, setLoadingOlder] = useState(false);
+    const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+    const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null);
     const flatListRef = useRef<FlatList>(null);
     const shouldAutoScrollRef = useRef(true);
+
+    const isLikelyVideoUrl = (url?: string) => {
+        if (!url) return false;
+        const trimmed = url.trim();
+        return /^data:video\//i.test(trimmed) || /\.(mp4|webm|m4v|mov)(\?|#|$)/i.test(trimmed);
+    };
 
     useEffect(() => {
         loadMessages(true);
@@ -105,11 +114,38 @@ export default function MessagesScreen({ route, navigation }: any) {
     const handleSend = async () => {
         if (!messageText.trim() || !user?.handle) return;
 
+        const draftText = messageText.trim();
+        if (editingMessage) {
+            try {
+                const updated = await editMessage(editingMessage.id, draftText, user.handle, handle);
+                if (updated) {
+                    setMessages((prev) => prev.map((m) => (m.id === editingMessage.id ? updated : m)));
+                }
+            } catch (error) {
+                console.error('Error editing message:', error);
+            } finally {
+                setEditingMessage(null);
+                setMessageText('');
+            }
+            return;
+        }
+
+        const replyToPayload = replyingTo
+            ? {
+                messageId: replyingTo.id,
+                text: replyingTo.text || '',
+                senderHandle: replyingTo.senderHandle,
+                imageUrl: replyingTo.imageUrl,
+                mediaType: (isLikelyVideoUrl(replyingTo.imageUrl) ? 'video' : 'image') as 'image' | 'video',
+            }
+            : undefined;
+
         const newMessage: ChatMessage = {
             id: Date.now().toString(),
             senderHandle: user.handle,
-            text: messageText.trim(),
+            text: draftText,
             timestamp: Date.now(),
+            replyTo: replyToPayload,
         };
 
         shouldAutoScrollRef.current = true;
@@ -117,11 +153,46 @@ export default function MessagesScreen({ route, navigation }: any) {
         setMessageText('');
 
         try {
-            await appendMessage(user.handle, handle, { text: newMessage.text });
+            await appendMessage(user.handle, handle, { text: newMessage.text, replyTo: replyToPayload });
             await loadMessages(true); // Reload latest page to get server ids/timestamps
         } catch (error) {
             console.error('Error sending message:', error);
+        } finally {
+            setReplyingTo(null);
         }
+    };
+
+    const openMessageActions = (item: ChatMessage) => {
+        const fromMe = item.senderHandle === user?.handle;
+        Alert.alert(
+            'Message actions',
+            'Choose an action',
+            [
+                {
+                    text: 'Reply',
+                    onPress: () => {
+                        setReplyingTo(item);
+                        setEditingMessage(null);
+                    },
+                },
+                ...(fromMe
+                    ? [{
+                        text: 'Edit',
+                        onPress: () => {
+                            setEditingMessage(item);
+                            setReplyingTo(null);
+                            setMessageText(item.text || '');
+                        },
+                    }]
+                    : []),
+                { text: 'Cancel', style: 'cancel' },
+            ],
+            { cancelable: true },
+        );
+    };
+
+    const handleImageClick = () => {
+        Alert.alert('Add photo', 'Photo picker for RN DM composer is coming next.');
     };
 
     const renderMessage = ({ item }: { item: ChatMessage }) => {
@@ -156,10 +227,40 @@ export default function MessagesScreen({ route, navigation }: any) {
                         size={32}
                     />
                 )}
-                <View style={[
+                <TouchableOpacity
+                    activeOpacity={0.9}
+                    onLongPress={() => openMessageActions(item)}
+                    style={[
                     styles.messageBubble,
                     isFromMe ? styles.messageBubbleFromMe : styles.messageBubbleFromOther,
-                ]}>
+                    ]}
+                >
+                    {(item as any).replyTo && (
+                        <View style={styles.replyPreviewWrap}>
+                            <View style={styles.replyPreviewBar} />
+                            {((item as any).replyTo?.imageUrl as string | undefined) ? (
+                                <View style={styles.replyPreviewThumb}>
+                                    {isLikelyVideoUrl((item as any).replyTo.imageUrl) ? (
+                                        <View style={styles.replyPreviewVideoBadge}>
+                                            <Icon name="videocam" size={12} color="#FFFFFF" />
+                                        </View>
+                                    ) : (
+                                        <Image source={{ uri: (item as any).replyTo.imageUrl }} style={styles.replyPreviewImage} />
+                                    )}
+                                </View>
+                            ) : null}
+                            <View style={styles.replyPreviewTextWrap}>
+                                <Text style={styles.replyPreviewSender} numberOfLines={1}>
+                                    {(item as any).replyTo?.senderHandle || 'Reply'}
+                                </Text>
+                                <Text style={styles.replyPreviewText} numberOfLines={1}>
+                                    {(item as any).replyTo?.imageUrl
+                                        ? (isLikelyVideoUrl((item as any).replyTo.imageUrl) ? 'Video' : 'Photo')
+                                        : ((item as any).replyTo?.text || 'Message')}
+                                </Text>
+                            </View>
+                        </View>
+                    )}
                     {item.text && (
                         <Text style={[
                             styles.messageText,
@@ -177,7 +278,16 @@ export default function MessagesScreen({ route, navigation }: any) {
                     ]}>
                         {timeAgo(item.timestamp)}
                     </Text>
-                </View>
+                    {isFromMe && (
+                        <View style={styles.readReceiptWrap}>
+                            <Icon
+                                name="checkmark-done"
+                                size={13}
+                                color={(item as any).read ? '#0A84FF' : '#8E8E93'}
+                            />
+                        </View>
+                    )}
+                </TouchableOpacity>
             </View>
         );
     };
@@ -245,19 +355,43 @@ export default function MessagesScreen({ route, navigation }: any) {
                     ) : null}
                 />
 
+                {(replyingTo || editingMessage) && (
+                    <View style={styles.composerContextWrap}>
+                        <View style={styles.composerContextBar} />
+                        <View style={styles.composerContextBody}>
+                            <Text style={styles.composerContextTitle}>
+                                {editingMessage ? 'Editing message' : `Replying to ${replyingTo?.senderHandle || ''}`}
+                            </Text>
+                            <Text style={styles.composerContextText} numberOfLines={1}>
+                                {editingMessage?.text || replyingTo?.text || (replyingTo?.imageUrl ? 'Photo' : 'Message')}
+                            </Text>
+                        </View>
+                        <TouchableOpacity
+                            onPress={() => {
+                                setReplyingTo(null);
+                                setEditingMessage(null);
+                                setMessageText('');
+                            }}
+                        >
+                            <Icon name="close" size={18} color="#9CA3AF" />
+                        </TouchableOpacity>
+                    </View>
+                )}
                 <View style={styles.inputContainer}>
-                    <TouchableOpacity style={styles.inputButton}>
-                        <Icon name="image-outline" size={24} color="#8B5CF6" />
-                    </TouchableOpacity>
-                    <TextInput
-                        value={messageText}
-                        onChangeText={setMessageText}
-                        placeholder="Message..."
-                        placeholderTextColor="#6B7280"
-                        style={styles.input}
-                        multiline
-                        maxLength={1000}
-                    />
+                    <View style={styles.inputShell}>
+                        <TouchableOpacity style={styles.inputIconInside} onPress={handleImageClick}>
+                            <Icon name="image-outline" size={20} color="#FFFFFF" />
+                        </TouchableOpacity>
+                        <TextInput
+                            value={messageText}
+                            onChangeText={setMessageText}
+                            placeholder="Message..."
+                            placeholderTextColor="#6B7280"
+                            style={styles.input}
+                            multiline
+                            maxLength={1000}
+                        />
+                    </View>
                     <TouchableOpacity
                         onPress={handleSend}
                         disabled={!messageText.trim()}
@@ -337,7 +471,7 @@ const styles = StyleSheet.create({
     },
     messageBubble: {
         maxWidth: '75%',
-        padding: 12,
+        padding: 10,
         borderRadius: 16,
     },
     messageBubbleFromMe: {
@@ -408,14 +542,54 @@ const styles = StyleSheet.create({
         borderTopColor: '#1F2937',
         gap: 12,
     },
-    inputButton: {
-        padding: 8,
+    composerContextWrap: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        paddingHorizontal: 16,
+        paddingTop: 8,
+        paddingBottom: 6,
+        borderTopWidth: 1,
+        borderTopColor: '#1F2937',
+        backgroundColor: '#030712',
+    },
+    composerContextBar: {
+        width: 2,
+        height: 34,
+        borderRadius: 2,
+        backgroundColor: 'rgba(255,255,255,0.35)',
+    },
+    composerContextBody: {
+        flex: 1,
+    },
+    composerContextTitle: {
+        color: '#9CA3AF',
+        fontSize: 11,
+        fontWeight: '600',
+        marginBottom: 1,
+    },
+    composerContextText: {
+        color: '#E5E7EB',
+        fontSize: 13,
+    },
+    inputShell: {
+        flex: 1,
+        position: 'relative',
+        justifyContent: 'center',
+    },
+    inputIconInside: {
+        position: 'absolute',
+        left: 12,
+        zIndex: 2,
     },
     input: {
-        flex: 1,
+        width: '100%',
         backgroundColor: '#1F2937',
-        borderRadius: 20,
-        paddingHorizontal: 16,
+        borderRadius: 24,
+        borderWidth: 2,
+        borderColor: '#FFFFFF',
+        paddingLeft: 42,
+        paddingRight: 16,
         paddingVertical: 10,
         color: '#FFFFFF',
         fontSize: 16,
@@ -431,6 +605,56 @@ const styles = StyleSheet.create({
     },
     sendButtonDisabled: {
         backgroundColor: '#1F2937',
+    },
+    readReceiptWrap: {
+        alignSelf: 'flex-end',
+        marginTop: 2,
+    },
+    replyPreviewWrap: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 8,
+    },
+    replyPreviewBar: {
+        width: 2,
+        alignSelf: 'stretch',
+        backgroundColor: 'rgba(255,255,255,0.35)',
+        borderRadius: 2,
+        marginRight: 8,
+    },
+    replyPreviewThumb: {
+        width: 36,
+        height: 36,
+        borderRadius: 8,
+        overflow: 'hidden',
+        backgroundColor: '#000000',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.2)',
+        marginRight: 8,
+    },
+    replyPreviewImage: {
+        width: '100%',
+        height: '100%',
+    },
+    replyPreviewVideoBadge: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#111827',
+    },
+    replyPreviewTextWrap: {
+        flex: 1,
+        minWidth: 0,
+    },
+    replyPreviewSender: {
+        color: 'rgba(255,255,255,0.75)',
+        fontSize: 11,
+        marginBottom: 2,
+        fontWeight: '600',
+    },
+    replyPreviewText: {
+        color: 'rgba(255,255,255,0.65)',
+        fontSize: 12,
     },
 });
 
