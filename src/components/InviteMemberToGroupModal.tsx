@@ -1,6 +1,7 @@
 import React from 'react';
 import { FiX, FiUserPlus } from 'react-icons/fi';
 import { inviteUserToChatGroup } from '../api/chatGroups';
+import { unifiedSearch } from '../api/search';
 import { showToast } from '../utils/toast';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { useAuth } from '../context/Auth';
@@ -23,11 +24,52 @@ export default function InviteMemberToGroupModal({
 }) {
   const { user } = useAuth();
   const [handleInput, setHandleInput] = React.useState('');
+  const [suggestions, setSuggestions] = React.useState<Array<{ handle: string; display_name?: string; avatar_url?: string }>>([]);
+  const [searching, setSearching] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
 
   React.useEffect(() => {
-    if (isOpen) setHandleInput('');
+    if (isOpen) {
+      setHandleInput('');
+      setSuggestions([]);
+    }
   }, [isOpen]);
+
+  React.useEffect(() => {
+    if (!isOpen || busy) return;
+    const q = handleInput.trim().replace(/^@/g, '');
+    if (q.length < 2) {
+      setSuggestions([]);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setSearching(true);
+      try {
+        const res = await unifiedSearch({ q, types: 'users', usersLimit: 6 });
+        if (cancelled) return;
+        const users = Array.isArray(res?.sections?.users?.items) ? res.sections.users.items : [];
+        const next = users
+          .map((u: any) => ({
+            handle: String(u?.handle || '').trim(),
+            display_name: typeof u?.display_name === 'string' ? u.display_name : undefined,
+            avatar_url: typeof u?.avatar_url === 'string' ? u.avatar_url : undefined,
+          }))
+          .filter((u: { handle: string }) => !!u.handle);
+        setSuggestions(next);
+      } catch {
+        if (!cancelled) setSuggestions([]);
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 220);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [handleInput, isOpen, busy]);
 
   if (!isOpen) return null;
 
@@ -47,6 +89,7 @@ export default function InviteMemberToGroupModal({
     try {
       await inviteUserToChatGroup(groupId, h);
       showToast(`Invited @${h} to “${groupName}”`);
+      showToast(`@${h} will see this in Notifications`);
       onClose();
     } catch (e: any) {
       console.error(e);
@@ -96,9 +139,33 @@ export default function InviteMemberToGroupModal({
               if (e.key === 'Enter') void submit();
             }}
           />
+          {(searching || suggestions.length > 0) && (
+            <div className="rounded-xl border border-white/10 bg-black/70 max-h-40 overflow-y-auto">
+              {searching ? (
+                <div className="px-3 py-2 text-xs text-white/50">Searching users...</div>
+              ) : (
+                suggestions.map((s) => (
+                  <button
+                    key={s.handle}
+                    type="button"
+                    className="w-full px-3 py-2 text-left hover:bg-white/10 transition-colors flex items-center gap-2"
+                    onClick={() => {
+                      setHandleInput(s.handle);
+                      setSuggestions([]);
+                    }}
+                  >
+                    <Avatar src={s.avatar_url || getAvatarForHandle(s.handle)} name={s.display_name || s.handle} size="sm" />
+                    <div className="min-w-0">
+                      <p className="text-sm text-white truncate">{s.display_name || s.handle}</p>
+                      <p className="text-[11px] text-white/55 truncate">{s.handle}</p>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
           <p className="text-[11px] text-white/45 leading-relaxed">
-            They’ll get a notification when the app is connected to your server. You can also open their profile → menu → Invite to
-            group.
+            They&apos;ll get a notification invite in their notifications tab when the app is connected to your server.
           </p>
           <button
             type="button"
