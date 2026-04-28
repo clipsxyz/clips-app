@@ -15,7 +15,16 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
-import { fetchConversationMessagesPage, appendMessage, markConversationRead, editMessage, type ChatMessage } from '../api/messages';
+import {
+    fetchConversationMessagesPage,
+    fetchGroupThreadMessagesPage,
+    appendMessage,
+    appendGroupChatMessage,
+    markConversationRead,
+    markGroupConversationReadById,
+    editMessage,
+    type ChatMessage,
+} from '../api/messages';
 import { getAvatarForHandle } from '../api/users';
 import { timeAgo } from '../utils/timeAgo';
 import Avatar from '../components/Avatar';
@@ -24,8 +33,10 @@ const DEBUG_MESSAGE_PAGING =
     __DEV__ && (globalThis as { __CLIPS_DEBUG_MESSAGE_PAGING__?: boolean }).__CLIPS_DEBUG_MESSAGE_PAGING__ === true;
 
 export default function MessagesScreen({ route, navigation }: any) {
-    const { handle } = route.params;
+    const { handle, chatGroupId } = route.params || {};
+    const isGroupThread = Boolean(chatGroupId);
     const { user } = useAuth();
+    const [groupName, setGroupName] = useState('Group');
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [messageText, setMessageText] = useState('');
     const [loading, setLoading] = useState(true);
@@ -45,13 +56,17 @@ export default function MessagesScreen({ route, navigation }: any) {
 
     useEffect(() => {
         loadMessages(true);
-    }, [handle]);
+    }, [handle, chatGroupId]);
 
     useEffect(() => {
         if (messages.length > 0 && user?.handle) {
-            markConversationRead(user.handle, handle).catch(console.error);
+            if (isGroupThread && chatGroupId) {
+                markGroupConversationReadById(chatGroupId, user.handle).catch(console.error);
+            } else if (handle) {
+                markConversationRead(user.handle, handle).catch(console.error);
+            }
         }
-    }, [messages, handle, user?.handle]);
+    }, [messages, handle, chatGroupId, isGroupThread, user?.handle]);
 
     const loadMessages = async (reset: boolean = false) => {
         if (!user?.handle) return;
@@ -62,16 +77,21 @@ export default function MessagesScreen({ route, navigation }: any) {
             setLoading(true);
         }
         try {
-            const page = await fetchConversationMessagesPage(user.handle, handle, null, 50);
+            const page = isGroupThread && chatGroupId
+                ? await fetchGroupThreadMessagesPage(chatGroupId, null, 50)
+                : await fetchConversationMessagesPage(user.handle, handle, null, 50);
             if (DEBUG_MESSAGE_PAGING) {
                 console.info('[RN Messages][dm][initial-page]', {
-                    handle,
+                    handle: isGroupThread ? chatGroupId : handle,
                     count: page.items.length,
                     nextCursor: page.nextCursor,
                     hasMore: page.hasMore,
                 });
             }
             setMessages(page.items);
+            if (isGroupThread && 'groupName' in page && typeof page.groupName === 'string' && page.groupName) {
+                setGroupName(page.groupName);
+            }
             setThreadCursor(page.nextCursor);
             setThreadHasMore(page.hasMore);
         } catch (error) {
@@ -85,10 +105,12 @@ export default function MessagesScreen({ route, navigation }: any) {
         if (!user?.handle || !threadHasMore || !threadCursor || loadingOlder) return;
         setLoadingOlder(true);
         try {
-            const page = await fetchConversationMessagesPage(user.handle, handle, threadCursor, 50);
+            const page = isGroupThread && chatGroupId
+                ? await fetchGroupThreadMessagesPage(chatGroupId, threadCursor, 50)
+                : await fetchConversationMessagesPage(user.handle, handle, threadCursor, 50);
             if (DEBUG_MESSAGE_PAGING) {
                 console.info('[RN Messages][dm][older-page]', {
-                    handle,
+                    handle: isGroupThread ? chatGroupId : handle,
                     count: page.items.length,
                     requestCursor: threadCursor,
                     nextCursor: page.nextCursor,
@@ -101,6 +123,9 @@ export default function MessagesScreen({ route, navigation }: any) {
                     const merged = [...page.items.filter((m) => !seen.has(m.id)), ...prev];
                     return merged.sort((a, b) => a.timestamp - b.timestamp);
                 });
+            }
+            if (isGroupThread && 'groupName' in page && typeof page.groupName === 'string' && page.groupName) {
+                setGroupName(page.groupName);
             }
             setThreadCursor(page.nextCursor);
             setThreadHasMore(page.hasMore);
@@ -116,6 +141,12 @@ export default function MessagesScreen({ route, navigation }: any) {
 
         const draftText = messageText.trim();
         if (editingMessage) {
+            if (isGroupThread) {
+                Alert.alert('Edit unavailable', 'Editing is currently available for direct messages only.');
+                setEditingMessage(null);
+                setMessageText('');
+                return;
+            }
             try {
                 const updated = await editMessage(editingMessage.id, draftText, user.handle, handle);
                 if (updated) {
@@ -153,7 +184,11 @@ export default function MessagesScreen({ route, navigation }: any) {
         setMessageText('');
 
         try {
-            await appendMessage(user.handle, handle, { text: newMessage.text, replyTo: replyToPayload });
+            if (isGroupThread && chatGroupId) {
+                await appendGroupChatMessage(user.handle, chatGroupId, { text: newMessage.text, replyTo: replyToPayload });
+            } else {
+                await appendMessage(user.handle, handle, { text: newMessage.text, replyTo: replyToPayload });
+            }
             await loadMessages(true); // Reload latest page to get server ids/timestamps
         } catch (error) {
             console.error('Error sending message:', error);
@@ -175,7 +210,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                         setEditingMessage(null);
                     },
                 },
-                ...(fromMe
+                ...(fromMe && !isGroupThread
                     ? [{
                         text: 'Edit',
                         onPress: () => {
@@ -221,11 +256,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                 isFromMe ? styles.messageFromMe : styles.messageFromOther,
             ]}>
                 {!isFromMe && (
-                    <Avatar
-                        src={senderAvatar}
-                        name={item.senderHandle.split('@')[0]}
-                        size={32}
-                    />
+                    <Avatar src={senderAvatar} name={item.senderHandle.split('@')[0]} size={32} />
                 )}
                 <TouchableOpacity
                     activeOpacity={0.9}
@@ -278,7 +309,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                     ]}>
                         {timeAgo(item.timestamp)}
                     </Text>
-                    {isFromMe && (
+                    {isFromMe && !isGroupThread && (
                         <View style={styles.readReceiptWrap}>
                             <Icon
                                 name="checkmark-done"
@@ -308,11 +339,11 @@ export default function MessagesScreen({ route, navigation }: any) {
                 </TouchableOpacity>
                 <View style={styles.headerInfo}>
                     <Avatar
-                        src={getAvatarForHandle(handle)}
-                        name={handle?.split('@')[0] || 'User'}
+                        src={isGroupThread ? undefined : getAvatarForHandle(handle)}
+                        name={isGroupThread ? (groupName || 'Group') : (handle?.split('@')[0] || 'User')}
                         size={32}
                     />
-                    <Text style={styles.headerName}>{handle}</Text>
+                    <Text style={styles.headerName}>{isGroupThread ? groupName : handle}</Text>
                 </View>
                 <TouchableOpacity>
                     <Icon name="ellipsis-vertical" size={24} color="#FFFFFF" />
