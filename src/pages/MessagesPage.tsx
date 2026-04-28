@@ -77,6 +77,7 @@ function isLikelyVideoUrl(url: string | undefined): boolean {
 /** Story-reply media can be mp4 URL without extension; try video first unless clearly image. */
 function DmImageOrVideoAttachment({ url, alt, className }: { url: string; alt: string; className?: string }) {
     const [videoFailed, setVideoFailed] = React.useState(false);
+    const [imageFailed, setImageFailed] = React.useState(false);
     const likelyImage = isLikelyImageUrl(url);
     const likelyVideo = isLikelyVideoUrl(url);
 
@@ -95,7 +96,10 @@ function DmImageOrVideoAttachment({ url, alt, className }: { url: string; alt: s
     if (likelyVideo && videoFailed) {
         return <div className={`${className || ''} flex items-center justify-center text-[10px] font-semibold text-white/85 bg-black/50`}>MP4</div>;
     }
-    return <img src={url} alt={alt} className={className} />;
+    if (imageFailed) {
+        return <div className={`${className || ''} flex items-center justify-center text-[10px] font-semibold text-white/85 bg-black/50`}>Preview</div>;
+    }
+    return <img src={url} alt={alt} className={className} onError={() => setImageFailed(true)} />;
 }
 
 // Helper function to parse question messages
@@ -3305,7 +3309,7 @@ export default function MessagesPage() {
                     const replyPostId = replyingTo.postId || extractPostId(replyingTo.text || '');
                     const replyPost = replyPostId ? sharedPosts[replyPostId] : null;
                     const replyThumbUrl = replyingTo.imageUrl || replyPost?.mediaUrl;
-                    const isVideoReply = replyPost?.mediaType === 'video';
+                    const isVideoReply = replyPost?.mediaType === 'video' || isLikelyVideoUrl(replyThumbUrl);
                     return (
                         <div className={`${compactPhone ? 'px-2.5 pt-2.5 pb-2' : 'px-4 pt-3 pb-2'} border-b border-white/10 bg-black`}>
                             <div className="flex items-center justify-between gap-3">
@@ -3313,11 +3317,11 @@ export default function MessagesPage() {
                                     <div className="w-px h-11 rounded-full flex-shrink-0 bg-white/25" />
                                     {replyThumbUrl && (
                                         <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 border border-white/15 bg-zinc-950">
-                                            {isVideoReply ? (
-                                                <video src={replyThumbUrl} className="w-full h-full object-cover" muted playsInline preload="metadata" />
-                                            ) : (
-                                                <img src={replyThumbUrl} alt="Reply preview" className="w-full h-full object-cover" />
-                                            )}
+                                            <DmImageOrVideoAttachment
+                                                url={replyThumbUrl}
+                                                alt="Reply preview"
+                                                className="w-full h-full object-cover"
+                                            />
                                         </div>
                                     )}
                                     <div className="flex-1 min-w-0">
