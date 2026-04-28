@@ -78,7 +78,9 @@ function PillTabs({
     onOpenDiscover: () => void;
 }) {
     const [menuOpen, setMenuOpen] = useState(false);
+    const [showGazetteerTitle, setShowGazetteerTitle] = useState(true);
     const activeLabel = active === userLocal ? 'Nearby' : active;
+    const headerLabel = showGazetteerTitle ? 'Gazetteer' : activeLabel;
     const activeIconName =
         active === userLocal
             ? 'navigate-outline'
@@ -128,6 +130,11 @@ function PillTabs({
         },
     ];
 
+    useEffect(() => {
+        const timeout = setTimeout(() => setShowGazetteerTitle(false), 2000);
+        return () => clearTimeout(timeout);
+    }, []);
+
     return (
         <View style={styles.tabContainer}>
             <View style={styles.feedHeaderPickerRow}>
@@ -147,7 +154,7 @@ function PillTabs({
                             color={active === userLocal ? '#34D399' : active === userRegional ? '#7A8AF0' : active === userNational ? '#F87171' : '#4ADE80'}
                             style={styles.feedDropdownActiveIcon}
                         />
-                        <Text style={styles.feedDropdownActiveText}>{activeLabel}</Text>
+                        <Text style={styles.feedDropdownActiveText}>{headerLabel}</Text>
                         <Icon name={menuOpen ? 'chevron-up-outline' : 'chevron-down-outline'} size={16} color="#E5E7EB" />
                     </TouchableOpacity>
 

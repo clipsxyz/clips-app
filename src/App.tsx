@@ -412,6 +412,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
   const [showBoostPrompt, setShowBoostPrompt] = React.useState(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [isInFullscreen, setIsInFullscreen] = React.useState(false);
+  const [showGazetteerTitle, setShowGazetteerTitle] = React.useState(true);
   const menuRef = React.useRef<HTMLDivElement>(null);
 
   // Use user location from props or context, with fallback to defaults
@@ -478,6 +479,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
 
   const hasAnyNotifications = notificationCount > 0 || insightsCount > 0 || questionsCount > 0;
   const activeLabel = props.active === local ? 'Nearby' : props.active;
+  const headerLabel = showGazetteerTitle ? 'Gazetteer' : activeLabel;
   const activeHeaderIcon = props.active === local
     ? <FiNavigation className="h-4 w-4 text-[#34D399]" />
     : props.active === regional
@@ -487,6 +489,11 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
         : props.active === 'Following'
           ? <FiUserPlus className="h-4 w-4 text-green-400" />
           : <FiMapPin className="h-4 w-4 text-white/85" />;
+
+  React.useEffect(() => {
+    const timeout = window.setTimeout(() => setShowGazetteerTitle(false), 2000);
+    return () => window.clearTimeout(timeout);
+  }, []);
 
   React.useEffect(() => {
     if (!menuOpen) return;
@@ -634,7 +641,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                   display: 'inline-block',
                 }}
               >
-                {activeLabel}
+                {headerLabel}
               </span>
               <FiChevronDown
                 className={`h-4 w-4 text-white/90 transition-transform ${menuOpen ? 'rotate-180' : ''}`}
