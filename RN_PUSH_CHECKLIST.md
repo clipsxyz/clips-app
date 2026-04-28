@@ -3,8 +3,14 @@
 Use this checklist after shipping push-related updates to ensure behavior is stable on real devices.
 
 ## Setup Preconditions
-- Install and configure `@react-native-firebase/messaging` for Android and iOS.
-- Confirm Firebase config files are present in native projects.
+- Install and configure `@react-native-firebase/app` and `@react-native-firebase/messaging` for Android and iOS.
+- Add Firebase config files:
+  - Android: `android/app/google-services.json`
+  - iOS: `ios/ClipsApp/GoogleService-Info.plist` (or your app target folder)
+- Ensure Android Gradle has Google services wiring:
+  - root `android/build.gradle` includes `classpath("com.google.gms:google-services:4.4.2")`
+  - app `android/app/build.gradle` applies `com.google.gms.google-services`
+- Run iOS pods after dependency changes: `cd ios && pod install`
 - Build and run on real devices (not simulator-only).
 
 ## Permission Flows
