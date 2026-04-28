@@ -315,8 +315,12 @@ export function showBrowserNotification(title: string, options?: NotificationOpt
   }
 }
 
+type NotificationInitOptions = {
+  onNotificationPress?: (data: Record<string, any>) => void;
+};
+
 // Initialize notifications (call this on app startup)
-export async function initializeNotifications(): Promise<void> {
+export async function initializeNotifications(_options?: NotificationInitOptions): Promise<void> {
   try {
     const prefs = getNotificationPreferences();
     if (!prefs.enabled) {
@@ -386,4 +390,8 @@ export async function initializeNotifications(): Promise<void> {
   } catch (error) {
     console.error('Error initializing notifications:', error);
   }
+}
+
+export function teardownNotifications(): void {
+  // Web implementation currently does not retain long-lived listeners here.
 }

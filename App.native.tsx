@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { StatusBar, useColorScheme } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -39,9 +39,11 @@ import TermsScreen from './src/screens/TermsScreen';
 import PublicPostScreen from './src/screens/PublicPostScreen';
 import ReplyQuestionScreen from './src/screens/ReplyQuestionScreen';
 import ClipScreen from './src/screens/ClipScreen';
+import { initializeNotifications, teardownNotifications } from './src/services/notifications';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
+const navigationRef = createNavigationContainerRef();
 
 function MainTabs() {
   const isDarkMode = useColorScheme() === 'dark';
@@ -102,11 +104,45 @@ function MainTabs() {
 function App(): React.JSX.Element {
   const isDarkMode = useColorScheme() === 'dark';
 
+  const handleNotificationPress = React.useCallback((data: Record<string, any>) => {
+    if (!navigationRef.isReady()) return;
+    const nav = navigationRef as any;
+
+    if (data.chatGroupId) {
+      nav.navigate('Messages', { chatGroupId: data.chatGroupId, kind: 'group' });
+      return;
+    }
+
+    if (data.fromHandle && data.storyId) {
+      nav.navigate('Stories', { openUserHandle: data.fromHandle, openStoryId: data.storyId });
+      return;
+    }
+
+    if (data.fromHandle) {
+      nav.navigate('Messages', { handle: data.fromHandle });
+      return;
+    }
+
+    if (data.postId) {
+      nav.navigate('PostDetail', { postId: data.postId });
+      return;
+    }
+
+    nav.navigate('Inbox', { initialTab: 'notifications' });
+  }, []);
+
+  React.useEffect(() => {
+    initializeNotifications({ onNotificationPress: handleNotificationPress }).catch((error) => {
+      console.warn('Native notification initialization failed:', error);
+    });
+    return () => teardownNotifications();
+  }, [handleNotificationPress]);
+
   return (
     <AuthProvider>
       <SafeAreaProvider>
         <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-        <NavigationContainer>
+        <NavigationContainer ref={navigationRef}>
           <Stack.Navigator
             screenOptions={{
               headerShown: false,
