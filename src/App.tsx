@@ -2,7 +2,7 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { FiHome, FiUser, FiUserPlus, FiUserX, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiHeart, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX, FiClock, FiSend } from 'react-icons/fi';
+import { FiHome, FiUser, FiUserPlus, FiUserX, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiHeart, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX, FiClock, FiSend, FiChevronDown, FiCompass, FiGlobe, FiNavigation } from 'react-icons/fi';
 import { GiGreekTemple } from 'react-icons/gi';
 import { LuFlame, LuPlus } from 'react-icons/lu';
 import { VscLiveShare } from 'react-icons/vsc';
@@ -404,25 +404,19 @@ function FeedBoostTabBadge({ active }: { active?: boolean }) {
 
 function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCustom?: () => void; userLocal?: string; userRegional?: string; userNational?: string; clipsCount?: number }) {
   const navigate = useNavigate();
-  const location = useLocation();
   const { user } = useAuth();
   const isMountedRef = React.useRef(false);
   const [notificationCount, setNotificationCount] = React.useState(0);
   const [insightsCount, setInsightsCount] = React.useState(0);
   const [questionsCount, setQuestionsCount] = React.useState(0);
   const [showBoostPrompt, setShowBoostPrompt] = React.useState(false);
-  const borderOverlayRef = React.useRef<HTMLDivElement>(null);
-  const clipsBorderOverlayRef = React.useRef<HTMLDivElement>(null);
-  const discoverBorderOverlayRef = React.useRef<HTMLDivElement>(null);
-  const tabBorderOverlayRefs = React.useRef<{ [key: string]: HTMLDivElement | null }>({});
-  const prevActiveTabRef = React.useRef<Tab | null>(null);
-  const clipsDiscoverAnimatedRef = React.useRef(false);
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const menuRef = React.useRef<HTMLDivElement>(null);
 
   // Use user location from props or context, with fallback to defaults
   const local = props.userLocal || user?.local || 'Finglas';
   const regional = props.userRegional || user?.regional || 'Dublin';
   const national = props.userNational || user?.national || 'Ireland';
-  const clipsCount = props.clipsCount || 0;
 
   // Track notification, insights, and questions counts
   React.useEffect(() => {
@@ -481,277 +475,176 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
     };
   }, [user?.handle]);
 
-  // Main location / feed tabs
   const hasAnyNotifications = notificationCount > 0 || insightsCount > 0 || questionsCount > 0;
-  const showNotificationsTab = true;
-  const coreFeedTabs: Tab[] = [regional, national, 'Following'];
-  const activeCoreFeedTab = coreFeedTabs.includes(props.active) ? props.active : null;
-  const orderedCoreFeedTabs: Tab[] = activeCoreFeedTab
-    ? [activeCoreFeedTab, ...coreFeedTabs.filter((tab) => tab !== activeCoreFeedTab)]
-    : coreFeedTabs;
-  const tabs: Tab[] = [...orderedCoreFeedTabs, 'Boost', ...(showNotificationsTab ? ['__notifications__'] : [])];
+  const activeLabel = props.active === local ? 'Nearby' : props.active;
+  const activeHeaderIcon = props.active === local
+    ? <FiNavigation className="h-4 w-4 text-[#34D399]" />
+    : props.active === regional
+      ? <FiMapPin className="h-4 w-4 text-[#7A8AF0]" />
+      : props.active === national
+        ? <FiGlobe className="h-4 w-4 text-red-400" />
+        : props.active === 'Following'
+          ? <FiUserPlus className="h-4 w-4 text-green-400" />
+          : <FiMapPin className="h-4 w-4 text-white/85" />;
 
-
-  // Easing function for smooth animation (ease-out cubic)
-  const easeOutCubic = (t: number): number => {
-    return 1 - Math.pow(1 - t, 3);
-  };
-
-  // Helper: run progressive border reveal on an overlay element
-  const runBorderRevealAnimation = React.useCallback((overlay: HTMLDivElement | null) => {
-    if (!overlay) return;
-    overlay.style.maskImage = 'conic-gradient(from 0deg, black 360deg)';
-    overlay.style.webkitMaskImage = 'conic-gradient(from 0deg, black 360deg)';
-    const duration = 1800;
-    const startTime = Date.now();
-    const animate = () => {
-      const elapsed = Date.now() - startTime;
-      const rawProgress = Math.min(elapsed / duration, 1);
-      const easedProgress = easeOutCubic(rawProgress);
-      const angle = easedProgress * 360;
-      const mask = `conic-gradient(from 0deg, transparent 0deg, transparent ${angle}deg, black ${angle}deg, black 360deg)`;
-      overlay.style.maskImage = mask;
-      overlay.style.webkitMaskImage = mask;
-      if (rawProgress < 1) requestAnimationFrame(animate);
-      else {
-        overlay.style.maskImage = 'conic-gradient(from 0deg, transparent 0deg, transparent 360deg)';
-        overlay.style.webkitMaskImage = 'conic-gradient(from 0deg, transparent 0deg, transparent 360deg)';
+  React.useEffect(() => {
+    if (!menuOpen) return;
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (!menuRef.current) return;
+      if (!menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
       }
     };
-    requestAnimationFrame(animate);
-  }, []);
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [menuOpen]);
 
-  // Animate border reveal when active tab changes (location tabs – white border)
-  React.useEffect(() => {
-    const currentTab = props.active;
-    const prevTab = prevActiveTabRef.current;
-    if (currentTab !== prevTab && currentTab) {
-      runBorderRevealAnimation(tabBorderOverlayRefs.current[currentTab] ?? null);
-    }
-    prevActiveTabRef.current = currentTab;
-  }, [props.active, runBorderRevealAnimation]);
-
-  // One-time progressive border animation for Clips and Discover on mount
-  React.useEffect(() => {
-    if (clipsDiscoverAnimatedRef.current) return;
-    clipsDiscoverAnimatedRef.current = true;
-    runBorderRevealAnimation(clipsBorderOverlayRef.current);
-    runBorderRevealAnimation(discoverBorderOverlayRef.current);
-  }, [runBorderRevealAnimation]);
+  const menuItems: Array<{
+    key: string;
+    label: string;
+    icon: React.ReactNode;
+    onClick: () => void;
+  }> = [
+    {
+      key: 'nearby',
+      label: 'Nearby',
+      icon: <FiNavigation className="h-4 w-4 text-[#34D399]" />,
+      onClick: () => {
+        props.onChange(local);
+        props.onClearCustom?.();
+        setMenuOpen(false);
+      },
+    },
+    {
+      key: 'regional',
+      label: regional,
+      icon: <FiMapPin className="h-4 w-4 text-[#7A8AF0]" />,
+      onClick: () => {
+        props.onChange(regional);
+        props.onClearCustom?.();
+        setMenuOpen(false);
+      },
+    },
+    {
+      key: 'national',
+      label: national,
+      icon: <FiGlobe className="h-4 w-4 text-red-400" />,
+      onClick: () => {
+        props.onChange(national);
+        props.onClearCustom?.();
+        setMenuOpen(false);
+      },
+    },
+    {
+      key: 'discover',
+      label: 'Discover',
+      icon: <FiCompass className="h-4 w-4 text-white/90" />,
+      onClick: () => {
+        setMenuOpen(false);
+        navigate('/discover');
+      },
+    },
+    {
+      key: 'following',
+      label: 'Following',
+      icon: <FiUserPlus className="h-4 w-4 text-green-400" />,
+      onClick: () => {
+        props.onChange('Following');
+        window.dispatchEvent(new CustomEvent('setFollowingTab'));
+        props.onClearCustom?.();
+        setMenuOpen(false);
+      },
+    },
+  ];
 
   return (
-    <div role="tablist" aria-label="Locations" className="z-30 bg-[#030712] py-1 relative">
+    <div role="tablist" aria-label="Locations" className="z-[140] bg-[#030712] py-1 relative isolate">
       {/* Not sticky: /feed uses an inner scroll container so this chrome stays pinned */}
       {/* Scrim effect */}
       <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/50 to-transparent pointer-events-none z-0" />
 
       <div className="relative px-3 z-10">
-        {/* Same palette as Avatar `storyRingStyle` (profile pic when user has stories): teal → sky → fuchsia */}
         <div className="absolute inset-x-1 -inset-y-2 rounded-2xl bg-gradient-to-tr from-teal-400/35 via-sky-500/35 to-fuchsia-500/30 blur-xl pointer-events-none" />
-        <div className={`relative grid ${showNotificationsTab ? 'grid-cols-[1fr_1fr_1fr_auto_auto]' : 'grid-cols-[1fr_1fr_1fr_auto]'} gap-1.5`}>
-          {tabs.map(t => {
-          const isNotificationsTab = t === '__notifications__';
-          const isBoostTab = t === 'Boost';
-          const isMainFeedTab = t === regional || t === national || t === 'Following';
-          const active = props.active === t || (isNotificationsTab && location.pathname === '/inbox');
-          const id = `tab-${t}`;
-          const panelId = `panel-${t}`;
+        <div className="relative grid grid-cols-[40px_1fr_40px] items-center gap-2">
+          <button
+            type="button"
+            aria-label="Boost"
+            onClick={() => setShowBoostPrompt(true)}
+            className="h-10 w-10 inline-flex items-center justify-center rounded-full text-white focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+          >
+            <FeedBoostTabBadge active={props.active === 'Boost'} />
+          </button>
 
-          // Special handling for Discover, Clips, and Following tabs
-          const handleClick = (e: React.MouseEvent) => {
-            e.stopPropagation();
-            if (t === 'Discover') {
-              navigate('/discover');
-            } else if (t === 'Clips') {
-              navigate('/stories');
-            } else if (t === 'Following') {
-              // Set active tab to Following and trigger following feed
-              props.onChange('Following');
-              window.dispatchEvent(new CustomEvent('setFollowingTab'));
-              props.onClearCustom?.();
-            } else if (t === 'Boost') {
-              setShowBoostPrompt(true);
-            } else if (t === '__notifications__') {
-              navigate('/inbox');
-            } else {
-              props.onChange(t);
-              props.onClearCustom?.();
-            }
-          };
-
-          // Format tab label
-          const tabLabel = t;
-
-          if (active) {
-            // Check if this tab should have shimmer animation (regional, national, or Following)
-            const shouldShimmer = isMainFeedTab || t === 'Boost';
-
-            return (
-              <motion.button
-                key={t}
-                layout
-                transition={{ type: 'spring', stiffness: 420, damping: 34, mass: 0.7 }}
-                id={id}
-                role="tab"
-                aria-selected={active}
-                aria-controls={panelId}
-                aria-label={isBoostTab ? 'Boost' : undefined}
-                tabIndex={active ? 0 : -1}
-                onClick={handleClick}
-                className={`relative rounded-lg py-1 text-white text-xs sm:text-sm font-medium leading-tight transition-transform active:scale-[.98] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 flex items-center justify-center gap-1 ${
-                  (isBoostTab || isNotificationsTab) ? 'w-10 px-0 justify-self-end overflow-visible' : 'w-full px-2'
-                }`}
+          <div ref={menuRef} className="relative flex justify-center">
+            <button
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-label="Change feed"
+              onClick={() => setMenuOpen((prev) => !prev)}
+              className="inline-flex max-w-full items-center gap-1.5 px-1.5 py-1 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+            >
+              <span className="shrink-0" aria-hidden>{activeHeaderIcon}</span>
+              <span
+                className="truncate"
                 style={{
-                  outline: 'none',
-                  boxShadow: 'none'
-                }}
-                onFocus={(e) => {
-                  e.currentTarget.style.outline = 'none';
-                  e.currentTarget.style.boxShadow = 'none';
+                  fontSize: '22px',
+                  fontWeight: 700,
+                  lineHeight: '1.1',
+                  fontFamily: 'Urbanist, "Instagram Sans", Inter, sans-serif',
+                  background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.7) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.7) 100%)',
+                  backgroundSize: '200% 100%',
+                  WebkitBackgroundClip: 'text',
+                  backgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  color: 'transparent',
+                  animation: 'shimmer 6s linear infinite',
+                  display: 'inline-block',
                 }}
               >
-                {/* White progressive border wrapper */}
-                <div
-                  className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
-                  style={{
-                    background: 'conic-gradient(from 0deg, white, white)',
-                  }}
-                >
-                  {/* Overlay that covers border initially, then rotates to reveal it */}
-                  <div
-                    ref={(el) => { tabBorderOverlayRefs.current[t] = el; }}
-                    className="absolute inset-0 bg-black rounded-lg"
-                    style={{
-                      maskImage: 'conic-gradient(from 0deg, black 360deg)',
-                      WebkitMaskImage: 'conic-gradient(from 0deg, black 360deg)',
-                    }}
-                  />
-                  <div className="w-full h-full rounded-lg bg-black relative z-10" />
-                </div>
-                {/* Content */}
-                <span className="relative z-10 truncate whitespace-nowrap inline-flex items-center justify-center">
-                  {isNotificationsTab ? (
-                    <span className="relative inline-flex items-center justify-center">
-                      <FiBell className="w-4 h-4 text-white" />
-                      {hasAnyNotifications && (
-                        <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-red-500" />
-                      )}
-                    </span>
-                  ) : isBoostTab ? (
-                    <FeedBoostTabBadge active />
-                  ) : shouldShimmer ? (
-                    <span className="inline-flex items-center gap-2">
-                      {active && isMainFeedTab && (
-                        t === 'Following'
-                          ? <FiUserPlus className="w-3 h-3 text-green-400 shrink-0" />
-                          : t === regional
-                            ? <FiMapPin className="w-3 h-3 text-[#7A8AF0] shrink-0" />
-                            : <FiMapPin className="w-3 h-3 text-red-400 shrink-0" />
-                      )}
-                      <span
-                        className="truncate"
-                        style={{
-                          background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%)',
-                          backgroundSize: '200% 100%',
-                          WebkitBackgroundClip: 'text',
-                          backgroundClip: 'text',
-                          WebkitTextFillColor: 'transparent',
-                          color: 'transparent',
-                          animation: 'shimmer 6s linear infinite',
-                          display: 'inline-block'
-                        }}
-                      >
-                        {tabLabel}
-                      </span>
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-2">
-                      {active && isMainFeedTab && (
-                        t === 'Following'
-                          ? <FiUserPlus className="w-3 h-3 text-green-400 shrink-0" />
-                          : t === regional
-                            ? <FiMapPin className="w-3 h-3 text-[#7A8AF0] shrink-0" />
-                            : <FiMapPin className="w-3 h-3 text-red-400 shrink-0" />
-                      )}
-                      <span className="truncate">{tabLabel}</span>
-                    </span>
-                  )}
-                </span>
-                {active && isMainFeedTab && (
-                  <span
-                    className="pointer-events-none absolute left-1/2 -bottom-2 z-20 -translate-x-1/2"
-                    style={{
-                      width: 0,
-                      height: 0,
-                      borderLeft: '6px solid transparent',
-                      borderRight: '6px solid transparent',
-                      borderTop: '7px solid white',
-                    }}
-                  >
-                    <span
-                      className="absolute -left-[5px] -top-[7px]"
-                      style={{
-                        width: 0,
-                        height: 0,
-                        borderLeft: '5px solid transparent',
-                        borderRight: '5px solid transparent',
-                        borderTop: '6px solid #000',
-                      }}
-                    />
-                  </span>
-                )}
-              </motion.button>
-            );
-          }
-
-          return (
-            <motion.button
-              key={t}
-              layout
-              transition={{ type: 'spring', stiffness: 420, damping: 34, mass: 0.7 }}
-              id={id}
-              role="tab"
-              aria-selected={active}
-              aria-controls={panelId}
-              aria-label={isBoostTab ? 'Boost' : undefined}
-              tabIndex={active ? 0 : -1}
-              onClick={handleClick}
-              className={`rounded-lg py-1 bg-black text-xs sm:text-sm font-medium leading-tight transition-transform active:scale-[.98] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${
-                isBoostTab
-                  ? 'w-10 px-0 justify-self-end overflow-visible text-white opacity-100 hover:text-white'
-                  : isNotificationsTab
-                    ? 'w-10 px-0 justify-self-end text-white opacity-100 hover:text-white'
-                  : 'w-full px-2 text-gray-600 dark:text-gray-500 hover:text-gray-400 opacity-60'
-              }`}
-              style={{
-                outline: 'none',
-                boxShadow: 'none',
-                border: 'none'
-              }}
-              onFocus={(e) => {
-                e.currentTarget.style.outline = 'none';
-                e.currentTarget.style.boxShadow = 'none';
-              }}
-            >
-              <span className="truncate whitespace-nowrap inline-flex items-center justify-center">
-                {isNotificationsTab ? (
-                  <span className="relative inline-flex items-center justify-center">
-                    <FiBell className="w-4 h-4 text-white" />
-                    {hasAnyNotifications && (
-                      <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-red-500" />
-                    )}
-                  </span>
-                ) : isBoostTab ? (
-                  <FeedBoostTabBadge />
-                ) : (
-                  <span className="inline-flex items-center gap-2">
-                    <span className="truncate">{tabLabel}</span>
-                  </span>
-                )}
+                {activeLabel}
               </span>
-            </motion.button>
-          );
-          })}
+              <FiChevronDown
+                className={`h-4 w-4 text-white/90 transition-transform ${menuOpen ? 'rotate-180' : ''}`}
+                aria-hidden
+              />
+            </button>
+
+            {menuOpen && (
+              <div
+                role="menu"
+                className="absolute top-[calc(100%+6px)] left-1/2 z-[160] w-[220px] -translate-x-1/2 overflow-hidden rounded-[22px] border border-white/10 bg-[#272b35]/92 shadow-[0_14px_30px_rgba(0,0,0,0.5)] backdrop-blur-xl"
+              >
+                <div className="py-1.5">
+                  {menuItems.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      role="menuitem"
+                      onClick={item.onClick}
+                      className="w-full px-4 py-2.5 text-left text-white/95 hover:bg-white/10 transition-colors inline-flex items-center gap-2.5"
+                      style={{ fontSize: '17px', fontFamily: 'Urbanist, "Instagram Sans", Inter, sans-serif', fontWeight: 500 }}
+                    >
+                      <span className="shrink-0">{item.icon}</span>
+                      <span className="truncate">{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            aria-label="Notifications"
+            onClick={() => navigate('/inbox')}
+            className="relative h-10 w-10 inline-flex items-center justify-center rounded-full text-white focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+          >
+            <FiBell className="w-5 h-5 text-white" />
+            {hasAnyNotifications && (
+              <span className="absolute top-[8px] right-[8px] h-2.5 w-2.5 rounded-full bg-red-500 ring-1 ring-[#030712]" />
+            )}
+          </button>
         </div>
       </div>
 

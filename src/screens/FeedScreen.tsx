@@ -59,65 +59,123 @@ type Tab = string;
 function PillTabs({
     active,
     onChange,
+    userLocal = 'Finglas',
     userRegional = 'Dublin',
-    userNational = 'Ireland'
+    userNational = 'Ireland',
+    hasNotifications = false,
+    onOpenBoost,
+    onOpenInbox,
+    onOpenDiscover,
 }: {
     active: Tab;
     onChange: (t: Tab) => void;
+    userLocal?: string;
     userRegional?: string;
     userNational?: string;
+    hasNotifications?: boolean;
+    onOpenBoost: () => void;
+    onOpenInbox: () => void;
+    onOpenDiscover: () => void;
 }) {
-    const mainFeedTabs: Tab[] = [userRegional, userNational, 'Following'];
-    const activeMainFeedTab = mainFeedTabs.includes(active) ? active : null;
-    const orderedMainFeedTabs = activeMainFeedTab
-        ? [activeMainFeedTab, ...mainFeedTabs.filter((tab) => tab !== activeMainFeedTab)]
-        : mainFeedTabs;
-    const tabs: Tab[] = [...orderedMainFeedTabs, 'Clips', 'Discover'];
+    const [menuOpen, setMenuOpen] = useState(false);
+    const activeLabel = active === userLocal ? 'Nearby' : active;
+    const activeIconName =
+        active === userLocal
+            ? 'navigate-outline'
+            : active === userRegional
+                ? 'location-outline'
+                : active === userNational
+                    ? 'earth-outline'
+                    : active === 'Following'
+                        ? 'person-add-outline'
+                        : 'location-outline';
+
+    const menuItems = [
+        {
+            key: 'nearby',
+            label: 'Nearby',
+            icon: 'navigate-outline',
+            iconColor: '#34D399',
+            onPress: () => onChange(userLocal),
+        },
+        {
+            key: 'regional',
+            label: userRegional,
+            icon: 'location-outline',
+            iconColor: '#7A8AF0',
+            onPress: () => onChange(userRegional),
+        },
+        {
+            key: 'national',
+            label: userNational,
+            icon: 'earth-outline',
+            iconColor: '#F87171',
+            onPress: () => onChange(userNational),
+        },
+        {
+            key: 'discover',
+            label: 'Discover',
+            icon: 'compass-outline',
+            iconColor: '#FFFFFF',
+            onPress: onOpenDiscover,
+        },
+        {
+            key: 'following',
+            label: 'Following',
+            icon: 'person-add-outline',
+            iconColor: '#4ADE80',
+            onPress: () => onChange('Following'),
+        },
+    ];
 
     return (
         <View style={styles.tabContainer}>
-            <View style={styles.tabGrid}>
-                {tabs.map(t => {
-                    const isActive = active === t;
-                    const isMainFeedTab = mainFeedTabs.includes(t);
-                    return (
-                        <TouchableOpacity
-                            key={t}
-                            onPress={() => onChange(t)}
-                            style={[
-                                styles.tabButton,
-                                isActive ? styles.activeTabButton : styles.inactiveTabButton,
-                            ]}
-                        >
-                            <View style={styles.tabLabelRow}>
-                                {isActive && isMainFeedTab && (
-                                    <Icon
-                                        name={t === 'Following' ? 'person-add' : 'location'}
-                                        size={12}
-                                        color={t === 'Following' ? '#4ADE80' : t === userRegional ? '#7A8AF0' : '#F87171'}
-                                        style={styles.activeMainFeedLocationIcon}
-                                    />
-                                )}
-                                <Text
-                                    style={[
-                                        styles.tabText,
-                                        isActive ? styles.activeTabText : styles.inactiveTabText,
-                                    ]}
+            <View style={styles.feedHeaderPickerRow}>
+                <TouchableOpacity onPress={onOpenBoost} style={styles.feedHeaderIconButton}>
+                    <Icon name="flash" size={18} color="#FBBF24" />
+                </TouchableOpacity>
+
+                <View style={styles.feedHeaderCenter}>
+                    <TouchableOpacity
+                        onPress={() => setMenuOpen((prev) => !prev)}
+                        style={styles.feedDropdownTrigger}
+                        activeOpacity={0.85}
+                    >
+                        <Icon
+                            name={activeIconName}
+                            size={16}
+                            color={active === userLocal ? '#34D399' : active === userRegional ? '#7A8AF0' : active === userNational ? '#F87171' : '#4ADE80'}
+                            style={styles.feedDropdownActiveIcon}
+                        />
+                        <Text style={styles.feedDropdownActiveText}>{activeLabel}</Text>
+                        <Icon name={menuOpen ? 'chevron-up-outline' : 'chevron-down-outline'} size={16} color="#E5E7EB" />
+                    </TouchableOpacity>
+
+                    {menuOpen && (
+                        <View style={styles.feedDropdownMenu}>
+                            {menuItems.map((item) => (
+                                <TouchableOpacity
+                                    key={item.key}
+                                    style={styles.feedDropdownMenuItem}
+                                    onPress={() => {
+                                        item.onPress();
+                                        setMenuOpen(false);
+                                    }}
                                 >
-                                    {t}
-                                </Text>
-                                {isActive && !isMainFeedTab && (
-                                    <Icon name="eye" size={15} color="#FFFFFF" style={styles.eyeIcon} />
-                                )}
-                            </View>
-                            {isActive && isMainFeedTab && (
-                                <View style={styles.activeMainFeedTailOuter}>
-                                    <View style={styles.activeMainFeedTailInner} />
-                                </View>
-                            )}
-                        </TouchableOpacity>
-                    );
-                })}
+                                    <Icon name={item.icon} size={18} color={item.iconColor} />
+                                    <Text style={styles.feedDropdownMenuText}>{item.label}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    )}
+                </View>
+
+                <TouchableOpacity onPress={onOpenInbox} style={styles.feedHeaderIconButton}>
+                    <View style={styles.feedHeaderNotifWrap}>
+                        <Icon name="notifications-outline" size={22} color="#FFFFFF" />
+                        {hasNotifications && <View style={styles.feedHeaderNotifDot} />}
+                    </View>
+                </TouchableOpacity>
             </View>
         </View>
     );
@@ -1098,6 +1156,7 @@ const FeedCard = React.memo(function FeedCard({
 function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const { user } = useAuth();
     const userId = user?.id ?? 'anon';
+    const defaultLocal = user?.local || 'Finglas';
     const defaultNational = user?.national || 'Ireland';
     const defaultRegional = user?.regional || 'Dublin';
 
@@ -1296,14 +1355,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     };
 
     const handleTabChange = (tab: Tab) => {
-        if (tab === 'Discover') {
-            navigation.navigate('Discover');
-            return;
-        }
-        if (tab === 'Clips') {
-            navigation.navigate('Stories');
-            return;
-        }
         if (tab === 'Following') {
             setShowFollowingFeed(true);
             setActive('Following'); // Set active to Following so it's highlighted
@@ -1458,18 +1509,19 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                 <Icon name="add-circle-outline" size={16} color="#F9FAFB" />
                                 <Text style={styles.headerMiniActionText}>Add Yours</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity style={[styles.headerMiniAction, styles.boostHeaderAction]} onPress={() => setShowBoostPrompt(true)}>
-                                <Icon name="flash" size={16} color="#111827" />
-                                <Text style={[styles.headerMiniActionText, { color: '#111827' }]}>Boost</Text>
-                            </TouchableOpacity>
                         </View>
                     </View>
                 </View>
                 <PillTabs
                     active={showFollowingFeed ? 'Following' : active}
                     onChange={handleTabChange}
+                    userLocal={defaultLocal}
                     userRegional={defaultRegional}
                     userNational={defaultNational}
+                    hasNotifications={hasInbox || unreadCount > 0}
+                    onOpenBoost={() => setShowBoostPrompt(true)}
+                    onOpenInbox={() => navigation.navigate('Inbox')}
+                    onOpenDiscover={() => navigation.navigate('Discover')}
                 />
             </View>
 
@@ -1708,71 +1760,87 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
         gap: 8,
     },
-    tabButton: {
-        flex: 1,
+    feedHeaderPickerRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
         paddingHorizontal: 12,
-        paddingVertical: 6,
+        minHeight: 40,
+        zIndex: 30,
+    },
+    feedHeaderIconButton: {
+        width: 40,
+        height: 40,
         borderRadius: 20,
-        flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        position: 'relative',
-        overflow: 'visible',
     },
-    tabLabelRow: {
+    feedHeaderCenter: {
+        flex: 1,
+        alignItems: 'center',
+        position: 'relative',
+    },
+    feedDropdownTrigger: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 4,
+        gap: 6,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 16,
     },
-    activeTabButton: {
-        backgroundColor: '#000000',
+    feedDropdownActiveIcon: {
+        marginTop: 1,
     },
-    inactiveTabButton: {
-        backgroundColor: '#000000',
+    feedDropdownActiveText: {
+        fontSize: 22,
+        fontWeight: '700',
+        color: '#FFFFFF',
+        letterSpacing: 0.2,
+        textShadowColor: 'rgba(255,255,255,0.28)',
+        textShadowOffset: { width: 0, height: 0 },
+        textShadowRadius: 6,
     },
-    tabText: {
+    feedDropdownMenu: {
+        position: 'absolute',
+        top: 44,
+        alignSelf: 'center',
+        width: 232,
+        backgroundColor: 'rgba(36, 40, 49, 0.94)',
+        borderRadius: 24,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.14)',
+        paddingVertical: 7,
+        zIndex: 60,
+        shadowColor: '#000',
+        shadowOpacity: 0.5,
+        shadowRadius: 14,
+        shadowOffset: { width: 0, height: 12 },
+        elevation: 36,
+    },
+    feedDropdownMenuItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 11,
+        paddingHorizontal: 15,
+        paddingVertical: 11,
+    },
+    feedDropdownMenuText: {
         fontSize: 16,
+        color: '#F9FAFB',
         fontWeight: '600',
     },
-    activeTabText: {
-        color: '#FFFFFF',
+    feedHeaderNotifWrap: {
+        position: 'relative',
     },
-    inactiveTabText: {
-        color: '#6B7280',
-    },
-    eyeIcon: {
-        marginLeft: 4,
-    },
-    activeMainFeedLocationIcon: {
-        marginRight: 2,
-    },
-    activeMainFeedTailOuter: {
+    feedHeaderNotifDot: {
         position: 'absolute',
-        bottom: -7,
-        left: '50%',
-        marginLeft: -6,
-        width: 0,
-        height: 0,
-        borderLeftWidth: 6,
-        borderRightWidth: 6,
-        borderTopWidth: 7,
-        borderLeftColor: 'transparent',
-        borderRightColor: 'transparent',
-        borderTopColor: '#FFFFFF',
-    },
-    activeMainFeedTailInner: {
-        position: 'absolute',
-        left: -5,
-        top: -7,
-        width: 0,
-        height: 0,
-        borderLeftWidth: 5,
-        borderRightWidth: 5,
-        borderTopWidth: 6,
-        borderLeftColor: 'transparent',
-        borderRightColor: 'transparent',
-        borderTopColor: '#000000',
+        top: 6,
+        right: 1,
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: '#EF4444',
     },
     feedContent: {
         paddingBottom: 20,
