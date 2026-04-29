@@ -4,6 +4,7 @@ import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile, FiUserPlus, Fi
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { getAvatarForHandle } from '../api/users';
+import { setAvatarForHandle } from '../api/users';
 import { getNotifications, type Notification, type NotificationType, markNotificationRead, markAllNotificationsRead, getUnreadNotificationCount, deleteNotification } from '../api/notifications';
 import { getStoryInsightsForUser, type StoryInsight, fetchFollowedUsersStoryGroups, fetchStoryGroupByHandle } from '../api/stories';
 import { listConversations, seedMockDMs, type ConversationSummary, pinConversation, unpinConversation, acceptMessageRequest, muteConversation, unmuteConversation, deleteConversation, markConversationRead, markConversationUnread } from '../api/messages';
@@ -15,10 +16,27 @@ import { showToast } from '../utils/toast';
 import { getFollowedUsers } from '../api/posts';
 import type { StoryGroup } from '../types';
 import { toggleFollow, acceptFollowRequest, denyFollowRequest } from '../api/client';
+import { fetchUserProfile } from '../api/client';
 import { getSocket } from '../services/socketio';
 import { leaveChatGroup } from '../api/client';
 import { markGroupConversationReadById } from '../api/messages';
 import { getNotificationPreferences, isNotificationTypeEnabled } from '../services/notifications';
+
+function extractAvatarUrl(profile: any): string {
+    const candidate =
+        profile?.avatar_url ||
+        profile?.avatarUrl ||
+        profile?.profile_picture_url ||
+        profile?.profilePictureUrl ||
+        profile?.profile_image_url ||
+        profile?.profileImageUrl ||
+        profile?.user?.avatar_url ||
+        profile?.user?.avatarUrl ||
+        profile?.user?.profile_picture_url ||
+        profile?.user?.profilePictureUrl ||
+        '';
+    return typeof candidate === 'string' ? candidate.trim() : '';
+}
 
 function inboxConversationRowId(conv: ConversationSummary): string {
     if (conv.kind === 'group' && conv.chatGroupId) return `g:${conv.chatGroupId}`;
@@ -77,6 +95,7 @@ function ConversationItem({
     onSwipeOpenChange,
     compactPhone,
     onOpenChatInfo,
+    getAvatarSrc,
 }: { 
     conv: ConversationSummary; 
     onPin?: () => void;
@@ -93,6 +112,7 @@ function ConversationItem({
     compactPhone?: boolean;
     /** Opens black & white chat info sheet (inbox list). */
     onOpenChatInfo?: (conv: ConversationSummary) => void;
+    getAvatarSrc?: (handle: string) => string | undefined;
 }) {
     const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 390;
     const SWIPE_ACTION_WIDTH = viewportWidth < 360 ? 188 : viewportWidth < 430 ? 208 : 224;
@@ -334,7 +354,7 @@ function ConversationItem({
             <div className="relative overflow-visible flex-shrink-0">
                 <Avatar
                     name={displayTitle}
-                    src={isGroupRow ? undefined : getAvatarForHandle(conv.otherHandle)}
+                    src={isGroupRow ? undefined : (getAvatarSrc ? getAvatarSrc(conv.otherHandle) : getAvatarForHandle(conv.otherHandle))}
                     size="md"
                     hasStory={hasStory}
                     onClick={handleAvatarClick}
@@ -423,6 +443,29 @@ export default function InboxPage() {
     const [openSwipeHandle, setOpenSwipeHandle] = React.useState<string | null>(null);
     const [inboxChatInfo, setInboxChatInfo] = React.useState<ConversationSummary | null>(null);
     const [compactPhone, setCompactPhone] = React.useState<boolean>(() => (typeof window !== 'undefined' ? window.innerWidth <= 390 : false));
+    const [storyThumbMenu, setStoryThumbMenu] = React.useState<{ fromHandle: string; storyId: string } | null>(null);
+    const [insightLikersModal, setInsightLikersModal] = React.useState<{ storyId: string; likers: string[] } | null>(null);
+    const [insightAvatarMap, setInsightAvatarMap] = React.useState<Record<string, string>>({});
+    const [dmAvatarMap, setDmAvatarMap] = React.useState<Record<string, string>>({});
+    const insightAvatarFetchInFlightRef = React.useRef<Set<string>>(new Set());
+    const storyThumbLongPressTimerRef = React.useRef<number | null>(null);
+    const storyThumbLongPressTriggeredRef = React.useRef(false);
+
+    const clearStoryThumbLongPressTimer = React.useCallback(() => {
+        if (storyThumbLongPressTimerRef.current !== null) {
+            window.clearTimeout(storyThumbLongPressTimerRef.current);
+            storyThumbLongPressTimerRef.current = null;
+        }
+    }, []);
+
+    const openStoryFromNotification = React.useCallback((fromHandle: string, storyId: string) => {
+        navigate('/stories', {
+            state: {
+                openUserHandle: fromHandle,
+                openStoryId: storyId,
+            },
+        });
+    }, [navigate]);
 
     const getInsightsSeenStorageKey = React.useCallback(
         (handle: string) => `clips:insights-seen:${String(handle || '').trim().toLowerCase()}`,
@@ -482,6 +525,80 @@ export default function InboxPage() {
         window.addEventListener('resize', onResize);
         return () => window.removeEventListener('resize', onResize);
     }, []);
+
+    React.useEffect(() => {
+        return () => {
+            clearStoryThumbLongPressTimer();
+        };
+    }, [clearStoryThumbLongPressTimer]);
+
+    React.useEffect(() => {
+        if (user?.handle && user?.avatarUrl) {
+            setAvatarForHandle(user.handle, user.avatarUrl);
+            setDmAvatarMap((prev) => ({ ...prev, [user.handle]: user.avatarUrl! }));
+            setInsightAvatarMap((prev) => ({ ...prev, [user.handle]: user.avatarUrl! }));
+        }
+    }, [user?.handle, user?.avatarUrl]);
+
+    React.useEffect(() => {
+        const handles = Array.from(
+            new Set(
+                insights
+                    .filter((insight) => insight.likes > 0 && Array.isArray(insight.likers) && insight.likers.length > 0)
+                    .flatMap((insight) => insight.likers || [])
+                    .filter((h): h is string => typeof h === 'string' && h.trim().length > 0)
+            )
+        );
+        const missing = handles.filter((handle) => !getAvatarForHandle(handle) && !insightAvatarMap[handle]);
+        if (missing.length === 0) return;
+
+        missing.forEach((handle) => {
+            if (insightAvatarFetchInFlightRef.current.has(handle)) return;
+            insightAvatarFetchInFlightRef.current.add(handle);
+            fetchUserProfile(handle, user?.id)
+                .then((profile: any) => {
+                    const avatarUrl = extractAvatarUrl(profile);
+                    if (avatarUrl.length > 0) {
+                        setAvatarForHandle(handle, avatarUrl);
+                        setInsightAvatarMap((prev) => ({ ...prev, [handle]: avatarUrl }));
+                    }
+                })
+                .catch(() => {})
+                .finally(() => {
+                    insightAvatarFetchInFlightRef.current.delete(handle);
+                });
+        });
+    }, [insights, insightAvatarMap, user?.id]);
+
+    React.useEffect(() => {
+        const handles = Array.from(
+            new Set(
+                [
+                    ...notifications.map((n) => n.fromHandle),
+                    ...items.filter((c) => c.kind !== 'group').map((c) => c.otherHandle),
+                ].filter((h): h is string => typeof h === 'string' && h.trim().length > 0)
+            )
+        );
+        const missing = handles.filter((handle) => !getAvatarForHandle(handle) && !dmAvatarMap[handle]);
+        if (missing.length === 0) return;
+
+        missing.forEach((handle) => {
+            if (insightAvatarFetchInFlightRef.current.has(handle)) return;
+            insightAvatarFetchInFlightRef.current.add(handle);
+            fetchUserProfile(handle, user?.id)
+                .then((profile: any) => {
+                    const avatarUrl = extractAvatarUrl(profile);
+                    if (avatarUrl.length > 0) {
+                        setAvatarForHandle(handle, avatarUrl);
+                        setDmAvatarMap((prev) => ({ ...prev, [handle]: avatarUrl }));
+                    }
+                })
+                .catch(() => {})
+                .finally(() => {
+                    insightAvatarFetchInFlightRef.current.delete(handle);
+                });
+        });
+    }, [notifications, items, dmAvatarMap, user?.id]);
 
     const loadData = React.useCallback(async () => {
         if (!user?.handle) return;
@@ -890,6 +1007,10 @@ export default function InboxPage() {
         () => insights.filter((insight) => !seenInsightIds.has(insight.storyId)).length,
         [insights, seenInsightIds]
     );
+    const likedInsights = React.useMemo(
+        () => insights.filter((insight) => insight.likes > 0 && Array.isArray(insight.likers) && insight.likers.length > 0),
+        [insights]
+    );
 
     if (!user) {
         return <div className="p-6">Please sign in to view notifications.</div>;
@@ -1288,6 +1409,7 @@ export default function InboxPage() {
                                         onSwipeOpenChange={setOpenSwipeHandle}
                                         onOpenChatInfo={openInboxChatInfo}
                                         compactPhone={compactPhone}
+                                        getAvatarSrc={(handle) => dmAvatarMap[handle] || getAvatarForHandle(handle)}
                                     />
                                 ))}
                             </div>
@@ -1318,6 +1440,7 @@ export default function InboxPage() {
                                         onSwipeOpenChange={setOpenSwipeHandle}
                                         onOpenChatInfo={openInboxChatInfo}
                                         compactPhone={compactPhone}
+                                        getAvatarSrc={(handle) => dmAvatarMap[handle] || getAvatarForHandle(handle)}
                                     />
                                 ))}
                             </div>
@@ -1345,6 +1468,7 @@ export default function InboxPage() {
                                 onSwipeOpenChange={setOpenSwipeHandle}
                                 onOpenChatInfo={openInboxChatInfo}
                                 compactPhone={compactPhone}
+                                getAvatarSrc={(handle) => dmAvatarMap[handle] || getAvatarForHandle(handle)}
                             />
                         ))}
                     </div>
@@ -1374,6 +1498,7 @@ export default function InboxPage() {
                                             onSwipeOpenChange={setOpenSwipeHandle}
                                             onOpenChatInfo={openInboxChatInfo}
                                             compactPhone={compactPhone}
+                                            getAvatarSrc={(handle) => dmAvatarMap[handle] || getAvatarForHandle(handle)}
                                         />
                                     ))}
                                 </div>
@@ -1408,6 +1533,7 @@ export default function InboxPage() {
                                             onSwipeOpenChange={setOpenSwipeHandle}
                                             onOpenChatInfo={openInboxChatInfo}
                                             compactPhone={compactPhone}
+                                            getAvatarSrc={(handle) => dmAvatarMap[handle] || getAvatarForHandle(handle)}
                                         />
                                     ))}
                                 </div>
@@ -1442,6 +1568,7 @@ export default function InboxPage() {
                                             onSwipeOpenChange={setOpenSwipeHandle}
                                             onOpenChatInfo={openInboxChatInfo}
                                             compactPhone={compactPhone}
+                                            getAvatarSrc={(handle) => dmAvatarMap[handle] || getAvatarForHandle(handle)}
                                         />
                                     ))}
                                 </div>
@@ -1471,6 +1598,7 @@ export default function InboxPage() {
                                             onSwipeOpenChange={setOpenSwipeHandle}
                                             onOpenChatInfo={openInboxChatInfo}
                                             compactPhone={compactPhone}
+                                            getAvatarSrc={(handle) => dmAvatarMap[handle] || getAvatarForHandle(handle)}
                                         />
                                     ))}
                                 </div>
@@ -1521,7 +1649,7 @@ export default function InboxPage() {
                                     </div>
                                     <Avatar
                                         name={notif.groupName || notif.fromHandle}
-                                        src={notif.chatGroupId ? undefined : getAvatarForHandle(notif.fromHandle)}
+                                        src={notif.chatGroupId ? undefined : (dmAvatarMap[notif.fromHandle] || getAvatarForHandle(notif.fromHandle))}
                                         size="sm"
                                     />
                                     <div className="flex-1 min-w-0">
@@ -1548,12 +1676,31 @@ export default function InboxPage() {
                                                     type="button"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        navigate('/stories', {
-                                                            state: {
-                                                                openUserHandle: notif.fromHandle,
-                                                                openStoryId: notif.storyId,
-                                                            },
-                                                        });
+                                                        if (!notif.storyId) return;
+                                                        if (storyThumbLongPressTriggeredRef.current) {
+                                                            storyThumbLongPressTriggeredRef.current = false;
+                                                            return;
+                                                        }
+                                                        openStoryFromNotification(notif.fromHandle, notif.storyId);
+                                                    }}
+                                                    onPointerDown={(e) => {
+                                                        e.stopPropagation();
+                                                        if (!notif.storyId) return;
+                                                        storyThumbLongPressTriggeredRef.current = false;
+                                                        clearStoryThumbLongPressTimer();
+                                                        storyThumbLongPressTimerRef.current = window.setTimeout(() => {
+                                                            storyThumbLongPressTriggeredRef.current = true;
+                                                            setStoryThumbMenu({ fromHandle: notif.fromHandle, storyId: notif.storyId! });
+                                                        }, 420);
+                                                    }}
+                                                    onPointerUp={clearStoryThumbLongPressTimer}
+                                                    onPointerCancel={clearStoryThumbLongPressTimer}
+                                                    onPointerLeave={clearStoryThumbLongPressTimer}
+                                                    onContextMenu={(e) => {
+                                                        e.preventDefault();
+                                                        e.stopPropagation();
+                                                        if (!notif.storyId) return;
+                                                        setStoryThumbMenu({ fromHandle: notif.fromHandle, storyId: notif.storyId });
                                                     }}
                                                     className="mt-1 inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-1.5 py-1 hover:bg-white/10 transition-colors"
                                                     aria-label="Open story that was replied to"
@@ -1628,6 +1775,7 @@ export default function InboxPage() {
                                 onSwipeOpenChange={setOpenSwipeHandle}
                                 onOpenChatInfo={openInboxChatInfo}
                                 compactPhone={compactPhone}
+                                getAvatarSrc={(handle) => dmAvatarMap[handle] || getAvatarForHandle(handle)}
                             />
                         ))}
                     </div>
@@ -1639,7 +1787,7 @@ export default function InboxPage() {
                     </div>
                 )
             ) : activeTab === 'insights' ? (
-                !insights || insights.length === 0 ? (
+                !likedInsights || likedInsights.length === 0 ? (
                     <div className="text-gray-500">No story insights yet.</div>
                 ) : (
                 <div className="space-y-2">
@@ -1653,7 +1801,7 @@ export default function InboxPage() {
                             </button>
                         </div>
                     )}
-                    {insights.map(insight => (
+                    {likedInsights.map(insight => (
                         <div
                             key={insight.storyId}
                             onClick={() => {
@@ -1676,11 +1824,21 @@ export default function InboxPage() {
                                     size="sm"
                                 />
                             ) : insight.likes > 0 && insight.likers && insight.likers.length > 0 ? (
-                                <Avatar
-                                    name={insight.likers[0]}
-                                    src={getAvatarForHandle(insight.likers[0])}
-                                    size="sm"
-                                />
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        navigate(`/user/${encodeURIComponent(insight.likers[0])}`);
+                                    }}
+                                    className="rounded-full"
+                                    aria-label={`Open ${insight.likers[0]} profile`}
+                                >
+                                    <Avatar
+                                        name={insight.likers[0]}
+                                        src={insightAvatarMap[insight.likers[0]] || getAvatarForHandle(insight.likers[0])}
+                                        size="sm"
+                                    />
+                                </button>
                             ) : (
                                 <div className="w-10 h-10 rounded-full bg-gray-700 flex-shrink-0" />
                             )}
@@ -1697,15 +1855,36 @@ export default function InboxPage() {
                                         insight.question.responseCount === 1
                                             ? `1 answer`
                                             : `${insight.question.responseCount} answers`
-                                    ) : insight.likes === 0
-                                        ? 'No likes yet'
-                                        : !insight.likers || insight.likers.length === 0
-                                        ? 'No likes yet'
-                                        : insight.likes === 1
-                                        ? `Liked by ${insight.likers[0]}`
-                                        : insight.likes === 2
-                                        ? `Liked by ${insight.likers.join(' and ')}`
-                                        : `Liked by ${insight.likers.slice(0, 2).join(', ')} and ${insight.likes - 2} others`}
+                                    ) : (
+                                        <>
+                                            Liked by{' '}
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    navigate(`/user/${encodeURIComponent(insight.likers[0])}`);
+                                                }}
+                                                className="text-sky-300 underline hover:text-sky-200"
+                                            >
+                                                {insight.likers[0]}
+                                            </button>
+                                            {insight.likes > 1 ? (
+                                                <>
+                                                    {' and '}
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setInsightLikersModal({ storyId: insight.storyId, likers: insight.likers || [] });
+                                                        }}
+                                                        className="text-sky-300 underline hover:text-sky-200"
+                                                    >
+                                                        {`${insight.likes - 1} others`}
+                                                    </button>
+                                                </>
+                                            ) : ''}
+                                        </>
+                                    )}
                                 </div>
                             </div>
                             <div className="text-[10px] text-gray-400">
@@ -1753,7 +1932,7 @@ export default function InboxPage() {
                             <div className="flex items-start gap-3 p-4 border-b border-white/15">
                                 <Avatar
                                     name={title}
-                                    src={isGroupRow ? undefined : getAvatarForHandle(c.otherHandle)}
+                                    src={isGroupRow ? undefined : (dmAvatarMap[c.otherHandle] || getAvatarForHandle(c.otherHandle))}
                                     size="lg"
                                 />
                                 <div className="flex-1 min-w-0 pt-0.5">
@@ -1877,6 +2056,73 @@ export default function InboxPage() {
                     </div>
                 );
             })()}
+
+            {storyThumbMenu && (
+                <div
+                    className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-end justify-center p-4"
+                    onClick={() => setStoryThumbMenu(null)}
+                >
+                    <div
+                        className="w-full max-w-sm rounded-2xl border border-white/20 bg-black text-white overflow-hidden"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <button
+                            type="button"
+                            className="w-full px-4 py-3.5 text-left text-sm font-semibold hover:bg-white/10 transition-colors"
+                            onClick={() => {
+                                const selected = storyThumbMenu;
+                                setStoryThumbMenu(null);
+                                openStoryFromNotification(selected.fromHandle, selected.storyId);
+                            }}
+                        >
+                            View story
+                        </button>
+                        <button
+                            type="button"
+                            className="w-full px-4 py-3.5 text-left text-sm text-white/80 border-t border-white/10 hover:bg-white/10 transition-colors"
+                            onClick={() => setStoryThumbMenu(null)}
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {insightLikersModal && (
+                <div
+                    className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-end justify-center p-4"
+                    onClick={() => setInsightLikersModal(null)}
+                >
+                    <div
+                        className="w-full max-w-sm rounded-2xl border border-white/20 bg-black text-white overflow-hidden"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="px-4 py-3 border-b border-white/10 text-sm font-semibold">Story likes</div>
+                        <div className="max-h-[50vh] overflow-y-auto">
+                            {insightLikersModal.likers.map((handle) => (
+                                <button
+                                    key={`${insightLikersModal.storyId}-${handle}`}
+                                    type="button"
+                                    className="w-full px-4 py-3 text-left text-sm hover:bg-white/10 transition-colors border-b border-white/10 last:border-b-0"
+                                    onClick={() => {
+                                        setInsightLikersModal(null);
+                                        navigate(`/user/${encodeURIComponent(handle)}`);
+                                    }}
+                                >
+                                    {handle}
+                                </button>
+                            ))}
+                        </div>
+                        <button
+                            type="button"
+                            className="w-full px-4 py-3 text-left text-sm text-white/80 border-t border-white/10 hover:bg-white/10 transition-colors"
+                            onClick={() => setInsightLikersModal(null)}
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* Question Responses Modal */}
             {selectedQuestionInsight && selectedQuestionInsight.question && (

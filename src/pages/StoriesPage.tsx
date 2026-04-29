@@ -184,6 +184,7 @@ export default function StoriesPage() {
     const location = useLocation();
     const openUserHandle = location.state?.openUserHandle;
     const openStoryId = location.state?.openStoryId;
+    const fromDmViewStory = location.state?.fromDmViewStory === true;
     const fromStories24Rail = location.state?.fromStories24Rail === true;
     const railHandles = Array.isArray(location.state?.railHandles)
         ? (location.state.railHandles as string[])
@@ -810,6 +811,12 @@ export default function StoriesPage() {
             const currentGroup = currentGroups[currentIdx];
             if (!currentGroup || !currentGroup.stories || currentGroup.stories.length === 0) {
                 console.warn('Cannot navigate: currentGroup or stories is invalid', { currentGroupIndex: currentIdx, storyGroupsLength: currentGroups.length });
+                return currentGroups;
+            }
+
+            // DM "View story" should behave like a focused preview: do not auto-chain to more stories.
+            if (fromDmViewStory) {
+                closeStories();
                 return currentGroups;
             }
 
@@ -3851,7 +3858,7 @@ export default function StoriesPage() {
                                         value={replyText}
                                         onChange={(e) => setReplyText(e.target.value)}
                                         placeholder={`Reply to ${currentGroup?.userHandle || 'story'}`}
-                                        className="flex-1 rounded-full px-3 py-2 text-white placeholder-white/60 text-xs border border-white/20 min-w-0 bg-black/45 focus:bg-black/65 focus:text-white focus:placeholder-white/55 focus:border-white/35 focus:outline-none focus:ring-1 focus:ring-white/35 appearance-none"
+                                        className="flex-1 rounded-full px-3 py-2 text-white placeholder-white/70 text-xs border-2 border-white min-w-0 bg-black/45 focus:bg-black/65 focus:text-white focus:placeholder-white/65 focus:border-white focus:outline-none focus:ring-1 focus:ring-white/45 appearance-none"
                                         style={{ color: '#ffffff', WebkitTextFillColor: '#ffffff', caretColor: '#ffffff' }}
                                         autoFocus
                                     />
@@ -3908,7 +3915,7 @@ export default function StoriesPage() {
                                         e.stopPropagation();
                                         e.preventDefault();
                                     }}
-                                    className="flex-1 bg-white/10 rounded-full px-3 py-2 text-left text-white/60 text-xs min-w-0"
+                                    className="flex-1 bg-white/10 rounded-full px-3 py-2 text-left text-white/80 text-xs font-bold border-2 border-white min-w-0"
                                 >
                                     Send message
                                 </button>

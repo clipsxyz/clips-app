@@ -22,6 +22,8 @@ import {
 } from '../api/notifications';
 import { getStoryInsightsForUser, type StoryInsight, fetchStoryGroupByHandle } from '../api/stories';
 import { getAvatarForHandle } from '../api/users';
+import { setAvatarForHandle } from '../api/users';
+import { fetchUserProfile } from '../api/client';
 import { timeAgo } from '../utils/timeAgo';
 import Avatar from '../components/Avatar';
 import {
@@ -39,6 +41,22 @@ import {
 } from '../api/messages';
 import { getNotificationPreferences, isNotificationTypeEnabled } from '../services/notifications';
 
+function extractAvatarUrl(profile: any): string {
+    const candidate =
+        profile?.avatar_url ||
+        profile?.avatarUrl ||
+        profile?.profile_picture_url ||
+        profile?.profilePictureUrl ||
+        profile?.profile_image_url ||
+        profile?.profileImageUrl ||
+        profile?.user?.avatar_url ||
+        profile?.user?.avatarUrl ||
+        profile?.user?.profile_picture_url ||
+        profile?.user?.profilePictureUrl ||
+        '';
+    return typeof candidate === 'string' ? candidate.trim() : '';
+}
+
 export default function InboxScreen({ navigation, route }: any) {
     const { user } = useAuth();
     const [insights, setInsights] = useState<StoryInsight[]>([]);
@@ -50,6 +68,13 @@ export default function InboxScreen({ navigation, route }: any) {
     const [messageFilter, setMessageFilter] = useState<'all' | 'unread' | 'requests' | 'pinned'>('all');
     const [conversationQuery, setConversationQuery] = useState('');
     const [refreshing, setRefreshing] = useState(false);
+    const [insightAvatarMap, setInsightAvatarMap] = useState<Record<string, string>>({});
+    const [dmAvatarMap, setDmAvatarMap] = useState<Record<string, string>>({});
+    const avatarFetchInFlightRef = React.useRef<Set<string>>(new Set());
+    const likedInsights = useMemo(
+        () => insights.filter((item) => item.likes > 0 && Array.isArray(item.likers) && item.likers.length > 0),
+        [insights]
+    );
 
     useEffect(() => {
         loadData();
@@ -61,6 +86,73 @@ export default function InboxScreen({ navigation, route }: any) {
             setActiveTab(requestedTab);
         }
     }, [route?.params?.initialTab]);
+
+    useEffect(() => {
+        if (user?.handle && user?.avatarUrl) {
+            setAvatarForHandle(user.handle, user.avatarUrl);
+            setDmAvatarMap((prev) => ({ ...prev, [user.handle]: user.avatarUrl! }));
+            setInsightAvatarMap((prev) => ({ ...prev, [user.handle]: user.avatarUrl! }));
+        }
+    }, [user?.handle, user?.avatarUrl]);
+
+    useEffect(() => {
+        const handles = Array.from(
+            new Set(
+                likedInsights
+                    .flatMap((item) => item.likers || [])
+                    .filter((h): h is string => typeof h === 'string' && h.trim().length > 0)
+            )
+        );
+        const missing = handles.filter((handle) => !getAvatarForHandle(handle) && !insightAvatarMap[handle]);
+        if (missing.length === 0) return;
+
+        missing.forEach((handle) => {
+            if (avatarFetchInFlightRef.current.has(handle)) return;
+            avatarFetchInFlightRef.current.add(handle);
+            fetchUserProfile(handle, user?.id)
+                .then((profile: any) => {
+                    const avatarUrl = extractAvatarUrl(profile);
+                    if (avatarUrl.length > 0) {
+                        setAvatarForHandle(handle, avatarUrl);
+                        setInsightAvatarMap((prev) => ({ ...prev, [handle]: avatarUrl }));
+                    }
+                })
+                .catch(() => {})
+                .finally(() => {
+                    avatarFetchInFlightRef.current.delete(handle);
+                });
+        });
+    }, [likedInsights, insightAvatarMap, user?.id]);
+
+    useEffect(() => {
+        const handles = Array.from(
+            new Set(
+                [
+                    ...notifications.map((n) => n.fromHandle),
+                    ...conversations.filter((c) => c.kind !== 'group').map((c) => c.otherHandle),
+                ].filter((h): h is string => typeof h === 'string' && h.trim().length > 0)
+            )
+        );
+        const missing = handles.filter((handle) => !getAvatarForHandle(handle) && !dmAvatarMap[handle]);
+        if (missing.length === 0) return;
+
+        missing.forEach((handle) => {
+            if (avatarFetchInFlightRef.current.has(handle)) return;
+            avatarFetchInFlightRef.current.add(handle);
+            fetchUserProfile(handle, user?.id)
+                .then((profile: any) => {
+                    const avatarUrl = extractAvatarUrl(profile);
+                    if (avatarUrl.length > 0) {
+                        setAvatarForHandle(handle, avatarUrl);
+                        setDmAvatarMap((prev) => ({ ...prev, [handle]: avatarUrl }));
+                    }
+                })
+                .catch(() => {})
+                .finally(() => {
+                    avatarFetchInFlightRef.current.delete(handle);
+                });
+        });
+    }, [notifications, conversations, dmAvatarMap, user?.id]);
 
     const loadData = async () => {
         if (!user?.handle) return;
@@ -115,6 +207,16 @@ export default function InboxScreen({ navigation, route }: any) {
         } finally {
             setRefreshing(false);
         }
+    };
+
+    const openLikersList = (likers: string[]) => {
+        if (!Array.isArray(likers) || likers.length === 0) return;
+        const options = likers.slice(0, 8).map((handle) => ({
+            text: handle,
+            onPress: () => navigation.navigate('ViewProfile', { handle }),
+        }));
+        options.push({ text: 'Cancel', onPress: () => {} });
+        Alert.alert('Story likes', 'View profile', options);
     };
 
     const handleNotificationPress = async (notif: Notification) => {
@@ -415,16 +517,22 @@ export default function InboxScreen({ navigation, route }: any) {
                 />
             ) : activeTab === 'insights' ? (
                 <FlatList
-                    data={insights}
+                    data={likedInsights}
                     keyExtractor={(item) => item.storyId}
-                    renderItem={({ item }) => (
+                    renderItem={({ item }) => {
+                        const primaryLiker = item.likers?.[0];
+                        return (
                         <TouchableOpacity
-                            onPress={() => {}}
+                            onPress={() => {
+                                if (primaryLiker) {
+                                    navigation.navigate('ViewProfile', { handle: primaryLiker });
+                                }
+                            }}
                             style={styles.item}
                         >
                             {item.likes > 0 && item.likers && item.likers.length > 0 ? (
                                 <Avatar
-                                    src={getAvatarForHandle(item.likers[0])}
+                                    src={insightAvatarMap[item.likers[0]] || getAvatarForHandle(item.likers[0])}
                                     name={item.likers[0]}
                                     size={48}
                                 />
@@ -439,15 +547,29 @@ export default function InboxScreen({ navigation, route }: any) {
                                     <Text style={styles.itemTime}>{timeAgo(item.createdAt)}</Text>
                                 </View>
                                 <Text style={styles.itemMessage} numberOfLines={1}>
-                                    {item.likes === 0
-                                        ? 'No likes yet'
-                                        : item.likes === 1
-                                        ? `Liked by ${item.likers[0]}`
-                                        : `Liked by ${item.likers.slice(0, 2).join(', ')} and ${item.likes - 2} others`}
+                                    Liked by{' '}
+                                    <Text
+                                        style={styles.itemMessageLink}
+                                        onPress={() => {
+                                            if (primaryLiker) {
+                                                navigation.navigate('ViewProfile', { handle: primaryLiker });
+                                            }
+                                        }}
+                                    >
+                                        {primaryLiker}
+                                    </Text>
+                                    {item.likes > 1 ? (
+                                        <Text
+                                            style={styles.itemMessageLink}
+                                            onPress={() => openLikersList(item.likers || [])}
+                                        >
+                                            {` and ${item.likes - 1} others`}
+                                        </Text>
+                                    ) : ''}
                                 </Text>
                             </View>
                         </TouchableOpacity>
-                    )}
+                    );}}
                     ListEmptyComponent={
                         <View style={styles.emptyContainer}>
                             <Text style={styles.emptyText}>No story insights yet</Text>
@@ -514,7 +636,7 @@ export default function InboxScreen({ navigation, route }: any) {
                                     {isGroup ? (
                                         <Avatar src={item.groupAvatarUrl || undefined} name={title} size={40} />
                                     ) : (
-                                        <Avatar src={getAvatarForHandle(item.otherHandle)} name={item.otherHandle} size={40} />
+                                        <Avatar src={dmAvatarMap[item.otherHandle] || getAvatarForHandle(item.otherHandle)} name={item.otherHandle} size={40} />
                                     )}
                                 </View>
                                 <View style={styles.itemContent}>
@@ -810,6 +932,11 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: '#9CA3AF',
         marginTop: 2,
+    },
+    itemMessageLink: {
+        color: '#93C5FD',
+        textDecorationLine: 'underline',
+        fontWeight: '700',
     },
     itemTime: {
         fontSize: 12,

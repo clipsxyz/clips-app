@@ -1950,6 +1950,19 @@ export default function MessagesPage() {
         closeContextMenu();
     };
 
+    const handleViewStory = () => {
+        if (!contextMenu?.message || !contextMenu.message.storyId) return;
+        const storyOwner = contextMenu.message.senderHandle || handle;
+        navigate('/stories', {
+            state: {
+                openUserHandle: storyOwner,
+                openStoryId: contextMenu.message.storyId,
+                fromDmViewStory: true,
+            },
+        });
+        closeContextMenu();
+    };
+
     const handleForward = async () => {
         if (!contextMenu?.message || !user?.handle) return;
         
@@ -3494,6 +3507,15 @@ export default function MessagesPage() {
                             <FiCornerUpLeft className="w-5 h-5" />
                             <span>Reply</span>
                         </button>
+                        {contextMenu.message?.storyId && (
+                            <button
+                                onClick={handleViewStory}
+                                className="w-full text-left px-4 py-3 hover:bg-gray-800 flex items-center gap-3 text-white"
+                            >
+                                <FiImage className="w-5 h-5" />
+                                <span>View story</span>
+                            </button>
+                        )}
                         <button
                             onClick={() => {
                                 if (contextMenu?.message) {
