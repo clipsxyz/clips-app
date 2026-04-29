@@ -81,16 +81,16 @@ function PillTabs({
     const [showGazetteerTitle, setShowGazetteerTitle] = useState(true);
     const activeLabel = active === userLocal ? 'Nearby' : active;
     const headerLabel = showGazetteerTitle ? 'Gazetteer' : activeLabel;
-    const activeIconName =
+    const activeIndicatorColor =
         active === userLocal
-            ? 'navigate-outline'
+            ? '#34D399'
             : active === userRegional
-                ? 'location-outline'
+                ? '#7A8AF0'
                 : active === userNational
-                    ? 'earth-outline'
+                    ? '#93C5FD'
                     : active === 'Following'
-                        ? 'person-add-outline'
-                        : 'location-outline';
+                        ? '#F472B6'
+                        : '#E5E7EB';
 
     const menuItems = [
         {
@@ -111,7 +111,7 @@ function PillTabs({
             key: 'national',
             label: userNational,
             icon: 'earth-outline',
-            iconColor: '#F87171',
+            iconColor: '#93C5FD',
             onPress: () => onChange(userNational),
         },
         {
@@ -125,7 +125,7 @@ function PillTabs({
             key: 'following',
             label: 'Following',
             icon: 'person-add-outline',
-            iconColor: '#4ADE80',
+            iconColor: '#F472B6',
             onPress: () => onChange('Following'),
         },
     ];
@@ -149,11 +149,12 @@ function PillTabs({
                         activeOpacity={0.85}
                     >
                         <Icon
-                            name={activeIconName}
+                            name="location"
                             size={16}
-                            color={active === userLocal ? '#34D399' : active === userRegional ? '#7A8AF0' : active === userNational ? '#F87171' : '#4ADE80'}
+                            color="#FFFFFF"
                             style={styles.feedDropdownActiveIcon}
                         />
+                        <View style={[styles.feedDropdownActiveDot, { backgroundColor: activeIndicatorColor }]} />
                         <Text style={styles.feedDropdownActiveText}>{headerLabel}</Text>
                         <Icon name={menuOpen ? 'chevron-up-outline' : 'chevron-down-outline'} size={16} color="#E5E7EB" />
                     </TouchableOpacity>
@@ -1485,7 +1486,6 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     return (
         <View style={styles.container}>
             <View style={styles.stickyTabsContainer}>
-                <View style={styles.scrim} />
                 <View style={styles.feedHeaderTopRow}>
                     <View style={styles.topHeaderRow}>
                         <Text style={styles.gazetteerText}>Gazetteer</Text>
@@ -1613,7 +1613,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#030712',
+        backgroundColor: '#000000',
     },
     stickyTabsContainer: {
         position: 'absolute',
@@ -1621,7 +1621,7 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         zIndex: 1000,
-        backgroundColor: '#030712',
+        backgroundColor: '#000000',
         elevation: 10,
         width: '100%',
     },
@@ -1671,14 +1671,6 @@ const styles = StyleSheet.create({
         color: '#E5E7EB',
         fontSize: 11,
         fontWeight: '700',
-    },
-    scrim: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
     },
     gazetteerButton: {
         flexDirection: 'row',
@@ -1773,22 +1765,27 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 6,
-        paddingHorizontal: 10,
-        paddingVertical: 5,
-        borderRadius: 16,
+        gap: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 10,
+        borderWidth: 2,
+        borderColor: '#FFFFFF',
+        backgroundColor: '#111827',
     },
     feedDropdownActiveIcon: {
         marginTop: 1,
     },
+    feedDropdownActiveDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 999,
+    },
     feedDropdownActiveText: {
         fontSize: 22,
         fontWeight: '700',
-        color: '#FFFFFF',
+        color: '#E5E7EB',
         letterSpacing: 0.2,
-        textShadowColor: 'rgba(255,255,255,0.28)',
-        textShadowOffset: { width: 0, height: 0 },
-        textShadowRadius: 6,
     },
     feedDropdownMenu: {
         position: 'absolute',
@@ -1836,7 +1833,7 @@ const styles = StyleSheet.create({
         paddingTop: 96,
     },
     feedCard: {
-        backgroundColor: '#030712',
+        backgroundColor: '#000000',
         marginBottom: FEED_UI.spacing.cardGap,
     },
     sponsoredBadge: {

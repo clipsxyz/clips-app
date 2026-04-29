@@ -480,15 +480,15 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
   const hasAnyNotifications = notificationCount > 0 || insightsCount > 0 || questionsCount > 0;
   const activeLabel = props.active === local ? 'Nearby' : props.active;
   const headerLabel = showGazetteerTitle ? 'Gazetteer' : activeLabel;
-  const activeHeaderIcon = props.active === local
-    ? <FiNavigation className="h-4 w-4 text-[#34D399]" />
+  const activeHeaderDotClass = props.active === local
+    ? 'bg-[#34D399]'
     : props.active === regional
-      ? <FiMapPin className="h-4 w-4 text-[#7A8AF0]" />
+      ? 'bg-[#7A8AF0]'
       : props.active === national
-        ? <FiGlobe className="h-4 w-4 text-red-400" />
+        ? 'bg-[#93C5FD]'
         : props.active === 'Following'
-          ? <FiUserPlus className="h-4 w-4 text-green-400" />
-          : <FiMapPin className="h-4 w-4 text-white/85" />;
+          ? 'bg-pink-400'
+          : 'bg-white/85';
 
   React.useEffect(() => {
     const timeout = window.setTimeout(() => setShowGazetteerTitle(false), 2000);
@@ -567,7 +567,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
     {
       key: 'national',
       label: national,
-      icon: <FiGlobe className="h-4 w-4 text-red-400" />,
+      icon: <FiGlobe className="h-4 w-4 text-[#93C5FD]" />,
       onClick: () => {
         props.onChange(national);
         props.onClearCustom?.();
@@ -586,7 +586,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
     {
       key: 'following',
       label: 'Following',
-      icon: <FiUserPlus className="h-4 w-4 text-green-400" />,
+      icon: <FiUserPlus className="h-4 w-4 text-pink-400" />,
       onClick: () => {
         props.onChange('Following');
         window.dispatchEvent(new CustomEvent('setFollowingTab'));
@@ -597,13 +597,9 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
   ];
 
   return (
-    <div role="tablist" aria-label="Locations" className="z-[140] bg-[#030712] py-1 relative isolate">
+    <div role="tablist" aria-label="Locations" className="z-[140] bg-black py-1 relative isolate">
       {/* Not sticky: /feed uses an inner scroll container so this chrome stays pinned */}
-      {/* Scrim effect */}
-      <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/50 to-transparent pointer-events-none z-0" />
-
       <div className="relative px-3 z-10">
-        <div className="absolute inset-x-1 -inset-y-2 rounded-2xl bg-gradient-to-tr from-teal-400/35 via-sky-500/35 to-fuchsia-500/30 blur-xl pointer-events-none" />
         <div className="relative grid grid-cols-[40px_1fr_40px] items-center gap-2">
           <button
             type="button"
@@ -621,9 +617,12 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               aria-expanded={menuOpen}
               aria-label="Change feed"
               onClick={() => setMenuOpen((prev) => !prev)}
-              className="inline-flex max-w-full items-center gap-1.5 px-1.5 py-1 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+              className="inline-flex max-w-full items-center gap-2 rounded-lg border-2 border-white bg-[#111827] px-3 py-1.5 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
             >
-              <span className="shrink-0" aria-hidden>{activeHeaderIcon}</span>
+              <span className="shrink-0" aria-hidden>
+                <FiMapPin className="h-4 w-4 text-white" />
+              </span>
+              <span className={`shrink-0 h-2.5 w-2.5 rounded-full ${activeHeaderDotClass}`} aria-hidden />
               <span
                 className="truncate"
                 style={{
@@ -631,14 +630,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                   fontWeight: 700,
                   lineHeight: '1.1',
                   fontFamily: 'Urbanist, "Instagram Sans", Inter, sans-serif',
-                  background: 'linear-gradient(90deg, rgba(255, 255, 255, 0.7) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.7) 100%)',
-                  backgroundSize: '200% 100%',
-                  WebkitBackgroundClip: 'text',
-                  backgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                  color: 'transparent',
-                  animation: 'shimmer 6s linear infinite',
-                  display: 'inline-block',
+                  color: '#E5E7EB',
                 }}
               >
                 {headerLabel}
