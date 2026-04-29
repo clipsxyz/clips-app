@@ -915,25 +915,25 @@ const styles = StyleSheet.create({
     },
     profileInfo: {
         flexDirection: 'row',
-        marginBottom: 20,
-        gap: 16,
+        marginBottom: 16,
+        gap: 14,
     },
     userInfo: {
         flex: 1,
         justifyContent: 'center',
     },
     userName: {
-        fontSize: 20,
+        fontSize: 19,
         fontWeight: '600',
         color: '#FFFFFF',
     },
     userHandle: {
-        fontSize: 16,
+        fontSize: 15,
         color: '#9CA3AF',
         marginTop: 2,
     },
     userBio: {
-        fontSize: 14,
+        fontSize: 13,
         color: '#D1D5DB',
         marginTop: 4,
     },

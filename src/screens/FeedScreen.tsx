@@ -1828,7 +1828,7 @@ const styles = StyleSheet.create({
     },
     feedContent: {
         paddingBottom: 20,
-        paddingTop: 96,
+        paddingTop: 92,
     },
     feedCard: {
         backgroundColor: '#000000',
@@ -1859,8 +1859,8 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         alignItems: 'flex-start',
         paddingHorizontal: FEED_UI.spacing.inset,
-        paddingTop: FEED_UI.spacing.inset,
-        paddingBottom: FEED_UI.spacing.compactV,
+        paddingTop: 10,
+        paddingBottom: 6,
     },
     postHeaderLeft: {
         flexDirection: 'row',
@@ -1869,7 +1869,7 @@ const styles = StyleSheet.create({
     },
     avatarWrapper: {
         position: 'relative',
-        marginRight: 12,
+        marginRight: 10,
     },
     avatarContainer: {
         position: 'relative',
@@ -1930,14 +1930,14 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     userHandle: {
-        fontSize: 16,
+        fontSize: 15,
         fontWeight: '600',
         color: '#FFFFFF',
     },
     postMeta: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginTop: 4,
+        marginTop: 3,
         gap: 4,
     },
     locationText: {
@@ -1978,7 +1978,7 @@ const styles = StyleSheet.create({
     },
     textCardWrapper: {
         marginHorizontal: 16,
-        marginVertical: 12,
+        marginVertical: 10,
         alignItems: 'center',
     },
     textCard: {
@@ -2016,7 +2016,7 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         alignItems: 'center',
         paddingHorizontal: FEED_UI.spacing.inset,
-        paddingVertical: FEED_UI.spacing.compactV,
+        paddingVertical: 7,
     },
     actionButtons: {
         flexDirection: 'row',
@@ -2031,7 +2031,7 @@ const styles = StyleSheet.create({
     actionButton: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 4,
+        gap: 3,
     },
     actionText: {
         fontSize: FEED_UI.type.actionCount,
