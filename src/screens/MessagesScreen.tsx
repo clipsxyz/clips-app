@@ -1116,15 +1116,6 @@ export default function MessagesScreen({ route, navigation }: any) {
                         <TouchableOpacity style={styles.inputIconInside} onPress={handleImageClick}>
                             <Icon name="add" size={22} color="#FFFFFF" />
                         </TouchableOpacity>
-                        <TouchableOpacity
-                            style={styles.inputIconRight}
-                            onPress={() => {
-                                setStickerTargetMessageId(null);
-                                setShowStickerPicker(true);
-                            }}
-                        >
-                            <Icon name="happy-outline" size={20} color="#FFFFFF" />
-                        </TouchableOpacity>
                         <TextInput
                             value={messageText}
                             onChangeText={setMessageText}
@@ -1134,7 +1125,29 @@ export default function MessagesScreen({ route, navigation }: any) {
                             multiline
                             maxLength={1000}
                         />
+                        <TouchableOpacity
+                            style={styles.inputIconRight}
+                            onPress={() => {
+                                setStickerTargetMessageId(null);
+                                setShowStickerPicker(true);
+                            }}
+                        >
+                            <Icon name="happy-outline" size={20} color="#FFFFFF" />
+                        </TouchableOpacity>
                     </View>
+                    <TouchableOpacity
+                        style={[
+                            styles.composerMicButton,
+                            isRecordingVoice && styles.composerMicButtonActive,
+                        ]}
+                        onPress={isRecordingVoice ? stopVoiceRecording : startVoiceRecording}
+                    >
+                        <Icon
+                            name={isRecordingVoice ? 'square' : 'mic'}
+                            size={17}
+                            color={isRecordingVoice ? '#FFFFFF' : '#D4AF37'}
+                        />
+                    </TouchableOpacity>
                     <TouchableOpacity
                         onPress={messageText.trim() ? handleSend : (isRecordingVoice ? stopVoiceRecording : startVoiceRecording)}
                         style={[
@@ -1501,6 +1514,7 @@ const styles = StyleSheet.create({
         position: 'absolute',
         right: 12,
         zIndex: 2,
+        elevation: 3,
     },
     input: {
         width: '100%',
@@ -1514,6 +1528,25 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         fontSize: 16,
         maxHeight: 100,
+    },
+    composerMicButton: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#4B5563',
+        borderWidth: 1,
+        borderColor: '#D4AF37',
+        shadowColor: '#E5E7EB',
+        shadowOpacity: 0.35,
+        shadowRadius: 5,
+        shadowOffset: { width: 0, height: 1 },
+        elevation: 3,
+    },
+    composerMicButtonActive: {
+        backgroundColor: '#B45309',
+        borderColor: '#FDE68A',
     },
     sendButton: {
         width: 40,

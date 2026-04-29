@@ -715,8 +715,29 @@ export default function MessagesPage() {
     // Start voice recording
     const handleStartRecording = async () => {
         try {
+            if (!window.isSecureContext) {
+                showToast?.('Microphone requires HTTPS (or localhost).');
+                return;
+            }
+            if (!navigator.mediaDevices?.getUserMedia) {
+                showToast?.('Microphone is not supported in this browser.');
+                return;
+            }
+            if (typeof MediaRecorder === 'undefined') {
+                showToast?.('Voice recording is not supported on this browser/device.');
+                return;
+            }
+
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            const mediaRecorder = new MediaRecorder(stream);
+            const preferredMimeType =
+                MediaRecorder.isTypeSupported?.('audio/webm;codecs=opus')
+                    ? 'audio/webm;codecs=opus'
+                    : MediaRecorder.isTypeSupported?.('audio/webm')
+                        ? 'audio/webm'
+                        : '';
+            const mediaRecorder = preferredMimeType
+                ? new MediaRecorder(stream, { mimeType: preferredMimeType })
+                : new MediaRecorder(stream);
             mediaRecorderRef.current = mediaRecorder;
             audioChunksRef.current = [];
             
@@ -759,7 +780,14 @@ export default function MessagesPage() {
             }, 1000);
         } catch (error) {
             console.error('Error starting recording:', error);
-            showToast?.('Failed to start recording. Please check microphone permissions.');
+            const err = error as { name?: string; message?: string };
+            if (err?.name === 'NotAllowedError') {
+                showToast?.('Microphone permission denied. Please allow mic access in browser settings.');
+            } else if (err?.name === 'NotFoundError') {
+                showToast?.('No microphone detected on this device.');
+            } else {
+                showToast?.('Failed to start recording. Please check microphone permissions.');
+            }
         }
     };
     
@@ -3442,6 +3470,24 @@ export default function MessagesPage() {
                                 }`}
                             />
                         </div>
+                        <button
+                            type="button"
+                            onClick={isRecording ? handleStopRecording : handleStartRecording}
+                            className={`flex-shrink-0 rounded-full p-2.5 transition-all shadow-sm border ${
+                                isRecording
+                                    ? 'bg-red-600 text-white border-red-400'
+                                    : 'bg-gradient-to-br from-gray-300 via-yellow-500 to-gray-500 text-white border-yellow-300'
+                            }`}
+                            aria-label={isRecording ? 'Stop voice recording' : 'Start voice recording'}
+                            title={isRecording ? 'Stop voice recording' : 'Start voice recording'}
+                        >
+                            <FiMic className="w-5 h-5 sm:w-6 sm:h-6" />
+                        </button>
+                        {isRecording && (
+                            <div className="flex-shrink-0 rounded-full border border-red-400 bg-red-600/20 px-2 py-1 text-[11px] font-semibold text-red-300">
+                                REC {recordingTime}s
+                            </div>
+                        )}
                         {messageText.trim() && (
                             <button
                                 type="button"
