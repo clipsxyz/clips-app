@@ -132,6 +132,68 @@ const LOCATION_CITIES = new Set([
   'sydney', 'melbourne', 'brisbane', 'perth', 'auckland', 'wellington', 'christchurch'
 ]);
 
+const DUBLIN_LOCAL_AREAS = new Set(['finglas', 'artane', 'ballymun']);
+
+function toLocationLabelCase(value?: string): string {
+  const trimmed = (value || '').trim();
+  if (!trimmed) return '';
+  if (trimmed.toLowerCase() === 'uk') return 'UK';
+  if (trimmed.toLowerCase() === 'usa' || trimmed.toLowerCase() === 'us') return 'USA';
+  return trimmed
+    .split(/\s+/)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ');
+}
+
+function resolveAuthorLocations(input: {
+  userHandle?: string;
+  userLocal?: string;
+  userRegional?: string;
+  userNational?: string;
+}): { userLocal: string; userRegional: string; userNational: string } {
+  const fallback = getUserLocationFromHandle(input.userHandle || '');
+  const pick = (...vals: Array<string | undefined>): string => {
+    for (const v of vals) {
+      const s = (v || '').trim();
+      if (s) return s;
+    }
+    return '';
+  };
+
+  let local = pick(input.userLocal, fallback.local);
+  let regional = pick(input.userRegional, fallback.regional);
+  let national = pick(input.userNational, fallback.national);
+
+  const localLower = local.toLowerCase();
+  const regionalLower = regional.toLowerCase();
+
+  if (!regional && local) {
+    regional = DUBLIN_LOCAL_AREAS.has(localLower) ? 'Dublin' : local;
+  }
+
+  if (!national) {
+    if (regionalLower === 'dublin' || DUBLIN_LOCAL_AREAS.has(localLower)) {
+      national = 'Ireland';
+    } else if (regionalLower === 'new york' || localLower === 'new york') {
+      national = 'USA';
+    } else if (regionalLower === 'london' || localLower === 'london') {
+      national = 'UK';
+    } else if (regionalLower === 'paris' || localLower === 'paris') {
+      national = 'France';
+    } else if (regionalLower === 'tokyo' || localLower === 'tokyo') {
+      national = 'Japan';
+    } else if (regionalLower === 'sydney' || localLower === 'sydney') {
+      national = 'Australia';
+    }
+  }
+
+  return {
+    userLocal: toLocationLabelCase(local),
+    userRegional: toLocationLabelCase(regional),
+    userNational: toLocationLabelCase(national),
+  };
+}
+
 // Storage key for posts
 const POSTS_STORAGE_KEY = 'clips_app_posts';
 const PENDING_CREATED_POST_KEY = 'clips_pending_created_post';
@@ -219,7 +281,29 @@ if (!postsInitialized) {
   });
 
   // Load user-created posts from localStorage (only non-mock posts should be stored; old saves may have contained mock data)
-  const userCreatedPosts = getPostsFromStorage().filter(p => !isMockPostId(p.id));
+  // and normalize any legacy location fields so feed matching is consistent.
+  const storedUserCreatedPosts = getPostsFromStorage().filter(p => !isMockPostId(p.id));
+  const userCreatedPosts = storedUserCreatedPosts.map((p) => ({
+    ...p,
+    ...resolveAuthorLocations({
+      userHandle: p.userHandle,
+      userLocal: p.userLocal,
+      userRegional: p.userRegional,
+      userNational: p.userNational,
+    }),
+  }));
+  const hasLocationMigrationChanges = userCreatedPosts.some((p, index) => {
+    const original = storedUserCreatedPosts[index];
+    return (
+      (p.userLocal || '') !== (original?.userLocal || '') ||
+      (p.userRegional || '') !== (original?.userRegional || '') ||
+      (p.userNational || '') !== (original?.userNational || '')
+    );
+  });
+  if (hasLocationMigrationChanges) {
+    // One-time migration pass for existing local posts.
+    savePostsToStorage(userCreatedPosts);
+  }
   console.log('📂 Loaded', userCreatedPosts.length, 'user-created posts from localStorage');
 
   // Merge: user-created posts first (newest), then JSON posts — mock posts are never loaded from storage
@@ -760,6 +844,13 @@ export function transformLaravelPost(response: any): Post {
   // some API endpoints omit it.
   const existing = posts.find((p) => String(p.id) === String(response.id));
 
+  const normalizedLocations = resolveAuthorLocations({
+    userHandle: response.user_handle || response.userHandle,
+    userLocal: response.user?.local || response.userLocal,
+    userRegional: response.user?.regional || response.userRegional,
+    userNational: response.user?.national || response.userNational,
+  });
+
   return {
     id: response.id,
     publicShareToken: response.public_share_token || response.publicShareToken,
@@ -807,9 +898,7 @@ export function transformLaravelPost(response: any): Post {
     videoCaptionText: response.video_caption_text || response.videoCaptionText,
     subtitlesEnabled: response.subtitles_enabled || response.subtitlesEnabled,
     subtitleText: response.subtitle_text || response.subtitleText,
-    userLocal: response.user?.local || response.userLocal || '',
-    userRegional: response.user?.regional || response.userRegional || '',
-    userNational: response.user?.national || response.userNational || '',
+    ...normalizedLocations,
     userAccountType:
       response.user?.account_type === 'business' || response.user?.account_type === 'personal'
         ? response.user.account_type
@@ -1163,7 +1252,17 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
   // Mock implementation (fallback)
   try {
     // Reload only user-created posts from localStorage (exclude mock ids to avoid duplicates)
-    const userCreatedPosts = getPostsFromStorage().filter(p => !isMockPostId(p.id));
+  const userCreatedPosts = getPostsFromStorage()
+    .filter(p => !isMockPostId(p.id))
+    .map((p) => ({
+      ...p,
+      ...resolveAuthorLocations({
+        userHandle: p.userHandle,
+        userLocal: p.userLocal,
+        userRegional: p.userRegional,
+        userNational: p.userNational,
+      }),
+    }));
     // Keep current in-memory mock/seed posts (don't reload mock from storage)
     const mockPosts = posts.filter(p => isMockPostId(p.id));
     // Merge: user-created first, then mock/seed (single copy of each)
@@ -2349,14 +2448,19 @@ export async function createPost(
       return undefined;
     };
 
+    const normalizedCreatedLocations = resolveAuthorLocations({
+      userHandle,
+      userLocal: userLocal ?? transformed.userLocal,
+      userRegional: userRegional ?? transformed.userRegional,
+      userNational: userNational ?? transformed.userNational,
+    });
+
     transformed = {
       ...transformed,
       // Preserve user-entered copy even if API response omits it on create.
       text: pickNonEmptyString(transformed.text, text),
       caption: pickNonEmptyString(transformed.caption, caption, text),
-      userLocal: userLocal ?? transformed.userLocal,
-      userRegional: userRegional ?? transformed.userRegional,
-      userNational: userNational ?? transformed.userNational,
+      ...normalizedCreatedLocations,
       userAccountType: transformed.userAccountType ?? currentUserAccountType,
       venue: venue || transformed.venue,
       landmark: landmark || transformed.landmark,
@@ -2514,9 +2618,7 @@ export async function createPost(
     }
 
     // Get location from user data if provided, otherwise infer from handle
-    const locationData = userLocal && userRegional && userNational
-      ? { userLocal, userRegional, userNational }
-      : getUserLocationFromHandle(userHandle);
+    const locationData = resolveAuthorLocations({ userHandle, userLocal, userRegional, userNational });
 
     const postCreatedAt = Date.now(); // Epoch timestamp in milliseconds
 
