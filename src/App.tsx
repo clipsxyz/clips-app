@@ -617,7 +617,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               aria-expanded={menuOpen}
               aria-label="Change feed"
               onClick={() => setMenuOpen((prev) => !prev)}
-              className="inline-flex max-w-full items-center gap-2 rounded-lg border-2 border-white bg-[#111827] px-3 py-1.5 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+              className="inline-flex max-w-full items-center gap-2 rounded-lg bg-[#36454F] px-3 py-1.5 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
             >
               <span className="shrink-0" aria-hidden>
                 <FiMapPin className="h-4 w-4 text-white" />
@@ -626,7 +626,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
               <span
                 className="truncate"
                 style={{
-                  fontSize: '22px',
+                  fontSize: '20px',
                   fontWeight: 700,
                   lineHeight: '1.1',
                   fontFamily: 'Urbanist, "Instagram Sans", Inter, sans-serif',

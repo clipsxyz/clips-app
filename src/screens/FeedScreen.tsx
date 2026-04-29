@@ -1769,9 +1769,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
         paddingVertical: 6,
         borderRadius: 10,
-        borderWidth: 2,
-        borderColor: '#FFFFFF',
-        backgroundColor: '#111827',
+        backgroundColor: '#36454F',
     },
     feedDropdownActiveIcon: {
         marginTop: 1,
@@ -1782,7 +1780,7 @@ const styles = StyleSheet.create({
         borderRadius: 999,
     },
     feedDropdownActiveText: {
-        fontSize: 22,
+        fontSize: 20,
         fontWeight: '700',
         color: '#E5E7EB',
         letterSpacing: 0.2,
