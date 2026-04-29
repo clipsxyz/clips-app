@@ -356,9 +356,24 @@ export default function StickerOverlayComponent({
         }
     };
 
-    // Base size: GIF larger, link wider to match Instagram-style pill
-    const baseWidth = overlay.sticker.category === 'GIF' ? 80 : isLinkSticker ? 212 : 50;
-    const baseHeight = overlay.sticker.category === 'GIF' ? 80 : isLinkSticker ? 42 : 50;
+    // Base size: keep text preview proportions close to viewer output.
+    const isTextSticker = overlay.sticker.category === 'Text';
+    const baseWidth =
+        overlay.sticker.category === 'GIF'
+            ? 80
+            : isLinkSticker
+                ? 212
+                : isTextSticker
+                    ? 120
+                    : 50;
+    const baseHeight =
+        overlay.sticker.category === 'GIF'
+            ? 80
+            : isLinkSticker
+                ? 42
+                : isTextSticker
+                    ? 72
+                    : 50;
     const width = baseWidth * overlay.scale;
     const height = baseHeight * overlay.scale;
     const size = Math.min(width, height);
@@ -401,15 +416,38 @@ export default function StickerOverlayComponent({
                     </span>
                 ) : isLinkSticker ? (
                     <div
-                        className="flex items-center gap-0 px-0 py-0 rounded-lg overflow-hidden shadow-[0_6px_14px_rgba(0,0,0,0.2)] bg-white border border-black/10"
-                        style={{ pointerEvents: 'none', maxWidth: '100%' }}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full overflow-hidden"
+                        style={{
+                            pointerEvents: 'none',
+                            maxWidth: '100%',
+                            background: 'rgba(255,255,255,0.68)',
+                            border: '1px solid rgba(255,255,255,0.52)',
+                            boxShadow: '0 8px 22px rgba(0,0,0,0.26), 0 0 0 1px rgba(255,255,255,0.08) inset',
+                            backdropFilter: 'blur(8px)',
+                            WebkitBackdropFilter: 'blur(8px)',
+                        }}
                     >
-                        <span className="inline-flex h-8 w-8 items-center justify-center shrink-0 bg-[#EAF4FF] text-[#138CFF] rounded-l-lg">
-                            <FiLink className="w-3.5 h-3.5" />
+                        <span
+                            className="inline-flex h-[18px] w-[18px] items-center justify-center shrink-0 rounded-full"
+                            style={{
+                                color: '#E11D48',
+                                background: 'rgba(255,255,255,0.58)',
+                                border: '1px solid rgba(255,255,255,0.68)',
+                            }}
+                        >
+                            <FiLink className="w-2.5 h-2.5" />
                         </span>
                         <span
-                            className="font-semibold whitespace-nowrap overflow-hidden text-ellipsis px-3 text-black tracking-[-0.01em]"
-                            style={{ fontFamily: 'Inter, system-ui, sans-serif', fontSize: '15px', lineHeight: '1', maxWidth: `${Math.max(112, width - 52)}px` }}
+                            className="font-semibold whitespace-nowrap overflow-hidden text-ellipsis"
+                            style={{
+                                fontFamily: 'Inter, system-ui, sans-serif',
+                                fontSize: '11px',
+                                lineHeight: '1',
+                                maxWidth: `${Math.max(74, width - 42)}px`,
+                                color: '#0B1220',
+                                letterSpacing: '0.05px',
+                                fontWeight: 600,
+                            }}
                         >
                             {getLinkLabel()}
                         </span>
@@ -428,11 +466,19 @@ export default function StickerOverlayComponent({
                     />
                 ) : overlay.sticker.category === 'Text' && overlay.sticker.name ? (
                     <span
-                        className="font-bold drop-shadow-lg whitespace-nowrap"
+                        className="font-bold drop-shadow-lg whitespace-pre-wrap break-words text-center"
                         style={{
-                            fontSize: `${size * 0.6}px`,
+                            fontSize:
+                                (overlay as any).fontSize === 'small'
+                                    ? `${14 * (overlay.scale || 1)}px`
+                                    : (overlay as any).fontSize === 'large'
+                                        ? `${30 * (overlay.scale || 1)}px`
+                                        : `${20 * (overlay.scale || 1)}px`,
                             color: (overlay as any).textColor || '#FFFFFF',
                             textShadow: '2px 2px 4px rgba(0,0,0,0.8), -1px -1px 2px rgba(0,0,0,0.8)',
+                            // Keep editor preview close to posted-story wrapping (avoid one-word columns or giant blocks).
+                            maxWidth: `${Math.min(containerWidth * 0.72, Math.max(150, width * 1.35))}px`,
+                            lineHeight: 1.15,
                             pointerEvents: 'none'
                         }}
                     >

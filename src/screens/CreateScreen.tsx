@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import * as ImagePicker from 'react-native-image-picker';
 import ImageCropPicker from 'react-native-image-crop-picker';
+import Video from 'react-native-video';
 import { useAuth } from '../context/Auth';
 import { createPost } from '../api/posts';
 import { prepareMediaForPostNative } from '../utils/prepareMediaForPostNative';
@@ -49,13 +50,20 @@ export default function CreateScreen({ navigation, route }: any) {
     
     const [selectedMedia, setSelectedMedia] = useState<string | null>(normalizeMediaUri(passedMedia));
     const [mediaType, setMediaType] = useState<'image' | 'video' | null>(passedMediaType);
-    const [text, setText] = useState('');
-    const [location, setLocation] = useState('');
+    const [text, setText] = useState(route.params?.draftCaption || route.params?.draftTextBody || '');
+    const [location, setLocation] = useState(route.params?.draftLocation || '');
+    const [venue, setVenue] = useState(route.params?.draftVenue || '');
+    const [landmark, setLandmark] = useState(route.params?.draftLandmark || '');
+    const [taggedUsersInput, setTaggedUsersInput] = useState(
+        Array.isArray(route.params?.draftTaggedUsers) ? route.params.draftTaggedUsers.join(', ') : ''
+    );
     const [isUploading, setIsUploading] = useState(false);
     const [isSavingDraft, setIsSavingDraft] = useState(false);
     const [trimStart, setTrimStart] = useState<number>(Number(route.params?.trimStart || 0));
     const [trimEnd, setTrimEnd] = useState<number>(Number(route.params?.trimEnd || 0));
     const [videoCoverTime, setVideoCoverTime] = useState<number>(Number(route.params?.videoCoverTime || 0));
+    const [isVideoPaused, setIsVideoPaused] = useState(false);
+    const [videoDurationSec, setVideoDurationSec] = useState<number>(Math.max(1, Number(route.params?.videoDuration || 0) || 15));
     const [storyAudience, setStoryAudience] = useState<'public' | 'close_friends' | 'only_me'>('public');
     const storyTextPresets = React.useMemo(
         () => [
@@ -68,6 +76,14 @@ export default function CreateScreen({ navigation, route }: any) {
     );
     const [storyTextPresetId, setStoryTextPresetId] = useState<string>('none');
     const activeStoryPreset = storyTextPresets.find((preset) => preset.id === storyTextPresetId) || storyTextPresets[0];
+    const taggedUsers = React.useMemo(
+        () =>
+            taggedUsersInput
+                .split(',')
+                .map((v) => v.trim().replace(/^@+/, ''))
+                .filter((v, idx, arr) => v.length > 0 && arr.indexOf(v) === idx),
+        [taggedUsersInput],
+    );
 
     React.useEffect(() => {
         if (!isAddYoursFlow) return;
@@ -75,29 +91,47 @@ export default function CreateScreen({ navigation, route }: any) {
     }, [isAddYoursFlow]);
 
     const handleSelectMedia = () => {
+        const pickPhotoWithFallback = async () => {
+            try {
+                const image = await ImageCropPicker.openPicker({
+                    mediaType: 'photo',
+                    cropping: true,
+                    width: 1080,
+                    height: 1350,
+                    cropperToolbarTitle: 'Adjust photo',
+                    cropperChooseText: 'Use Photo',
+                    cropperCancelText: 'Cancel',
+                    compressImageQuality: 0.9,
+                });
+                setSelectedMedia(normalizeMediaUri(image.path || null));
+                setMediaType('image');
+            } catch (err: any) {
+                if (err?.code === 'E_PICKER_CANCELLED') return;
+                console.error('Photo picker error (cropper), falling back:', err);
+                ImagePicker.launchImageLibrary(
+                    { mediaType: 'photo', selectionLimit: 1, quality: 0.9 },
+                    (response) => {
+                        if (response.didCancel) return;
+                        if (response.errorCode) {
+                            Alert.alert('Photo error', response.errorMessage || 'Could not open your photo library.');
+                            return;
+                        }
+                        const asset = response.assets?.[0];
+                        if (!asset?.uri) {
+                            Alert.alert('Photo error', 'No photo was selected.');
+                            return;
+                        }
+                        setSelectedMedia(normalizeMediaUri(asset.uri));
+                        setMediaType('image');
+                    }
+                );
+            }
+        };
+
         Alert.alert('Choose media type', 'How would you like to add media?', [
             {
                 text: 'Photo',
-                onPress: async () => {
-                    try {
-                        const image = await ImageCropPicker.openPicker({
-                            mediaType: 'photo',
-                            cropping: true,
-                            width: 1080,
-                            height: 1350,
-                            cropperToolbarTitle: 'Adjust photo',
-                            cropperChooseText: 'Use Photo',
-                            cropperCancelText: 'Cancel',
-                            compressImageQuality: 0.9,
-                        });
-                        setSelectedMedia(normalizeMediaUri(image.path || null));
-                        setMediaType('image');
-                    } catch (err: any) {
-                        if (err?.code !== 'E_PICKER_CANCELLED') {
-                            console.error('Photo picker error:', err);
-                        }
-                    }
-                },
+                onPress: () => { void pickPhotoWithFallback(); },
             },
             {
                 text: 'Video',
@@ -108,11 +142,18 @@ export default function CreateScreen({ navigation, route }: any) {
                             quality: 0.8,
                         },
                         (response) => {
-                            if (response.assets && response.assets[0]) {
-                                const asset = response.assets[0];
-                                setSelectedMedia(normalizeMediaUri(asset.uri || null));
-                                setMediaType('video');
+                            if (response.didCancel) return;
+                            if (response.errorCode) {
+                                Alert.alert('Video error', response.errorMessage || 'Could not open your video library.');
+                                return;
                             }
+                            const asset = response.assets?.[0];
+                            if (!asset?.uri) {
+                                Alert.alert('Video error', 'No video was selected.');
+                                return;
+                            }
+                            setSelectedMedia(normalizeMediaUri(asset.uri));
+                            setMediaType('video');
                         }
                     );
                 },
@@ -177,15 +218,15 @@ export default function CreateScreen({ navigation, route }: any) {
                 undefined,
                 undefined,
                 undefined,
+                taggedUsers.length > 0 ? taggedUsers : undefined,
                 undefined,
                 undefined,
                 undefined,
                 undefined,
                 undefined,
                 undefined,
-                undefined,
-                undefined,
-                undefined,
+                venue.trim() || undefined,
+                landmark.trim() || undefined,
                 undefined,
                 undefined,
                 preparedMedia.videoPosterUrl,
@@ -224,7 +265,11 @@ export default function CreateScreen({ navigation, route }: any) {
                 videoUrl: selectedMedia || '',
                 videoDuration: mediaType === 'video' ? Math.max(trimEnd - trimStart, 0) : 0,
                 caption: text.trim() || undefined,
+                textBody: text.trim() || undefined,
                 location: location.trim() || undefined,
+                venue: venue.trim() || undefined,
+                landmark: landmark.trim() || undefined,
+                taggedUsers: taggedUsers.length > 0 ? taggedUsers : undefined,
                 mediaType: mediaType || undefined,
                 trimStart: mediaType === 'video' ? trimStart : undefined,
                 trimEnd: mediaType === 'video' ? trimEnd : undefined,
@@ -346,11 +391,43 @@ export default function CreateScreen({ navigation, route }: any) {
                 {/* Media Preview */}
                 {selectedMedia && (
                     <View style={styles.mediaPreview}>
-                        <Image
-                            source={{ uri: selectedMedia }}
-                            style={styles.previewImage}
-                            resizeMode="contain"
-                        />
+                        {mediaType === 'video' ? (
+                            <View style={styles.videoPreviewWrap}>
+                                <Video
+                                    source={{ uri: selectedMedia }}
+                                    style={styles.previewImage}
+                                    resizeMode="contain"
+                                    paused={isVideoPaused}
+                                    repeat
+                                    controls
+                                    muted
+                                    onLoad={(event) => {
+                                        const duration = Number(event?.duration || 0);
+                                        if (!Number.isFinite(duration) || duration <= 0) return;
+                                        const rounded = Math.max(1, Math.floor(duration));
+                                        setVideoDurationSec(rounded);
+                                        setTrimEnd((prev) => {
+                                            const next = prev > 0 ? prev : rounded;
+                                            return Math.min(rounded, Math.max(trimStart + 1, next));
+                                        });
+                                        setTrimStart((prev) => Math.min(prev, Math.max(0, rounded - 1)));
+                                        setVideoCoverTime((prev) => Math.min(prev, rounded));
+                                    }}
+                                />
+                                <TouchableOpacity
+                                    style={styles.videoPauseBtn}
+                                    onPress={() => setIsVideoPaused((v) => !v)}
+                                >
+                                    <Icon name={isVideoPaused ? 'play' : 'pause'} size={18} color="#FFFFFF" />
+                                </TouchableOpacity>
+                            </View>
+                        ) : (
+                            <Image
+                                source={{ uri: selectedMedia }}
+                                style={styles.previewImage}
+                                resizeMode="contain"
+                            />
+                        )}
                         <TouchableOpacity
                             onPress={() => {
                                 setSelectedMedia(null);
@@ -365,14 +442,39 @@ export default function CreateScreen({ navigation, route }: any) {
                 {mediaType === 'video' && (
                     <View style={styles.videoMetaCard}>
                         <Text style={styles.videoMetaText}>
+                            Duration: {videoDurationSec.toFixed(1)}s
+                        </Text>
+                        <Text style={styles.videoMetaText}>
                             Trim: {Math.max(0, trimStart).toFixed(1)}s - {Math.max(trimEnd, trimStart).toFixed(1)}s
                         </Text>
                         <Text style={styles.videoMetaText}>Cover frame: {Math.max(0, videoCoverTime).toFixed(1)}s</Text>
+                        <View style={styles.videoMetaControlsRow}>
+                            <TouchableOpacity style={styles.videoMetaChip} onPress={() => setTrimStart((v) => Math.max(0, Math.min(v - 1, trimEnd - 1)))}>
+                                <Text style={styles.videoMetaChipText}>Start -</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.videoMetaChip} onPress={() => setTrimStart((v) => Math.min(trimEnd - 1, v + 1))}>
+                                <Text style={styles.videoMetaChipText}>Start +</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.videoMetaChip} onPress={() => setTrimEnd((v) => Math.max(trimStart + 1, v - 1))}>
+                                <Text style={styles.videoMetaChipText}>End -</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.videoMetaChip} onPress={() => setTrimEnd((v) => Math.min(videoDurationSec, Math.max(trimStart + 1, v + 1)))}>
+                                <Text style={styles.videoMetaChipText}>End +</Text>
+                            </TouchableOpacity>
+                        </View>
+                        <View style={styles.videoMetaControlsRow}>
+                            <TouchableOpacity style={styles.videoMetaChip} onPress={() => setVideoCoverTime((v) => Math.max(0, v - 1))}>
+                                <Text style={styles.videoMetaChipText}>Cover -1s</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.videoMetaChip} onPress={() => setVideoCoverTime((v) => Math.min(videoDurationSec, v + 1))}>
+                                <Text style={styles.videoMetaChipText}>Cover +1s</Text>
+                            </TouchableOpacity>
+                        </View>
                         <TouchableOpacity
                             style={styles.videoMetaReset}
                             onPress={() => {
                                 setTrimStart(0);
-                                setTrimEnd(0);
+                                setTrimEnd(videoDurationSec);
                                 setVideoCoverTime(0);
                             }}
                         >
@@ -406,6 +508,51 @@ export default function CreateScreen({ navigation, route }: any) {
                             style={styles.locationInput}
                         />
                     </View>
+                </View>
+
+                <View style={styles.inputContainer}>
+                    <View style={styles.locationInputContainer}>
+                        <Icon name="business" size={20} color="#8B5CF6" />
+                        <TextInput
+                            value={venue}
+                            onChangeText={setVenue}
+                            placeholder="Add venue"
+                            placeholderTextColor="#6B7280"
+                            style={styles.locationInput}
+                        />
+                    </View>
+                </View>
+
+                <View style={styles.inputContainer}>
+                    <View style={styles.locationInputContainer}>
+                        <Icon name="pin" size={20} color="#8B5CF6" />
+                        <TextInput
+                            value={landmark}
+                            onChangeText={setLandmark}
+                            placeholder="Add landmark"
+                            placeholderTextColor="#6B7280"
+                            style={styles.locationInput}
+                        />
+                    </View>
+                </View>
+                <View style={styles.inputContainer}>
+                    <View style={styles.locationInputContainer}>
+                        <Icon name="person-add" size={20} color="#8B5CF6" />
+                        <TextInput
+                            value={taggedUsersInput}
+                            onChangeText={setTaggedUsersInput}
+                            placeholder="Tag users (comma separated)"
+                            placeholderTextColor="#6B7280"
+                            style={styles.locationInput}
+                            autoCapitalize="none"
+                            autoCorrect={false}
+                        />
+                    </View>
+                    {taggedUsers.length > 0 && (
+                        <Text style={styles.taggedUsersPreview}>
+                            Tagged: {taggedUsers.map((u) => `@${u}`).join(', ')}
+                        </Text>
+                    )}
                 </View>
             </ScrollView>
         </SafeAreaView>
@@ -556,6 +703,22 @@ const styles = StyleSheet.create({
         width: '100%',
         height: '100%',
     },
+    videoPreviewWrap: {
+        width: '100%',
+        height: '100%',
+        backgroundColor: '#000000',
+    },
+    videoPauseBtn: {
+        position: 'absolute',
+        right: 14,
+        top: 14,
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0,0,0,0.45)',
+    },
     removeMediaButton: {
         position: 'absolute',
         top: 16,
@@ -569,13 +732,32 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: '#374151',
         backgroundColor: '#111827',
-        padding: 12,
-        gap: 6,
+        padding: 11,
+        gap: 5,
     },
     videoMetaText: {
         color: '#D1D5DB',
         fontSize: 12,
         fontWeight: '600',
+    },
+    videoMetaControlsRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 6,
+        marginTop: 2,
+    },
+    videoMetaChip: {
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: '#4B5563',
+        backgroundColor: '#1F2937',
+        paddingHorizontal: 9,
+        paddingVertical: 5,
+    },
+    videoMetaChipText: {
+        color: '#E5E7EB',
+        fontSize: 10,
+        fontWeight: '700',
     },
     videoMetaReset: {
         marginTop: 4,
@@ -617,6 +799,12 @@ const styles = StyleSheet.create({
         flex: 1,
         color: '#FFFFFF',
         fontSize: 16,
+    },
+    taggedUsersPreview: {
+        marginTop: 8,
+        color: '#9CA3AF',
+        fontSize: 12,
+        fontWeight: '600',
     },
 });
 

@@ -12,11 +12,15 @@ import Avatar from '../components/Avatar';
 
 type SearchMode = 'locations' | 'venues' | 'landmarks' | 'users' | 'posts' | 'nearby';
 type SearchRefinement = 'all' | 'local' | 'regional';
+type NearbyScope = 'local' | 'regional';
 type RecentSearchItem = { q: string; mode: SearchMode; ts: number };
 
 const RECENT_SEARCHES_KEY = 'searchRecentQueriesV1';
 const SAVED_SEARCHES_KEY = 'searchSavedQueriesV1';
 const MAX_RECENT_SEARCHES = 8;
+const POPULAR_LOCATIONS = ['Dublin', 'Cork', 'Galway', 'London', 'New York'];
+const POPULAR_VENUES = ['Croke Park', 'Temple Bar', 'Aviva Stadium', 'The Brazen Head', '3Arena'];
+const POPULAR_LANDMARKS = ['River Liffey', 'Phoenix Park', 'Ha\'penny Bridge', 'Spire', 'Trinity College'];
 
 async function readSearchList(key: string): Promise<RecentSearchItem[]> {
     try {
@@ -45,6 +49,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
     const [loading, setLoading] = useState(false);
     const [preloadPosts, setPreloadPosts] = useState<Post[]>([]);
     const [searchMode, setSearchMode] = useState<SearchMode>('locations');
+    const [nearbyScope, setNearbyScope] = useState<NearbyScope>('local');
     const [refinement, setRefinement] = useState<SearchRefinement>('all');
     const [sectionLoadingMore, setSectionLoadingMore] = useState<{ users: boolean; locations: boolean; posts: boolean }>({
         users: false,
@@ -56,6 +61,14 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
     const [followBusyHandle, setFollowBusyHandle] = useState<string | null>(null);
     const [localFollowState, setLocalFollowState] = useState<Record<string, boolean>>({});
     const [suggestedUsers, setSuggestedUsers] = useState<Array<{ handle: string; display_name?: string; avatar_url?: string }>>([]);
+    const modePlaceholder: Record<SearchMode, string> = {
+        locations: 'Search by location',
+        venues: 'Search by venue',
+        landmarks: 'Search by landmark',
+        users: 'Search users',
+        posts: 'Search posts',
+        nearby: 'Search nearby users',
+    };
 
     useEffect(() => {
         fetchPostsByUser('Sarah@Artane', 30).then(setPreloadPosts).catch(() => setPreloadPosts([]));
@@ -115,10 +128,13 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
     }, [user?.local]);
 
     useEffect(() => {
-        if (searchMode === 'nearby' && user?.local) {
-            setSearchQuery(user.local);
+        if (searchMode === 'nearby') {
+            const target = nearbyScope === 'regional' ? user?.regional : user?.local;
+            if (target && target.trim().length > 0) {
+                setSearchQuery(target);
+            }
         }
-    }, [searchMode, user?.local]);
+    }, [searchMode, nearbyScope, user?.local, user?.regional]);
 
     const addRecentSearch = (q: string, mode: SearchMode) => {
         const query = q.trim();
@@ -187,10 +203,15 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
     const hasQuery = searchQuery.trim().length > 0;
     const isCurrentQuerySaved = savedSearches.some((x) => x.q.toLowerCase() === searchQuery.trim().toLowerCase() && x.mode === searchMode);
 
-    const goToLocation = (loc: string, kind: 'location' | 'venue' | 'landmark' = 'location') => {
+    const goToLocation = async (loc: string, kind: 'location' | 'venue' | 'landmark' = 'location') => {
         addRecentSearch(loc, searchMode);
-        if (kind === 'location') navigation.navigate('Discover', { location: loc });
-        else navigation.navigate('Discover', { location: loc, type: kind });
+        try {
+            await AsyncStorage.setItem('pendingLocation', loc);
+            await AsyncStorage.setItem('pendingFilterType', kind);
+        } catch {
+            // ignore storage errors and still navigate
+        }
+        navigation.navigate('Home', { location: loc, filterType: kind });
     };
 
     const goToUser = (handle: string) => {
@@ -200,6 +221,28 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
 
     const goToPost = (postId: string) => {
         navigation.navigate('PostDetail', { postId });
+    };
+
+    const handleSubmitSearch = () => {
+        const q = searchQuery.trim();
+        if (!q) return;
+        if (searchMode === 'locations') {
+            void goToLocation(q, 'location');
+            return;
+        }
+        if (searchMode === 'venues') {
+            void goToLocation(q, 'venue');
+            return;
+        }
+        if (searchMode === 'landmarks') {
+            void goToLocation(q, 'landmark');
+            return;
+        }
+        if (searchMode === 'users' || searchMode === 'nearby') {
+            goToUser(q);
+            return;
+        }
+        // For posts mode we keep results list behavior (open a specific post from results grid).
     };
 
     const loadMoreSection = async (section: 'users' | 'locations' | 'posts') => {
@@ -267,9 +310,11 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                     <Icon name="search" size={20} color="#6B7280" />
                     <TextInput
                         style={styles.searchInput}
-                        placeholder="Search users, locations, posts..."
+                        placeholder={modePlaceholder[searchMode]}
                         value={searchQuery}
                         onChangeText={setSearchQuery}
+                        onSubmitEditing={handleSubmitSearch}
+                        returnKeyType="search"
                         placeholderTextColor="#9CA3AF"
                     />
                     {!!searchQuery && (
@@ -299,6 +344,29 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                         );
                     })}
                 </ScrollView>
+                {searchMode === 'nearby' && (
+                    <View style={styles.nearbyScopeRow}>
+                        <TouchableOpacity
+                            onPress={() => setNearbyScope('local')}
+                            style={[styles.nearbyScopeChip, nearbyScope === 'local' && styles.nearbyScopeChipActive]}
+                        >
+                            <Text style={[styles.nearbyScopeChipText, nearbyScope === 'local' && styles.nearbyScopeChipTextActive]}>
+                                Local
+                            </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            onPress={() => setNearbyScope('regional')}
+                            style={[styles.nearbyScopeChip, nearbyScope === 'regional' && styles.nearbyScopeChipActive]}
+                        >
+                            <Text style={[styles.nearbyScopeChipText, nearbyScope === 'regional' && styles.nearbyScopeChipTextActive]}>
+                                Regional
+                            </Text>
+                        </TouchableOpacity>
+                        <Text style={styles.nearbyScopeHint}>
+                            Searching near {nearbyScope === 'regional' ? (user?.regional || 'your region') : (user?.local || 'your local area')}
+                        </Text>
+                    </View>
+                )}
                 {hasQuery && (
                     <View style={styles.refinementRow}>
                         {[
@@ -356,12 +424,18 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                         <View>
                             {filteredLocations.map((loc: any) => {
                                 const kind = searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
+                                const iconName = kind === 'venue' ? 'business' : kind === 'landmark' ? 'flag' : 'location';
+                                const kindLabel = kind === 'venue' ? 'Venue' : kind === 'landmark' ? 'Landmark' : 'Location';
                                 return (
                                     <TouchableOpacity key={`${loc.name}-${loc.country || ''}`} onPress={() => goToLocation(loc.name, kind)} style={styles.resultItem}>
-                                        <Icon name="location" size={20} color="#8B5CF6" />
+                                        <Icon name={iconName} size={20} color="#8B5CF6" />
                                         <View style={styles.resultInfo}>
                                             <Text style={styles.resultName}>{loc.name}</Text>
-                                            <Text style={styles.resultMeta}>{loc.type || 'Place'}{loc.country ? ` • ${loc.country}` : ''}</Text>
+                                            <Text style={styles.resultMeta}>
+                                                {kindLabel}
+                                                {loc.type ? ` • ${loc.type}` : ''}
+                                                {loc.country ? ` • ${loc.country}` : ''}
+                                            </Text>
                                         </View>
                                     </TouchableOpacity>
                                 );
@@ -403,6 +477,68 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                 </ScrollView>
             ) : (
                 <ScrollView style={styles.emptyState}>
+                    {searchMode === 'nearby' && (
+                        <View style={styles.searchHistoryCard}>
+                            <Text style={styles.sectionTitle}>Nearby scope</Text>
+                            <Text style={styles.smallMuted}>Use your saved profile locations to discover nearby users quickly.</Text>
+                            <View style={styles.quickPickWrap}>
+                                <TouchableOpacity
+                                    style={styles.quickPickChip}
+                                    disabled={!user?.local}
+                                    onPress={() => {
+                                        if (!user?.local) return;
+                                        setNearbyScope('local');
+                                        setSearchQuery(String(user.local));
+                                    }}
+                                >
+                                    <Text style={styles.quickPickChipText}>Local: {user?.local || 'Not set'}</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={styles.quickPickChip}
+                                    disabled={!user?.regional}
+                                    onPress={() => {
+                                        if (!user?.regional) return;
+                                        setNearbyScope('regional');
+                                        setSearchQuery(String(user.regional));
+                                    }}
+                                >
+                                    <Text style={styles.quickPickChipText}>Regional: {user?.regional || 'Not set'}</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    )}
+                    {(searchMode === 'locations' || searchMode === 'venues' || searchMode === 'landmarks') && (
+                        <View style={styles.searchHistoryCard}>
+                            <Text style={styles.sectionTitle}>
+                                {searchMode === 'venues'
+                                    ? 'Popular venues'
+                                    : searchMode === 'landmarks'
+                                        ? 'Popular landmarks'
+                                        : 'Popular locations'}
+                            </Text>
+                            <View style={styles.quickPickWrap}>
+                                {(searchMode === 'venues'
+                                    ? POPULAR_VENUES
+                                    : searchMode === 'landmarks'
+                                        ? POPULAR_LANDMARKS
+                                        : POPULAR_LOCATIONS
+                                ).map((name) => (
+                                    <TouchableOpacity
+                                        key={`${searchMode}-${name}`}
+                                        style={styles.quickPickChip}
+                                        onPress={() =>
+                                            void goToLocation(
+                                                name,
+                                                searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location'
+                                            )
+                                        }
+                                    >
+                                        <Text style={styles.quickPickChipText}>{name}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        </View>
+                    )}
                     <View style={styles.searchHistoryCard}>
                         <Text style={styles.sectionTitle}>Recent</Text>
                         {recentSearches.length === 0 ? (
@@ -532,6 +668,37 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 8,
+    },
+    nearbyScopeRow: {
+        marginTop: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    nearbyScopeChip: {
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: '#374151',
+        backgroundColor: '#111827',
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+    },
+    nearbyScopeChipActive: {
+        borderColor: '#22D3EE',
+        backgroundColor: '#083344',
+    },
+    nearbyScopeChipText: {
+        color: '#D1D5DB',
+        fontSize: 11,
+        fontWeight: '700',
+    },
+    nearbyScopeChipTextActive: {
+        color: '#A5F3FC',
+    },
+    nearbyScopeHint: {
+        color: '#9CA3AF',
+        fontSize: 12,
     },
     refinementChip: {
         borderRadius: 999,
@@ -763,6 +930,24 @@ const styles = StyleSheet.create({
         backgroundColor: '#111827',
         justifyContent: 'center',
         alignItems: 'center',
+    },
+    quickPickWrap: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    quickPickChip: {
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: '#4B5563',
+        backgroundColor: '#1F2937',
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+    },
+    quickPickChipText: {
+        color: '#E5E7EB',
+        fontSize: 12,
+        fontWeight: '700',
     },
 });
 

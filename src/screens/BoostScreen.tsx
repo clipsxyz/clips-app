@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -7,6 +7,31 @@ import { fetchPostsByUser, decorateForUser } from '../api/posts';
 import type { Post } from '../types';
 import BoostSelectionModal from '../components/BoostSelectionModal';
 import { getBoostAnalytics, type BoostAnalytics } from '../api/boost';
+
+function buildInstantAnalytics(post: Post): BoostAnalytics {
+    return {
+        hasBoost: !!post.isBoosted || !!post.boostFeedType,
+        isActive: !!post.isBoosted,
+        postId: post.id,
+        range: 'all',
+        feedType: (post.boostFeedType as any) || null,
+        activatedAt: null,
+        expiresAt: null,
+        spendEur: 0,
+        analytics: {
+            impressions: Number(post.stats.views || 0),
+            likes: Number(post.stats.likes || 0),
+            comments: Number(post.stats.comments || 0),
+            shares: Number(post.stats.shares || 0),
+            profileVisits: 0,
+            messageStarts: 0,
+            costPerProfileVisit: null,
+            costPerMessageStart: null,
+            trend: { impressions: [] },
+            sourceMatchedEventsCount: 0,
+        },
+    };
+}
 
 const BoostScreen: React.FC = ({ navigation }: any) => {
     const { user } = useAuth();
@@ -18,6 +43,10 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
     const [showBoostModal, setShowBoostModal] = useState(false);
     const [analyticsByPostId, setAnalyticsByPostId] = useState<Record<string, BoostAnalytics>>({});
     const [analyticsLoadingPostId, setAnalyticsLoadingPostId] = useState<string | null>(null);
+    const [boostFilter, setBoostFilter] = useState<'all' | 'ready' | 'active' | 'ended'>('all');
+    const [boostSort, setBoostSort] = useState<'best' | 'recent'>('best');
+    const [insightsRange, setInsightsRange] = useState<'24h' | '7d' | 'all'>('24h');
+    const analyticsCacheRef = useRef<Map<string, { data: BoostAnalytics; ts: number }>>(new Map());
 
     useEffect(() => {
         loadUserPosts();
@@ -52,10 +81,69 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
         setSelectedPost(null);
     };
 
+    const classifyBoostStatus = useCallback((p: Post): 'ready' | 'active' | 'ended' => {
+        if (p.isBoosted) return 'active';
+        if (p.boostFeedType && !p.isBoosted) return 'ended';
+        return 'ready';
+    }, []);
+
+    const qualityScore = useCallback((p: Post): number => {
+        const views = Math.max(1, p.stats.views || 1);
+        const engagement = (p.stats.likes + p.stats.comments + p.stats.shares) / views;
+        const recencyBoost = Math.max(0, 1 - ((Date.now() - (p.createdAt || 0)) / (1000 * 60 * 60 * 24 * 14)));
+        return engagement * 100 + recencyBoost * 10 + Math.log10(views + 10);
+    }, []);
+
+    const filteredPosts = useMemo(() => {
+        if (boostFilter === 'all') return posts;
+        return posts.filter((p) => classifyBoostStatus(p) === boostFilter);
+    }, [posts, boostFilter, classifyBoostStatus]);
+
+    const sortedPosts = useMemo(() => {
+        const next = [...filteredPosts];
+        if (boostSort === 'recent') {
+            next.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+            return next;
+        }
+        next.sort((a, b) => qualityScore(b) - qualityScore(a));
+        return next;
+    }, [filteredPosts, boostSort, qualityScore]);
+
+    const boostSummary = useMemo(() => {
+        const active = posts.filter((p) => classifyBoostStatus(p) === 'active').length;
+        const ready = posts.filter((p) => classifyBoostStatus(p) === 'ready').length;
+        const ended = posts.filter((p) => classifyBoostStatus(p) === 'ended').length;
+        return { active, ready, ended, total: posts.length };
+    }, [posts, classifyBoostStatus]);
+
+    const getInsightsCached = useCallback(async (postId: string) => {
+        const key = `${insightsRange}:${postId}`;
+        const cached = analyticsCacheRef.current.get(key);
+        const ttlMs = 60 * 1000;
+        if (cached && Date.now() - cached.ts < ttlMs) return cached.data;
+        const data = await getBoostAnalytics(postId, insightsRange);
+        analyticsCacheRef.current.set(key, { data, ts: Date.now() });
+        return data;
+    }, [insightsRange]);
+
+    useEffect(() => {
+        sortedPosts.slice(0, 8).forEach((p) => {
+            void getInsightsCached(p.id)
+                .then((analytics) => {
+                    setAnalyticsByPostId((prev) => ({ ...prev, [p.id]: prev[p.id] || analytics }));
+                })
+                .catch(() => {});
+        });
+    }, [sortedPosts, getInsightsCached]);
+
     const handleLoadInsights = async (postId: string) => {
+        const post = posts.find((p) => p.id === postId);
+        if (post) {
+            setAnalyticsByPostId((prev) => ({ ...prev, [postId]: prev[postId] || buildInstantAnalytics(post) }));
+        }
         setAnalyticsLoadingPostId(postId);
         try {
-            const analytics = await getBoostAnalytics(postId);
+            const analytics = await getInsightsCached(postId);
             setAnalyticsByPostId((prev) => ({ ...prev, [postId]: analytics }));
         } catch (err) {
             console.error('Failed to load boost insights', err);
@@ -93,11 +181,68 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
             <View style={styles.header}>
                 <Text style={styles.title}>Your Posts</Text>
                 <Text style={styles.subtitle}>Boost your posts to reach more people</Text>
+                <View style={styles.summaryRow}>
+                    <Text style={styles.summaryText}>Active: {boostSummary.active}</Text>
+                    <Text style={styles.summaryText}>Ready: {boostSummary.ready}</Text>
+                    <Text style={styles.summaryText}>Ended: {boostSummary.ended}</Text>
+                </View>
+                <View style={styles.chipsRow}>
+                    {([
+                        { id: 'all' as const, label: `All (${boostSummary.total})` },
+                        { id: 'ready' as const, label: `Ready (${boostSummary.ready})` },
+                        { id: 'active' as const, label: `Active (${boostSummary.active})` },
+                        { id: 'ended' as const, label: `Ended (${boostSummary.ended})` },
+                    ]).map((chip) => {
+                        const active = boostFilter === chip.id;
+                        return (
+                            <TouchableOpacity
+                                key={chip.id}
+                                onPress={() => setBoostFilter(chip.id)}
+                                style={[styles.filterChip, active && styles.filterChipActive]}
+                            >
+                                <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{chip.label}</Text>
+                            </TouchableOpacity>
+                        );
+                    })}
+                </View>
+                <View style={styles.chipsRow}>
+                    {([
+                        { id: 'best' as const, label: 'Best' },
+                        { id: 'recent' as const, label: 'Recent' },
+                    ]).map((chip) => {
+                        const active = boostSort === chip.id;
+                        return (
+                            <TouchableOpacity
+                                key={chip.id}
+                                onPress={() => setBoostSort(chip.id)}
+                                style={[styles.smallChip, active && styles.smallChipActive]}
+                            >
+                                <Text style={[styles.smallChipText, active && styles.smallChipTextActive]}>{chip.label}</Text>
+                            </TouchableOpacity>
+                        );
+                    })}
+                    {([
+                        { id: '24h' as const, label: '24h' },
+                        { id: '7d' as const, label: '7d' },
+                        { id: 'all' as const, label: 'All' },
+                    ]).map((chip) => {
+                        const active = insightsRange === chip.id;
+                        return (
+                            <TouchableOpacity
+                                key={chip.id}
+                                onPress={() => setInsightsRange(chip.id)}
+                                style={[styles.smallChip, active && styles.rangeChipActive]}
+                            >
+                                <Text style={[styles.smallChipText, active && styles.smallChipTextActive]}>{chip.label}</Text>
+                            </TouchableOpacity>
+                        );
+                    })}
+                </View>
             </View>
 
-            {posts.length === 0 ? (
+            {sortedPosts.length === 0 ? (
                 <View style={styles.emptyContainer}>
-                    <Text style={styles.emptyText}>You haven't created any posts yet.</Text>
+                    <Text style={styles.emptyText}>{posts.length === 0 ? "You haven't created any posts yet." : 'No posts in this filter.'}</Text>
                     <TouchableOpacity
                         onPress={() => navigation.navigate('CreateComposer')}
                         style={styles.createButton}
@@ -107,7 +252,7 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
                 </View>
             ) : (
                 <FlatList
-                    data={posts}
+                    data={sortedPosts}
                     keyExtractor={(item) => item.id}
                     renderItem={({ item }) => (
                         <View
@@ -154,6 +299,9 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
                             </View>
                             {analyticsByPostId[item.id] && (
                                 <View style={styles.analyticsCard}>
+                                    {analyticsLoadingPostId === item.id ? (
+                                        <Text style={styles.analyticsUpdatingText}>Updating with latest analytics...</Text>
+                                    ) : null}
                                     {analyticsByPostId[item.id]?.hasBoost && analyticsByPostId[item.id]?.analytics ? (
                                         <>
                                             <Text style={styles.analyticsTitle}>
@@ -227,6 +375,66 @@ const styles = StyleSheet.create({
     subtitle: {
         fontSize: 14,
         color: '#9CA3AF',
+    },
+    summaryRow: {
+        flexDirection: 'row',
+        gap: 12,
+        marginTop: 8,
+    },
+    summaryText: {
+        fontSize: 11,
+        color: '#94A3B8',
+        fontWeight: '600',
+    },
+    chipsRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+        marginTop: 8,
+    },
+    filterChip: {
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: '#334155',
+        backgroundColor: '#111827',
+    },
+    filterChipActive: {
+        borderColor: '#FFFFFF',
+        backgroundColor: '#FFFFFF',
+    },
+    filterChipText: {
+        fontSize: 11,
+        color: '#CBD5E1',
+        fontWeight: '700',
+    },
+    filterChipTextActive: {
+        color: '#0F172A',
+    },
+    smallChip: {
+        paddingHorizontal: 9,
+        paddingVertical: 5,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: '#334155',
+        backgroundColor: '#111827',
+    },
+    smallChipActive: {
+        borderColor: '#FFFFFF',
+        backgroundColor: '#FFFFFF',
+    },
+    rangeChipActive: {
+        borderColor: '#38BDF8',
+        backgroundColor: 'rgba(14,165,233,0.20)',
+    },
+    smallChipText: {
+        fontSize: 10,
+        color: '#CBD5E1',
+        fontWeight: '700',
+    },
+    smallChipTextActive: {
+        color: '#0F172A',
     },
     emptyContainer: {
         flex: 1,
@@ -331,6 +539,12 @@ const styles = StyleSheet.create({
         fontSize: 13,
         fontWeight: '700',
         marginBottom: 6,
+    },
+    analyticsUpdatingText: {
+        color: '#7DD3FC',
+        fontSize: 11,
+        marginBottom: 6,
+        fontWeight: '600',
     },
     analyticsGrid: {
         gap: 4,

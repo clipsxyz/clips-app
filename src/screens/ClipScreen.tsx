@@ -56,6 +56,10 @@ const ClipScreen: React.FC = ({ navigation }: any) => {
         navigation.navigate('Live');
     };
 
+    const handleTextStory = () => {
+        navigation.navigate('TextOnlyCreate');
+    };
+
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
             <View style={styles.content}>
@@ -80,6 +84,11 @@ const ClipScreen: React.FC = ({ navigation }: any) => {
                     <TouchableOpacity onPress={handleGoLive} style={styles.optionButton}>
                         <Icon name="radio" size={32} color="#8B5CF6" />
                         <Text style={styles.optionText}>Go Live</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity onPress={handleTextStory} style={styles.optionButton}>
+                        <Icon name="text" size={32} color="#8B5CF6" />
+                        <Text style={styles.optionText}>Text Story</Text>
                     </TouchableOpacity>
                 </View>
             </View>

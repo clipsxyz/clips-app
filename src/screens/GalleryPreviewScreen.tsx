@@ -2,6 +2,7 @@ import React from 'react';
 import { Alert, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
+import Video from 'react-native-video';
 
 export default function GalleryPreviewScreen({ navigation, route }: any) {
   const mediaUrl: string | undefined = route.params?.mediaUrl;
@@ -10,6 +11,15 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
   const [trimStart, setTrimStart] = React.useState(0);
   const [trimEnd, setTrimEnd] = React.useState(15);
   const [coverTime, setCoverTime] = React.useState(0);
+  const [isVideoPaused, setIsVideoPaused] = React.useState(false);
+  const [videoDurationSec, setVideoDurationSec] = React.useState(15);
+
+  React.useEffect(() => {
+    if (mediaType !== 'video') return;
+    setTrimStart(0);
+    setTrimEnd(Math.max(1, videoDurationSec));
+    setCoverTime(0);
+  }, [mediaType, mediaUrl, videoDurationSec]);
 
   const handleContinue = () => {
     navigation.navigate('CreateComposer', {
@@ -38,11 +48,34 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
       <View style={styles.previewWrap}>
         {mediaType === 'image' && mediaUrl ? (
           <Image source={{ uri: mediaUrl }} style={styles.preview} resizeMode="contain" />
+        ) : mediaUrl ? (
+          <View style={styles.videoPreviewWrap}>
+            <Video
+              source={{ uri: mediaUrl }}
+              style={styles.videoPreview}
+              resizeMode="contain"
+              paused={isVideoPaused}
+              repeat
+              controls
+              muted
+              onLoad={(event) => {
+                const duration = Number(event?.duration || 0);
+                if (!Number.isFinite(duration) || duration <= 0) return;
+                const rounded = Math.max(1, Math.floor(duration));
+                setVideoDurationSec(rounded);
+                setTrimEnd((prev) => Math.min(Math.max(1, prev), rounded));
+                setTrimStart((prev) => Math.min(Math.max(0, prev), Math.max(0, rounded - 1)));
+                setCoverTime((prev) => Math.min(Math.max(0, prev), rounded));
+              }}
+            />
+            <TouchableOpacity style={styles.videoPauseBtn} onPress={() => setIsVideoPaused((v) => !v)}>
+              <Icon name={isVideoPaused ? 'play' : 'pause'} size={18} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
         ) : (
           <View style={styles.videoFallback}>
-            <Icon name="videocam" size={44} color="#F3F4F6" />
-            <Text style={styles.videoFallbackText}>Video selected</Text>
-            <Text style={styles.videoFallbackSubtext}>Tap Use to continue editing</Text>
+            <Icon name="warning-outline" size={32} color="#FCA5A5" />
+            <Text style={styles.videoFallbackSubtext}>No video available for preview</Text>
           </View>
         )}
       </View>
@@ -50,18 +83,42 @@ export default function GalleryPreviewScreen({ navigation, route }: any) {
         <View style={styles.videoToolsCard}>
           <Text style={styles.videoToolsTitle}>Quick edit</Text>
           <View style={styles.videoToolsRow}>
-            <TouchableOpacity style={styles.toolBtn} onPress={() => setTrimStart((v) => Math.max(0, v - 1))}>
+            <TouchableOpacity
+              style={styles.toolBtn}
+              onPress={() => setTrimStart((v) => Math.max(0, Math.min(v - 1, trimEnd - 1)))}
+            >
               <Text style={styles.toolBtnText}>Trim -</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.toolBtn} onPress={() => setTrimEnd((v) => Math.max(trimStart + 1, v + 1))}>
+            <TouchableOpacity
+              style={styles.toolBtn}
+              onPress={() => setTrimStart((v) => Math.min(trimEnd - 1, v + 1))}
+            >
               <Text style={styles.toolBtnText}>Trim +</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.toolBtn} onPress={() => setCoverTime((v) => Math.max(0, v + 1))}>
+            <TouchableOpacity
+              style={styles.toolBtn}
+              onPress={() => setTrimEnd((v) => Math.max(trimStart + 1, v - 1))}
+            >
+              <Text style={styles.toolBtnText}>End -</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.toolBtn}
+              onPress={() => setTrimEnd((v) => Math.min(videoDurationSec, Math.max(trimStart + 1, v + 1)))}
+            >
+              <Text style={styles.toolBtnText}>End +</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.toolBtn}
+              onPress={() => setCoverTime((v) => Math.max(0, v - 1))}
+            >
+              <Text style={styles.toolBtnText}>Cover -1s</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.toolBtn} onPress={() => setCoverTime((v) => Math.min(videoDurationSec, Math.max(0, v + 1)))}>
               <Text style={styles.toolBtnText}>Cover +1s</Text>
             </TouchableOpacity>
           </View>
           <Text style={styles.videoToolsMeta}>
-            Trim: {trimStart}s - {trimEnd}s | Cover: {coverTime}s
+            Duration: {videoDurationSec}s | Trim: {trimStart}s - {trimEnd}s | Cover: {coverTime}s
           </Text>
           <View style={styles.videoToolsRow}>
             <TouchableOpacity
@@ -105,6 +162,28 @@ const styles = StyleSheet.create({
   nextText: { color: '#F8D26A', fontSize: 15, fontWeight: '700' },
   previewWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 16 },
   preview: { width: '100%', height: '100%' },
+  videoPreviewWrap: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 14,
+    overflow: 'hidden',
+    backgroundColor: '#000000',
+  },
+  videoPreview: {
+    width: '100%',
+    height: '100%',
+  },
+  videoPauseBtn: {
+    position: 'absolute',
+    right: 12,
+    top: 12,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
   videoFallback: {
     width: '100%',
     borderRadius: 16,

@@ -38,6 +38,12 @@ function extractAvatarUrl(profile: any): string {
     return typeof candidate === 'string' ? candidate.trim() : '';
 }
 
+function normalizeHandleKey(handle?: string): string {
+    const value = (handle || '').trim();
+    if (!value) return '';
+    return value.replace(/^@/, '').toLowerCase();
+}
+
 function inboxConversationRowId(conv: ConversationSummary): string {
     if (conv.kind === 'group' && conv.chatGroupId) return `g:${conv.chatGroupId}`;
     return conv.otherHandle;
@@ -450,6 +456,19 @@ export default function InboxPage() {
     const insightAvatarFetchInFlightRef = React.useRef<Set<string>>(new Set());
     const storyThumbLongPressTimerRef = React.useRef<number | null>(null);
     const storyThumbLongPressTriggeredRef = React.useRef(false);
+    const resolveInsightAvatar = React.useCallback((handle?: string): string => {
+        const raw = (handle || '').trim();
+        if (!raw) return '';
+        const normalized = normalizeHandleKey(raw);
+        return (
+            insightAvatarMap[raw] ||
+            insightAvatarMap[normalized] ||
+            getAvatarForHandle(raw) ||
+            getAvatarForHandle(normalized) ||
+            getAvatarForHandle(`@${normalized}`) ||
+            ''
+        );
+    }, [insightAvatarMap]);
 
     const clearStoryThumbLongPressTimer = React.useCallback(() => {
         if (storyThumbLongPressTimerRef.current !== null) {
@@ -544,31 +563,35 @@ export default function InboxPage() {
         const handles = Array.from(
             new Set(
                 insights
-                    .filter((insight) => insight.likes > 0 && Array.isArray(insight.likers) && insight.likers.length > 0)
-                    .flatMap((insight) => insight.likers || [])
+                    .flatMap((insight) => [
+                        ...(insight.likers || []),
+                        ...(insight.viewers || []),
+                        ...(insight.question?.responses || []).map((r) => r.userHandle),
+                    ])
                     .filter((h): h is string => typeof h === 'string' && h.trim().length > 0)
             )
         );
-        const missing = handles.filter((handle) => !getAvatarForHandle(handle) && !insightAvatarMap[handle]);
+        const missing = handles.filter((handle) => !resolveInsightAvatar(handle));
         if (missing.length === 0) return;
 
         missing.forEach((handle) => {
-            if (insightAvatarFetchInFlightRef.current.has(handle)) return;
-            insightAvatarFetchInFlightRef.current.add(handle);
-            fetchUserProfile(handle, user?.id)
+            const fetchKey = normalizeHandleKey(handle) || handle;
+            if (insightAvatarFetchInFlightRef.current.has(fetchKey)) return;
+            insightAvatarFetchInFlightRef.current.add(fetchKey);
+            fetchUserProfile(fetchKey, user?.id)
                 .then((profile: any) => {
                     const avatarUrl = extractAvatarUrl(profile);
                     if (avatarUrl.length > 0) {
-                        setAvatarForHandle(handle, avatarUrl);
-                        setInsightAvatarMap((prev) => ({ ...prev, [handle]: avatarUrl }));
+                        setAvatarForHandle(fetchKey, avatarUrl);
+                        setInsightAvatarMap((prev) => ({ ...prev, [handle]: avatarUrl, [fetchKey]: avatarUrl }));
                     }
                 })
                 .catch(() => {})
                 .finally(() => {
-                    insightAvatarFetchInFlightRef.current.delete(handle);
+                    insightAvatarFetchInFlightRef.current.delete(fetchKey);
                 });
         });
-    }, [insights, insightAvatarMap, user?.id]);
+    }, [insights, resolveInsightAvatar, user?.id]);
 
     React.useEffect(() => {
         const handles = Array.from(
@@ -1007,8 +1030,14 @@ export default function InboxPage() {
         () => insights.filter((insight) => !seenInsightIds.has(insight.storyId)).length,
         [insights, seenInsightIds]
     );
-    const likedInsights = React.useMemo(
-        () => insights.filter((insight) => insight.likes > 0 && Array.isArray(insight.likers) && insight.likers.length > 0),
+    const actionableInsights = React.useMemo(
+        () =>
+            insights.filter(
+                (insight) =>
+                    (insight.views || 0) > 0 ||
+                    (insight.likes > 0 && Array.isArray(insight.likers) && insight.likers.length > 0) ||
+                    (!!insight.question && (insight.question.responseCount || 0) > 0)
+            ),
         [insights]
     );
 
@@ -1222,6 +1251,9 @@ export default function InboxPage() {
                 <div className="mb-4 overflow-x-auto scrollbar-hide">
                     <div className="flex items-center gap-3 px-0.5">
                         {storyGroups.map((group) => (
+                            (() => {
+                                const hasUnviewedStories = (group.stories || []).some((s) => !s.hasViewed);
+                                return (
                             <button
                                 key={group.userId || group.userHandle}
                                 type="button"
@@ -1232,7 +1264,13 @@ export default function InboxPage() {
                             >
                                 <div className="relative">
                                     {/* Story ring */}
-                                    <div className="w-14 h-14 rounded-full p-[2px] bg-gradient-to-tr from-teal-400 via-sky-500 to-fuchsia-500">
+                                    <div
+                                        className={`w-14 h-14 rounded-full p-[2px] ${
+                                            hasUnviewedStories
+                                                ? 'bg-gradient-to-tr from-teal-400 via-sky-500 to-fuchsia-500'
+                                                : 'bg-white/20'
+                                        }`}
+                                    >
                                         <div className="w-full h-full rounded-full bg-black flex items-center justify-center overflow-hidden">
                                             <Avatar
                                                 name={group.userHandle}
@@ -1246,6 +1284,8 @@ export default function InboxPage() {
                                     {group.userHandle}
                                 </span>
                             </button>
+                                );
+                            })()
                         ))}
                     </div>
                 </div>
@@ -1787,7 +1827,7 @@ export default function InboxPage() {
                     </div>
                 )
             ) : activeTab === 'insights' ? (
-                !likedInsights || likedInsights.length === 0 ? (
+                !actionableInsights || actionableInsights.length === 0 ? (
                     <div className="text-gray-500">No story insights yet.</div>
                 ) : (
                 <div className="space-y-2">
@@ -1801,7 +1841,11 @@ export default function InboxPage() {
                             </button>
                         </div>
                     )}
-                    {likedInsights.map(insight => (
+                    {actionableInsights.map(insight => {
+                        const primaryLiker = insight.likers?.[0];
+                        const primaryViewer = insight.viewers?.[0];
+                        const primaryHandle = primaryLiker || primaryViewer;
+                        return (
                         <div
                             key={insight.storyId}
                             onClick={() => {
@@ -1820,22 +1864,22 @@ export default function InboxPage() {
                             {insight.question && insight.question.responses && insight.question.responses.length > 0 ? (
                                 <Avatar
                                     name={insight.question.responses[0].userHandle}
-                                    src={getAvatarForHandle(insight.question.responses[0].userHandle)}
+                                    src={resolveInsightAvatar(insight.question.responses[0].userHandle)}
                                     size="sm"
                                 />
-                            ) : insight.likes > 0 && insight.likers && insight.likers.length > 0 ? (
+                            ) : primaryHandle ? (
                                 <button
                                     type="button"
                                     onClick={(e) => {
                                         e.stopPropagation();
-                                        navigate(`/user/${encodeURIComponent(insight.likers[0])}`);
+                                        navigate(`/user/${encodeURIComponent(primaryHandle)}`);
                                     }}
                                     className="rounded-full"
-                                    aria-label={`Open ${insight.likers[0]} profile`}
+                                    aria-label={`Open ${primaryHandle} profile`}
                                 >
                                     <Avatar
-                                        name={insight.likers[0]}
-                                        src={insightAvatarMap[insight.likers[0]] || getAvatarForHandle(insight.likers[0])}
+                                        name={primaryHandle}
+                                        src={resolveInsightAvatar(primaryHandle)}
                                         size="sm"
                                     />
                                 </button>
@@ -1855,7 +1899,7 @@ export default function InboxPage() {
                                         insight.question.responseCount === 1
                                             ? `1 answer`
                                             : `${insight.question.responseCount} answers`
-                                    ) : (
+                                    ) : insight.likes > 0 && insight.likers && insight.likers.length > 0 ? (
                                         <>
                                             Liked by{' '}
                                             <button
@@ -1884,6 +1928,23 @@ export default function InboxPage() {
                                                 </>
                                             ) : ''}
                                         </>
+                                    ) : insight.views > 0 && insight.viewers && insight.viewers.length > 0 ? (
+                                        <>
+                                            Viewed by{' '}
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    navigate(`/user/${encodeURIComponent(insight.viewers![0])}`);
+                                                }}
+                                                className="text-sky-300 underline hover:text-sky-200"
+                                            >
+                                                {insight.viewers[0]}
+                                            </button>
+                                            {insight.views > 1 ? ` and ${insight.views - 1} others` : ''}
+                                        </>
+                                    ) : (
+                                        'New story activity'
                                     )}
                                 </div>
                             </div>
@@ -1891,7 +1952,7 @@ export default function InboxPage() {
                                 {new Date(insight.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </div>
                         </div>
-                    ))}
+                    )})}
                 </div>
             )
             ) : null}
@@ -2162,7 +2223,7 @@ export default function InboxPage() {
                                         <div className="flex items-center gap-3 mb-2">
                                             <Avatar
                                                 name={response.userHandle}
-                                                src={getAvatarForHandle(response.userHandle)}
+                                                src={resolveInsightAvatar(response.userHandle)}
                                                 size="sm"
                                             />
                                             <div className="flex-1">

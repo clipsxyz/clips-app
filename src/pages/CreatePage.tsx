@@ -10,6 +10,13 @@ import StickerOverlayComponent from '../components/StickerOverlay';
 import TextStickerModal from '../components/TextStickerModal';
 import UserTaggingModal from '../components/UserTaggingModal';
 import { showToast } from '../utils/toast';
+
+const STICKER_SAFE_ZONE_TOP = 18;
+const STICKER_SAFE_ZONE_BOTTOM = 82;
+
+function clampStickerY(y: number): number {
+    return Math.max(STICKER_SAFE_ZONE_TOP, Math.min(STICKER_SAFE_ZONE_BOTTOM, y));
+}
 import { prepareMediaForPost } from '../utils/prepareMediaForPost';
 
 // Debounce hook for performance
@@ -871,7 +878,7 @@ export default function CreatePage() {
             stickerId: sticker.id,
             sticker,
             x: 50,
-            y: 50,
+            y: clampStickerY(50),
             scale: 1,
             rotation: 0,
             opacity: 1
@@ -896,7 +903,7 @@ export default function CreatePage() {
             stickerId: textSticker.id,
             sticker: textSticker,
             x: 50,
-            y: 50,
+            y: clampStickerY(50),
             scale: fontSize === 'small' ? 0.8 : fontSize === 'medium' ? 1 : 1.2,
             rotation: 0,
             opacity: 1
@@ -911,7 +918,11 @@ export default function CreatePage() {
     }, []);
 
     const handleUpdateSticker = useCallback((overlayId: string, updated: StickerOverlay) => {
-        setStickers(prev => prev.map(s => s.id === overlayId ? updated : s));
+        const constrainedOverlay = {
+            ...updated,
+            y: clampStickerY(updated.y),
+        };
+        setStickers(prev => prev.map(s => s.id === overlayId ? constrainedOverlay : s));
     }, []);
 
     const handleRemoveSticker = useCallback((overlayId: string) => {

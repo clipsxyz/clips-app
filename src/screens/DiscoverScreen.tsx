@@ -65,6 +65,19 @@ export default function DiscoverScreen({ navigation }: any) {
     const [recentSearches, setRecentSearches] = useState<DiscoverHistoryItem[]>([]);
     const [savedSearches, setSavedSearches] = useState<DiscoverHistoryItem[]>([]);
     const [topSections, setTopSections] = useState<SearchSections>({});
+    const modePlaceholder: Record<'city' | 'landmark' | 'venue', string> = {
+        city: 'Discover other locations...',
+        landmark: 'Discover landmarks...',
+        venue: 'Discover venues...',
+    };
+
+    const isTypeMatchForMode = (rawType: string | undefined, mode: 'city' | 'landmark' | 'venue') => {
+        const normalized = String(rawType || '').toLowerCase();
+        if (!normalized) return mode === 'city';
+        if (mode === 'venue') return normalized.includes('venue');
+        if (mode === 'landmark') return normalized.includes('landmark');
+        return normalized.includes('city') || normalized.includes('location') || normalized.includes('town');
+    };
 
     const results = popularCities.filter(city => 
         city.toLowerCase().includes(query.toLowerCase())
@@ -163,11 +176,14 @@ export default function DiscoverScreen({ navigation }: any) {
 
     const rawName = user?.name || 'Friend';
     const firstName = rawName.split('@')[0].trim().split(/\s+/)[0];
-    const displayList = suggestions.length > 0 
-        ? suggestions.slice(0, 8) 
+    const filteredSuggestionList = suggestions.filter((s) => isTypeMatchForMode((s as any)?.type, discoverMode));
+    const displayList = filteredSuggestionList.length > 0
+        ? filteredSuggestionList.slice(0, 8)
         : results.slice(0, 6).map(r => ({ name: r, type: 'city' as const }));
     const topUsers = Array.isArray(topSections.users?.items) ? topSections.users!.items.slice(0, 3) : [];
-    const topLocations = Array.isArray(topSections.locations?.items) ? topSections.locations!.items.slice(0, 3) : [];
+    const topLocations = Array.isArray(topSections.locations?.items)
+        ? topSections.locations!.items.filter((loc: any) => isTypeMatchForMode(loc?.type, discoverMode)).slice(0, 3)
+        : [];
     const topPosts = Array.isArray(topSections.posts?.items) ? topSections.posts!.items.slice(0, 3) : [];
     const isCurrentSaved = savedSearches.some((x) => x.q.toLowerCase() === query.trim().toLowerCase() && x.mode === discoverMode);
 
@@ -216,7 +232,7 @@ export default function DiscoverScreen({ navigation }: any) {
                                 return (
                                 <TouchableOpacity
                                     key={city}
-                                    onPress={() => selectLocation(city, 'location')}
+                                    onPress={() => selectLocation(city, discoverMode === 'venue' ? 'venue' : discoverMode === 'landmark' ? 'landmark' : 'location')}
                                     style={styles.cityButton}
                                 >
                                     <Icon name="location" size={16} color={colors[index % colors.length]} />
@@ -244,7 +260,7 @@ export default function DiscoverScreen({ navigation }: any) {
                                     setQuery(text);
                                     setActiveIndex(-1);
                                 }}
-                                placeholder="Discover other locations..."
+                                placeholder={modePlaceholder[discoverMode]}
                                 placeholderTextColor="#6B7280"
                                 style={styles.searchInput}
                                 onSubmitEditing={chooseFromQuery}

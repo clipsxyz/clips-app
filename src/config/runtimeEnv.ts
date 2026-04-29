@@ -41,8 +41,22 @@ export function getReactNativeDefaultApiBaseUrl(): string | null {
   if (typeof require === 'undefined') return null;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { Platform } = require('react-native') as typeof import('react-native');
+    const { Platform, NativeModules } = require('react-native') as typeof import('react-native');
     const port = '8000';
+
+    const scriptUrl = (NativeModules as any)?.SourceCode?.scriptURL as string | undefined;
+    if (scriptUrl) {
+      try {
+        const parsed = new URL(scriptUrl);
+        const host = parsed.hostname;
+        if (host && host !== 'localhost' && host !== '127.0.0.1') {
+          return `http://${host}:${port}/api`;
+        }
+      } catch {
+        /* ignore malformed script URL */
+      }
+    }
+
     if (Platform.OS === 'android') {
       return `http://10.0.2.2:${port}/api`;
     }

@@ -13,6 +13,7 @@ import {
     TextInput,
     ScrollView,
     Share,
+    Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -33,9 +34,20 @@ import Avatar from '../components/Avatar';
 
 const { width, height } = Dimensions.get('window');
 const STORY_DURATION = 15000; // 15 seconds
+const STORY_SAFE_ZONE_TOP = 18;
+const STORY_SAFE_ZONE_BOTTOM = 82;
+const QUICK_REACTIONS = ['❤️', '😂', '🔥'];
 
 export default function StoriesScreen({ route, navigation }: any) {
     const { openUserHandle, openStoryId } = route.params || {};
+    const normalizedOpenUserHandle = React.useMemo(() => {
+        if (!openUserHandle || typeof openUserHandle !== 'string') return '';
+        try {
+            return decodeURIComponent(openUserHandle);
+        } catch {
+            return openUserHandle;
+        }
+    }, [openUserHandle]);
     const { user } = useAuth();
     const [storyGroups, setStoryGroups] = useState<StoryGroup[]>([]);
     const [currentGroupIndex, setCurrentGroupIndex] = useState(0);
@@ -45,13 +57,14 @@ export default function StoriesScreen({ route, navigation }: any) {
     const [progress, setProgress] = useState(0);
     const [paused, setPaused] = useState(false);
     const [isMuted, setIsMuted] = useState(true);
-    const [showReplyModal, setShowReplyModal] = useState(false);
+    const [showInlineReplyComposer, setShowInlineReplyComposer] = useState(false);
     const [isSendingReply, setIsSendingReply] = useState(false);
     const [showShareModal, setShowShareModal] = useState(false);
     const [showInsightsModal, setShowInsightsModal] = useState(false);
     const [insightsTab, setInsightsTab] = useState<'viewers' | 'replies'>('viewers');
     const [replyText, setReplyText] = useState('');
     const [insightsAvatarMap, setInsightsAvatarMap] = useState<Record<string, string | undefined>>({});
+    const [isHoldingToPause, setIsHoldingToPause] = useState(false);
     const progressRef = useRef(0);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
     const formatRelativeTime = (timestamp?: number) => {
@@ -91,13 +104,13 @@ export default function StoriesScreen({ route, navigation }: any) {
     }, []);
 
     useEffect(() => {
-        if (openUserHandle && storyGroups.length > 0) {
-            const targetGroup = storyGroups.find(g => g.userHandle === openUserHandle);
+        if (normalizedOpenUserHandle && storyGroups.length > 0) {
+            const targetGroup = storyGroups.find(g => g.userHandle === normalizedOpenUserHandle);
             if (targetGroup) {
                 startViewingStories(targetGroup, openStoryId);
             }
         }
-    }, [openUserHandle, openStoryId, storyGroups.length]);
+    }, [normalizedOpenUserHandle, openStoryId, storyGroups.length]);
 
     const loadStories = async () => {
         if (!user?.id) {
@@ -108,9 +121,9 @@ export default function StoriesScreen({ route, navigation }: any) {
             const followedUserHandles = await getFollowedUsers(user.id);
             let groups = await fetchFollowedUsersStoryGroups(user.id, followedUserHandles);
             
-            if (openUserHandle) {
+            if (normalizedOpenUserHandle) {
                 // Add specific user's stories if not already included
-                const existingGroup = groups.find(g => g.userHandle === openUserHandle);
+                const existingGroup = groups.find(g => g.userHandle === normalizedOpenUserHandle);
                 if (!existingGroup) {
                     // Fetch and add this user's story group
                     // Implementation would fetch from API
@@ -233,10 +246,35 @@ export default function StoriesScreen({ route, navigation }: any) {
     const openStoryLink = async (rawUrl?: string) => {
         if (!rawUrl) return;
         const withProtocol = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
-        try {
-            await Linking.openURL(withProtocol);
-        } catch (error) {
-            console.error('Failed to open story link:', error);
+        Alert.alert(
+            'Visit link?',
+            'You are about to open this link in your browser.',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Visit link',
+                    onPress: async () => {
+                        try {
+                            await Linking.openURL(withProtocol);
+                        } catch (error) {
+                            console.error('Failed to open story link:', error);
+                        }
+                    },
+                },
+            ],
+            { cancelable: true }
+        );
+    };
+
+    const pauseForHold = () => {
+        setIsHoldingToPause(true);
+        setPaused(true);
+    };
+
+    const releaseHold = () => {
+        setIsHoldingToPause(false);
+        if (!showInlineReplyComposer && !isSendingReply) {
+            setPaused(false);
         }
     };
 
@@ -329,7 +367,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                 })
             );
             setReplyText('');
-            setShowReplyModal(false);
+            setShowInlineReplyComposer(false);
         } catch (error) {
             console.error('Error adding reply:', error);
         } finally {
@@ -374,10 +412,10 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     useEffect(() => {
         if (!viewingStories) return;
-        if (showReplyModal || isSendingReply) {
+        if (showInlineReplyComposer || isSendingReply) {
             setPaused(true);
         }
-    }, [viewingStories, showReplyModal, isSendingReply]);
+    }, [viewingStories, showInlineReplyComposer, isSendingReply]);
 
     useEffect(() => {
         if (viewingStories && !paused) {
@@ -403,6 +441,11 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     const currentGroup = storyGroups[currentGroupIndex];
     const currentStory = currentGroup?.stories[currentStoryIndex];
+    const showMuteControl = Boolean(
+        currentStory &&
+            (currentStory.mediaType === 'video' ||
+                (currentStory.mediaUrl && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(currentStory.mediaUrl)))
+    );
     const currentStoryAudienceLabel = currentStory?.audience === 'close_friends'
         ? 'Followers'
         : currentStory?.audience === 'only_me'
@@ -480,7 +523,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                             <View style={[styles.audienceBadge, { borderColor: currentStoryAudienceStyles.borderColor, backgroundColor: currentStoryAudienceStyles.backgroundColor }]}>
                                 <Text style={[styles.audienceBadgeText, { color: currentStoryAudienceStyles.textColor }]}>{currentStoryAudienceLabel}</Text>
                             </View>
-                            <Text style={styles.storyHeaderTime}>2h</Text>
+                            <Text style={styles.storyHeaderTime}>{formatRelativeTime(currentStory.createdAt)}</Text>
                         </View>
                         <TouchableOpacity onPress={closeStories}>
                             <Icon name="close" size={24} color="#FFFFFF" />
@@ -511,6 +554,8 @@ export default function StoriesScreen({ route, navigation }: any) {
                             .filter((overlay) => !!overlay?.linkUrl)
                             .map((overlay) => {
                                 const label = (overlay.linkName || overlay.textContent || 'Shop now').trim();
+                                const iconColor = '#E11D48';
+                                const labelColor = '#111111';
                                 return (
                                     <TouchableOpacity
                                         key={overlay.id}
@@ -522,8 +567,8 @@ export default function StoriesScreen({ route, navigation }: any) {
                                                 left: `${overlay.x}%`,
                                                 top: `${overlay.y}%`,
                                                 transform: [
-                                                    { translateX: -96 },
-                                                    { translateY: -21 },
+                                                    { translateX: -91 },
+                                                    { translateY: -17 },
                                                     { scale: overlay.scale || 1 },
                                                     { rotate: `${overlay.rotation || 0}deg` },
                                                 ],
@@ -532,9 +577,9 @@ export default function StoriesScreen({ route, navigation }: any) {
                                         ]}
                                     >
                                         <View style={styles.storyLinkIconTile}>
-                                            <Icon name="link-outline" size={15} color="#138CFF" />
+                                            <Icon name="link-outline" size={15} color={iconColor} />
                                         </View>
-                                        <Text numberOfLines={1} style={styles.storyLinkLabel}>
+                                        <Text numberOfLines={1} style={[styles.storyLinkLabel, { color: labelColor }]}>
                                             {label}
                                         </Text>
                                     </TouchableOpacity>
@@ -542,15 +587,20 @@ export default function StoriesScreen({ route, navigation }: any) {
                             })}
 
                     {/* Bottom actions */}
-                    <View style={styles.storyActions}>
+                    <View style={[styles.storyActions, isHoldingToPause && styles.storyActionsHidden]}>
+                        {!showInlineReplyComposer && (
+                            <TouchableOpacity
+                                onPress={() => handleReaction('❤️')}
+                                style={styles.actionButton}
+                            >
+                                <Icon name="heart" size={28} color="#FFFFFF" />
+                            </TouchableOpacity>
+                        )}
                         <TouchableOpacity
-                            onPress={() => handleReaction('❤️')}
-                            style={styles.actionButton}
-                        >
-                            <Icon name="heart" size={28} color="#FFFFFF" />
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            onPress={() => setShowReplyModal(true)}
+                            onPress={() => {
+                                setShowInlineReplyComposer(true);
+                                setPaused(true);
+                            }}
                             style={styles.actionButton}
                         >
                             <Icon name="chatbubble" size={28} color="#FFFFFF" />
@@ -561,12 +611,14 @@ export default function StoriesScreen({ route, navigation }: any) {
                         >
                             <Icon name="paper-plane" size={24} color="#FFFFFF" />
                         </TouchableOpacity>
-                        <TouchableOpacity
-                            onPress={() => setIsMuted(!isMuted)}
-                            style={styles.actionButton}
-                        >
-                            <Icon name={isMuted ? "volume-mute" : "volume-high"} size={28} color="#FFFFFF" />
-                        </TouchableOpacity>
+                        {showMuteControl && (
+                            <TouchableOpacity
+                                onPress={() => setIsMuted(!isMuted)}
+                                style={styles.actionButton}
+                            >
+                                <Icon name={isMuted ? "volume-mute" : "volume-high"} size={28} color="#FFFFFF" />
+                            </TouchableOpacity>
+                        )}
                         {currentStory?.userId === user?.id && (
                             <TouchableOpacity
                                 onPress={() => {
@@ -580,65 +632,73 @@ export default function StoriesScreen({ route, navigation }: any) {
                         )}
                     </View>
 
+                    {showInlineReplyComposer && (
+                        <View style={styles.inlineReplyComposer}>
+                            <View style={styles.inlineReplyActions}>
+                                <TextInput
+                                    value={replyText}
+                                    onChangeText={setReplyText}
+                                    placeholder="Reply to story..."
+                                    placeholderTextColor="#9CA3AF"
+                                    style={styles.inlineReplyInput}
+                                    multiline={false}
+                                    returnKeyType="send"
+                                    onFocus={() => setPaused(true)}
+                                    onSubmitEditing={() => {
+                                        if (!isSendingReply && replyText.trim()) {
+                                            handleReply();
+                                        }
+                                    }}
+                                />
+                                {QUICK_REACTIONS.map((emoji) => (
+                                    <TouchableOpacity
+                                        key={emoji}
+                                        onPress={() => handleReaction(emoji)}
+                                        style={styles.quickReactionButton}
+                                        disabled={isSendingReply}
+                                    >
+                                        <Text style={styles.quickReactionText}>{emoji}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                                <TouchableOpacity
+                                    onPress={() => {
+                                        if (isSendingReply) return;
+                                        setShowInlineReplyComposer(false);
+                                        setPaused(false);
+                                    }}
+                                    style={styles.inlineReplyCancelButton}
+                                    disabled={isSendingReply}
+                                >
+                                    <Text style={styles.inlineReplyCancelText}>Cancel</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    onPress={handleReply}
+                                    style={[styles.inlineReplySendButton, isSendingReply && styles.replySendButtonDisabled]}
+                                    disabled={isSendingReply || !replyText.trim()}
+                                >
+                                    <Text style={styles.replySendText}>{isSendingReply ? 'Sending...' : 'Send'}</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    )}
+
                     {/* Navigation areas */}
                     <TouchableOpacity
                         style={styles.leftTapArea}
+                        onPressIn={pauseForHold}
+                        onPressOut={releaseHold}
                         onPress={previousStory}
                         activeOpacity={1}
                     />
                     <TouchableOpacity
                         style={styles.rightTapArea}
+                        onPressIn={pauseForHold}
+                        onPressOut={releaseHold}
                         onPress={nextStory}
                         activeOpacity={1}
                     />
                 </>
             )}
-
-            {/* Reply Modal */}
-            <Modal
-                visible={showReplyModal}
-                transparent
-                animationType="slide"
-                onRequestClose={() => {
-                    if (isSendingReply) return;
-                    setShowReplyModal(false);
-                    setPaused(false);
-                }}
-            >
-                <View style={styles.replyModal}>
-                    <View style={styles.replyModalContent}>
-                        <Text style={styles.replyModalTitle}>Reply to story</Text>
-                        <TextInput
-                            value={replyText}
-                            onChangeText={setReplyText}
-                            placeholder="Type a reply..."
-                            placeholderTextColor="#9CA3AF"
-                            style={styles.replyInput}
-                            multiline
-                        />
-                        <View style={styles.replyModalActions}>
-                            <TouchableOpacity
-                                onPress={() => {
-                                    if (isSendingReply) return;
-                                    setShowReplyModal(false);
-                                    setPaused(false);
-                                }}
-                                style={styles.replyCancelButton}
-                                disabled={isSendingReply}
-                            >
-                                <Text style={styles.replyCancelText}>Cancel</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                onPress={handleReply}
-                                style={[styles.replySendButton, isSendingReply && styles.replySendButtonDisabled]}
-                                disabled={isSendingReply || !replyText.trim()}
-                            >
-                                <Text style={styles.replySendText}>{isSendingReply ? 'Sending...' : 'Send'}</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
 
             {/* Share Modal */}
             <Modal
@@ -713,7 +773,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                                     >
                                         <View style={styles.insightRowInner}>
                                             <Avatar
-                                                src={insightsAvatarMap[viewerHandle]}
+                                                src={insightsAvatarMap[viewerHandle] || getAvatarForHandle(viewerHandle)}
                                                 name={viewerHandle.split('@')[0] || viewerHandle}
                                                 size="sm"
                                             />
@@ -734,7 +794,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                                     >
                                         <View style={styles.insightRowInner}>
                                             <Avatar
-                                                src={insightsAvatarMap[reply.userHandle]}
+                                                src={insightsAvatarMap[reply.userHandle] || getAvatarForHandle(reply.userHandle)}
                                                 name={reply.userHandle.split('@')[0] || reply.userHandle}
                                                 size="sm"
                                             />
@@ -872,8 +932,14 @@ const styles = StyleSheet.create({
     },
     storyText: {
         fontSize: 18,
+        lineHeight: 24,
         color: '#FFFFFF',
         fontWeight: '600',
+        flexShrink: 1,
+        flexWrap: 'wrap',
+        width: '100%',
+        maxWidth: '100%',
+        alignSelf: 'stretch',
         textShadowColor: 'rgba(0, 0, 0, 0.75)',
         textShadowOffset: { width: 0, height: 1 },
         textShadowRadius: 3,
@@ -914,6 +980,66 @@ const styles = StyleSheet.create({
         gap: 32,
         zIndex: 10,
     },
+    storyActionsHidden: {
+        opacity: 0.25,
+    },
+    inlineReplyComposer: {
+        position: 'absolute',
+        left: 12,
+        right: 12,
+        bottom: 104,
+        zIndex: 16,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.2)',
+        backgroundColor: 'rgba(3, 7, 18, 0.92)',
+        padding: 8,
+    },
+    inlineReplyInput: {
+        flex: 1,
+        backgroundColor: 'rgba(31,41,55,0.95)',
+        borderRadius: 999,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        color: '#FFFFFF',
+        fontSize: 14,
+        minHeight: 36,
+    },
+    inlineReplyActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    quickReactionButton: {
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        backgroundColor: 'rgba(31,41,55,0.95)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    quickReactionText: {
+        fontSize: 14,
+    },
+    inlineReplyCancelButton: {
+        paddingHorizontal: 10,
+        paddingVertical: 7,
+        borderRadius: 999,
+        backgroundColor: '#374151',
+        alignItems: 'center',
+    },
+    inlineReplyCancelText: {
+        color: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    inlineReplySendButton: {
+        paddingHorizontal: 12,
+        paddingVertical: 7,
+        borderRadius: 999,
+        backgroundColor: '#3B82F6',
+        alignItems: 'center',
+    },
     actionButton: {
         width: 48,
         height: 48,
@@ -940,40 +1066,43 @@ const styles = StyleSheet.create({
     },
     storyLinkSticker: {
         position: 'absolute',
-        width: 192,
-        height: 42,
-        borderRadius: 6,
-        backgroundColor: '#FFFFFF',
+        width: 176,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: 'rgba(255,255,255,0.72)',
         borderWidth: 1,
-        borderColor: 'rgba(0,0,0,0.10)',
+        borderColor: 'rgba(255,255,255,0.52)',
         flexDirection: 'row',
         alignItems: 'center',
         overflow: 'hidden',
         shadowColor: '#000',
-        shadowOpacity: 0.2,
-        shadowRadius: 7,
+        shadowOpacity: 0.24,
+        shadowRadius: 8,
         shadowOffset: { width: 0, height: 3 },
-        elevation: 6,
+        elevation: 5,
         zIndex: 25,
     },
     storyLinkIconTile: {
-        width: 32,
-        height: 32,
-        marginLeft: 5,
-        borderRadius: 4,
-        backgroundColor: '#EAF4FF',
+        width: 18,
+        height: 18,
+        marginLeft: 6,
+        borderRadius: 9,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.68)',
+        backgroundColor: 'rgba(255,255,255,0.58)',
         alignItems: 'center',
         justifyContent: 'center',
     },
     storyLinkLabel: {
         flex: 1,
-        marginLeft: 10,
-        marginRight: 12,
-        fontSize: 15,
-        lineHeight: 16,
+        marginLeft: 7,
+        marginRight: 7,
+        fontSize: 11,
+        lineHeight: 11.5,
         fontFamily: 'Inter-SemiBold',
         fontWeight: '600',
-        color: '#111111',
+        letterSpacing: 0.05,
+        color: '#0B1220',
     },
     replyModal: {
         flex: 1,

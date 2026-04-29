@@ -1131,6 +1131,24 @@ export default function StoriesPage() {
         }
     }
 
+    async function handleStoryLinkTap(rawUrl?: string) {
+        if (!rawUrl) return;
+        const withProtocol = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
+        const result = await Swal.fire(
+            bottomSheet({
+            title: 'Visit link?',
+            message: 'You are about to open this link in a new tab.',
+            icon: 'alert',
+            showCancelButton: true,
+            confirmButtonText: 'Visit link',
+            cancelButtonText: 'Cancel',
+            })
+        );
+        if (result.isConfirmed) {
+            window.open(withProtocol, '_blank', 'noopener,noreferrer');
+        }
+    }
+
     // Handle reply
     /** Resolve media URL for DM preview — story may only have `sharedFromPost` until the card loads. */
     function getEffectiveStoryMediaUrlForReply(story: Story | undefined): string | undefined {
@@ -1459,6 +1477,26 @@ export default function StoriesPage() {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [viewingStories, currentGroupIndex, currentStoryIndex, storyGroups]);
 
+    React.useEffect(() => {
+        const styleId = 'stories-no-save-callout-style';
+        if (document.getElementById(styleId)) return;
+        const style = document.createElement('style');
+        style.id = styleId;
+        style.textContent = `
+            .stories-media-surface img,
+            .stories-media-surface video {
+                -webkit-user-drag: none !important;
+                -webkit-touch-callout: none !important;
+                user-select: none !important;
+                -webkit-user-select: none !important;
+            }
+        `;
+        document.head.appendChild(style);
+        return () => {
+            style.remove();
+        };
+    }, []);
+
     // Control video playback based on paused state
     React.useEffect(() => {
         if (!viewingStories || !videoRef.current) return;
@@ -1758,6 +1796,14 @@ export default function StoriesPage() {
     const sharedStoryAuthorDisplay = sharedStoryAuthor.startsWith('@') ? sharedStoryAuthor.slice(1) : sharedStoryAuthor;
     const showSharedStoryCredit =
         !!sharedStoryAuthor && sharedStoryAuthor !== currentGroup?.userHandle && showExtraSharedFromBar;
+    const isCurrentStoryVideo = Boolean(
+        currentStory &&
+            (currentStory.mediaType === 'video' ||
+                (!!currentStory.mediaUrl && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(currentStory.mediaUrl)) ||
+                (currentStory.sharedFromPost &&
+                    originalPost &&
+                    (originalPost.mediaType === 'video' || originalPost.mediaItems?.[0]?.type === 'video')))
+    );
     const isViewingOwnStory = !!(currentGroup && user && (currentGroup.userId === user.id || currentGroup.userHandle === user.handle));
     const storyViewsCount = Number(currentStory?.views || 0);
     const storyRepliesCount = Number(currentStory?.replies?.length || 0);
@@ -1811,8 +1857,15 @@ export default function StoriesPage() {
                         onPointerUp={handleHoldPauseEnd}
                         onPointerCancel={handleHoldPauseEnd}
                         onPointerLeave={handleHoldPauseEnd}
+                        onContextMenu={(e) => e.preventDefault()}
+                        onDragStart={(e) => e.preventDefault()}
+                        style={{
+                            userSelect: 'none',
+                            WebkitUserSelect: 'none',
+                            WebkitTouchCallout: 'none',
+                        }}
                     >
-                        <div className="relative w-full h-full flex items-center justify-center">
+                        <div className="relative w-full h-full flex items-center justify-center stories-media-surface">
                             <div className="relative w-full h-full overflow-hidden bg-black">
                                 {(() => {
                                     if (currentStory?.sharedFromPost && !originalPost && !sharedPostFetchFailed) {
@@ -2287,6 +2340,8 @@ export default function StoriesPage() {
                                                                 currentStory?.textStyle?.color ||
                                                                 currentStory?.textColor ||
                                                                 '#ffffff',
+                                                            overflowWrap: 'anywhere',
+                                                            wordBreak: 'break-word',
                                                         }}
                                                     >
                                                         {currentStoryText}
@@ -2429,11 +2484,9 @@ export default function StoriesPage() {
                                                     }
                                                 })();
                                                 return (
-                                                    <a
+                                                    <button
                                                         key={overlay.id}
-                                                        href={overlay.linkUrl}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
+                                                        type="button"
                                                         className="absolute pointer-events-auto cursor-pointer"
                                                         style={{
                                                             left: `${overlay.x}%`,
@@ -2442,27 +2495,48 @@ export default function StoriesPage() {
                                                             opacity: overlay.opacity,
                                                             zIndex: 20
                                                         }}
-                                                        onClick={(e) => e.stopPropagation()}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleStoryLinkTap(overlay.linkUrl);
+                                                        }}
                                                     >
                                                         <div
-                                                            className="font-semibold text-center rounded-lg overflow-hidden transition-transform active:scale-[0.97] flex items-center gap-0 justify-center shadow-[0_6px_14px_rgba(0,0,0,0.2)] max-w-[86vw] bg-white border border-black/10"
+                                                            className="font-semibold text-center rounded-full overflow-hidden transition-transform active:scale-[0.97] inline-flex items-center gap-1.5 justify-center max-w-[86vw] px-2.5 py-1"
                                                             style={{
-                                                                color: '#111111',
                                                                 whiteSpace: 'nowrap',
-                                                                maxWidth: '22rem'
+                                                                maxWidth: '11rem',
+                                                                background: 'rgba(255,255,255,0.68)',
+                                                                border: '1px solid rgba(255,255,255,0.52)',
+                                                                boxShadow: '0 8px 22px rgba(0,0,0,0.26), 0 0 0 1px rgba(255,255,255,0.08) inset',
+                                                                backdropFilter: 'blur(8px)',
+                                                                WebkitBackdropFilter: 'blur(8px)',
                                                             }}
                                                         >
-                                                            <span className="inline-flex h-8 w-8 items-center justify-center shrink-0 bg-[#EAF4FF] text-[#138CFF] rounded-l-lg">
-                                                                <FiLink className="w-3.5 h-3.5" />
+                                                            <span
+                                                                className="inline-flex h-[18px] w-[18px] items-center justify-center shrink-0 rounded-full"
+                                                                style={{
+                                                                    color: '#E11D48',
+                                                                    background: 'rgba(255,255,255,0.58)',
+                                                                    border: '1px solid rgba(255,255,255,0.68)',
+                                                                }}
+                                                            >
+                                                                <FiLink className="w-2.5 h-2.5" />
                                                             </span>
                                                             <span
-                                                                className="truncate max-w-[15.5rem] px-3 tracking-[-0.01em]"
-                                                                style={{ fontFamily: 'Inter, system-ui, sans-serif', fontSize: '15px', lineHeight: 1, fontWeight: 600 }}
+                                                                className="truncate max-w-[7.7rem]"
+                                                                style={{
+                                                                    fontFamily: 'Inter, system-ui, sans-serif',
+                                                                    fontSize: '11px',
+                                                                    lineHeight: 1,
+                                                                    fontWeight: 600,
+                                                                    color: '#0B1220',
+                                                                    letterSpacing: '0.05px',
+                                                                }}
                                                             >
                                                                 {linkLabel}
                                                             </span>
                                                         </div>
-                                                    </a>
+                                                    </button>
                                                 );
                                             }
                                             
@@ -2485,11 +2559,15 @@ export default function StoriesPage() {
                                                         }}
                                                     >
                                                         <div
-                                                            className={`font-bold text-center ${fontSize} flex items-center gap-1.5 justify-center`}
+                                                            className={`font-bold text-center ${fontSize} inline-flex items-center gap-1.5 justify-center flex-wrap`}
                                                             style={{
                                                                 color: overlay.textColor || '#FFFFFF',
                                                                 textShadow: '2px 2px 8px rgba(0,0,0,0.9), -1px -1px 0 rgba(0,0,0,0.9), 1px -1px 0 rgba(0,0,0,0.9), -1px 1px 0 rgba(0,0,0,0.9), 1px 1px 0 rgba(0,0,0,0.9)',
-                                                                whiteSpace: 'nowrap'
+                                                                whiteSpace: 'pre-wrap',
+                                                                overflowWrap: 'anywhere',
+                                                                wordBreak: 'break-word',
+                                                                lineHeight: 1.15,
+                                                                maxWidth: 'min(82vw, 24rem)'
                                                             }}
                                                         >
                                                             {isLocation && (
@@ -3608,27 +3686,29 @@ export default function StoriesPage() {
                                 )}
                             </div>
                                 <div className="flex items-center gap-1.5 shrink-0">
-                                    <button
-                                        type="button"
-                                        onPointerDown={(e) => e.stopPropagation()}
-                                        onPointerUp={(e) => {
-                                            e.stopPropagation();
-                                            e.preventDefault();
-                                            triggerMuteAction();
-                                        }}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            e.preventDefault();
-                                        }}
-                                        className="pointer-events-auto p-2 rounded-full bg-black/45 border border-white/20"
-                                        aria-label={isMuted ? 'Unmute story' : 'Mute story'}
-                                    >
-                                        {isMuted ? (
-                                            <FiVolumeX className="w-5 h-5 text-white" />
-                                        ) : (
-                                            <FiVolume2 className="w-5 h-5 text-white" />
-                                        )}
-                                    </button>
+                                    {isCurrentStoryVideo && (
+                                        <button
+                                            type="button"
+                                            onPointerDown={(e) => e.stopPropagation()}
+                                            onPointerUp={(e) => {
+                                                e.stopPropagation();
+                                                e.preventDefault();
+                                                triggerMuteAction();
+                                            }}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                e.preventDefault();
+                                            }}
+                                            className="pointer-events-auto p-2 rounded-full bg-black/45 border border-white/20"
+                                            aria-label={isMuted ? 'Unmute story' : 'Mute story'}
+                                        >
+                                            {isMuted ? (
+                                                <FiVolumeX className="w-5 h-5 text-white" />
+                                            ) : (
+                                                <FiVolume2 className="w-5 h-5 text-white" />
+                                            )}
+                                        </button>
+                                    )}
                                     <button
                                         onClick={closeStories}
                                         className="pointer-events-auto p-2"
@@ -3724,10 +3804,12 @@ export default function StoriesPage() {
                                     className={`font-semibold text-center ${currentStory?.textSize === 'small' ? 'text-sm' :
                                         currentStory?.textSize === 'large' ? 'text-2xl' :
                                             'text-lg'
-                                        }`}
+                                        } break-words whitespace-pre-wrap`}
                                     style={{
                                         color: currentStory?.textColor || 'white',
-                                        textShadow: '1px 1px 2px rgba(0,0,0,0.5)'
+                                        textShadow: '1px 1px 2px rgba(0,0,0,0.5)',
+                                        overflowWrap: 'anywhere',
+                                        wordBreak: 'break-word',
                                     }}
                                 >
                                     {(() => {

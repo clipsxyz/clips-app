@@ -5,7 +5,45 @@ import { getRuntimeEnv, getReactNativeDefaultApiBaseUrl, isLaravelApiEnabled } f
 // Use IP address if accessing from network, otherwise localhost (web); Metro uses env or RN defaults.
 const getApiBaseUrl = () => {
     const envUrl = getRuntimeEnv('VITE_API_URL');
-    if (envUrl) return envUrl;
+    if (envUrl) {
+        // React Native: env often remains localhost, which breaks on physical devices.
+        if (typeof window === 'undefined') {
+            try {
+                const parsed = new URL(envUrl);
+                if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
+                    const rn = getReactNativeDefaultApiBaseUrl();
+                    if (rn) {
+                        const rnParsed = new URL(rn);
+                        parsed.protocol = rnParsed.protocol;
+                        parsed.hostname = rnParsed.hostname;
+                        parsed.port = rnParsed.port;
+                        return parsed.toString().replace(/\/$/, '');
+                    }
+                }
+            } catch {
+                // Ignore invalid/relative env URL, fallback to original behavior.
+            }
+        }
+
+        // If app is opened from another device (phone) and env URL points to localhost,
+        // rewrite it to the current host so requests reach the dev machine backend.
+        if (typeof window !== 'undefined' && window.location?.hostname) {
+            const hostname = window.location.hostname;
+            const onNetwork = hostname !== 'localhost' && hostname !== '127.0.0.1';
+            if (onNetwork) {
+                try {
+                    const parsed = new URL(envUrl, window.location.origin);
+                    if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
+                        parsed.hostname = hostname;
+                        return parsed.toString().replace(/\/$/, '');
+                    }
+                } catch {
+                    // If envUrl is relative (e.g. /api), keep as-is.
+                }
+            }
+        }
+        return envUrl;
+    }
 
     if (typeof window !== 'undefined' && window.location?.hostname) {
         const hostname = window.location.hostname;

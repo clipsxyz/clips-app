@@ -1052,6 +1052,8 @@ export interface StoryInsight {
     mediaType?: 'image' | 'video';
     text?: string;
     createdAt: number;
+    views: number;
+    viewers: string[];
     likes: number;
     likers: string[]; // user handles who reacted (heart/thumbs-up)
     question?: {
@@ -1071,28 +1073,49 @@ export async function getStoryInsightsForUser(userHandle: string): Promise<Story
     await delay();
 
     const now = Date.now();
-    const ownStories = stories.filter(s => s.userHandle === userHandle && s.expiresAt > now);
+    const normalizedHandle = (userHandle || '').trim().toLowerCase();
+    const ownStories = stories.filter((s) => {
+        if ((s.userHandle || '').trim().toLowerCase() !== normalizedHandle) return false;
+        if (s.expiresAt <= now) return false;
+        // Re-shared stories should not create owner insight alerts.
+        if (s.sharedFromPost) return false;
+        if (s.sharedFromUser && (s.sharedFromUser || '').trim().toLowerCase() !== normalizedHandle) return false;
+        return true;
+    });
 
     return ownStories
         .map<StoryInsight>(story => {
             // Count common positive reactions as likes in insights (heart + thumbs-up).
             const likeReactions = (story.reactions || []).filter(r => r.emoji === '❤️' || r.emoji === '👍');
             const likers = Array.from(new Set(likeReactions.map(r => r.userHandle)));
+            const viewers = Array.from(
+                new Set(
+                    (story.viewerHandles || [])
+                        .map((h) => (h || '').trim())
+                        .filter((h) => !!h && h.toLowerCase() !== normalizedHandle)
+                )
+            );
+            const views = Math.max(Number(story.views || 0), viewers.length);
+            const questionResponseCount = story.question?.responses?.length || 0;
             return {
                 storyId: story.id,
                 mediaUrl: story.mediaUrl,
                 mediaType: story.mediaType,
                 text: story.text,
                 createdAt: story.createdAt,
+                views,
+                viewers,
                 likes: likers.length,
                 likers,
                 question: story.question ? {
                     prompt: story.question.prompt,
-                    responseCount: story.question.responses?.length || 0,
+                    responseCount: questionResponseCount,
                     responses: story.question.responses || []
                 } : undefined
             };
         })
+        // Only surface actionable insights (likes or question responses).
+        .filter((item) => item.views > 0 || item.likes > 0 || (item.question?.responseCount || 0) > 0)
         // Newest stories first
         .sort((a, b) => b.createdAt - a.createdAt);
 }

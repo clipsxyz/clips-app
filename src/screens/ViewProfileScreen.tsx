@@ -400,7 +400,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     <Icon name="arrow-back" size={24} color="#FFFFFF" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Profile</Text>
-                <TouchableOpacity>
+                <TouchableOpacity onPress={() => setShowProfileMenu(true)}>
                     <Icon name="ellipsis-horizontal" size={24} color="#FFFFFF" />
                 </TouchableOpacity>
             </View>
@@ -418,7 +418,10 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     </TouchableOpacity>
 
                     <View style={styles.statsContainer}>
-                        <TouchableOpacity style={styles.statItem} onPress={() => {}}>
+                        <TouchableOpacity
+                            style={styles.statItem}
+                            onPress={() => setContentTab('all')}
+                        >
                             <Text style={styles.statNumber}>{stats.posts}</Text>
                             <Text style={styles.statLabel}>Posts</Text>
                         </TouchableOpacity>

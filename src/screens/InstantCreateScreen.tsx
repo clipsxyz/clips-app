@@ -82,10 +82,10 @@ export default function InstantCreateScreen({ navigation }: any) {
           <Text style={styles.cardHint}>Share without media</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.card} onPress={() => openLibrary('story24')}>
+        <TouchableOpacity style={styles.card} onPress={() => openCamera('story24')}>
           <Icon name="location" size={28} color="#C0C0C0" />
           <Text style={styles.cardTitle}>Stories 24</Text>
-          <Text style={styles.cardHint}>Post a 24h story</Text>
+          <Text style={styles.cardHint}>Capture a 24h story</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.cardWide} onPress={() => navigation.navigate('TextOnlyCreate', { story24: true })}>

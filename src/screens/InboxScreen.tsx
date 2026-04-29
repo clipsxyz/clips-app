@@ -9,6 +9,7 @@ import {
     Alert,
     TextInput,
     RefreshControl,
+    Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -24,6 +25,7 @@ import { getStoryInsightsForUser, type StoryInsight, fetchStoryGroupByHandle } f
 import { getAvatarForHandle } from '../api/users';
 import { setAvatarForHandle } from '../api/users';
 import { fetchUserProfile } from '../api/client';
+import { acceptFollowRequest as acceptFollowRequestApi, denyFollowRequest as denyFollowRequestApi } from '../api/client';
 import { timeAgo } from '../utils/timeAgo';
 import Avatar from '../components/Avatar';
 import {
@@ -57,6 +59,21 @@ function extractAvatarUrl(profile: any): string {
     return typeof candidate === 'string' ? candidate.trim() : '';
 }
 
+function normalizeHandleKey(handle?: string): string {
+    const value = (handle || '').trim();
+    if (!value) return '';
+    return value.replace(/^@/, '').toLowerCase();
+}
+
+function canRenderStoryThumb(url?: string): boolean {
+    if (!url) return false;
+    const value = url.trim();
+    if (!value) return false;
+    if (/^data:image\//i.test(value)) return true;
+    if (/^data:video\//i.test(value)) return false;
+    return /\.(png|jpe?g|gif|webp|avif|bmp|svg)(\?|#|$)/i.test(value) || /^https?:\/\//i.test(value) || /^file:\/\//i.test(value);
+}
+
 export default function InboxScreen({ navigation, route }: any) {
     const { user } = useAuth();
     const [insights, setInsights] = useState<StoryInsight[]>([]);
@@ -71,8 +88,27 @@ export default function InboxScreen({ navigation, route }: any) {
     const [insightAvatarMap, setInsightAvatarMap] = useState<Record<string, string>>({});
     const [dmAvatarMap, setDmAvatarMap] = useState<Record<string, string>>({});
     const avatarFetchInFlightRef = React.useRef<Set<string>>(new Set());
-    const likedInsights = useMemo(
-        () => insights.filter((item) => item.likes > 0 && Array.isArray(item.likers) && item.likers.length > 0),
+    const resolveInsightAvatar = React.useCallback((handle?: string): string => {
+        const raw = (handle || '').trim();
+        if (!raw) return '';
+        const normalized = normalizeHandleKey(raw);
+        return (
+            insightAvatarMap[raw] ||
+            insightAvatarMap[normalized] ||
+            getAvatarForHandle(raw) ||
+            getAvatarForHandle(normalized) ||
+            getAvatarForHandle(`@${normalized}`) ||
+            ''
+        );
+    }, [insightAvatarMap]);
+    const actionableInsights = useMemo(
+        () =>
+            insights.filter(
+                (item) =>
+                    (item.views || 0) > 0 ||
+                    (item.likes > 0 && Array.isArray(item.likers) && item.likers.length > 0) ||
+                    ((item.question?.responseCount || 0) > 0)
+            ),
         [insights]
     );
 
@@ -98,31 +134,36 @@ export default function InboxScreen({ navigation, route }: any) {
     useEffect(() => {
         const handles = Array.from(
             new Set(
-                likedInsights
-                    .flatMap((item) => item.likers || [])
+                actionableInsights
+                    .flatMap((item) => [...(item.likers || []), ...(item.viewers || [])])
                     .filter((h): h is string => typeof h === 'string' && h.trim().length > 0)
             )
         );
-        const missing = handles.filter((handle) => !getAvatarForHandle(handle) && !insightAvatarMap[handle]);
+        const missing = handles.filter((handle) => !resolveInsightAvatar(handle));
         if (missing.length === 0) return;
 
         missing.forEach((handle) => {
-            if (avatarFetchInFlightRef.current.has(handle)) return;
-            avatarFetchInFlightRef.current.add(handle);
-            fetchUserProfile(handle, user?.id)
+            const fetchKey = normalizeHandleKey(handle) || handle;
+            if (avatarFetchInFlightRef.current.has(fetchKey)) return;
+            avatarFetchInFlightRef.current.add(fetchKey);
+            fetchUserProfile(fetchKey, user?.id)
                 .then((profile: any) => {
                     const avatarUrl = extractAvatarUrl(profile);
                     if (avatarUrl.length > 0) {
-                        setAvatarForHandle(handle, avatarUrl);
-                        setInsightAvatarMap((prev) => ({ ...prev, [handle]: avatarUrl }));
+                        setAvatarForHandle(fetchKey, avatarUrl);
+                        setInsightAvatarMap((prev) => ({
+                            ...prev,
+                            [handle]: avatarUrl,
+                            [fetchKey]: avatarUrl,
+                        }));
                     }
                 })
                 .catch(() => {})
                 .finally(() => {
-                    avatarFetchInFlightRef.current.delete(handle);
+                    avatarFetchInFlightRef.current.delete(fetchKey);
                 });
         });
-    }, [likedInsights, insightAvatarMap, user?.id]);
+    }, [actionableInsights, resolveInsightAvatar, user?.id]);
 
     useEffect(() => {
         const handles = Array.from(
@@ -219,6 +260,16 @@ export default function InboxScreen({ navigation, route }: any) {
         Alert.alert('Story likes', 'View profile', options);
     };
 
+    const openViewersList = (viewers: string[]) => {
+        if (!Array.isArray(viewers) || viewers.length === 0) return;
+        const options = viewers.slice(0, 8).map((handle) => ({
+            text: handle,
+            onPress: () => navigation.navigate('ViewProfile', { handle }),
+        }));
+        options.push({ text: 'Cancel', onPress: () => {} });
+        Alert.alert('Story views', 'View profile', options);
+    };
+
     const handleNotificationPress = async (notif: Notification) => {
         const isSyntheticConvNotif = notif.id.startsWith('conv-notif-');
         if (!notif.read && user?.handle && !isSyntheticConvNotif) {
@@ -240,6 +291,26 @@ export default function InboxScreen({ navigation, route }: any) {
         }
     };
 
+    const openStoryThumbActions = (notif: Notification) => {
+        if (!notif.storyId) return;
+        const canOpenStory = !unavailableStoryIds.has(notif.storyId);
+        const options: Array<{ text: string; style?: 'cancel' | 'destructive'; onPress?: () => void }> = [];
+        if (canOpenStory) {
+            options.push({
+                text: 'Open story',
+                onPress: () => {
+                    void handleNotificationPress(notif);
+                },
+            });
+        }
+        options.push({
+            text: 'View profile',
+            onPress: () => navigation.navigate('ViewProfile', { handle: notif.fromHandle }),
+        });
+        options.push({ text: 'Cancel', style: 'cancel' });
+        Alert.alert('Story actions', `@${notif.fromHandle}`, options);
+    };
+
     const handleMarkAllRead = async () => {
         if (!user?.handle) return;
         try {
@@ -257,6 +328,57 @@ export default function InboxScreen({ navigation, route }: any) {
             setNotifications((prev) => prev.filter((n) => n.id !== notifId));
         } catch (error) {
             console.error('Failed to delete notification:', error);
+        }
+    };
+
+    const handleAcceptFollowRequest = async (notif: Notification) => {
+        if (!user?.handle) return;
+        try {
+            try {
+                await acceptFollowRequestApi(notif.fromHandle);
+            } catch (apiError: any) {
+                const isConnectionError =
+                    apiError?.message === 'CONNECTION_REFUSED' ||
+                    apiError?.name === 'ConnectionRefused' ||
+                    apiError?.message?.includes('Failed to fetch');
+                if (isConnectionError) {
+                    const { acceptFollowRequest: acceptFollowRequestLocal } = await import('../api/privacy');
+                    acceptFollowRequestLocal(notif.fromHandle, user.handle);
+                } else {
+                    throw apiError;
+                }
+            }
+            await deleteNotification(notif.id, user.handle);
+            await loadData();
+            Alert.alert('Follow request accepted', `You are now following ${notif.fromHandle}.`);
+        } catch (error) {
+            console.error('Failed to accept follow request:', error);
+            Alert.alert('Error', 'Failed to accept follow request.');
+        }
+    };
+
+    const handleDenyFollowRequest = async (notif: Notification) => {
+        if (!user?.handle) return;
+        try {
+            try {
+                await denyFollowRequestApi(notif.fromHandle);
+            } catch (apiError: any) {
+                const isConnectionError =
+                    apiError?.message === 'CONNECTION_REFUSED' ||
+                    apiError?.name === 'ConnectionRefused' ||
+                    apiError?.message?.includes('Failed to fetch');
+                if (isConnectionError) {
+                    const { denyFollowRequest: denyFollowRequestLocal } = await import('../api/privacy');
+                    denyFollowRequestLocal(notif.fromHandle, user.handle);
+                } else {
+                    throw apiError;
+                }
+            }
+            await deleteNotification(notif.id, user.handle);
+            await loadData();
+        } catch (error) {
+            console.error('Failed to deny follow request:', error);
+            Alert.alert('Error', 'Failed to deny follow request.');
         }
     };
 
@@ -477,11 +599,20 @@ export default function InboxScreen({ navigation, route }: any) {
                             style={[styles.item, !item.read && styles.itemUnread]}
                         >
                             <View style={styles.itemIcon}>
-                                <Icon
-                                    name={getNotificationIcon(item.type)}
-                                    size={24}
-                                    color="#8B5CF6"
-                                />
+                                <View style={styles.notificationAvatarWrap}>
+                                    <Avatar
+                                        src={dmAvatarMap[item.fromHandle] || getAvatarForHandle(item.fromHandle)}
+                                        name={item.fromHandle}
+                                        size={40}
+                                    />
+                                    <View style={styles.notificationTypeBadge}>
+                                        <Icon
+                                            name={getNotificationIcon(item.type)}
+                                            size={10}
+                                            color="#111827"
+                                        />
+                                    </View>
+                                </View>
                             </View>
                             <View style={styles.itemContent}>
                                 <Text style={styles.itemTitle}>{item.fromHandle}</Text>
@@ -492,7 +623,40 @@ export default function InboxScreen({ navigation, route }: any) {
                                     </View>
                                 )}
                                 <Text style={styles.itemTime}>{timeAgo(item.timestamp)}</Text>
+                                {item.type === 'follow_request' && (
+                                    <View style={styles.followRequestActions}>
+                                        <TouchableOpacity
+                                            style={[styles.followRequestBtn, styles.followRequestAcceptBtn]}
+                                            onPress={() => { void handleAcceptFollowRequest(item); }}
+                                        >
+                                            <Text style={styles.followRequestAcceptText}>Accept</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={[styles.followRequestBtn, styles.followRequestDenyBtn]}
+                                            onPress={() => { void handleDenyFollowRequest(item); }}
+                                        >
+                                            <Text style={styles.followRequestDenyText}>Deny</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
                             </View>
+                            {!!item.storyId && !unavailableStoryIds.has(item.storyId) && !!item.imageUrl && (
+                                <TouchableOpacity
+                                    style={styles.storyThumbWrap}
+                                    onPress={() => { void handleNotificationPress(item); }}
+                                    onLongPress={() => openStoryThumbActions(item)}
+                                    delayLongPress={280}
+                                    activeOpacity={0.85}
+                                >
+                                    {canRenderStoryThumb(item.imageUrl) ? (
+                                        <Image source={{ uri: item.imageUrl }} style={styles.storyThumbImage} resizeMode="cover" />
+                                    ) : (
+                                        <View style={styles.storyThumbFallback}>
+                                            <Icon name="play" size={14} color="#E5E7EB" />
+                                        </View>
+                                    )}
+                                </TouchableOpacity>
+                            )}
                             {!item.id.startsWith('conv-notif-') && (
                                 <TouchableOpacity
                                     onPress={() =>
@@ -517,23 +681,25 @@ export default function InboxScreen({ navigation, route }: any) {
                 />
             ) : activeTab === 'insights' ? (
                 <FlatList
-                    data={likedInsights}
+                    data={actionableInsights}
                     keyExtractor={(item) => item.storyId}
                     renderItem={({ item }) => {
                         const primaryLiker = item.likers?.[0];
+                        const primaryViewer = item.viewers?.[0];
+                        const primaryHandle = primaryLiker || primaryViewer;
                         return (
                         <TouchableOpacity
                             onPress={() => {
-                                if (primaryLiker) {
-                                    navigation.navigate('ViewProfile', { handle: primaryLiker });
+                                if (primaryHandle) {
+                                    navigation.navigate('ViewProfile', { handle: primaryHandle });
                                 }
                             }}
                             style={styles.item}
                         >
-                            {item.likes > 0 && item.likers && item.likers.length > 0 ? (
+                            {primaryHandle ? (
                                 <Avatar
-                                    src={insightAvatarMap[item.likers[0]] || getAvatarForHandle(item.likers[0])}
-                                    name={item.likers[0]}
+                                    src={resolveInsightAvatar(primaryHandle)}
+                                    name={primaryHandle}
                                     size={48}
                                 />
                             ) : (
@@ -547,25 +713,50 @@ export default function InboxScreen({ navigation, route }: any) {
                                     <Text style={styles.itemTime}>{timeAgo(item.createdAt)}</Text>
                                 </View>
                                 <Text style={styles.itemMessage} numberOfLines={1}>
-                                    Liked by{' '}
-                                    <Text
-                                        style={styles.itemMessageLink}
-                                        onPress={() => {
-                                            if (primaryLiker) {
-                                                navigation.navigate('ViewProfile', { handle: primaryLiker });
-                                            }
-                                        }}
-                                    >
-                                        {primaryLiker}
-                                    </Text>
-                                    {item.likes > 1 ? (
-                                        <Text
-                                            style={styles.itemMessageLink}
-                                            onPress={() => openLikersList(item.likers || [])}
-                                        >
-                                            {` and ${item.likes - 1} others`}
-                                        </Text>
-                                    ) : ''}
+                                    {item.likes > 0 && primaryLiker ? (
+                                        <>
+                                            Liked by{' '}
+                                            <Text
+                                                style={styles.itemMessageLink}
+                                                onPress={() => {
+                                                    navigation.navigate('ViewProfile', { handle: primaryLiker });
+                                                }}
+                                            >
+                                                {primaryLiker}
+                                            </Text>
+                                            {item.likes > 1 ? (
+                                                <Text
+                                                    style={styles.itemMessageLink}
+                                                    onPress={() => openLikersList(item.likers || [])}
+                                                >
+                                                    {` and ${item.likes - 1} others`}
+                                                </Text>
+                                            ) : ''}
+                                            {item.views > 0 ? `  •  ${item.views} views` : ''}
+                                        </>
+                                    ) : item.views > 0 ? (
+                                        <>
+                                            Viewed by{' '}
+                                            <Text
+                                                style={styles.itemMessageLink}
+                                                onPress={() => {
+                                                    if (primaryViewer) navigation.navigate('ViewProfile', { handle: primaryViewer });
+                                                }}
+                                            >
+                                                {primaryViewer || 'people'}
+                                            </Text>
+                                            {item.views > 1 ? (
+                                                <Text
+                                                    style={styles.itemMessageLink}
+                                                    onPress={() => openViewersList(item.viewers || [])}
+                                                >
+                                                    {` and ${item.views - 1} others`}
+                                                </Text>
+                                            ) : ''}
+                                        </>
+                                    ) : (
+                                        'New story activity'
+                                    )}
                                 </Text>
                             </View>
                         </TouchableOpacity>
@@ -819,24 +1010,43 @@ const styles = StyleSheet.create({
     item: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 16,
+        paddingHorizontal: 12,
+        paddingVertical: 11,
         borderBottomWidth: 1,
         borderBottomColor: '#1F2937',
-        gap: 12,
+        gap: 10,
+        position: 'relative',
     },
     itemUnread: {
         backgroundColor: '#1F2937',
     },
     itemIcon: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        backgroundColor: '#1F2937',
+        width: 40,
+        height: 40,
+        borderRadius: 20,
         justifyContent: 'center',
         alignItems: 'center',
     },
+    notificationAvatarWrap: {
+        width: 40,
+        height: 40,
+        position: 'relative',
+    },
+    notificationTypeBadge: {
+        position: 'absolute',
+        right: -1,
+        bottom: -1,
+        width: 16,
+        height: 16,
+        borderRadius: 8,
+        backgroundColor: '#A78BFA',
+        borderWidth: 1,
+        borderColor: '#111827',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     rowActionIcon: {
-        paddingHorizontal: 8,
+        paddingHorizontal: 6,
         paddingVertical: 4,
     },
     conversationSearchWrap: {
@@ -924,14 +1134,14 @@ const styles = StyleSheet.create({
         marginBottom: 4,
     },
     itemTitle: {
-        fontSize: 16,
+        fontSize: 15,
         fontWeight: '600',
         color: '#FFFFFF',
     },
     itemMessage: {
-        fontSize: 14,
+        fontSize: 13,
         color: '#9CA3AF',
-        marginTop: 2,
+        marginTop: 1,
     },
     itemMessageLink: {
         color: '#93C5FD',
@@ -957,7 +1167,58 @@ const styles = StyleSheet.create({
         fontSize: 10,
         fontWeight: '700',
     },
+    storyThumbWrap: {
+        width: 40,
+        height: 40,
+        borderRadius: 9,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: '#374151',
+        backgroundColor: '#111827',
+    },
+    storyThumbImage: {
+        width: '100%',
+        height: '100%',
+    },
+    storyThumbFallback: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#111827',
+    },
+    followRequestActions: {
+        marginTop: 8,
+        flexDirection: 'row',
+        gap: 8,
+    },
+    followRequestBtn: {
+        borderRadius: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderWidth: 1,
+    },
+    followRequestAcceptBtn: {
+        borderColor: '#15803D',
+        backgroundColor: '#14532D',
+    },
+    followRequestDenyBtn: {
+        borderColor: '#4B5563',
+        backgroundColor: '#1F2937',
+    },
+    followRequestAcceptText: {
+        color: '#DCFCE7',
+        fontSize: 11,
+        fontWeight: '700',
+    },
+    followRequestDenyText: {
+        color: '#E5E7EB',
+        fontSize: 11,
+        fontWeight: '700',
+    },
     unreadDot: {
+        position: 'absolute',
+        right: 6,
+        top: 18,
         width: 8,
         height: 8,
         borderRadius: 4,

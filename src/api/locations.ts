@@ -2,7 +2,27 @@ import { getRuntimeEnv, getReactNativeDefaultApiBaseUrl } from '../config/runtim
 
 function resolveLocationsApiBase(): string {
     const envUrl = getRuntimeEnv('VITE_API_URL');
-    if (envUrl) return envUrl;
+    if (envUrl) {
+        // React Native: avoid localhost API URL on physical devices.
+        if (typeof window === 'undefined') {
+            try {
+                const parsed = new URL(envUrl);
+                if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
+                    const rn = getReactNativeDefaultApiBaseUrl();
+                    if (rn) {
+                        const rnParsed = new URL(rn);
+                        parsed.protocol = rnParsed.protocol;
+                        parsed.hostname = rnParsed.hostname;
+                        parsed.port = rnParsed.port;
+                        return parsed.toString().replace(/\/$/, '');
+                    }
+                }
+            } catch {
+                // Keep original env URL when invalid/relative.
+            }
+        }
+        return envUrl;
+    }
     const rn = getReactNativeDefaultApiBaseUrl();
     if (rn) return rn;
     return 'http://localhost:8000/api';

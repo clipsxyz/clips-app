@@ -3,10 +3,15 @@ import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import { FiMapPin, FiUser, FiGlobe, FiX, FiEye, FiEyeOff, FiFileText, FiShield, FiCheck } from 'react-icons/fi';
 import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMaps';
-import { loginUser } from '../api/client';
+import { loginUser, registerUser } from '../api/client';
 import { consumePublicShareReturnPath } from '../utils/publicShare';
 
 const LOCAL_REGISTRATIONS_KEY = 'gazetteer_local_registrations';
+const interestOptions = [
+  'Food & Dining', 'Sports', 'Music', 'Art & Culture', 'Technology',
+  'Travel', 'Fashion', 'Photography', 'Fitness', 'Gaming',
+  'Books', 'Movies', 'Nature', 'Cooking', 'Dancing',
+];
 
 type PageMode = 'signup' | 'login';
 
@@ -65,11 +70,11 @@ export default function LoginPage() {
   
   // Get step from URL parameter, default to 1 - use URL as source of truth
   const stepFromUrl = parseInt(searchParams.get('step') || '1', 10);
-  const step = (stepFromUrl >= 1 && stepFromUrl <= 2) ? stepFromUrl : 1;
+  const step = (stepFromUrl >= 1 && stepFromUrl <= 3) ? stepFromUrl : 1;
   
   // Helper function to update step (updates both state and URL)
   const updateStep = React.useCallback((newStep: number) => {
-    if (newStep >= 1 && newStep <= 2) {
+    if (newStep >= 1 && newStep <= 3) {
       setSignupError('');
       setSearchParams({ step: newStep.toString() });
     }
@@ -97,6 +102,10 @@ export default function LoginPage() {
   const [birthYear, setBirthYear] = React.useState('');
   const [preferredLocationsInput, setPreferredLocationsInput] = React.useState('');
   const [accountType, setAccountType] = React.useState<'personal' | 'business' | null>(null);
+  const [interests, setInterests] = React.useState<string[]>([]);
+  const [acceptedTerms, setAcceptedTerms] = React.useState(false);
+  const [acceptedGuidelines, setAcceptedGuidelines] = React.useState(false);
+  const [profilePicture, setProfilePicture] = React.useState<string | null>(null);
 
   // Password visibility toggle
   const [showPassword, setShowPassword] = React.useState(false);
@@ -245,6 +254,12 @@ export default function LoginPage() {
     if (!accountType) {
       nextErrors.accountType = 'Please choose Personal or Business account.';
     }
+    if (!acceptedTerms) {
+      nextErrors.terms = 'You must accept Terms.';
+    }
+    if (!acceptedGuidelines) {
+      nextErrors.guidelines = 'You must accept Community Guidelines.';
+    }
     if (password !== confirmPassword) {
       nextErrors.confirmPassword = 'Passwords do not match.';
     }
@@ -283,6 +298,14 @@ export default function LoginPage() {
     }
     setSignupFieldErrors({});
     setSignupError('');
+    updateStep(3);
+  }
+
+  async function handleProfilePictureSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSignupFieldErrors({});
+    setSignupError('');
+    const age = getAgeFromBirthday();
     const consentTimestamp = new Date().toISOString();
     const preferredLocations = preferredLocationsInput
       .split(',')
@@ -295,12 +318,13 @@ export default function LoginPage() {
       email: email.trim(),
       password: password,
       age: age ?? undefined,
+      interests,
       local: local,
       regional: regional,
       national: national,
       handle: `${name.trim().split(/\s+/)[0] || name.trim()}@${regional}`,
       countryFlag: countryFlag.trim(),
-      avatarUrl: undefined as string | undefined,
+      avatarUrl: profilePicture || undefined,
       placesTraveled: preferredLocations.length > 0 ? preferredLocations : undefined,
       accountType: accountType ?? 'personal',
       termsAcceptedAt: consentTimestamp,
@@ -308,14 +332,54 @@ export default function LoginPage() {
     };
 
     try {
-      const userDataForStorage = { ...userData, avatarUrl: undefined };
-      saveLocalRegistration(email.trim(), password, userDataForStorage);
+      const apiResponse = await registerUser({
+        username: email.trim(),
+        email: email.trim(),
+        password,
+        displayName: name.trim(),
+        handle: `${name.trim().split(/\s+/)[0] || name.trim()}@${regional}`,
+        locationLocal: local,
+        locationRegional: regional,
+        locationNational: national,
+        accountType: (accountType ?? 'personal') as 'personal' | 'business',
+        isBusiness: accountType === 'business',
+      });
+      const token = (apiResponse as { token?: string })?.token;
+      if (token) localStorage.setItem('authToken', token);
+    } catch {
+      // Keep local registration fallback behavior aligned with RN.
+    }
+
+    try {
+      saveLocalRegistration(email.trim(), password, userData);
       login(userData);
       nav(getPostAuthRedirect(), { replace: true, state: { fromSignup: true } });
     } catch (err: any) {
       console.error('Sign up error:', err);
       setSignupError(err?.message || 'Something went wrong. Try again.');
     }
+  }
+
+  function toggleInterest(interest: string) {
+    setInterests(prev =>
+      prev.includes(interest)
+        ? prev.filter(i => i !== interest)
+        : prev.length < 5
+          ? [...prev, interest]
+          : prev
+    );
+  }
+
+  function handleProfilePictureSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setProfilePicture(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
   }
 
   async function handleLoginSubmit(e: React.FormEvent) {
@@ -529,7 +593,7 @@ export default function LoginPage() {
           style={{ background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 24%, #f4f4f4 48%, #bfc5cc 72%, #ffe8a3 100%)' }}
         >
         <form
-          onSubmit={step === 1 ? handleAccountSubmit : handleLocationSubmit}
+          onSubmit={step === 1 ? handleAccountSubmit : step === 2 ? handleLocationSubmit : handleProfilePictureSubmit}
           className="rounded-2xl bg-black flex flex-col min-h-0"
         >
           {/* Header */}
@@ -559,10 +623,10 @@ export default function LoginPage() {
                 </span>
               </h1>
               <p className="text-xs sm:text-sm text-gray-400 mb-4 sm:mb-6 font-normal">
-                {step === 1 ? 'Step 1: Account security' : 'Step 2: Profile and location'}
+                {step === 1 ? 'Step 1: Account security' : step === 2 ? 'Step 2: Profile and location' : 'Step 3: Profile photo'}
               </p>
               
-              {/* Step Indicators - two steps only */}
+              {/* Step Indicators */}
               <div className="flex justify-center items-center space-x-2 mb-4 sm:mb-6">
                 <div
                   className={`h-1 rounded-full transition-all ${step >= 1 ? '' : 'bg-gray-300'}`}
@@ -573,6 +637,12 @@ export default function LoginPage() {
                 <div
                   className={`h-1 rounded-full transition-all ${step >= 2 ? '' : 'bg-gray-300'}`}
                   style={step >= 2
+                    ? { width: '80px', background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 24%, #f4f4f4 48%, #bfc5cc 72%, #ffe8a3 100%)' }
+                    : { width: '40px' }}
+                ></div>
+                <div
+                  className={`h-1 rounded-full transition-all ${step >= 3 ? '' : 'bg-gray-300'}`}
+                  style={step >= 3
                     ? { width: '80px', background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 24%, #f4f4f4 48%, #bfc5cc 72%, #ffe8a3 100%)' }
                     : { width: '40px' }}
                 ></div>
@@ -728,6 +798,49 @@ export default function LoginPage() {
               {signupFieldErrors.confirmPassword && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.confirmPassword}</p>}
             </div>
 
+            <div className="rounded-sm border border-white/10 bg-white/5 px-3 py-2.5">
+              <p className="text-[11px] text-gray-400 mb-2">Select up to 5 interests</p>
+              <div className="flex flex-wrap gap-2">
+                {interestOptions.map((interest) => {
+                  const selected = interests.includes(interest);
+                  return (
+                    <button
+                      key={interest}
+                      type="button"
+                      onClick={() => toggleInterest(interest)}
+                      className={`rounded-full border px-2.5 py-1 text-[11px] ${
+                        selected ? 'border-[#8ab4ff] bg-[#8ab4ff]/15 text-[#dce9ff]' : 'border-white/20 text-gray-300'
+                      }`}
+                    >
+                      {interest}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 px-1 text-xs text-gray-300">
+              <input
+                type="checkbox"
+                checked={acceptedTerms}
+                onChange={(e) => setAcceptedTerms(e.target.checked)}
+                className="h-4 w-4 rounded border-white/30 bg-black"
+              />
+              <span>I accept Terms & Conditions</span>
+            </label>
+            {signupFieldErrors.terms && <p className="text-xs text-red-400 px-1">{signupFieldErrors.terms}</p>}
+
+            <label className="flex items-center gap-2 px-1 text-xs text-gray-300">
+              <input
+                type="checkbox"
+                checked={acceptedGuidelines}
+                onChange={(e) => setAcceptedGuidelines(e.target.checked)}
+                className="h-4 w-4 rounded border-white/30 bg-black"
+              />
+              <span>I accept Community Guidelines</span>
+            </label>
+            {signupFieldErrors.guidelines && <p className="text-xs text-red-400 px-1">{signupFieldErrors.guidelines}</p>}
+
           </>
         )}
 
@@ -873,6 +986,16 @@ export default function LoginPage() {
               {signupFieldErrors.local && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.local}</p>}
             </div>
 
+            <div>
+              <input
+                value={countryFlag}
+                onChange={e => setCountryFlag(e.target.value)}
+                className="w-full rounded-xl border-2 border-white bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-white"
+                placeholder="Country Flag (emoji)"
+                maxLength={8}
+              />
+            </div>
+
             <div className="rounded-sm border border-white/10 bg-white/5 px-3 py-2">
               <p className="text-[11px] text-gray-400">Your handle preview</p>
               <p className="text-sm text-white font-medium">
@@ -895,16 +1018,47 @@ export default function LoginPage() {
           </>
         )}
 
+        {step === 3 && (
+          <>
+            <div className="rounded-sm border border-white/10 bg-white/5 px-3 py-4">
+              <p className="text-[11px] text-gray-400 mb-3">Profile picture (optional)</p>
+              <div className="flex items-center gap-3">
+                <div className="h-14 w-14 rounded-full overflow-hidden bg-gray-800 border border-white/20 flex items-center justify-center text-xs text-gray-200">
+                  {profilePicture ? (
+                    <img src={profilePicture} alt="Profile preview" className="h-full w-full object-cover" />
+                  ) : (
+                    (name.trim().split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase() || 'U')
+                  )}
+                </div>
+                <label className="inline-flex cursor-pointer items-center rounded-xl border border-white/25 px-3 py-2 text-xs text-white hover:bg-white/5">
+                  Choose photo
+                  <input type="file" accept="image/*" className="hidden" onChange={handleProfilePictureSelect} />
+                </label>
+                {profilePicture && (
+                  <button
+                    type="button"
+                    onClick={() => setProfilePicture(null)}
+                    className="rounded-xl border border-white/20 px-3 py-2 text-xs text-gray-300 hover:bg-white/5"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+              <p className="mt-2 text-[11px] text-gray-500">Your initials are used if no photo is selected.</p>
+            </div>
+          </>
+        )}
+
             {/* Footer - inside scroll area so T&C is reachable on mobile */}
             <div className="pt-6 mt-4 border-t border-gray-700 space-y-3">
               <button
                 type="submit"
                 className="w-full px-4 py-3 bg-white text-[#111827] rounded-xl transition-colors text-sm font-semibold hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {step === 1 ? 'Continue' : 'Create account'}
+                {step === 1 ? 'Continue' : step === 2 ? 'Continue' : 'Create account'}
               </button>
               
-              {step === 2 && (
+              {step > 1 && (
                 <button
                   type="button"
                   onClick={() => updateStep(step - 1)}

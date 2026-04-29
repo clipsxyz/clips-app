@@ -24,7 +24,7 @@ import {
 } from '../utils/commentModeration';
 
 const ProfileScreen: React.FC = ({ navigation }: any) => {
-    const { user, logout } = useAuth();
+    const { user, logout, login } = useAuth();
     const [posts, setPosts] = useState<Post[]>([]);
     const [collections, setCollections] = useState<Collection[]>([]);
     const [drafts, setDrafts] = useState<Draft[]>([]);
@@ -42,6 +42,10 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [hiddenQueueFilter, setHiddenQueueFilter] = useState<'all' | 'comments' | 'replies'>('all');
     const [notificationPrefs, setNotificationPrefs] = useState<NotificationPreferences>(getNotificationPreferences());
     const [isPrivate, setIsPrivate] = useState(!!user?.is_private);
+    const [editProfileOpen, setEditProfileOpen] = useState(false);
+    const [profileNameDraft, setProfileNameDraft] = useState(user?.name || '');
+    const [profileBioDraft, setProfileBioDraft] = useState(user?.bio || '');
+    const [profileWebsiteDraft, setProfileWebsiteDraft] = useState((user as any)?.website || '');
 
     useEffect(() => {
         loadData();
@@ -50,6 +54,12 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     useEffect(() => {
         setIsPrivate(!!user?.is_private);
     }, [user?.is_private]);
+
+    useEffect(() => {
+        setProfileNameDraft(user?.name || '');
+        setProfileBioDraft(user?.bio || '');
+        setProfileWebsiteDraft((user as any)?.website || '');
+    }, [user?.name, user?.bio, (user as any)?.website]);
 
     const loadData = async () => {
         if (!user?.handle) return;
@@ -162,6 +172,29 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         }
     };
 
+    const handleSaveProfileEdits = async () => {
+        if (!user?.handle) return;
+        try {
+            const payload: any = {
+                display_name: profileNameDraft.trim() || undefined,
+                bio: profileBioDraft.trim() || undefined,
+                website: profileWebsiteDraft.trim() || undefined,
+            };
+            await updateAuthProfile(payload);
+            login({
+                ...user,
+                name: profileNameDraft.trim() || user.name,
+                bio: profileBioDraft.trim() || undefined,
+                website: profileWebsiteDraft.trim() || undefined,
+            } as any);
+            setEditProfileOpen(false);
+            Alert.alert('Saved', 'Your profile has been updated.');
+        } catch (error) {
+            console.error('Failed to save profile edits:', error);
+            Alert.alert('Save failed', 'Could not update profile right now.');
+        }
+    };
+
     if (loading) {
         return (
             <SafeAreaView style={styles.container}>
@@ -179,7 +212,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     size={32}
                 />
                 <Text style={styles.title}>Passport</Text>
-                <TouchableOpacity>
+                <TouchableOpacity onPress={() => setSettingsOpen(true)}>
                     <Icon name="lock-closed" size={24} color="#FFFFFF" />
                 </TouchableOpacity>
             </View>
@@ -285,7 +318,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 <TouchableOpacity 
                     style={styles.editButton}
                     onPress={() => {
-                        // Navigate to profile edit - would need to create that screen
+                        setEditProfileOpen(true);
                     }}
                 >
                     <Text style={styles.editButtonText}>Edit Profile</Text>
@@ -396,14 +429,31 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             {drafts.length > 0 ? (
                                 drafts.map((draft) => (
                                     <View key={draft.id} style={styles.draftItem}>
-                                        <View style={styles.draftInfo}>
+                                        <TouchableOpacity
+                                            style={styles.draftInfo}
+                                            onPress={() => {
+                                                setDraftsOpen(false);
+                                                navigation.navigate('CreateComposer', {
+                                                    mediaUrl: draft.videoUrl || undefined,
+                                                    mediaType: draft.mediaType || (draft.videoUrl ? 'video' : undefined),
+                                                    draftCaption: draft.caption || '',
+                                                    draftTextBody: draft.textBody || '',
+                                                    draftLocation: draft.location || '',
+                                                    draftVenue: draft.venue || '',
+                                                    draftLandmark: draft.landmark || '',
+                                                    draftTaggedUsers: draft.taggedUsers || [],
+                                                    trimStart: draft.trimStart ?? 0,
+                                                    trimEnd: draft.trimEnd ?? 0,
+                                                });
+                                            }}
+                                        >
                                             <Text style={styles.draftDate}>
                                                 {new Date(draft.createdAt).toLocaleDateString()}
                                             </Text>
                                             <Text style={styles.draftText} numberOfLines={2}>
                                                 {draft.caption || draft.textBody || 'No text'}
                                             </Text>
-                                        </View>
+                                        </TouchableOpacity>
                                         <TouchableOpacity
                                             onPress={() => handleDeleteDraft(draft.id)}
                                             style={styles.deleteButton}
@@ -416,6 +466,71 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                 <Text style={styles.emptyText}>No drafts yet</Text>
                             )}
                         </ScrollView>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Edit Profile Modal */}
+            <Modal
+                visible={editProfileOpen}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => setEditProfileOpen(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Edit Profile</Text>
+                            <TouchableOpacity onPress={() => setEditProfileOpen(false)}>
+                                <Icon name="close" size={24} color="#FFFFFF" />
+                            </TouchableOpacity>
+                        </View>
+                        <View style={styles.modalBody}>
+                            <Text style={styles.inputLabel}>Display name</Text>
+                            <TextInput
+                                style={styles.wordInput}
+                                value={profileNameDraft}
+                                onChangeText={setProfileNameDraft}
+                                placeholder="Enter display name"
+                                placeholderTextColor="#6B7280"
+                            />
+
+                            <Text style={styles.inputLabel}>Bio</Text>
+                            <TextInput
+                                style={[styles.wordInput, { minHeight: 84, textAlignVertical: 'top' }]}
+                                value={profileBioDraft}
+                                onChangeText={setProfileBioDraft}
+                                placeholder="Tell people about yourself"
+                                placeholderTextColor="#6B7280"
+                                multiline
+                                maxLength={220}
+                            />
+
+                            <Text style={styles.inputLabel}>Website</Text>
+                            <TextInput
+                                style={styles.wordInput}
+                                value={profileWebsiteDraft}
+                                onChangeText={setProfileWebsiteDraft}
+                                placeholder="https://"
+                                placeholderTextColor="#6B7280"
+                                autoCapitalize="none"
+                            />
+
+                            <View style={styles.sheetActionsRow}>
+                                <TouchableOpacity
+                                    style={styles.smallActionButton}
+                                    onPress={() => setEditProfileOpen(false)}
+                                >
+                                    <Text style={styles.smallActionButtonText}>Cancel</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={styles.addWordButton}
+                                    onPress={() => { void handleSaveProfileEdits(); }}
+                                >
+                                    <Text style={styles.addWordButtonText}>Save</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
                     </View>
                 </View>
             </Modal>
@@ -796,7 +911,7 @@ const styles = StyleSheet.create({
     },
     profileSection: {
         paddingHorizontal: 16,
-        paddingVertical: 20,
+        paddingVertical: 16,
     },
     profileInfo: {
         flexDirection: 'row',
@@ -825,7 +940,7 @@ const styles = StyleSheet.create({
     statsContainer: {
         flexDirection: 'row',
         justifyContent: 'space-around',
-        marginBottom: 20,
+        marginBottom: 16,
     },
     statItem: {
         alignItems: 'center',
@@ -842,16 +957,16 @@ const styles = StyleSheet.create({
     },
     editButton: {
         backgroundColor: '#1F2937',
-        paddingVertical: 10,
-        paddingHorizontal: 24,
-        borderRadius: 8,
+        paddingVertical: 9,
+        paddingHorizontal: 20,
+        borderRadius: 9,
         alignSelf: 'center',
         borderWidth: 1,
         borderColor: '#374151',
     },
     editButtonText: {
-        fontSize: 16,
-        fontWeight: '500',
+        fontSize: 15,
+        fontWeight: '600',
         color: '#FFFFFF',
     },
     postsSection: {
@@ -992,7 +1107,8 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
     },
     modalBody: {
-        padding: 16,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
     },
     draftItem: {
         flexDirection: 'row',
@@ -1069,8 +1185,8 @@ const styles = StyleSheet.create({
     safetySection: {
         backgroundColor: '#111827',
         borderRadius: 10,
-        padding: 12,
-        marginBottom: 12,
+        padding: 11,
+        marginBottom: 10,
         borderWidth: 1,
         borderColor: '#1F2937',
     },
@@ -1167,6 +1283,12 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         fontSize: 12,
         fontWeight: '700',
+    },
+    sheetActionsRow: {
+        marginTop: 14,
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        columnGap: 8,
     },
     wordChipWrap: {
         flexDirection: 'row',

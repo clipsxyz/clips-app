@@ -7933,8 +7933,7 @@ function FeedPageWrapper() {
             }}
             showBoostIcon={user?.handle === p.userHandle && !p.originalUserHandle}
             onBoost={async () => {
-              // Keep boost entry visible from feed cards; route to Boost page.
-              navigate('/boost');
+              showToast('Boost is managed in the mobile app.');
             }}
             onDelete={user?.handle === p.userHandle && !p.originalUserHandle ? async () => {
               const result = await Swal.fire(bottomSheet({
@@ -8498,7 +8497,10 @@ function FeedPageWrapper() {
               setShareModalOpen(true);
             }}
             onOpenComments={() => handleOpenComments(p.id)}
-            onBoost={() => { navigate('/boost'); }}
+            onBoost={async () => {
+              showToast('Boost is managed in the mobile app.');
+            }}
+            
             onReclip={async () => {
               if (p.userHandle === user?.handle) return;
               if (p.userReclipped) return;
@@ -8559,6 +8561,7 @@ function BoostPageWrapper() {
   const [boostFilter, setBoostFilter] = React.useState<'all' | 'ready' | 'active' | 'ended'>('all');
   const [boostSort, setBoostSort] = React.useState<'best' | 'recent'>('best');
   const [insightsRange, setInsightsRange] = React.useState<'24h' | '7d' | 'all'>('24h');
+  const boostInsightsCacheRef = React.useRef<Map<string, { data: any; ts: number }>>(new Map());
 
   // Load only the current user's posts (no mock users)
   React.useEffect(() => {
@@ -8741,9 +8744,40 @@ function BoostPageWrapper() {
     }).join('');
   }, []);
 
+  const getBoostInsightsCached = React.useCallback(async (postId: string) => {
+    const key = `${insightsRange}:${postId}`;
+    const cached = boostInsightsCacheRef.current.get(key);
+    const ttlMs = 60 * 1000;
+    if (cached && Date.now() - cached.ts < ttlMs) {
+      return cached.data;
+    }
+    const data = await getBoostAnalytics(postId, insightsRange);
+    boostInsightsCacheRef.current.set(key, { data, ts: Date.now() });
+    return data;
+  }, [insightsRange]);
+
+  React.useEffect(() => {
+    // Prefetch a small set of visible posts so "View insights" feels instant.
+    sortedBoostPosts.slice(0, 8).forEach((p) => {
+      void getBoostInsightsCached(p.id).catch(() => {});
+    });
+  }, [sortedBoostPosts, getBoostInsightsCached]);
+
   const handleViewBoostInsights = React.useCallback(async (post: Post) => {
-    try {
-      const data = await getBoostAnalytics(post.id, insightsRange);
+    const firstMediaItem = Array.isArray(post.mediaItems) && post.mediaItems.length > 0
+      ? post.mediaItems.find((m) => (m.type === 'image' || m.type === 'video') && !!m.url) ?? post.mediaItems[0]
+      : null;
+    const previewUrl = firstMediaItem?.url || post.mediaUrl || '';
+    const previewType = (firstMediaItem?.type || post.mediaType || 'text') as 'image' | 'video' | 'text';
+    const previewHandle = post.userHandle || 'Post';
+    const previewText = (post.text || post.caption || post.imageText || '').trim();
+    const previewTextSafe = previewText
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
+    const renderInsightsSheet = (data: any, loading = false) => {
       const metrics = data?.analytics ?? {
         impressions: 0,
         likes: 0,
@@ -8758,23 +8792,12 @@ function BoostPageWrapper() {
       const statusClass = data?.isActive
         ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40'
         : 'bg-gray-500/20 text-gray-300 border-gray-400/30';
-      const firstMediaItem = Array.isArray(post.mediaItems) && post.mediaItems.length > 0
-        ? post.mediaItems.find((m) => (m.type === 'image' || m.type === 'video') && !!m.url) ?? post.mediaItems[0]
-        : null;
-      const previewUrl = firstMediaItem?.url || post.mediaUrl || '';
-      const previewType = (firstMediaItem?.type || post.mediaType || 'text') as 'image' | 'video' | 'text';
-      const previewHandle = post.userHandle || 'Post';
-      const previewText = (post.text || post.caption || post.imageText || '').trim();
-      const previewTextSafe = previewText
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
 
-      await Swal.fire(bottomSheet({
+      return bottomSheet({
         title: 'Boost insights',
         html: `
           <div class="mt-2 text-left space-y-2.5">
+            ${loading ? '<div class="rounded-xl border border-sky-400/30 bg-sky-500/10 px-3 py-2 text-xs text-sky-100">Updating with latest analytics…</div>' : ''}
             <div class="rounded-xl border border-white/10 bg-white/[0.03] p-2.5">
               <div class="flex items-center gap-2.5">
                 <div class="w-12 h-12 rounded-lg overflow-hidden border border-white/15 bg-black/30 shrink-0">
@@ -8836,15 +8859,43 @@ function BoostPageWrapper() {
         `,
         icon: 'info',
         confirmButtonText: 'Close',
-      }));
+      });
+    };
+
+    const quickData = {
+      hasBoost: !!post.isBoosted || !!post.boostFeedType,
+      isActive: !!post.isBoosted,
+      spendEur: 0,
+      analytics: {
+        impressions: Number(post.stats.views || 0),
+        likes: Number(post.stats.likes || 0),
+        comments: Number(post.stats.comments || 0),
+        shares: Number(post.stats.shares || 0),
+        profileVisits: 0,
+        messageStarts: 0,
+        sourceMatchedEventsCount: 0,
+        trend: { impressions: [] },
+      },
+    };
+
+    void Swal.fire(renderInsightsSheet(quickData, true));
+
+    try {
+      const data = await getBoostInsightsCached(post.id);
+      if (Swal.isVisible()) {
+        Swal.update(renderInsightsSheet(data, false));
+      }
     } catch (err) {
-      await Swal.fire(bottomSheet({
-        title: 'Could not load insights',
-        message: err instanceof Error ? err.message : 'Please try again.',
-        icon: 'alert',
-      }));
+      if (Swal.isVisible()) {
+        Swal.update(bottomSheet({
+          title: 'Could not load insights',
+          message: err instanceof Error ? err.message : 'Please try again.',
+          icon: 'alert',
+          confirmButtonText: 'Close',
+        }));
+      }
     }
-  }, [insightsRange, sparklineBars]);
+  }, [getBoostInsightsCached, insightsRange, sparklineBars]);
 
   // Not logged in
   if (!user) {
