@@ -32,6 +32,8 @@ export default function TextOnlyPostPage() {
     const [tagSearchLoading, setTagSearchLoading] = useState(false);
     const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(locationState?.templateId || null);
     const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+    const [showTemplateCue, setShowTemplateCue] = useState(false);
+    const [showTemplateBurst, setShowTemplateBurst] = useState(false);
 
     const activeTemplate: TextStoryTemplate | undefined = selectedTemplateId
         ? TEXT_STORY_TEMPLATES.find((t) => t.id === selectedTemplateId)
@@ -47,6 +49,20 @@ export default function TextOnlyPostPage() {
         const nextHeight = Math.min(el.scrollHeight, 400); // cap height so page layout stays usable
         el.style.height = `${nextHeight}px`;
     }, [text]);
+
+    useEffect(() => {
+        const appears = window.setTimeout(() => setShowTemplateCue(true), 500);
+        const bursts = window.setTimeout(() => setShowTemplateBurst(true), 3400);
+        const hides = window.setTimeout(() => {
+            setShowTemplateCue(false);
+            setShowTemplateBurst(false);
+        }, 4300);
+        return () => {
+            window.clearTimeout(appears);
+            window.clearTimeout(bursts);
+            window.clearTimeout(hides);
+        };
+    }, []);
 
     useEffect(() => {
         if (!tagSearchQuery.trim()) {
@@ -261,13 +277,20 @@ export default function TextOnlyPostPage() {
                         >
                             Cancel
                         </button>
-                        <button
-                            onClick={() => setShowTemplatePicker(true)}
-                            className={`p-1.5 rounded-full text-white transition-colors border border-white/40 ${selectedTemplateId ? 'bg-white/10' : 'hover:bg-white/10'}`}
-                            aria-label="Choose template"
-                        >
-                            <FiLayers className="w-5 h-5" />
-                        </button>
+                        <div className="relative">
+                            {showTemplateCue && (
+                                <span className={`contribute-badge-pop absolute top-full mt-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-2xl border border-white/80 bg-gradient-to-r from-[#f6e27a] via-[#d4af37] to-[#d8dde3] text-[#111827] text-[11px] font-bold px-3.5 py-1 shadow-[0_8px_20px_rgba(212,175,55,0.42)] ${showTemplateBurst ? 'contribute-badge-burst' : ''}`}>
+                                    <span>Try template</span>
+                                </span>
+                            )}
+                            <button
+                                onClick={() => setShowTemplatePicker(true)}
+                                className={`p-1.5 rounded-full text-white transition-colors border border-white/40 ${selectedTemplateId ? 'bg-white/10' : 'hover:bg-white/10'}`}
+                                aria-label="Choose template"
+                            >
+                                <FiLayers className="w-5 h-5" />
+                            </button>
+                        </div>
                     </div>
                     <div className="flex items-center gap-3">
                         <button
