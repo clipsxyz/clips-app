@@ -9,7 +9,7 @@ import QRCode from 'qrcode';
 import Flag from '../components/Flag';
 import { getUserCollections } from '../api/collections';
 import type { Collection } from '../types';
-import { approveHiddenComment, deleteHiddenComment, deletePost, fetchHiddenCommentsForOwner, getFollowedUsers, posts, type HiddenCommentReviewItem } from '../api/posts';
+import { addComment, addReply, approveHiddenComment, deleteHiddenComment, deletePost, fetchComments, fetchHiddenCommentsForOwner, getFollowedUsers, posts, toggleCommentLike, toggleLike, toggleReplyLike, type HiddenCommentReviewItem } from '../api/posts';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 import { showToast } from '../utils/toast';
@@ -18,7 +18,7 @@ import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMap
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
 import { getUnreadTotal } from '../api/messages';
 import { fetchFollowers, fetchFollowing, updateAuthProfile, mapLaravelUserToAppFields, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, toggleFollow, type FacebookMatchedFriend, matchContactPhones } from '../api/client';
-import type { Post, User } from '../types';
+import type { Comment, Post, User } from '../types';
 import { getAvatarForHandle } from '../api/users';
 import { loginWithFacebookWeb } from '../services/facebookAuthWeb';
 import { 
@@ -36,6 +36,7 @@ import {
   setCommentModerationPreferences,
   type CommentModerationPreferences,
 } from '../utils/commentModeration';
+import splashLogo from '../assets/gazetteer-splash-logo.png';
 
 // Card image: show illustration from /profile-cards/ when present (.svg or .png), else fall back to icon
 function ProfileCardImage({ imagePath, icon }: { imagePath: string; icon: React.ReactNode }) {
@@ -134,14 +135,18 @@ export default function ProfilePage() {
   const [contactsSyncing, setContactsSyncing] = React.useState(false);
   const [draftsOpen, setDraftsOpen] = React.useState(false);
   const [myFeedOpen, setMyFeedOpen] = React.useState(false);
-  const [myFeedVisible, setMyFeedVisible] = React.useState(false);
-  const [myFeedDragY, setMyFeedDragY] = React.useState(0);
   const [myFeedSelectedPost, setMyFeedSelectedPost] = React.useState<Post | null>(null);
+  const [myFeedCommentsOpen, setMyFeedCommentsOpen] = React.useState(false);
+  const [myFeedCommentsPost, setMyFeedCommentsPost] = React.useState<Post | null>(null);
+  const [myFeedComments, setMyFeedComments] = React.useState<Comment[]>([]);
+  const [myFeedCommentsLoading, setMyFeedCommentsLoading] = React.useState(false);
+  const [myFeedCommentDraft, setMyFeedCommentDraft] = React.useState('');
+  const [myFeedReplyingTo, setMyFeedReplyingTo] = React.useState<string | null>(null);
+  const [myFeedReplyDraft, setMyFeedReplyDraft] = React.useState('');
   const [myFeedRefreshTick, setMyFeedRefreshTick] = React.useState(0);
   const [myFeedEditedPostIds, setMyFeedEditedPostIds] = React.useState<Record<string, true>>({});
   const [myFeedOpeningPostId, setMyFeedOpeningPostId] = React.useState<string | null>(null);
-  const myFeedTouchStartYRef = React.useRef<number | null>(null);
-  const myFeedSheetRef = React.useRef<HTMLDivElement | null>(null);
+  const myFeedListRef = React.useRef<HTMLDivElement | null>(null);
   const [drafts, setDrafts] = React.useState<Draft[]>([]);
   const [isPrivate, setIsPrivate] = React.useState(user?.is_private || false);
   const [isTogglingPrivacy, setIsTogglingPrivacy] = React.useState(false);
@@ -164,6 +169,8 @@ export default function ProfilePage() {
   const [loadingHiddenCommentQueue, setLoadingHiddenCommentQueue] = React.useState(false);
   const [hiddenQueueFilter, setHiddenQueueFilter] = React.useState<'all' | 'comments' | 'replies'>('all');
   const [isInitializingNotifications, setIsInitializingNotifications] = React.useState(false);
+  const quickRailRef = React.useRef<HTMLDivElement | null>(null);
+  const [showQuickRailHint, setShowQuickRailHint] = React.useState(true);
   const ownProfileHandle = React.useMemo(() => (user?.handle || '').replace(/^@/, ''), [user?.handle]);
   const normalizedOwnHandle = React.useMemo(
     () => ownProfileHandle.trim().toLowerCase(),
@@ -202,6 +209,26 @@ export default function ProfilePage() {
   }, [settingsOpen, user?.handle]);
 
   React.useEffect(() => {
+    const el = quickRailRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      if (el.scrollLeft > 8) setShowQuickRailHint(false);
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    const t = window.setTimeout(() => {
+      // Gentle nudge so users notice horizontal scrolling.
+      if (el.scrollWidth > el.clientWidth && el.scrollLeft < 1) {
+        el.scrollTo({ left: 28, behavior: 'smooth' });
+        window.setTimeout(() => el.scrollTo({ left: 0, behavior: 'smooth' }), 320);
+      }
+    }, 500);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      window.clearTimeout(t);
+    };
+  }, []);
+
+  React.useEffect(() => {
     const onLocalPostCreated = () => {
       setMyFeedRefreshTick((v) => v + 1);
     };
@@ -209,20 +236,9 @@ export default function ProfilePage() {
     return () => window.removeEventListener('localPostCreated', onLocalPostCreated);
   }, []);
 
-  React.useEffect(() => {
-    if (!myFeedOpen) {
-      setMyFeedVisible(false);
-      return;
-    }
-    const frame = window.requestAnimationFrame(() => setMyFeedVisible(true));
-    return () => window.cancelAnimationFrame(frame);
-  }, [myFeedOpen]);
-
   const closeMyFeed = React.useCallback(() => {
-    setMyFeedVisible(false);
-    setMyFeedDragY(0);
     setMyFeedSelectedPost(null);
-    window.setTimeout(() => setMyFeedOpen(false), 180);
+    setMyFeedOpen(false);
   }, []);
 
   const handleDeleteMyFeedPost = React.useCallback(async () => {
@@ -253,11 +269,44 @@ export default function ProfilePage() {
     }
   }, [myFeedSelectedPost, user?.id, user?.handle]);
 
+  const handleDeleteMyFeedPostFromCard = React.useCallback(
+    async (post: Post) => {
+      if (!post?.id || !user?.id) return;
+      const result = await Swal.fire(
+        bottomSheet({
+          title: 'Delete post?',
+          message: "This can't be undone.",
+          icon: 'alert',
+          showCancelButton: true,
+          confirmButtonText: 'Delete',
+          cancelButtonText: 'Cancel',
+        })
+      );
+      if (!result.isConfirmed) return;
+      try {
+        await deletePost(String(user.id), post.id, user?.handle);
+        setMyFeedRefreshTick((v) => v + 1);
+        if (myFeedSelectedPost?.id === post.id) {
+          setMyFeedSelectedPost(null);
+        }
+      } catch (err) {
+        Swal.fire(
+          bottomSheet({
+            title: 'Could not delete post',
+            message: err instanceof Error ? err.message : 'Please try again.',
+            icon: 'alert',
+          })
+        );
+      }
+    },
+    [myFeedSelectedPost?.id, user?.handle, user?.id]
+  );
+
   const openMyFeedPost = React.useCallback((post: Post) => {
     setMyFeedOpeningPostId(post.id);
-    const sheet = myFeedSheetRef.current;
-    if (sheet) {
-      sheet.scrollTo({ top: 0, behavior: 'smooth' });
+    const list = myFeedListRef.current;
+    if (list) {
+      list.scrollTo({ top: 0, behavior: 'smooth' });
     }
     window.setTimeout(() => {
       setMyFeedSelectedPost(post);
@@ -265,27 +314,81 @@ export default function ProfilePage() {
     }, 140);
   }, []);
 
-
-  const handleMyFeedTouchStart = React.useCallback((event: React.TouchEvent<HTMLDivElement>) => {
-    myFeedTouchStartYRef.current = event.touches[0]?.clientY ?? null;
-  }, []);
-
-  const handleMyFeedTouchMove = React.useCallback((event: React.TouchEvent<HTMLDivElement>) => {
-    const startY = myFeedTouchStartYRef.current;
-    if (startY == null) return;
-    const currentY = event.touches[0]?.clientY ?? startY;
-    const delta = Math.max(0, currentY - startY);
-    setMyFeedDragY(delta);
-  }, []);
-
-  const handleMyFeedTouchEnd = React.useCallback(() => {
-    if (myFeedDragY > 90) {
-      closeMyFeed();
-    } else {
-      setMyFeedDragY(0);
+  const openMyFeedComments = React.useCallback(async (post: Post) => {
+    setMyFeedCommentsPost(post);
+    setMyFeedCommentsOpen(true);
+    setMyFeedCommentDraft('');
+    setMyFeedReplyingTo(null);
+    setMyFeedReplyDraft('');
+    setMyFeedCommentsLoading(true);
+    try {
+      const rows = await fetchComments(post.id);
+      setMyFeedComments(Array.isArray(rows) ? rows : []);
+    } catch (error) {
+      console.error('Error loading My feed comments:', error);
+      setMyFeedComments([]);
+    } finally {
+      setMyFeedCommentsLoading(false);
     }
-    myFeedTouchStartYRef.current = null;
-  }, [closeMyFeed, myFeedDragY]);
+  }, []);
+
+  const handleAddMyFeedComment = React.useCallback(async () => {
+    if (!user?.handle || !myFeedCommentsPost?.id) return;
+    const text = myFeedCommentDraft.trim();
+    if (!text) return;
+    try {
+      const created = await addComment(myFeedCommentsPost.id, user.handle, text);
+      setMyFeedComments((prev) => [...prev, created]);
+      setMyFeedCommentDraft('');
+      setMyFeedRefreshTick((v) => v + 1);
+    } catch (error) {
+      console.error('Error adding My feed comment:', error);
+      showToast('Could not add comment right now.');
+    }
+  }, [myFeedCommentDraft, myFeedCommentsPost?.id, user?.handle]);
+
+  const handleToggleMyFeedCommentLike = React.useCallback(async (commentId: string) => {
+    try {
+      const updated = await toggleCommentLike(commentId);
+      setMyFeedComments((prev) => prev.map((c) => (c.id === commentId ? updated : c)));
+    } catch (error) {
+      console.error('Error toggling my feed comment like:', error);
+    }
+  }, []);
+
+  const handleAddMyFeedReply = React.useCallback(async () => {
+    if (!myFeedCommentsPost?.id || !myFeedReplyingTo || !user?.handle) return;
+    const text = myFeedReplyDraft.trim();
+    if (!text) return;
+    try {
+      const reply = await addReply(myFeedCommentsPost.id, myFeedReplyingTo, user.handle, text);
+      setMyFeedComments((prev) =>
+        prev.map((c) =>
+          c.id === myFeedReplyingTo
+            ? {
+                ...c,
+                replies: [...(c.replies || []), reply],
+                replyCount: (c.replyCount || 0) + 1,
+              }
+            : c
+        )
+      );
+      setMyFeedReplyDraft('');
+      setMyFeedReplyingTo(null);
+    } catch (error) {
+      console.error('Error adding my feed reply:', error);
+      showToast('Could not add reply right now.');
+    }
+  }, [myFeedCommentsPost?.id, myFeedReplyDraft, myFeedReplyingTo, user?.handle]);
+
+  const handleToggleMyFeedReplyLike = React.useCallback(async (parentId: string, replyId: string) => {
+    try {
+      const updatedParent = await toggleReplyLike(parentId, replyId);
+      setMyFeedComments((prev) => prev.map((c) => (c.id === parentId ? updatedParent : c)));
+    } catch (error) {
+      console.error('Error toggling my feed reply like:', error);
+    }
+  }, []);
   
   // Location state for cascading dropdowns
   const [national, setNational] = React.useState(user?.national || '');
@@ -1103,8 +1206,12 @@ export default function ProfilePage() {
           </div>
 
           {/* Quick actions rail: horizontal snap chips */}
-          <div className="border-t border-gray-800 mt-3 pt-3">
-            <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide pb-1 px-0.5" style={{ scrollSnapType: 'x mandatory' }}>
+          <div className="border-t border-gray-800 mt-3 pt-3 relative">
+            <div
+              ref={quickRailRef}
+              className="flex items-center gap-2 overflow-x-auto scrollbar-hide pb-1 px-0.5"
+              style={{ scrollSnapType: 'x mandatory' }}
+            >
               <button
                 type="button"
                 onClick={(e) => {
@@ -1282,6 +1389,15 @@ export default function ProfilePage() {
                 <span className="text-xs font-semibold">Settings</span>
               </button>
             </div>
+            {showQuickRailHint && (
+              <>
+                <div className="pointer-events-none absolute right-0 top-3 bottom-6 w-10 bg-gradient-to-l from-[#020617] to-transparent" />
+                <div className="pointer-events-none absolute right-2 top-[54px] text-gray-400 text-[11px] inline-flex items-center gap-1">
+                  <span>Swipe</span>
+                  <span aria-hidden>›</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -2280,94 +2396,126 @@ export default function ProfilePage() {
 
         {/* My Feed Modal */}
         {myFeedOpen && (
-          <div
-            className={`fixed inset-0 z-[220] backdrop-blur-sm flex items-end justify-center p-0 sm:p-4 transition-colors duration-200 ${
-              myFeedVisible ? 'bg-black/60' : 'bg-black/0'
-            }`}
-            onClick={closeMyFeed}
-          >
+          <div className="fixed inset-0 z-[220] bg-[#020617]">
             <div
-              className={`bg-[#020617] border border-white/10 rounded-t-3xl sm:rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl transition-transform duration-200 ${
-                myFeedVisible ? 'translate-y-0' : 'translate-y-full sm:translate-y-8'
-              }`}
-              ref={myFeedSheetRef}
-              style={{
-                transform: myFeedVisible
-                  ? `translateY(${myFeedDragY}px)`
-                  : undefined,
-                transitionDuration: myFeedDragY > 0 ? '0ms' : undefined,
-              }}
-              onClick={(e) => e.stopPropagation()}
+              ref={myFeedListRef}
+              className="h-full overflow-y-auto"
             >
-              <div className="sticky top-0 z-30 bg-[#020617] border-b border-white/10 px-6 py-3">
-                <div
-                  className="flex justify-center pb-2 touch-none"
-                  onTouchStart={handleMyFeedTouchStart}
-                  onTouchMove={handleMyFeedTouchMove}
-                  onTouchEnd={handleMyFeedTouchEnd}
-                  onTouchCancel={handleMyFeedTouchEnd}
-                >
-                  <div className="w-12 h-1 bg-white/30 rounded-full" />
-                </div>
-                <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-gray-100">My Feed</h2>
+              <div className="sticky top-0 z-30 bg-[#020617]/95 backdrop-blur border-b border-white/10 px-4 py-3">
+                <div className="mx-auto w-full max-w-2xl flex items-center justify-between gap-3">
+                  <div className="inline-flex items-center gap-2">
+                    <img src={splashLogo} alt="Gazetteer" className="w-8 h-8 object-contain rounded-lg bg-white/5 p-1" />
+                    <h2 className="text-xl font-bold text-gray-100">My feed</h2>
+                  </div>
                   <button onClick={closeMyFeed} className="p-2 bg-white text-black hover:bg-gray-100 rounded-full transition-colors" aria-label="Close My Feed">
                     <FiX className="w-6 h-6 text-black" />
                   </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={closeMyFeed}
-                  className="relative z-40 mt-3 w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-gray-200 bg-white text-black font-semibold hover:bg-gray-100 transition-colors flex items-center justify-center gap-2"
-                  aria-label="Close tiles"
-                  title="Close tiles"
-                >
-                  <FiX className="w-4 h-4" />
-                  Close tiles
-                </button>
               </div>
-              <div className="p-4 pb-6">
+              <div className="mx-auto w-full max-w-2xl p-4 pb-10">
                 {myFeedOpeningPostId && (
                   <div className="mb-3 text-xs font-semibold text-sky-200 bg-sky-500/15 border border-sky-400/30 rounded-lg px-3 py-2">
                     Opening post...
                   </div>
                 )}
                 {myFeedPosts.length > 0 ? (
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="space-y-3">
                     {myFeedPosts.map((post) => {
                       const firstMedia = post.mediaItems?.[0];
                       const thumb = firstMedia?.url || post.mediaUrl || '';
                       const isImage = firstMedia?.type === 'image' || post.mediaType === 'image';
                       const isVideo = firstMedia?.type === 'video' || post.mediaType === 'video';
                       const textPreview = (post.text || '').trim();
+                      const displayName = (post.userHandle || user?.handle || '@you').replace(/^@/, '');
                       return (
-                        <button
-                          key={post.id}
-                          type="button"
-                          onClick={() => openMyFeedPost(post)}
-                          className="relative aspect-square rounded-lg overflow-hidden bg-[#111827] border border-white/10 hover:opacity-95 transition-opacity"
-                          title="Open post"
-                        >
-                          {thumb && isImage ? (
-                            <img src={thumb} alt="My post" className="w-full h-full object-cover" />
-                          ) : textPreview.length > 0 && !isVideo ? (
-                            <div className="w-full h-full bg-gradient-to-br from-gray-900 to-gray-700 p-2.5 flex items-start">
-                              <p className="text-white text-[11px] leading-4 line-clamp-6 text-left">{textPreview}</p>
+                        <article key={post.id} className="rounded-2xl border border-white/10 bg-[#111827] overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => openMyFeedPost(post)}
+                            className="w-full text-left"
+                            title="Open post"
+                          >
+                            <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <Avatar
+                                  name={displayName}
+                                  src={user?.avatarUrl || getAvatarForHandle(post.userHandle || user?.handle || '@you')}
+                                  size={34}
+                                />
+                                <div className="min-w-0">
+                                  <p className="text-sm text-white font-semibold truncate">{displayName}</p>
+                                  <p className="text-xs text-gray-400 truncate">{new Date(post.createdAt).toLocaleString()}</p>
+                                </div>
+                              </div>
+                              {myFeedEditedPostIds[post.id] && (
+                                <span className="px-2 py-0.5 rounded bg-blue-600/90 text-white text-[10px] font-semibold">
+                                  Edited
+                                </span>
+                              )}
                             </div>
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center bg-[#111827] text-gray-400">
-                              {isVideo ? <FiVideo className="w-6 h-6" /> : <FiType className="w-6 h-6" />}
+                            {thumb && isImage ? (
+                              <img src={thumb} alt="My post" className="w-full max-h-[520px] object-cover bg-black" />
+                            ) : thumb && isVideo ? (
+                              <video src={thumb} className="w-full max-h-[520px] object-cover bg-black" muted playsInline />
+                            ) : (
+                              <div className="p-4 bg-gradient-to-br from-gray-900 to-gray-700">
+                                <p className="text-white text-sm whitespace-pre-wrap">{textPreview || 'No text'}</p>
+                              </div>
+                            )}
+                            {(post.caption || (post.text && thumb)) && (
+                              <div className="px-4 py-3">
+                                <p className="text-sm text-gray-200 whitespace-pre-wrap">{post.caption || post.text}</p>
+                              </div>
+                            )}
+                            <div className="px-4 py-3 border-t border-white/10 flex items-center gap-4 text-xs text-gray-300">
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  if (!user?.id) return;
+                                  void (async () => {
+                                    try {
+                                      const updated = await toggleLike(String(user.id), post.id, post);
+                                      const nextLikes = updated.stats?.likes ?? post.stats?.likes ?? 0;
+                                      post.stats = { ...post.stats, likes: nextLikes };
+                                      setMyFeedRefreshTick((v) => v + 1);
+                                    } catch (error) {
+                                      console.error('Failed to like my feed post:', error);
+                                    }
+                                  })();
+                                }}
+                                className="inline-flex items-center gap-1 hover:text-white transition-colors"
+                                aria-label="Like post"
+                              >
+                                <FiThumbsUp className="w-4 h-4" /> {post.stats?.likes ?? 0}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void openMyFeedComments(post);
+                                }}
+                                className="inline-flex items-center gap-1 hover:text-white transition-colors"
+                                aria-label="Open comments"
+                              >
+                                <FiMessageCircle className="w-4 h-4" /> {post.stats?.comments ?? 0}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void handleDeleteMyFeedPostFromCard(post);
+                                }}
+                                className="ml-auto inline-flex items-center gap-1 rounded-md border border-red-300/30 bg-red-500/10 px-2 py-1 text-red-200 hover:bg-red-500/20 transition-colors"
+                                aria-label="Delete post"
+                                title="Delete post"
+                              >
+                                <FiX className="w-3.5 h-3.5" />
+                                Delete
+                              </button>
                             </div>
-                          )}
-                          <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px]">
-                            {post.stats?.likes ?? 0} likes
-                          </div>
-                          {myFeedEditedPostIds[post.id] && (
-                            <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-blue-600/90 text-white text-[10px] font-semibold">
-                              Edited
-                            </div>
-                          )}
-                        </button>
+                          </button>
+                        </article>
                       );
                     })}
                   </div>
@@ -2442,6 +2590,100 @@ export default function ProfilePage() {
                       >
                         Delete post
                       </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {myFeedCommentsOpen && (
+                <div className="fixed inset-0 z-[235] bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setMyFeedCommentsOpen(false)}>
+                  <div className="bg-black border-2 border-white w-full sm:max-w-lg rounded-t-3xl sm:rounded-2xl max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                    <div className="sticky top-0 bg-black border-b-2 border-white px-4 py-3 flex items-center justify-between">
+                      <h3 className="text-lg font-semibold text-gray-100">
+                        {myFeedComments.length} {myFeedComments.length === 1 ? 'comment' : 'comments'}
+                      </h3>
+                      <button
+                        onClick={() => setMyFeedCommentsOpen(false)}
+                        className="p-2 bg-white text-black hover:bg-gray-100 rounded-full transition-colors"
+                        aria-label="Close comments"
+                      >
+                        <FiX className="w-5 h-5 text-black" />
+                      </button>
+                    </div>
+                    <div className="p-4 space-y-3">
+                      {myFeedCommentsLoading ? (
+                        <p className="text-sm text-gray-300">Loading comments...</p>
+                      ) : myFeedComments.length === 0 ? (
+                        <p className="text-sm text-gray-400">No comments yet.</p>
+                      ) : (
+                        <div className="space-y-3 max-h-[42vh] overflow-y-auto pr-1">
+                          {myFeedComments.map((comment) => (
+                            <div key={comment.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                              <p className="text-xs font-semibold text-gray-100">{comment.userHandle || 'User'}</p>
+                              <p className="text-sm text-gray-200 mt-1 whitespace-pre-wrap">{comment.text || ''}</p>
+                              <div className="mt-2 flex items-center gap-3 text-xs">
+                                <button
+                                  type="button"
+                                  onClick={() => { void handleToggleMyFeedCommentLike(comment.id); }}
+                                  className="text-sky-300 hover:text-sky-200 transition-colors"
+                                >
+                                  {(comment.userLiked ? 'Unlike' : 'Like')} ({comment.likes ?? 0})
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setMyFeedReplyingTo(comment.id)}
+                                  className="text-sky-300 hover:text-sky-200 transition-colors"
+                                >
+                                  Reply ({comment.replyCount ?? 0})
+                                </button>
+                              </div>
+                              {Array.isArray(comment.replies) && comment.replies.length > 0 && (
+                                <div className="mt-2 pl-3 border-l border-white/10 space-y-2">
+                                  {comment.replies.map((reply) => (
+                                    <div key={reply.id}>
+                                      <p className="text-[11px] font-semibold text-gray-300">{reply.userHandle || 'User'}</p>
+                                      <p className="text-xs text-gray-300">{reply.text || ''}</p>
+                                      <button
+                                        type="button"
+                                        onClick={() => { void handleToggleMyFeedReplyLike(comment.id, reply.id); }}
+                                        className="mt-1 text-[11px] text-sky-300 hover:text-sky-200 transition-colors"
+                                      >
+                                        {(reply.userLiked ? 'Unlike' : 'Like')} ({reply.likes ?? 0})
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {myFeedReplyingTo && (
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                          <input
+                            value={myFeedReplyDraft}
+                            onChange={(e) => setMyFeedReplyDraft(e.target.value)}
+                            placeholder="Write a reply..."
+                            className="w-full sm:flex-1 min-h-[42px] rounded-lg border border-white/20 bg-[#0b1220] px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-0 focus:border-white"
+                          />
+                          <div className="flex items-center justify-end gap-2">
+                            <button type="button" onClick={() => setMyFeedReplyingTo(null)} className="px-3 py-2 rounded-lg border border-white/20 text-gray-200 hover:bg-white/5">Cancel</button>
+                            <button type="button" onClick={() => { void handleAddMyFeedReply(); }} className="px-3 py-2 rounded-lg bg-white text-black font-semibold hover:bg-gray-100">Send</button>
+                          </div>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <input
+                          value={myFeedCommentDraft}
+                          onChange={(e) => setMyFeedCommentDraft(e.target.value)}
+                          placeholder="Add a comment..."
+                          className="flex-1 min-h-[42px] rounded-lg border border-white/20 bg-[#0b1220] px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-0 focus:border-white"
+                        />
+                        <button type="button" onClick={() => { void handleAddMyFeedComment(); }} className="px-3 py-2 rounded-lg bg-white text-black font-semibold hover:bg-gray-100">Post</button>
+                      </div>
+                      {myFeedCommentsPost && (
+                        <p className="text-[11px] text-gray-500">Commenting on post by {myFeedCommentsPost.userHandle}</p>
+                      )}
                     </div>
                   </div>
                 </div>

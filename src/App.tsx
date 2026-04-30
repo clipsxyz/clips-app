@@ -82,12 +82,50 @@ let lastFeedAutoplayAtMs = 0;
 
 type Tab = string; // Dynamic based on user location
 
-function BottomNav({ onCreateClick, onProfileClick }: { onCreateClick: () => void; onProfileClick?: () => void }) {
+function BottomNav({ onCreateClick, onInboxClick }: { onCreateClick: () => void; onInboxClick?: () => void }) {
   const nav = useNavigate();
   const loc = useLocation();
   const { user } = useAuth();
+  const [inboxBadgeCount, setInboxBadgeCount] = React.useState(0);
   const [showContributeCue, setShowContributeCue] = React.useState(false);
   const [showContributeBurst, setShowContributeBurst] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!user?.handle) {
+      setInboxBadgeCount(0);
+      return;
+    }
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const [notificationUnread, messageUnread] = await Promise.all([
+          getUnreadNotificationCount(user.handle).catch(() => 0),
+          getUnreadTotal(user.handle).catch(() => 0),
+        ]);
+        // Inbox can include both notifications and unread DMs.
+        if (!cancelled) setInboxBadgeCount(Math.max(0, notificationUnread + messageUnread));
+      } catch {
+        if (!cancelled) setInboxBadgeCount(0);
+      }
+    };
+    void refresh();
+    const interval = window.setInterval(() => {
+      void refresh();
+    }, 12000);
+    const onUpdate = () => {
+      void refresh();
+    };
+    window.addEventListener('notificationsUpdated', onUpdate as EventListener);
+    window.addEventListener('notificationCreated', onUpdate as EventListener);
+    window.addEventListener('focus', onUpdate as EventListener);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('notificationsUpdated', onUpdate as EventListener);
+      window.removeEventListener('notificationCreated', onUpdate as EventListener);
+      window.removeEventListener('focus', onUpdate as EventListener);
+    };
+  }, [user?.handle]);
 
   React.useEffect(() => {
     if (loc.pathname !== '/feed') {
@@ -143,6 +181,7 @@ function BottomNav({ onCreateClick, onProfileClick }: { onCreateClick: () => voi
   const item = (path: string, label: string, icon: React.ReactNode, onClick?: () => void, isCustomIcon?: boolean) => {
     const active = loc.pathname === path;
     const showContributeBadge = loc.pathname === '/feed' && path === '/create' && showContributeCue;
+    const showInboxBadge = path === '/inbox' && inboxBadgeCount > 0;
     
     // For custom icons (like profile), render as-is but wrap in square container
     if (isCustomIcon) {
@@ -180,6 +219,11 @@ function BottomNav({ onCreateClick, onProfileClick }: { onCreateClick: () => voi
       >
         <div className="relative">
           {createSquareIcon(icon, active)}
+          {showInboxBadge && (
+            <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] leading-4 font-bold text-center">
+              {inboxBadgeCount > 9 ? '9+' : inboxBadgeCount}
+            </span>
+          )}
           {showContributeBadge && (
             <span className={`contribute-badge-pop absolute -top-9 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-2xl border border-white/80 bg-gradient-to-r from-[#f6e27a] via-[#d4af37] to-[#d8dde3] text-[#111827] text-[11px] font-bold px-3.5 py-1 shadow-[0_8px_20px_rgba(212,175,55,0.42)] ${showContributeBurst ? 'contribute-badge-burst' : ''}`}>
               <span className="inline-flex items-center gap-1">
@@ -249,7 +293,7 @@ function BottomNav({ onCreateClick, onProfileClick }: { onCreateClick: () => voi
         {item('/discover', 'Discover', discoverFooterIcon, () => nav('/discover'), true)}
         {item('/create', 'Create', <FiPlusSquare size={16} />, onCreateClick)}
         {item('/search', 'Search', <FiSearch size={16} />)}
-        {item('/profile', 'Passport', profileIcon, onProfileClick, true)}
+        {item('/inbox', 'Inbox', <FiMessageSquare size={16} />, onInboxClick || (() => nav('/inbox')))}
       </div>
     </nav>
   );
@@ -343,7 +387,7 @@ export default function App() {
           && loc.pathname !== '/login' && (
             <BottomNav
             onCreateClick={() => navigate('/create/instant')}
-            onProfileClick={() => navigate('/profile')}
+            onInboxClick={() => navigate('/inbox')}
           />
           )}
       </main>
@@ -518,6 +562,7 @@ function PillTabs(props: {
   }, [user?.handle]);
 
   const hasAnyNotifications = notificationCount > 0 || insightsCount > 0 || questionsCount > 0;
+  const passportInitials = ((user?.name || user?.handle || 'U').trim().split(/\s+/).map((s) => s[0]).slice(0, 2).join('') || 'U').toUpperCase();
   const activeLabel = props.customLocation || (props.active === local ? 'Nearby' : props.active);
   const headerLabel = showGazetteerTitle ? 'Gazetteer' : activeLabel;
   const activeHeaderDotClass = props.customLocation
@@ -930,14 +975,23 @@ function PillTabs(props: {
 
           <button
             type="button"
-            aria-label="Notifications"
-            onClick={() => navigate('/inbox')}
-            className="relative h-10 w-10 inline-flex items-center justify-center rounded-full text-white focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+            aria-label="My Passport"
+            title="My Passport"
+            onClick={() => navigate('/profile')}
+            className="relative inline-flex flex-col items-center justify-center gap-1 text-white focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
           >
-            <FiBell className="w-5 h-5 text-white" />
-            {hasAnyNotifications && (
-              <span className="absolute top-[8px] right-[8px] h-2.5 w-2.5 rounded-full bg-red-500 ring-1 ring-[#030712]" />
-            )}
+            <span className="w-8 h-8 rounded-lg overflow-hidden bg-gray-700 flex items-center justify-center border-2 border-white">
+              {user?.avatarUrl ? (
+                <img
+                  src={user.avatarUrl}
+                  alt="My Passport"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span className="text-[10px] font-semibold text-white">{passportInitials}</span>
+              )}
+            </span>
+            <span className="text-[10px] leading-none font-medium text-white">Passport</span>
           </button>
         </div>
       </div>

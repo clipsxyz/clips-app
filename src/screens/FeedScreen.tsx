@@ -54,6 +54,8 @@ import type { Post, Comment } from '../types';
 import { getInstagramImageDimensions } from '../utils/imageDimensions';
 import { FEED_UI } from '../constants/feedUiTokens';
 import { Dimensions } from 'react-native';
+import FeedPostMeta from '../components/FeedPostMeta';
+import FeedEngagementRow from '../components/FeedEngagementRow';
 
 type Tab = string;
 
@@ -67,7 +69,7 @@ function PillTabs({
     userNational = 'Ireland',
     hasNotifications = false,
     onOpenBoost,
-    onOpenInbox,
+    onOpenPassport,
     onOpenDiscover,
     onSearchLocation,
     onClearCustom,
@@ -81,7 +83,7 @@ function PillTabs({
     userNational?: string;
     hasNotifications?: boolean;
     onOpenBoost: () => void;
-    onOpenInbox: () => void;
+    onOpenPassport: () => void;
     onOpenDiscover: () => void;
     onSearchLocation?: (location: string, filterType: 'location' | 'venue' | 'landmark') => void;
     onClearCustom?: () => void;
@@ -420,10 +422,10 @@ function PillTabs({
                     )}
                 </View>
 
-                <TouchableOpacity onPress={onOpenInbox} style={styles.feedHeaderIconButton}>
+                <TouchableOpacity onPress={onOpenPassport} style={styles.feedHeaderIconButton}>
                     <View style={styles.feedHeaderNotifWrap}>
-                        <Icon name="notifications-outline" size={22} color="#FFFFFF" />
-                        {hasNotifications && <View style={styles.feedHeaderNotifDot} />}
+                        <Icon name="person-circle-outline" size={22} color="#FFFFFF" />
+                        <Text style={styles.feedHeaderPassportLabel}>Passport</Text>
                     </View>
                 </TouchableOpacity>
             </View>
@@ -574,18 +576,15 @@ function PostHeader({
                     style={styles.postHeaderInfo}
                     onPress={onProfileMenuPress}
                 >
-                    <Text style={styles.userHandle}>{post.userHandle}</Text>
-                    {post.createdAt && (
-                        <View style={styles.postMeta}>
-                            <Text style={styles.timeText}>{timeAgo(post.createdAt)}</Text>
-                            {(post.locationLabel || post.venue) && (
-                                <Text style={styles.locationText}>
-                                    {post.locationLabel}
-                                    {post.venue ? ` · ${post.venue}` : ''}
-                                </Text>
-                            )}
-                        </View>
-                    )}
+                    <FeedPostMeta
+                        handle={post.userHandle}
+                        timeText={post.createdAt ? timeAgo(post.createdAt) : undefined}
+                        locationText={
+                            (post.locationLabel || post.venue)
+                                ? `${post.locationLabel || ''}${post.venue ? ` · ${post.venue}` : ''}`.trim()
+                                : undefined
+                        }
+                    />
                 </TouchableOpacity>
             </View>
             <View style={styles.postHeaderRight}>
@@ -1267,35 +1266,21 @@ const FeedCard = React.memo(function FeedCard({
 
             <View style={styles.engagementBar}>
                 <View style={styles.actionButtons}>
-                    <TouchableOpacity onPress={onLike} style={styles.actionButton}>
-                        <Icon
-                            name={post.userLiked ? "heart" : "heart-outline"}
-                            size={FEED_UI.icon.action}
-                            color={post.userLiked ? "#EF4444" : "#6B7280"}
-                        />
-                        <Text style={styles.actionText}>{post.stats.likes}</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity onPress={onComment} style={styles.actionButton}>
-                        <Icon name="chatbubble-outline" size={FEED_UI.icon.action} color="#6B7280" />
-                        <Text style={styles.actionText}>{post.stats.comments}</Text>
-                    </TouchableOpacity>
-
-                    {!isCurrentUser && (
-                        <TouchableOpacity onPress={onReclip} style={styles.actionButton}>
-                            <Icon name="repeat" size={FEED_UI.icon.action} color={post.userReclipped ? "#8B5CF6" : "#6B7280"} />
-                            <Text style={styles.actionText}>{post.stats.reclips}</Text>
-                        </TouchableOpacity>
-                    )}
-
-                    <TouchableOpacity onPress={onShare} style={styles.actionButton}>
-                        <Icon name="share-outline" size={FEED_UI.icon.action} color="#6B7280" />
-                    </TouchableOpacity>
-
-                    <View style={styles.viewsContainer}>
-                        <Icon name="eye-outline" size={16} color="#6B7280" />
-                        <Text style={styles.actionText}>{post.stats.views}</Text>
-                    </View>
+                    <FeedEngagementRow
+                        likes={post.stats.likes}
+                        comments={post.stats.comments}
+                        reclips={post.stats.reclips}
+                        views={post.stats.views}
+                        userLiked={post.userLiked}
+                        userReclipped={post.userReclipped}
+                        onLike={() => { void onLike(); }}
+                        onComment={onComment}
+                        onReclip={!isCurrentUser ? () => { void onReclip(); } : undefined}
+                        onShare={() => { void onShare(); }}
+                        showReclip={!isCurrentUser}
+                        showShare
+                        showViews
+                    />
                 </View>
 
                 <View style={styles.rightActions}>
@@ -1426,10 +1411,17 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [selectedPostForShare, setSelectedPostForShare] = useState<Post | null>(null);
     const [unreadCount, setUnreadCount] = useState(0);
+    const [footerActive, setFooterActive] = useState<'home' | 'discover' | 'create' | 'search' | 'inbox'>('home');
     const [hasInbox, setHasInbox] = useState(false);
     const [reloadTick, setReloadTick] = useState(0);
     const [showBoostPrompt, setShowBoostPrompt] = useState(false);
     const requestTokenRef = useRef(0);
+
+    useFocusEffect(
+        useCallback(() => {
+            setFooterActive('home');
+        }, [])
+    );
 
     const currentFilter = showFollowingFeed
         ? 'discover'
@@ -1809,7 +1801,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     userNational={defaultNational}
                     hasNotifications={hasInbox || unreadCount > 0}
                     onOpenBoost={() => setShowBoostPrompt(true)}
-                    onOpenInbox={() => navigation.navigate('Inbox')}
+                    onOpenPassport={() => navigation.navigate('Profile')}
                     onOpenDiscover={() => navigation.navigate('Discover')}
                     onSearchLocation={handleHeaderLocationSearch}
                     onClearCustom={clearCustomLocation}
@@ -1861,6 +1853,36 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.feedContent}
             />
+
+            <View style={styles.bottomFooterNav}>
+                <TouchableOpacity style={[styles.bottomFooterItem, footerActive === 'home' && styles.bottomFooterItemActive]} onPress={() => { setFooterActive('home'); navigation.navigate('Home'); }}>
+                    <Icon name="home" size={18} color={footerActive === 'home' ? '#F9FAFB' : '#FFFFFF'} />
+                    <Text style={[styles.bottomFooterLabel, footerActive === 'home' && styles.bottomFooterLabelActive]}>Home</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.bottomFooterItem, footerActive === 'discover' && styles.bottomFooterItemActive]} onPress={() => { setFooterActive('discover'); navigation.navigate('Discover'); }}>
+                    <Icon name="compass-outline" size={18} color={footerActive === 'discover' ? '#F9FAFB' : '#FFFFFF'} />
+                    <Text style={[styles.bottomFooterLabel, footerActive === 'discover' && styles.bottomFooterLabelActive]}>Discover</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.bottomFooterItem, footerActive === 'create' && styles.bottomFooterItemActive]} onPress={() => { setFooterActive('create'); navigation.navigate('CreateComposer', { addYours: true }); }}>
+                    <Icon name="add-circle-outline" size={18} color={footerActive === 'create' ? '#F9FAFB' : '#FFFFFF'} />
+                    <Text style={[styles.bottomFooterLabel, footerActive === 'create' && styles.bottomFooterLabelActive]}>Create</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.bottomFooterItem, footerActive === 'search' && styles.bottomFooterItemActive]} onPress={() => { setFooterActive('search'); navigation.navigate('Search'); }}>
+                    <Icon name="search-outline" size={18} color={footerActive === 'search' ? '#F9FAFB' : '#FFFFFF'} />
+                    <Text style={[styles.bottomFooterLabel, footerActive === 'search' && styles.bottomFooterLabelActive]}>Search</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.bottomFooterItem, footerActive === 'inbox' && styles.bottomFooterItemActive]} onPress={() => { setFooterActive('inbox'); navigation.navigate('Inbox'); }}>
+                    <View style={styles.bottomFooterInboxIconWrap}>
+                        <Icon name="chatbox-ellipses-outline" size={18} color={footerActive === 'inbox' ? '#F9FAFB' : '#FFFFFF'} />
+                        {unreadCount > 0 ? (
+                            <View style={styles.bottomFooterBadge}>
+                                <Text style={styles.bottomFooterBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+                            </View>
+                        ) : null}
+                    </View>
+                    <Text style={[styles.bottomFooterLabel, footerActive === 'inbox' && styles.bottomFooterLabelActive]}>Inbox</Text>
+                </TouchableOpacity>
+            </View>
 
             {/* Comments Modal */}
             <CommentsModal
@@ -2170,19 +2192,72 @@ const styles = StyleSheet.create({
     },
     feedHeaderNotifWrap: {
         position: 'relative',
+        alignItems: 'center',
     },
-    feedHeaderNotifDot: {
-        position: 'absolute',
-        top: 6,
-        right: 1,
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-        backgroundColor: '#EF4444',
+    feedHeaderPassportLabel: {
+        marginTop: 1,
+        fontSize: 9,
+        color: '#FFFFFF',
+        fontWeight: '600',
     },
     feedContent: {
-        paddingBottom: 20,
+        paddingBottom: 92,
         paddingTop: 92,
+    },
+    bottomFooterNav: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-around',
+        backgroundColor: 'rgba(0,0,0,0.92)',
+        borderTopWidth: 1,
+        borderTopColor: '#1F2937',
+        paddingTop: 6,
+        paddingBottom: 10,
+        paddingHorizontal: 6,
+        zIndex: 1200,
+    },
+    bottomFooterItem: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        rowGap: 2,
+        borderRadius: 12,
+        paddingVertical: 3,
+    },
+    bottomFooterItemActive: {
+        backgroundColor: '#111827',
+    },
+    bottomFooterLabel: {
+        fontSize: 10,
+        fontWeight: '600',
+        color: '#FFFFFF',
+    },
+    bottomFooterLabelActive: {
+        color: '#F9FAFB',
+    },
+    bottomFooterInboxIconWrap: {
+        position: 'relative',
+    },
+    bottomFooterBadge: {
+        position: 'absolute',
+        top: -6,
+        right: -10,
+        minWidth: 16,
+        height: 16,
+        borderRadius: 8,
+        backgroundColor: '#EF4444',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 3,
+    },
+    bottomFooterBadgeText: {
+        color: '#FFFFFF',
+        fontSize: 9,
+        fontWeight: '700',
     },
     feedCard: {
         backgroundColor: '#000000',
@@ -2381,21 +2456,6 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: FEED_UI.spacing.groupGapTight,
-    },
-    actionButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 3,
-    },
-    actionText: {
-        fontSize: FEED_UI.type.actionCount,
-        fontWeight: '600',
-        color: '#FFFFFF',
-    },
-    viewsContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
     },
     errorContainer: {
         padding: 16,

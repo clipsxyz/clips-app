@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, FlatList, ActivityIndicator, Modal, ScrollView, Alert, TextInput, Share, Linking } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, FlatList, ActivityIndicator, Modal, ScrollView, Alert, TextInput, Share, Linking, Animated, Easing } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
-import { approveHiddenComment, deleteHiddenComment, fetchHiddenCommentsForOwner, fetchPostsByUser, type HiddenCommentReviewItem } from '../api/posts';
+import { approveHiddenComment, deleteHiddenComment, fetchHiddenCommentsForOwner, fetchPostsByUser, toggleLike, fetchComments, addComment, toggleCommentLike, toggleReplyLike, addReply, type HiddenCommentReviewItem } from '../api/posts';
 import { getUserCollections } from '../api/collections';
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
 import { getUnreadTotal } from '../api/messages';
@@ -13,6 +13,8 @@ import { setProfilePrivacy } from '../api/privacy';
 import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, toggleFollow, type FacebookMatchedFriend, matchContactPhones } from '../api/client';
 import type { Post, Collection } from '../types';
 import Avatar from '../components/Avatar';
+import FeedPostMeta from '../components/FeedPostMeta';
+import MyFeedPostCard from '../components/MyFeedPostCard';
 import {
     getNotificationPreferences,
     saveNotificationPreferences,
@@ -25,6 +27,7 @@ import {
     type CommentModerationPreferences,
 } from '../utils/commentModeration';
 import { getRuntimeEnv, getReactNativeDefaultApiBaseUrl } from '../config/runtimeEnv';
+import { timeAgo } from '../utils/timeAgo';
 
 const ProfileScreen: React.FC = ({ navigation }: any) => {
     const { user, logout, login } = useAuth();
@@ -37,6 +40,14 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [draftsOpen, setDraftsOpen] = useState(false);
     const [commentSafetyOpen, setCommentSafetyOpen] = useState(false);
     const [inviteFriendsOpen, setInviteFriendsOpen] = useState(false);
+    const [myFeedOpen, setMyFeedOpen] = useState(false);
+    const [myFeedCommentsOpen, setMyFeedCommentsOpen] = useState(false);
+    const [myFeedCommentsPost, setMyFeedCommentsPost] = useState<Post | null>(null);
+    const [myFeedComments, setMyFeedComments] = useState<any[]>([]);
+    const [myFeedCommentsLoading, setMyFeedCommentsLoading] = useState(false);
+    const [myFeedCommentDraft, setMyFeedCommentDraft] = useState('');
+    const [myFeedReplyingTo, setMyFeedReplyingTo] = useState<string | null>(null);
+    const [myFeedReplyDraft, setMyFeedReplyDraft] = useState('');
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [unreadCount, setUnreadCount] = useState(0);
     const [commentModerationPrefs, setCommentModerationPrefs] = useState<CommentModerationPreferences>(getCommentModerationPreferences());
@@ -61,6 +72,8 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [inviteSyncing, setInviteSyncing] = useState(false);
     const [inviteMatchedFriends, setInviteMatchedFriends] = useState<FacebookMatchedFriend[]>([]);
     const [contactsSyncing, setContactsSyncing] = useState(false);
+    const [showTabsHint, setShowTabsHint] = useState(true);
+    const tabsHintAnim = React.useRef(new Animated.Value(0)).current;
 
     useEffect(() => {
         loadData();
@@ -79,6 +92,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
 
     useFocusEffect(
         React.useCallback(() => {
+            void loadData();
             setSecurityModalOpen(true);
             setSecurityStep('phone');
             setSecurityBusy(false);
@@ -88,6 +102,28 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             setPendingPhoneNumber('');
         }, [])
     );
+
+    useEffect(() => {
+        const loop = Animated.loop(
+            Animated.sequence([
+                Animated.timing(tabsHintAnim, {
+                    toValue: 6,
+                    duration: 450,
+                    easing: Easing.out(Easing.cubic),
+                    useNativeDriver: true,
+                }),
+                Animated.timing(tabsHintAnim, {
+                    toValue: 0,
+                    duration: 450,
+                    easing: Easing.in(Easing.cubic),
+                    useNativeDriver: true,
+                }),
+                Animated.delay(1200),
+            ])
+        );
+        if (showTabsHint) loop.start();
+        return () => loop.stop();
+    }, [showTabsHint, tabsHintAnim]);
 
     const loadData = async () => {
         if (!user?.handle) return;
@@ -107,6 +143,91 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             setLoading(false);
         }
     };
+
+    const openMyFeedComments = React.useCallback(async (post: Post) => {
+        setMyFeedCommentsPost(post);
+        setMyFeedCommentsOpen(true);
+        setMyFeedCommentDraft('');
+        setMyFeedReplyingTo(null);
+        setMyFeedReplyDraft('');
+        setMyFeedCommentsLoading(true);
+        try {
+            const rows = await fetchComments(post.id);
+            setMyFeedComments(Array.isArray(rows) ? rows : []);
+        } catch (error) {
+            console.error('Error loading My feed comments:', error);
+            setMyFeedComments([]);
+        } finally {
+            setMyFeedCommentsLoading(false);
+        }
+    }, []);
+
+    const handleAddMyFeedComment = React.useCallback(async () => {
+        if (!user?.handle || !myFeedCommentsPost?.id) return;
+        const text = myFeedCommentDraft.trim();
+        if (!text) return;
+        try {
+            const created = await addComment(myFeedCommentsPost.id, user.handle, text);
+            setMyFeedComments((prev) => [...prev, created]);
+            setMyFeedCommentDraft('');
+            setPosts((prev) =>
+                prev.map((p) =>
+                    p.id === myFeedCommentsPost.id
+                        ? {
+                              ...p,
+                              stats: { ...p.stats, comments: (p.stats?.comments ?? 0) + 1 },
+                          }
+                        : p
+                )
+            );
+        } catch (error) {
+            console.error('Error adding My feed comment:', error);
+            Alert.alert('Could not add comment', 'Please try again.');
+        }
+    }, [myFeedCommentDraft, myFeedCommentsPost?.id, user?.handle]);
+
+    const handleToggleMyFeedCommentLike = React.useCallback(async (commentId: string) => {
+        try {
+            const updated = await toggleCommentLike(commentId);
+            setMyFeedComments((prev) => prev.map((c) => (c.id === commentId ? updated : c)));
+        } catch (error) {
+            console.error('Error toggling comment like in My feed:', error);
+        }
+    }, []);
+
+    const handleAddMyFeedReply = React.useCallback(async () => {
+        if (!myFeedCommentsPost?.id || !myFeedReplyingTo || !user?.handle) return;
+        const text = myFeedReplyDraft.trim();
+        if (!text) return;
+        try {
+            const reply = await addReply(myFeedCommentsPost.id, myFeedReplyingTo, user.handle, text);
+            setMyFeedComments((prev) =>
+                prev.map((c) =>
+                    c.id === myFeedReplyingTo
+                        ? {
+                              ...c,
+                              replies: [...(c.replies || []), reply],
+                              replyCount: (c.replyCount || 0) + 1,
+                          }
+                        : c
+                )
+            );
+            setMyFeedReplyDraft('');
+            setMyFeedReplyingTo(null);
+        } catch (error) {
+            console.error('Error adding reply in My feed:', error);
+            Alert.alert('Could not add reply', 'Please try again.');
+        }
+    }, [myFeedCommentsPost?.id, myFeedReplyingTo, myFeedReplyDraft, user?.handle]);
+
+    const handleToggleMyFeedReplyLike = React.useCallback(async (parentId: string, replyId: string) => {
+        try {
+            const updatedParent = await toggleReplyLike(parentId, replyId);
+            setMyFeedComments((prev) => prev.map((c) => (c.id === parentId ? updatedParent : c)));
+        } catch (error) {
+            console.error('Error toggling reply like in My feed:', error);
+        }
+    }, []);
 
     const filteredHiddenQueue = React.useMemo(() => {
         if (hiddenQueueFilter === 'comments') return hiddenCommentQueue.filter((item) => !item.isReply);
@@ -421,13 +542,31 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             </View>
 
             {/* Tabs: Messages, Drafts, Collections, Comment Safety, Settings */}
-            <View style={styles.tabsContainer}>
+            <View style={styles.tabsWrap}>
+            <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.tabsContainer}
+                contentContainerStyle={styles.tabsContentContainer}
+                onScroll={(e) => {
+                    if (e.nativeEvent.contentOffset.x > 8) setShowTabsHint(false);
+                }}
+                scrollEventThrottle={16}
+            >
                 <TouchableOpacity
                     style={styles.tab}
                     onPress={() => setInviteFriendsOpen(true)}
                 >
                     <Icon name="people-outline" size={20} color="#67E8F9" />
                     <Text style={styles.tabLabel}>Invite Friends</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={styles.tab}
+                    onPress={() => setMyFeedOpen(true)}
+                >
+                    <Icon name="newspaper-outline" size={20} color="#FFFFFF" />
+                    <Text style={styles.tabLabel}>My feed</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -493,6 +632,16 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     <Icon name="settings" size={20} color="#FFFFFF" />
                     <Text style={styles.tabLabel}>Settings</Text>
                 </TouchableOpacity>
+            </ScrollView>
+            {showTabsHint && (
+                <>
+                    <View pointerEvents="none" style={styles.tabsHintFade} />
+                    <Animated.View pointerEvents="none" style={[styles.tabsHintChip, { transform: [{ translateX: tabsHintAnim }] }]}>
+                        <Text style={styles.tabsHintText}>Swipe</Text>
+                        <Text style={styles.tabsHintText}>›</Text>
+                    </Animated.View>
+                </>
+            )}
             </View>
 
             <View style={styles.profileSection}>
@@ -975,6 +1124,167 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 </View>
             </Modal>
 
+            {/* My Feed Modal */}
+            <Modal
+                visible={myFeedOpen}
+                animationType="slide"
+                transparent={false}
+                onRequestClose={() => setMyFeedOpen(false)}
+            >
+                <SafeAreaView style={styles.myFeedScreen}>
+                    <View style={styles.myFeedHeader}>
+                        <View style={styles.myFeedHeaderLeft}>
+                            <Image source={require('../assets/gazetteer-splash-logo.png')} style={styles.myFeedLogo} />
+                            <Text style={styles.myFeedTitle}>My feed</Text>
+                        </View>
+                        <TouchableOpacity onPress={() => setMyFeedOpen(false)} style={styles.myFeedCloseButton}>
+                            <Icon name="close" size={22} color="#111827" />
+                        </TouchableOpacity>
+                    </View>
+
+                    <FlatList
+                        data={posts}
+                        keyExtractor={(item) => item.id}
+                        contentContainerStyle={styles.myFeedListContent}
+                        renderItem={({ item }) => (
+                            <MyFeedPostCard
+                                post={item}
+                                user={user}
+                                onPress={() => navigation.navigate('PostDetail', { postId: item.id })}
+                                onCommentPress={() => {
+                                    void openMyFeedComments(item);
+                                }}
+                                onLikePress={() => {
+                                    if (!user?.id) return;
+                                    void (async () => {
+                                        try {
+                                            const updated = await toggleLike(user.id, item.id, item);
+                                            setPosts((prev) => prev.map((p) => (p.id === item.id ? updated : p)));
+                                        } catch (error) {
+                                            console.error('Failed to toggle like in My feed:', error);
+                                        }
+                                    })();
+                                }}
+                            />
+                        )}
+                        ListEmptyComponent={
+                            <View style={styles.emptyContainer}>
+                                <Text style={styles.emptyText}>You have not posted anything yet.</Text>
+                            </View>
+                        }
+                    />
+                </SafeAreaView>
+            </Modal>
+
+            {/* My Feed Comments Modal */}
+            <Modal
+                visible={myFeedCommentsOpen}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => setMyFeedCommentsOpen(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.myFeedCommentsModalContent}>
+                        <View style={styles.myFeedCommentsModalHeader}>
+                            <Text style={styles.modalTitle}>
+                                {myFeedComments.length} {myFeedComments.length === 1 ? 'comment' : 'comments'}
+                            </Text>
+                            <TouchableOpacity onPress={() => setMyFeedCommentsOpen(false)}>
+                                <Icon name="close" size={24} color="#FFFFFF" />
+                            </TouchableOpacity>
+                        </View>
+                        <View style={styles.myFeedCommentsModalBody}>
+                            {myFeedCommentsLoading ? (
+                                <ActivityIndicator size="small" color="#8B5CF6" />
+                            ) : (
+                                <ScrollView style={styles.myFeedCommentsList}>
+                                    {myFeedComments.length === 0 ? (
+                                        <Text style={styles.emptyText}>No comments yet.</Text>
+                                    ) : (
+                                        myFeedComments.map((comment) => (
+                                            <View key={comment.id} style={styles.myFeedCommentItem}>
+                                                {(((comment as any).updatedAt && (comment as any).updatedAt !== comment.createdAt) ||
+                                                    ((comment as any).updated_at && (comment as any).updated_at !== (comment as any).created_at) ||
+                                                    (comment as any).editedAt) ? (
+                                                    <Text style={styles.myFeedEditedBadge}>edited</Text>
+                                                ) : null}
+                                                <Text style={styles.myFeedCommentAuthor}>{comment.userHandle || 'User'}</Text>
+                                                <Text style={styles.myFeedCommentText}>{comment.text || ''}</Text>
+                                                <Text style={styles.myFeedCommentTime}>
+                                                    {comment.createdAt ? timeAgo(comment.createdAt) : 'just now'}
+                                                </Text>
+                                                <View style={styles.myFeedCommentActionsRow}>
+                                                    <TouchableOpacity onPress={() => { void handleToggleMyFeedCommentLike(comment.id); }}>
+                                                        <Text style={styles.myFeedCommentActionText}>
+                                                            {(comment.userLiked ? 'Unlike' : 'Like')} ({comment.likes ?? 0})
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                    <TouchableOpacity onPress={() => setMyFeedReplyingTo(comment.id)}>
+                                                        <Text style={styles.myFeedCommentActionText}>Reply ({comment.replyCount ?? 0})</Text>
+                                                    </TouchableOpacity>
+                                                </View>
+                                                {Array.isArray(comment.replies) && comment.replies.length > 0 ? (
+                                                    <View style={styles.myFeedReplyList}>
+                                                        {comment.replies.map((reply: any) => (
+                                                            <View key={reply.id} style={styles.myFeedReplyItem}>
+                                                                {(((reply as any).updatedAt && (reply as any).updatedAt !== reply.createdAt) ||
+                                                                    ((reply as any).updated_at && (reply as any).updated_at !== (reply as any).created_at) ||
+                                                                    (reply as any).editedAt) ? (
+                                                                    <Text style={styles.myFeedEditedBadge}>edited</Text>
+                                                                ) : null}
+                                                                <Text style={styles.myFeedReplyAuthor}>{reply.userHandle || 'User'}</Text>
+                                                                <Text style={styles.myFeedReplyText}>{reply.text || ''}</Text>
+                                                                <Text style={styles.myFeedReplyTime}>
+                                                                    {reply.createdAt ? timeAgo(reply.createdAt) : 'just now'}
+                                                                </Text>
+                                                                <TouchableOpacity onPress={() => { void handleToggleMyFeedReplyLike(comment.id, reply.id); }}>
+                                                                    <Text style={styles.myFeedReplyActionText}>
+                                                                        {(reply.userLiked ? 'Unlike' : 'Like')} ({reply.likes ?? 0})
+                                                                    </Text>
+                                                                </TouchableOpacity>
+                                                            </View>
+                                                        ))}
+                                                    </View>
+                                                ) : null}
+                                            </View>
+                                        ))
+                                    )}
+                                </ScrollView>
+                            )}
+                            {myFeedReplyingTo ? (
+                                <View style={styles.myFeedCommentInputRow}>
+                                    <TextInput
+                                        style={styles.myFeedCommentInput}
+                                        value={myFeedReplyDraft}
+                                        onChangeText={setMyFeedReplyDraft}
+                                        placeholder="Write a reply..."
+                                        placeholderTextColor="#6B7280"
+                                    />
+                                    <TouchableOpacity style={styles.smallActionButton} onPress={() => setMyFeedReplyingTo(null)}>
+                                        <Text style={styles.smallActionButtonText}>Cancel</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity style={styles.addWordButton} onPress={() => { void handleAddMyFeedReply(); }}>
+                                        <Text style={styles.addWordButtonText}>Reply</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            ) : null}
+                            <View style={styles.myFeedCommentInputRow}>
+                                <TextInput
+                                    style={styles.myFeedCommentInput}
+                                    value={myFeedCommentDraft}
+                                    onChangeText={setMyFeedCommentDraft}
+                                    placeholder="Add a comment..."
+                                    placeholderTextColor="#6B7280"
+                                />
+                                <TouchableOpacity style={styles.addWordButton} onPress={() => { void handleAddMyFeedComment(); }}>
+                                    <Text style={styles.addWordButtonText}>Post</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
             {/* Settings Modal */}
             <Modal
                 visible={settingsOpen}
@@ -1415,22 +1725,51 @@ const styles = StyleSheet.create({
         fontSize: 16,
         color: '#6B7280',
     },
-    tabsContainer: {
-        flexDirection: 'row',
-        justifyContent: 'space-around',
-        paddingVertical: 12,
+    tabsWrap: {
+        position: 'relative',
         borderBottomWidth: 1,
         borderBottomColor: '#1F2937',
+    },
+    tabsContainer: {
+        maxHeight: 66,
+    },
+    tabsContentContainer: {
+        flexDirection: 'row',
+        paddingVertical: 12,
+        paddingHorizontal: 8,
+        columnGap: 8,
     },
     tab: {
         alignItems: 'center',
         position: 'relative',
         paddingHorizontal: 12,
+        minWidth: 84,
     },
     tabLabel: {
         fontSize: 12,
         color: '#FFFFFF',
         marginTop: 4,
+    },
+    tabsHintFade: {
+        position: 'absolute',
+        right: 0,
+        top: 0,
+        bottom: 0,
+        width: 42,
+        backgroundColor: 'rgba(3,7,18,0.75)',
+    },
+    tabsHintChip: {
+        position: 'absolute',
+        right: 8,
+        top: 46,
+        flexDirection: 'row',
+        alignItems: 'center',
+        columnGap: 2,
+    },
+    tabsHintText: {
+        color: '#9CA3AF',
+        fontSize: 11,
+        fontWeight: '600',
     },
     badge: {
         position: 'absolute',
@@ -1467,6 +1806,151 @@ const styles = StyleSheet.create({
         flex: 1,
         marginLeft: 12,
     },
+    myFeedScreen: {
+        flex: 1,
+        backgroundColor: '#020617',
+    },
+    myFeedHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        borderBottomWidth: 1,
+        borderBottomColor: '#1F2937',
+    },
+    myFeedHeaderLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    myFeedLogo: {
+        width: 32,
+        height: 32,
+        borderRadius: 8,
+        marginRight: 8,
+    },
+    myFeedTitle: {
+        fontSize: 22,
+        fontWeight: '700',
+        color: '#FFFFFF',
+    },
+    myFeedCloseButton: {
+        backgroundColor: '#FFFFFF',
+        borderRadius: 999,
+        padding: 8,
+    },
+    myFeedListContent: {
+        padding: 12,
+        rowGap: 12,
+        paddingBottom: 28,
+    },
+    myFeedCard: {
+        backgroundColor: '#111827',
+        borderWidth: 1,
+        borderColor: '#1F2937',
+        borderRadius: 16,
+        overflow: 'hidden',
+    },
+    myFeedCardHeader: {
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        borderBottomWidth: 1,
+        borderBottomColor: '#1F2937',
+        rowGap: 8,
+    },
+    myFeedAuthorRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    myFeedAuthorMeta: {
+        marginLeft: 10,
+        flex: 1,
+    },
+    myFeedLocationPill: {
+        alignSelf: 'flex-start',
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: '#374151',
+        backgroundColor: '#0F172A',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        flexDirection: 'row',
+        alignItems: 'center',
+        columnGap: 4,
+        maxWidth: '100%',
+    },
+    myFeedLocationText: {
+        color: '#BFDBFE',
+        fontSize: 11,
+        fontWeight: '600',
+        maxWidth: 260,
+    },
+    myFeedMedia: {
+        width: '100%',
+        height: 320,
+        backgroundColor: '#000000',
+    },
+    myFeedVideoPreviewWrap: {
+        position: 'relative',
+    },
+    myFeedVideoOverlay: {
+        position: 'absolute',
+        inset: 0,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0, 0, 0, 0.2)',
+    },
+    myFeedVideoPlaceholder: {
+        width: '100%',
+        height: 320,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#030712',
+    },
+    myFeedVideoPlaceholderText: {
+        marginTop: 8,
+        color: '#D1D5DB',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    myFeedTextCard: {
+        paddingHorizontal: 14,
+        paddingVertical: 16,
+        backgroundColor: '#1F2937',
+    },
+    myFeedTextCardText: {
+        color: '#FFFFFF',
+        fontSize: 15,
+        lineHeight: 22,
+    },
+    myFeedCaptionWrap: {
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+    },
+    myFeedCaptionText: {
+        color: '#E5E7EB',
+        fontSize: 13,
+        lineHeight: 20,
+    },
+    myFeedStatsRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        borderTopWidth: 1,
+        borderTopColor: '#1F2937',
+        columnGap: 12,
+    },
+    myFeedStatPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        columnGap: 4,
+    },
+    myFeedStatText: {
+        color: '#D1D5DB',
+        fontSize: 12,
+        fontWeight: '600',
+    },
     modalOverlay: {
         flex: 1,
         backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -1494,6 +1978,28 @@ const styles = StyleSheet.create({
     modalBody: {
         paddingHorizontal: 14,
         paddingVertical: 12,
+    },
+    myFeedCommentsModalContent: {
+        backgroundColor: '#000000',
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        maxHeight: '80%',
+        borderWidth: 2,
+        borderColor: '#FFFFFF',
+    },
+    myFeedCommentsModalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: 16,
+        borderBottomWidth: 2,
+        borderBottomColor: '#FFFFFF',
+        backgroundColor: '#000000',
+    },
+    myFeedCommentsModalBody: {
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        backgroundColor: '#000000',
     },
     draftItem: {
         flexDirection: 'row',
@@ -1646,6 +2152,99 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         columnGap: 8,
+    },
+    myFeedCommentsList: {
+        maxHeight: 260,
+        marginBottom: 12,
+    },
+    myFeedCommentItem: {
+        paddingVertical: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: '#1F2937',
+    },
+    myFeedEditedBadge: {
+        alignSelf: 'flex-start',
+        marginBottom: 4,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 999,
+        backgroundColor: '#1E3A8A',
+        color: '#DBEAFE',
+        fontSize: 10,
+        fontWeight: '700',
+        textTransform: 'uppercase',
+    },
+    myFeedCommentAuthor: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '700',
+        marginBottom: 2,
+    },
+    myFeedCommentText: {
+        color: '#D1D5DB',
+        fontSize: 13,
+        lineHeight: 18,
+    },
+    myFeedCommentTime: {
+        marginTop: 3,
+        color: '#9CA3AF',
+        fontSize: 11,
+    },
+    myFeedCommentActionsRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        columnGap: 14,
+        marginTop: 6,
+    },
+    myFeedCommentActionText: {
+        color: '#93C5FD',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    myFeedReplyList: {
+        marginTop: 8,
+        paddingLeft: 10,
+        borderLeftWidth: 1,
+        borderLeftColor: '#374151',
+        rowGap: 6,
+    },
+    myFeedReplyItem: {},
+    myFeedReplyAuthor: {
+        color: '#E5E7EB',
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    myFeedReplyText: {
+        color: '#CBD5E1',
+        fontSize: 12,
+        lineHeight: 17,
+    },
+    myFeedReplyTime: {
+        marginTop: 2,
+        color: '#94A3B8',
+        fontSize: 10,
+    },
+    myFeedReplyActionText: {
+        marginTop: 3,
+        color: '#93C5FD',
+        fontSize: 11,
+        fontWeight: '600',
+    },
+    myFeedCommentInputRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        columnGap: 8,
+    },
+    myFeedCommentInput: {
+        flex: 1,
+        backgroundColor: '#030712',
+        borderWidth: 1,
+        borderColor: '#374151',
+        borderRadius: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        color: '#FFFFFF',
+        fontSize: 13,
     },
     wordInput: {
         flex: 1,
