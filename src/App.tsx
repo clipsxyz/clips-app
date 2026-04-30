@@ -595,7 +595,8 @@ function PillTabs(props: {
     const timer = window.setTimeout(async () => {
       try {
         setLoadingSuggestions(true);
-        const res = await searchLocations(q, 6);
+        const modeForApi = parsedVenue ? 'venue' : parsedLandmark ? 'landmark' : 'all';
+        const res = await searchLocations(q, 6, modeForApi);
         if (!cancelled) {
           const allApiSuggestions = Array.isArray(res) ? res : [];
           const mappedApi: HeaderSuggestion[] = allApiSuggestions.map((s) => {

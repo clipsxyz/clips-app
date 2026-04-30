@@ -15,7 +15,7 @@ import { setProfilePrivacy } from '../api/privacy';
 import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMaps';
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
 import { getUnreadTotal } from '../api/messages';
-import { fetchFollowers, fetchFollowing, updateAuthProfile, mapLaravelUserToAppFields } from '../api/client';
+import { fetchFollowers, fetchFollowing, updateAuthProfile, mapLaravelUserToAppFields, sendPhoneVerificationCode, verifyPhoneVerificationCode } from '../api/client';
 import type { Post, User } from '../types';
 import { getAvatarForHandle } from '../api/users';
 import { 
@@ -26,6 +26,7 @@ import {
   resetNotificationPreferences
 } from '../services/notifications';
 import { testBrowserNotification, testNotificationTypes, testImageNotification } from '../utils/testNotifications';
+import { runEndpointHealthCheck } from '../utils/endpointHealth';
 import {
   getCommentModerationPreferences,
   setCommentModerationPreferences,
@@ -721,6 +722,108 @@ export default function ProfilePage() {
     }
   };
 
+  const handleSecurityPhoneVerify = async () => {
+    const phoneStep = await Swal.fire({
+      title: 'Add phone',
+      html: `
+        <div style="display:flex; flex-direction:column; gap:10px; text-align:left; margin-top:8px; width:100%; max-width:100%; box-sizing:border-box;">
+          <p style="margin:0; color:#a1a1aa; font-size:13px;">
+            Add your phone number for extra security, easier account recovery, and quicker logins.
+          </p>
+          <div style="display:flex; gap:8px; width:100%; max-width:100%; box-sizing:border-box;">
+            <select id="phone-country-code" style="flex:0 0 96px; width:96px; min-width:96px; max-width:96px; border-radius:10px; border:1px solid #3f3f46; background:#18181b; color:#fff; padding:10px 8px; box-sizing:border-box;">
+              <option value="+353">IE +353</option>
+              <option value="+44">UK +44</option>
+              <option value="+1">US +1</option>
+              <option value="+33">FR +33</option>
+              <option value="+55">BR +55</option>
+            </select>
+            <input id="phone-number-input" type="tel" placeholder="Phone number" style="flex:1 1 auto; min-width:0; width:100%; max-width:100%; border-radius:10px; border:1px solid #3f3f46; background:#18181b; color:#fff; padding:10px; box-sizing:border-box;" />
+          </div>
+        </div>
+      `,
+      showCancelButton: true,
+      confirmButtonText: 'Continue',
+      cancelButtonText: 'Not now',
+      background: '#111111',
+      color: '#ffffff',
+      focusConfirm: false,
+      customClass: {
+        popup: 'swal-bottom-sheet-popup',
+        confirmButton: 'swal-bottom-sheet-confirm',
+        cancelButton: 'swal-bottom-sheet-cancel',
+      },
+      preConfirm: () => {
+        const countryEl = document.getElementById('phone-country-code') as HTMLSelectElement | null;
+        const phoneEl = document.getElementById('phone-number-input') as HTMLInputElement | null;
+        const countryCode = countryEl?.value?.trim() || '+353';
+        const phoneDigits = (phoneEl?.value || '').replace(/\D+/g, '');
+        if (phoneDigits.length < 7 || phoneDigits.length > 15) {
+          Swal.showValidationMessage('Enter a valid phone number.');
+          return null;
+        }
+        return `${countryCode}${phoneDigits}`;
+      },
+    });
+    if (!phoneStep.isConfirmed || !phoneStep.value) return;
+
+    const phoneNumber = String(phoneStep.value);
+    const sendResult = await sendPhoneVerificationCode(phoneNumber);
+    if (sendResult.delivery === 'mock' && sendResult.debug_code) {
+      showToast(`Demo PIN: ${sendResult.debug_code}`);
+    } else {
+      showToast('Verification code sent');
+    }
+
+    const otpStep = await Swal.fire({
+      title: 'Enter 6-digit code',
+      text: `Your code was sent to ${phoneNumber}`,
+      input: 'text',
+      inputPlaceholder: '000000',
+      inputAttributes: {
+        maxlength: '6',
+        autocapitalize: 'off',
+        autocorrect: 'off',
+        inputmode: 'numeric',
+      },
+      showCancelButton: true,
+      confirmButtonText: 'Verify',
+      cancelButtonText: 'Cancel',
+      background: '#111111',
+      color: '#ffffff',
+      customClass: {
+        popup: 'swal-bottom-sheet-popup',
+        confirmButton: 'swal-bottom-sheet-confirm',
+        cancelButton: 'swal-bottom-sheet-cancel',
+      },
+      preConfirm: (value) => {
+        const typed = String(value || '').replace(/\D+/g, '');
+        if (typed.length !== 6) {
+          Swal.showValidationMessage('Enter the 6-digit code.');
+          return null;
+        }
+        return typed;
+      },
+    });
+    if (!otpStep.isConfirmed || !otpStep.value) return;
+
+    try {
+      await verifyPhoneVerificationCode(phoneNumber, String(otpStep.value));
+      await Swal.fire(bottomSheet({
+        title: 'Phone verified',
+        message: 'Your account now has an extra verification step.',
+        icon: 'success',
+        confirmButtonText: 'Done',
+      }));
+    } catch (err: any) {
+      await Swal.fire(bottomSheet({
+        title: 'Verification failed',
+        message: err?.message || 'Could not verify code. Please try again.',
+        icon: 'alert',
+      }));
+    }
+  };
+
   const handleProfilePictureSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     console.log('File selected:', file);
@@ -967,6 +1070,20 @@ export default function ProfilePage() {
               >
                 <FiLock className="w-4 h-4" />
                 <span className="text-xs font-semibold">Comment Safety</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  void handleSecurityPhoneVerify();
+                }}
+                className="shrink-0 min-h-[44px] px-3.5 py-2 rounded-xl border border-emerald-300/40 bg-emerald-900/30 text-emerald-100 hover:bg-emerald-900/45 transition-colors flex items-center gap-2"
+                style={{ scrollSnapAlign: 'start' }}
+              >
+                <FiUserCheck className="w-4 h-4" />
+                <span className="text-xs font-semibold">Security</span>
               </button>
 
               <button
@@ -2243,6 +2360,32 @@ export default function ProfilePage() {
                       <p className="text-xs text-gray-500">Edit preferred locations for feed suggestions</p>
                     </div>
                     <FiMapPin className="w-4 h-4 text-gray-600" />
+                  </button>
+                </div>
+
+                <div>
+                  <button
+                    onClick={async () => {
+                      const results = await runEndpointHealthCheck();
+                      const failed = results.filter((r) => !r.ok);
+                      const message = results
+                        .map((r) => `${r.ok ? 'OK' : 'FAIL'} ${r.name}${r.details ? ` (${r.details})` : ''}`)
+                        .join('\n');
+                      Swal.fire(
+                        bottomSheet({
+                          title: failed.length === 0 ? 'Endpoint Health: All Good' : 'Endpoint Health: Issues Found',
+                          message,
+                          icon: failed.length === 0 ? 'success' : 'alert',
+                        })
+                      );
+                    }}
+                    className="w-full flex items-center justify-between rounded-xl border border-gray-200 px-4 py-3 hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="text-left">
+                      <p className="text-sm font-semibold text-gray-900">Endpoint health check</p>
+                      <p className="text-xs text-gray-500">Run a quick API connectivity/status check</p>
+                    </div>
+                    <FiSettings className="w-4 h-4 text-gray-600" />
                   </button>
                 </div>
 

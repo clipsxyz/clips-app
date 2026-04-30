@@ -11,6 +11,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rules\Password;
 
 class AuthController extends Controller
@@ -137,6 +139,136 @@ class AuthController extends Controller
         Cache::put($vk, (int) Cache::get($vk, 0) + 1, now()->addDays(365));
 
         return response()->json($user->makeHidden(['password'])->fresh());
+    }
+
+    /**
+     * Send a 6-digit OTP to a phone number (or return debug code in local/dev fallback).
+     */
+    public function sendPhoneCode(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'phone' => ['required', 'string', 'regex:/^\+[1-9]\d{7,14}$/'],
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $phone = (string) $request->input('phone');
+        $otpCode = (string) random_int(100000, 999999);
+        $expiresAt = now()->addMinutes(10);
+
+        $cacheKey = 'phone_otp:user:' . $user->id;
+        $cachePayload = [
+            'phone' => $phone,
+            'code_hash' => hash('sha256', $otpCode),
+            'attempts' => 0,
+            'expires_at' => $expiresAt->toISOString(),
+        ];
+        Cache::put($cacheKey, $cachePayload, $expiresAt);
+
+        $twilioSid = (string) config('services.twilio.sid', '');
+        $twilioToken = (string) config('services.twilio.token', '');
+        $twilioFrom = (string) config('services.twilio.from', '');
+        $twilioConfigured = $twilioSid !== '' && $twilioToken !== '' && $twilioFrom !== '';
+
+        $delivery = 'mock';
+        if ($twilioConfigured) {
+            $res = Http::asForm()
+                ->withBasicAuth($twilioSid, $twilioToken)
+                ->post("https://api.twilio.com/2010-04-01/Accounts/{$twilioSid}/Messages.json", [
+                    'From' => $twilioFrom,
+                    'To' => $phone,
+                    'Body' => "Your Clips verification code is {$otpCode}",
+                ]);
+
+            if ($res->successful()) {
+                $delivery = 'sms';
+            } else {
+                Log::warning('Twilio OTP send failed', [
+                    'status' => $res->status(),
+                    'body' => $res->body(),
+                ]);
+                if (app()->environment('production')) {
+                    return response()->json(['error' => 'Failed to send verification code'], 502);
+                }
+            }
+        }
+
+        $response = [
+            'ok' => true,
+            'delivery' => $delivery,
+            'expires_in_seconds' => 600,
+        ];
+
+        if ($delivery === 'mock') {
+            $response['debug_code'] = $otpCode;
+        }
+
+        return response()->json($response);
+    }
+
+    /**
+     * Verify the OTP and mark the authenticated user's phone as verified.
+     */
+    public function verifyPhoneCode(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'phone' => ['required', 'string', 'regex:/^\+[1-9]\d{7,14}$/'],
+            'code' => ['required', 'digits:6'],
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $phone = (string) $request->input('phone');
+        $code = (string) $request->input('code');
+        $cacheKey = 'phone_otp:user:' . $user->id;
+        $payload = Cache::get($cacheKey);
+
+        if (!is_array($payload) || empty($payload['phone']) || empty($payload['code_hash'])) {
+            return response()->json(['error' => 'Verification code expired. Please request a new one.'], 422);
+        }
+
+        if ((string) $payload['phone'] !== $phone) {
+            return response()->json(['error' => 'Phone number does not match the requested verification.'], 422);
+        }
+
+        $attempts = (int) ($payload['attempts'] ?? 0);
+        if ($attempts >= 5) {
+            Cache::forget($cacheKey);
+            return response()->json(['error' => 'Too many incorrect attempts. Please request a new code.'], 429);
+        }
+
+        $expectedHash = (string) $payload['code_hash'];
+        $givenHash = hash('sha256', $code);
+        if (!hash_equals($expectedHash, $givenHash)) {
+            $payload['attempts'] = $attempts + 1;
+            Cache::put($cacheKey, $payload, now()->addMinutes(10));
+            return response()->json(['error' => 'Incorrect verification code.'], 422);
+        }
+
+        $user->phone_number = $phone;
+        $user->phone_verified_at = now();
+        $user->save();
+        Cache::forget($cacheKey);
+
+        return response()->json([
+            'ok' => true,
+            'phone_number' => $user->phone_number,
+            'phone_verified_at' => optional($user->phone_verified_at)->toISOString(),
+        ]);
     }
 
     /**

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, FlatList, ActivityIndicator, Modal, ScrollView, Alert, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
 import { approveHiddenComment, deleteHiddenComment, fetchHiddenCommentsForOwner, fetchPostsByUser, type HiddenCommentReviewItem } from '../api/posts';
@@ -8,7 +9,7 @@ import { getUserCollections } from '../api/collections';
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
 import { getUnreadTotal } from '../api/messages';
 import { setProfilePrivacy } from '../api/privacy';
-import { updateAuthProfile } from '../api/client';
+import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode } from '../api/client';
 import type { Post, Collection } from '../types';
 import Avatar from '../components/Avatar';
 import {
@@ -47,6 +48,13 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [profileBioDraft, setProfileBioDraft] = useState(user?.bio || '');
     const [profileWebsiteDraft, setProfileWebsiteDraft] = useState((user as any)?.socialLinks?.website || (user as any)?.website || '');
     const [profilePodcastDraft, setProfilePodcastDraft] = useState((user as any)?.socialLinks?.podcast || '');
+    const [securityModalOpen, setSecurityModalOpen] = useState(false);
+    const [securityStep, setSecurityStep] = useState<'phone' | 'code'>('phone');
+    const [securityBusy, setSecurityBusy] = useState(false);
+    const [phoneCountryCode, setPhoneCountryCode] = useState('+353');
+    const [phoneInput, setPhoneInput] = useState('');
+    const [otpInput, setOtpInput] = useState('');
+    const [pendingPhoneNumber, setPendingPhoneNumber] = useState('');
 
     useEffect(() => {
         loadData();
@@ -62,6 +70,18 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         setProfileWebsiteDraft((user as any)?.socialLinks?.website || (user as any)?.website || '');
         setProfilePodcastDraft((user as any)?.socialLinks?.podcast || '');
     }, [user?.name, user?.bio, (user as any)?.website, (user as any)?.socialLinks?.website, (user as any)?.socialLinks?.podcast]);
+
+    useFocusEffect(
+        React.useCallback(() => {
+            setSecurityModalOpen(true);
+            setSecurityStep('phone');
+            setSecurityBusy(false);
+            setPhoneCountryCode('+353');
+            setPhoneInput('');
+            setOtpInput('');
+            setPendingPhoneNumber('');
+        }, [])
+    );
 
     const loadData = async () => {
         if (!user?.handle) return;
@@ -204,6 +224,51 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         } catch (error) {
             console.error('Failed to save profile edits:', error);
             Alert.alert('Save failed', 'Could not update profile right now.');
+        }
+    };
+
+    const handleSendSecurityCode = async () => {
+        if (securityBusy) return;
+        const digits = phoneInput.replace(/\D+/g, '');
+        if (digits.length < 7 || digits.length > 15) {
+            Alert.alert('Invalid number', 'Enter a valid phone number.');
+            return;
+        }
+        const fullPhone = `${phoneCountryCode}${digits}`;
+        setSecurityBusy(true);
+        try {
+            const res = await sendPhoneVerificationCode(fullPhone);
+            setPendingPhoneNumber(fullPhone);
+            setSecurityStep('code');
+            setOtpInput('');
+            if (res.delivery === 'mock' && res.debug_code) {
+                Alert.alert('Demo code', `Use PIN ${res.debug_code}`);
+            } else {
+                Alert.alert('Code sent', `A verification code was sent to ${fullPhone}.`);
+            }
+        } catch (error: any) {
+            Alert.alert('Send failed', error?.message || 'Could not send verification code.');
+        } finally {
+            setSecurityBusy(false);
+        }
+    };
+
+    const handleVerifySecurityCode = async () => {
+        if (securityBusy) return;
+        const code = otpInput.replace(/\D+/g, '');
+        if (code.length !== 6) {
+            Alert.alert('Invalid code', 'Enter the 6-digit code.');
+            return;
+        }
+        setSecurityBusy(true);
+        try {
+            await verifyPhoneVerificationCode(pendingPhoneNumber, code);
+            setSecurityModalOpen(false);
+            Alert.alert('Verified', 'Phone verification complete.');
+        } catch (error: any) {
+            Alert.alert('Verification failed', error?.message || 'Incorrect code. Try again.');
+        } finally {
+            setSecurityBusy(false);
         }
     };
 
@@ -421,6 +486,71 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     />
                 )}
             </View>
+
+            <Modal
+                visible={securityModalOpen}
+                animationType="fade"
+                transparent={true}
+                onRequestClose={() => {}}
+            >
+                <View style={styles.securityOverlay}>
+                    <View style={styles.securityCard}>
+                        {securityStep === 'phone' ? (
+                            <>
+                                <Text style={styles.securityTitle}>Add phone</Text>
+                                <Text style={styles.securityBody}>
+                                    Add your phone number for extra security and easier account recovery.
+                                </Text>
+                                <View style={styles.securityPhoneRow}>
+                                    <TextInput
+                                        value={phoneCountryCode}
+                                        onChangeText={setPhoneCountryCode}
+                                        placeholder="+353"
+                                        placeholderTextColor="#9CA3AF"
+                                        style={styles.securityCountryInput}
+                                    />
+                                    <TextInput
+                                        value={phoneInput}
+                                        onChangeText={setPhoneInput}
+                                        placeholder="Phone number"
+                                        placeholderTextColor="#9CA3AF"
+                                        keyboardType="phone-pad"
+                                        style={styles.securityPhoneInput}
+                                    />
+                                </View>
+                                <TouchableOpacity
+                                    style={[styles.securityPrimaryButton, securityBusy && styles.securityPrimaryButtonDisabled]}
+                                    onPress={handleSendSecurityCode}
+                                    disabled={securityBusy}
+                                >
+                                    <Text style={styles.securityPrimaryButtonText}>{securityBusy ? 'Sending...' : 'Continue'}</Text>
+                                </TouchableOpacity>
+                            </>
+                        ) : (
+                            <>
+                                <Text style={styles.securityTitle}>Enter 6-digit code</Text>
+                                <Text style={styles.securityBody}>Your code was sent to {pendingPhoneNumber}</Text>
+                                <TextInput
+                                    value={otpInput}
+                                    onChangeText={setOtpInput}
+                                    placeholder="000000"
+                                    placeholderTextColor="#9CA3AF"
+                                    keyboardType="number-pad"
+                                    maxLength={6}
+                                    style={styles.securityCodeInput}
+                                />
+                                <TouchableOpacity
+                                    style={[styles.securityPrimaryButton, securityBusy && styles.securityPrimaryButtonDisabled]}
+                                    onPress={handleVerifySecurityCode}
+                                    disabled={securityBusy}
+                                >
+                                    <Text style={styles.securityPrimaryButtonText}>{securityBusy ? 'Verifying...' : 'Verify'}</Text>
+                                </TouchableOpacity>
+                            </>
+                        )}
+                    </View>
+                </View>
+            </Modal>
 
             {/* Drafts Modal */}
             <Modal
@@ -1405,6 +1535,84 @@ const styles = StyleSheet.create({
     },
     queueActionTextDanger: {
         color: '#FCA5A5',
+    },
+    securityOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.7)',
+        justifyContent: 'center',
+        paddingHorizontal: 18,
+    },
+    securityCard: {
+        backgroundColor: '#111827',
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: '#1F2937',
+        padding: 16,
+    },
+    securityTitle: {
+        color: '#FFFFFF',
+        fontSize: 28,
+        fontWeight: '700',
+        marginBottom: 10,
+    },
+    securityBody: {
+        color: '#D1D5DB',
+        fontSize: 14,
+        lineHeight: 20,
+        marginBottom: 12,
+    },
+    securityPhoneRow: {
+        flexDirection: 'row',
+        columnGap: 8,
+        marginBottom: 12,
+    },
+    securityCountryInput: {
+        width: 92,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#374151',
+        backgroundColor: '#1F2937',
+        color: '#FFFFFF',
+        paddingHorizontal: 10,
+        paddingVertical: 10,
+    },
+    securityPhoneInput: {
+        flex: 1,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#374151',
+        backgroundColor: '#1F2937',
+        color: '#FFFFFF',
+        paddingHorizontal: 10,
+        paddingVertical: 10,
+    },
+    securityCodeInput: {
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#374151',
+        backgroundColor: '#1F2937',
+        color: '#FFFFFF',
+        paddingHorizontal: 12,
+        paddingVertical: 12,
+        fontSize: 18,
+        letterSpacing: 6,
+        textAlign: 'center',
+        marginBottom: 12,
+    },
+    securityPrimaryButton: {
+        backgroundColor: '#9F1239',
+        borderRadius: 999,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 12,
+    },
+    securityPrimaryButtonDisabled: {
+        opacity: 0.6,
+    },
+    securityPrimaryButtonText: {
+        color: '#FFFFFF',
+        fontSize: 15,
+        fontWeight: '700',
     },
 });
 

@@ -32,18 +32,31 @@ const API_BASE_URL = resolveLocationsApiBase();
 
 export type LocationSuggestion = {
     name: string;
-    type: 'local' | 'city' | 'country';
+    type: 'local' | 'city' | 'country' | 'location' | 'venue' | 'landmark';
     country?: string;
     city?: string;
+    place_id?: string | null;
 };
 
-export async function searchLocations(query: string, limit = 20): Promise<LocationSuggestion[]> {
-    const url = new URL(`${API_BASE_URL}/locations/search`);
+export async function searchLocations(
+    query: string,
+    limit = 20,
+    mode: 'all' | 'location' | 'venue' | 'landmark' = 'all'
+): Promise<LocationSuggestion[]> {
+    const url = new URL(`${API_BASE_URL}/search/places`);
     url.searchParams.set('q', query);
     url.searchParams.set('limit', String(limit));
+    url.searchParams.set('mode', mode);
     const res = await fetch(url.toString());
-    if (!res.ok) throw new Error('Failed to fetch locations');
-    return res.json();
+    if (res.ok) return res.json();
+
+    // Backward-compat fallback for environments without the new endpoint.
+    const legacy = new URL(`${API_BASE_URL}/locations/search`);
+    legacy.searchParams.set('q', query);
+    legacy.searchParams.set('limit', String(limit));
+    const legacyRes = await fetch(legacy.toString());
+    if (!legacyRes.ok) throw new Error('Failed to fetch locations');
+    return legacyRes.json();
 }
 
 

@@ -29,6 +29,7 @@ class User extends Authenticatable
     protected $fillable = [
         'username',
         'email',
+        'phone_number',
         'password',
         'display_name',
         'handle',
@@ -53,6 +54,7 @@ class User extends Authenticatable
 
     protected $casts = [
         'email_verified_at' => 'datetime',
+        'phone_verified_at' => 'datetime',
         'deleted_at' => 'datetime',
         'password' => 'hashed',
         'is_verified' => 'boolean',

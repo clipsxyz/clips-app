@@ -7,9 +7,149 @@ use App\Models\User;
 use App\Models\Post;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Http;
 
 class SearchController extends Controller
 {
+    /**
+     * Place search endpoint for header/discover search.
+     * Uses Google Places when configured, falls back to local gazetteer ranking.
+     */
+    public function places(Request $request): JsonResponse
+    {
+        $request->validate([
+            'q' => 'required|string|max:200',
+            'limit' => 'nullable|integer|min:1|max:20',
+            'mode' => 'nullable|in:all,location,venue,landmark',
+        ]);
+
+        $qRaw = trim((string) $request->query('q', ''));
+        $q = strtolower($qRaw);
+        $limit = min((int) $request->query('limit', 10), 20);
+        $mode = (string) $request->query('mode', 'all');
+
+        if ($qRaw === '') {
+            return response()->json([]);
+        }
+
+        $googleKey = config('services.google_maps.api_key');
+        if (is_string($googleKey) && trim($googleKey) !== '') {
+            try {
+                $google = Http::timeout(6)->get('https://maps.googleapis.com/maps/api/place/autocomplete/json', [
+                    'input' => $qRaw,
+                    'key' => $googleKey,
+                    'types' => 'geocode|establishment',
+                ]);
+                if ($google->ok()) {
+                    $payload = $google->json();
+                    $predictions = is_array($payload['predictions'] ?? null) ? $payload['predictions'] : [];
+                    $mapped = collect($predictions)
+                        ->map(function ($item) {
+                            $description = (string) ($item['description'] ?? '');
+                            $types = is_array($item['types'] ?? null) ? $item['types'] : [];
+                            $lowerTypes = array_map(fn($t) => strtolower((string) $t), $types);
+
+                            $kind = 'location';
+                            if (in_array('establishment', $lowerTypes, true) || in_array('point_of_interest', $lowerTypes, true)) {
+                                $kind = 'venue';
+                            }
+                            if (
+                                in_array('tourist_attraction', $lowerTypes, true) ||
+                                in_array('natural_feature', $lowerTypes, true) ||
+                                in_array('premise', $lowerTypes, true)
+                            ) {
+                                $kind = 'landmark';
+                            }
+
+                            $country = null;
+                            if (!empty($item['terms']) && is_array($item['terms'])) {
+                                $last = end($item['terms']);
+                                if (is_array($last) && !empty($last['value'])) {
+                                    $country = (string) $last['value'];
+                                }
+                            }
+
+                            return [
+                                'name' => $description,
+                                'type' => $kind,
+                                'country' => $country,
+                                'place_id' => $item['place_id'] ?? null,
+                            ];
+                        })
+                        ->filter(function ($item) use ($mode) {
+                            if ($mode === 'all') return true;
+                            return ($item['type'] ?? 'location') === $mode;
+                        })
+                        ->take($limit)
+                        ->values()
+                        ->toArray();
+
+                    if (!empty($mapped)) {
+                        return response()->json($mapped);
+                    }
+                }
+            } catch (\Throwable $_) {
+                // Fall through to local fallback
+            }
+        }
+
+        // Fallback: local gazetteer for location mode + heuristics for venue/landmark strings.
+        $results = [];
+        $gazetteerPath = storage_path('app/data/locations.json');
+        if (file_exists($gazetteerPath)) {
+            $data = json_decode(file_get_contents($gazetteerPath), true);
+            $scored = collect(is_array($data) ? $data : [])
+                ->map(function ($item) use ($q) {
+                    $name = strtolower((string) ($item['name'] ?? ''));
+                    $country = strtolower((string) ($item['country'] ?? ''));
+                    $isPrefix = str_starts_with($name, $q) || str_starts_with($country, $q);
+                    $isIncludes = !$isPrefix && (str_contains($name, $q) || str_contains($country, $q));
+                    if (!$isPrefix && !$isIncludes) return null;
+                    return ['item' => $item, 'score' => $isPrefix ? 0 : 1];
+                })
+                ->filter()
+                ->sortBy('score')
+                ->pluck('item')
+                ->values();
+
+            foreach ($scored as $row) {
+                $results[] = [
+                    'name' => (string) ($row['name'] ?? ''),
+                    'type' => 'location',
+                    'country' => $row['country'] ?? null,
+                    'place_id' => null,
+                ];
+                if (count($results) >= $limit) break;
+            }
+        }
+
+        $venueSeeds = ['Wembley Stadium', '3Arena', 'Phoenix Park Cafe', 'Madison Square Garden', 'O2 Arena', 'Croke Park', 'Aviva Stadium'];
+        $landmarkSeeds = ['Eiffel Tower', 'Colosseum', 'Big Ben', 'Statue of Liberty', 'Christ the Redeemer'];
+        if ($mode === 'all' || $mode === 'venue') {
+            foreach ($venueSeeds as $name) {
+                if (str_contains(strtolower($name), $q)) {
+                    $results[] = ['name' => $name, 'type' => 'venue', 'country' => null, 'place_id' => null];
+                }
+            }
+        }
+        if ($mode === 'all' || $mode === 'landmark') {
+            foreach ($landmarkSeeds as $name) {
+                if (str_contains(strtolower($name), $q)) {
+                    $results[] = ['name' => $name, 'type' => 'landmark', 'country' => null, 'place_id' => null];
+                }
+            }
+        }
+
+        $deduped = collect($results)
+            ->filter(fn($item) => !empty($item['name']))
+            ->unique(fn($item) => strtolower((string) $item['name']))
+            ->take($limit)
+            ->values()
+            ->toArray();
+
+        return response()->json($deduped);
+    }
+
     /**
      * Unified search across users, locations, and posts
      */

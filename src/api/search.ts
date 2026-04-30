@@ -1,3 +1,5 @@
+import { apiRequest } from './client';
+
 export type SearchSections = {
     users?: { items: any[]; nextCursor: number | string | null; hasMore?: boolean };
     locations?: { items: any[]; nextCursor: number | string | null; hasMore?: boolean };
@@ -67,19 +69,10 @@ export async function unifiedSearch(params: {
             throw new Error('Laravel API disabled via VITE_USE_LARAVEL_API=false');
         }
 
-        const resp = await fetch(`/api/search?${searchParams.toString()}`);
-        
-        // Check if response is JSON
-        const contentType = resp.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-            throw new Error('API returned non-JSON response');
-        }
-        
-        if (!resp.ok) {
-            throw new Error(`Search failed with status ${resp.status}`);
-        }
-        
-        const result = await resp.json() as { q: string; sections: SearchSections };
+        const result = await apiRequest(`/search?${searchParams.toString()}`, {
+            method: 'GET',
+            timeoutMs: 6000,
+        }) as { q: string; sections: SearchSections };
         
         // Add Sarah@Artane to search results if query matches (for testing)
         const qLower = params.q.toLowerCase();

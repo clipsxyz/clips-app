@@ -150,6 +150,51 @@ export async function getCurrentUser() {
     return apiRequest('/auth/me');
 }
 
+type PhoneSendCodeResponse = {
+    ok: boolean;
+    delivery: 'sms' | 'mock';
+    expires_in_seconds: number;
+    debug_code?: string;
+};
+
+export async function sendPhoneVerificationCode(phone: string): Promise<PhoneSendCodeResponse> {
+    if (!isLaravelApiEnabled()) {
+        const otp = String(Math.floor(100000 + Math.random() * 900000));
+        sessionStorage.setItem('clips:mockPhoneOtp', otp);
+        sessionStorage.setItem('clips:mockPhoneOtpPhone', phone);
+        return { ok: true, delivery: 'mock', expires_in_seconds: 600, debug_code: otp };
+    }
+    try {
+        return await apiRequest('/auth/phone/send-code', {
+            method: 'POST',
+            body: JSON.stringify({ phone }),
+        });
+    } catch (err: any) {
+        if (err?.name === 'ConnectionRefused') {
+            const otp = String(Math.floor(100000 + Math.random() * 900000));
+            sessionStorage.setItem('clips:mockPhoneOtp', otp);
+            sessionStorage.setItem('clips:mockPhoneOtpPhone', phone);
+            return { ok: true, delivery: 'mock', expires_in_seconds: 600, debug_code: otp };
+        }
+        throw err;
+    }
+}
+
+export async function verifyPhoneVerificationCode(phone: string, code: string): Promise<{ ok: boolean; phone_number?: string; phone_verified_at?: string }> {
+    if (!isLaravelApiEnabled()) {
+        const expected = sessionStorage.getItem('clips:mockPhoneOtp');
+        const expectedPhone = sessionStorage.getItem('clips:mockPhoneOtpPhone');
+        if (!expected || expected !== code || expectedPhone !== phone) {
+            throw new Error('Incorrect code. Try again.');
+        }
+        return { ok: true, phone_number: phone, phone_verified_at: new Date().toISOString() };
+    }
+    return apiRequest('/auth/phone/verify-code', {
+        method: 'POST',
+        body: JSON.stringify({ phone, code }),
+    });
+}
+
 /** Map Laravel `/auth/me` or `/auth/profile` JSON into partial app `User` fields. */
 export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Record<string, unknown> {
     const pt = apiUser.places_traveled ?? apiUser.placesTraveled;

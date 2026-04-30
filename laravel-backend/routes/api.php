@@ -128,6 +128,7 @@ Route::get('/boost/stripe-status', function () {
 // Public search and location routes
 Route::get('/locations/search', [LocationController::class, 'search']);
 Route::get('/search', [SearchController::class, 'unified']);
+Route::get('/search/places', [SearchController::class, 'places']);
 
 // Public routes
 Route::prefix('auth')->group(function () {
@@ -216,6 +217,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('auth')->group(function () {
         Route::get('/me', [AuthController::class, 'me']);
         Route::put('/profile', [AuthController::class, 'updateProfile']);
+        Route::post('/phone/send-code', [AuthController::class, 'sendPhoneCode']);
+        Route::post('/phone/verify-code', [AuthController::class, 'verifyPhoneCode']);
         Route::post('/logout', [AuthController::class, 'logout']);
     });
 
