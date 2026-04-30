@@ -727,6 +727,13 @@ export default function ProfilePage() {
       title: 'Add phone',
       html: `
         <div style="display:flex; flex-direction:column; gap:10px; text-align:left; margin-top:8px; width:100%; max-width:100%; box-sizing:border-box;">
+          <div style="display:flex; align-items:center; gap:8px; background:#052e16; border:1px solid #166534; color:#bbf7d0; border-radius:10px; padding:8px 10px;">
+            <svg width="16" height="16" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+              <circle cx="16" cy="16" r="16" fill="#25D366"></circle>
+              <path d="M22.6 18.9c-.3-.2-1.9-.9-2.2-1-.3-.1-.5-.2-.7.2s-.8 1-.9 1.2c-.2.2-.3.2-.6.1-.3-.2-1.3-.5-2.4-1.5-.9-.8-1.4-1.7-1.6-2s0-.4.1-.5c.1-.1.3-.3.4-.5.1-.1.2-.3.3-.4.1-.2 0-.3 0-.5s-.7-1.7-1-2.3c-.3-.7-.5-.6-.7-.6h-.6c-.2 0-.5.1-.7.3-.2.2-1 1-1 2.4s1 2.8 1.1 3c.1.2 2 3 4.9 4.2.7.3 1.2.4 1.6.6.7.2 1.4.2 1.9.1.6-.1 1.9-.8 2.2-1.6.3-.8.3-1.5.2-1.6-.1-.1-.3-.2-.6-.4z" fill="#ffffff"></path>
+            </svg>
+            <span style="font-size:12px; font-weight:600;">We will text your verification code on WhatsApp</span>
+          </div>
           <p style="margin:0; color:#a1a1aa; font-size:13px;">
             Add your phone number for extra security, easier account recovery, and quicker logins.
           </p>
@@ -777,7 +784,7 @@ export default function ProfilePage() {
 
     const otpStep = await Swal.fire({
       title: 'Enter 6-digit code',
-      text: `Your code was sent to ${phoneNumber}`,
+      text: `Your WhatsApp code was sent to ${phoneNumber}`,
       input: 'text',
       inputPlaceholder: '000000',
       inputAttributes: {

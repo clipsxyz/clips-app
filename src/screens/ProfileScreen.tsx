@@ -498,6 +498,10 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         {securityStep === 'phone' ? (
                             <>
                                 <Text style={styles.securityTitle}>Add phone</Text>
+                                <View style={styles.securityWhatsAppBadge}>
+                                    <Icon name="logo-whatsapp" size={14} color="#DCFCE7" />
+                                    <Text style={styles.securityWhatsAppBadgeText}>We will text your verification code on WhatsApp</Text>
+                                </View>
                                 <Text style={styles.securityBody}>
                                     Add your phone number for extra security and easier account recovery.
                                 </Text>
@@ -529,7 +533,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         ) : (
                             <>
                                 <Text style={styles.securityTitle}>Enter 6-digit code</Text>
-                                <Text style={styles.securityBody}>Your code was sent to {pendingPhoneNumber}</Text>
+                                <Text style={styles.securityBody}>Your WhatsApp code was sent to {pendingPhoneNumber}</Text>
                                 <TextInput
                                     value={otpInput}
                                     onChangeText={setOtpInput}
@@ -1560,6 +1564,24 @@ const styles = StyleSheet.create({
         fontSize: 14,
         lineHeight: 20,
         marginBottom: 12,
+    },
+    securityWhatsAppBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        columnGap: 8,
+        backgroundColor: '#052E16',
+        borderWidth: 1,
+        borderColor: '#166534',
+        borderRadius: 10,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        marginBottom: 10,
+    },
+    securityWhatsAppBadgeText: {
+        color: '#BBF7D0',
+        fontSize: 12,
+        fontWeight: '600',
+        flex: 1,
     },
     securityPhoneRow: {
         flexDirection: 'row',

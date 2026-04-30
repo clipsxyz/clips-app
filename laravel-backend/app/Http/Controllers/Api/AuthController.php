@@ -174,23 +174,34 @@ class AuthController extends Controller
 
         $twilioSid = (string) config('services.twilio.sid', '');
         $twilioToken = (string) config('services.twilio.token', '');
-        $twilioFrom = (string) config('services.twilio.from', '');
+        $otpChannel = strtolower((string) config('services.twilio.otp_channel', 'whatsapp'));
+        if (!in_array($otpChannel, ['whatsapp', 'sms'], true)) {
+            $otpChannel = 'whatsapp';
+        }
+        $twilioFrom = $otpChannel === 'whatsapp'
+            ? (string) config('services.twilio.whatsapp_from', '')
+            : (string) config('services.twilio.from', '');
         $twilioConfigured = $twilioSid !== '' && $twilioToken !== '' && $twilioFrom !== '';
 
         $delivery = 'mock';
         if ($twilioConfigured) {
+            $to = $otpChannel === 'whatsapp' ? "whatsapp:{$phone}" : $phone;
+            $from = $otpChannel === 'whatsapp'
+                ? (str_starts_with($twilioFrom, 'whatsapp:') ? $twilioFrom : "whatsapp:{$twilioFrom}")
+                : $twilioFrom;
             $res = Http::asForm()
                 ->withBasicAuth($twilioSid, $twilioToken)
                 ->post("https://api.twilio.com/2010-04-01/Accounts/{$twilioSid}/Messages.json", [
-                    'From' => $twilioFrom,
-                    'To' => $phone,
+                    'From' => $from,
+                    'To' => $to,
                     'Body' => "Your Clips verification code is {$otpCode}",
                 ]);
 
             if ($res->successful()) {
-                $delivery = 'sms';
+                $delivery = $otpChannel;
             } else {
                 Log::warning('Twilio OTP send failed', [
+                    'channel' => $otpChannel,
                     'status' => $res->status(),
                     'body' => $res->body(),
                 ]);
