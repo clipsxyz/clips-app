@@ -61,6 +61,7 @@ function PillTabs({
     active,
     onChange,
     customLocation = null,
+    customFilterType = null,
     userLocal = 'Finglas',
     userRegional = 'Dublin',
     userNational = 'Ireland',
@@ -74,6 +75,7 @@ function PillTabs({
     active: Tab;
     onChange: (t: Tab) => void;
     customLocation?: string | null;
+    customFilterType?: 'location' | 'venue' | 'landmark' | null;
     userLocal?: string;
     userRegional?: string;
     userNational?: string;
@@ -81,7 +83,7 @@ function PillTabs({
     onOpenBoost: () => void;
     onOpenInbox: () => void;
     onOpenDiscover: () => void;
-    onSearchLocation?: (location: string) => void;
+    onSearchLocation?: (location: string, filterType: 'location' | 'venue' | 'landmark') => void;
     onClearCustom?: () => void;
 }) {
     const [menuOpen, setMenuOpen] = useState(false);
@@ -100,6 +102,14 @@ function PillTabs({
             'Paris', 'London', 'Dublin', 'Berlin', 'Madrid', 'Rome', 'Lisbon', 'Amsterdam', 'Tokyo',
             'Sao Paulo', 'Rio de Janeiro', 'New York', 'Los Angeles', 'Toronto', 'Sydney',
         ],
+        []
+    );
+    const fallbackVenues = useMemo(
+        () => ['3Arena', 'Phoenix Park Cafe', 'Madison Square Garden', 'O2 Arena', 'Louvre Cafe'],
+        []
+    );
+    const fallbackLandmarks = useMemo(
+        () => ['Eiffel Tower', 'Colosseum', 'Big Ben', 'Statue of Liberty', 'Christ the Redeemer'],
         []
     );
     const activeLabel = customLocation || (active === userLocal ? 'Nearby' : active);
@@ -182,7 +192,15 @@ function PillTabs({
             setLoadingSuggestions(false);
             return;
         }
-        const q = locationQuery.trim();
+        const raw = locationQuery.trim();
+        const parsedVenue = raw.match(/^venue\s*:\s*(.*)$/i);
+        const parsedLandmark = raw.match(/^landmark\s*:\s*(.*)$/i);
+        const searchMode: 'location' | 'venue' | 'landmark' = parsedVenue
+            ? 'venue'
+            : parsedLandmark
+                ? 'landmark'
+                : 'location';
+        const q = (parsedVenue?.[1] || parsedLandmark?.[1] || raw).trim();
         if (q.length < 2) {
             setLocationSuggestions([]);
             setUsingFallbackSuggestions(false);
@@ -195,12 +213,27 @@ function PillTabs({
                 setLoadingSuggestions(true);
                 const res = await searchLocations(q, 6);
                 if (!cancelled) {
-                    const apiSuggestions = Array.isArray(res) ? res.slice(0, 6) : [];
+                    const apiSuggestions = Array.isArray(res)
+                        ? res
+                            .filter((s) => {
+                                const t = String((s as any)?.type || '').toLowerCase();
+                                if (searchMode === 'venue') return t.includes('venue');
+                                if (searchMode === 'landmark') return t.includes('landmark');
+                                return !t.includes('venue') && !t.includes('landmark');
+                            })
+                            .slice(0, 6)
+                        : [];
                     if (apiSuggestions.length > 0) {
                         setUsingFallbackSuggestions(false);
                         setLocationSuggestions(apiSuggestions);
                     } else {
-                        const fallback = fallbackPlaces
+                        const source =
+                            searchMode === 'venue'
+                                ? fallbackVenues
+                                : searchMode === 'landmark'
+                                    ? fallbackLandmarks
+                                    : fallbackPlaces;
+                        const fallback = source
                             .filter((name) => name.toLowerCase().includes(q.toLowerCase()))
                             .slice(0, 6)
                             .map((name) => ({ name, type: 'city' as const }));
@@ -210,7 +243,13 @@ function PillTabs({
                 }
             } catch {
                 if (!cancelled) {
-                    const fallback = fallbackPlaces
+                    const source =
+                        searchMode === 'venue'
+                            ? fallbackVenues
+                            : searchMode === 'landmark'
+                                ? fallbackLandmarks
+                                : fallbackPlaces;
+                    const fallback = source
                         .filter((name) => name.toLowerCase().includes(q.toLowerCase()))
                         .slice(0, 6)
                         .map((name) => ({ name, type: 'city' as const }));
@@ -225,12 +264,22 @@ function PillTabs({
             cancelled = true;
             clearTimeout(timer);
         };
-    }, [menuOpen, locationQuery]);
+    }, [menuOpen, locationQuery, fallbackPlaces, fallbackVenues, fallbackLandmarks]);
 
     const submitLocationSearch = () => {
-        const next = locationQuery.trim();
+        const raw = locationQuery.trim();
+        if (!raw) return;
+        let filterType: 'location' | 'venue' | 'landmark' = 'location';
+        let next = raw;
+        if (/^venue\s*:/i.test(raw)) {
+            filterType = 'venue';
+            next = raw.replace(/^venue\s*:/i, '').trim();
+        } else if (/^landmark\s*:/i.test(raw)) {
+            filterType = 'landmark';
+            next = raw.replace(/^landmark\s*:/i, '').trim();
+        }
         if (!next) return;
-        onSearchLocation?.(next);
+        onSearchLocation?.(next, filterType);
         setMenuOpen(false);
     };
 
@@ -248,7 +297,7 @@ function PillTabs({
                         activeOpacity={0.85}
                     >
                         <Icon
-                            name="location"
+                            name={customFilterType === 'venue' ? 'home-outline' : customFilterType === 'landmark' ? 'business-outline' : 'location'}
                             size={16}
                             color="#FFFFFF"
                             style={styles.feedDropdownActiveIcon}
@@ -276,6 +325,9 @@ function PillTabs({
                                     style={styles.feedDropdownSearchInput}
                                 />
                             </View>
+                            <Text style={styles.feedDropdownSearchHint}>
+                                Tip: use venue: or landmark:
+                            </Text>
                             {locationQuery.trim().length >= 2 ? (
                                 <View style={styles.feedDropdownSuggestionsWrap}>
                                     {loadingSuggestions ? (
@@ -286,8 +338,14 @@ function PillTabs({
                                                 key={`${s.name}-${idx}`}
                                                 style={styles.feedDropdownSuggestionItem}
                                                 onPress={() => {
+                                                    const raw = locationQuery.trim();
+                                                    const mode: 'location' | 'venue' | 'landmark' = /^venue\s*:/i.test(raw)
+                                                        ? 'venue'
+                                                        : /^landmark\s*:/i.test(raw)
+                                                            ? 'landmark'
+                                                            : 'location';
                                                     setLocationQuery(s.name);
-                                                    onSearchLocation?.(s.name);
+                                                    onSearchLocation?.(s.name, mode);
                                                     setMenuOpen(false);
                                                 }}
                                             >
@@ -1330,6 +1388,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [refreshing, setRefreshing] = useState(false);
     const [showFollowingFeed, setShowFollowingFeed] = useState(false);
     const [customLocation, setCustomLocation] = useState<string | null>(null);
+    const [customFilterType, setCustomFilterType] = useState<'location' | 'venue' | 'landmark' | null>(null);
     const [commentsModalOpen, setCommentsModalOpen] = useState(false);
     const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
     const [selectedPostForComments, setSelectedPostForComments] = useState<Post | null>(null);
@@ -1341,7 +1400,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [showBoostPrompt, setShowBoostPrompt] = useState(false);
     const requestTokenRef = useRef(0);
 
-    const currentFilter = showFollowingFeed ? 'discover' : (customLocation || active);
+    const currentFilter = showFollowingFeed
+        ? 'discover'
+        : (customLocation
+            ? (customFilterType === 'venue'
+                ? `venue:${customLocation}`
+                : customFilterType === 'landmark'
+                    ? `landmark:${customLocation}`
+                    : customLocation)
+            : active);
 
     // Helper to update a post in pages
     const updatePost = (postId: string, updater: (post: Post) => Post) => {
@@ -1377,16 +1444,24 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     useEffect(() => {
         const requestedLocation = route?.params?.location;
+        const requestedFilterType = route?.params?.filterType as 'location' | 'venue' | 'landmark' | undefined;
         if (!requestedLocation || typeof requestedLocation !== 'string') return;
         const next = requestedLocation.trim();
         if (!next) return;
         setShowFollowingFeed(false);
         setCustomLocation(next);
+        setCustomFilterType(
+            requestedFilterType === 'venue'
+                ? 'venue'
+                : requestedFilterType === 'landmark'
+                    ? 'landmark'
+                    : 'location'
+        );
         setPages([]);
         setCursor(0);
         setEnd(false);
         setError(null);
-    }, [route?.params?.location]);
+    }, [route?.params?.location, route?.params?.filterType]);
 
     useEffect(() => {
         setPages([]);
@@ -1515,19 +1590,22 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         if (tab === 'Following') {
             setShowFollowingFeed(true);
             setCustomLocation(null);
+            setCustomFilterType(null);
             setActive('Following'); // Set active to Following so it's highlighted
         } else {
             setShowFollowingFeed(false);
             setCustomLocation(null);
+            setCustomFilterType(null);
             setActive(tab);
         }
     };
 
-    const handleHeaderLocationSearch = (location: string) => {
+    const handleHeaderLocationSearch = (location: string, filterType: 'location' | 'venue' | 'landmark' = 'location') => {
         const next = location.trim();
         if (!next) return;
         setShowFollowingFeed(false);
         setCustomLocation(next);
+        setCustomFilterType(filterType);
         setPages([]);
         setCursor(0);
         setEnd(false);
@@ -1536,6 +1614,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const clearCustomLocation = () => {
         setCustomLocation(null);
+        setCustomFilterType(null);
         setPages([]);
         setCursor(0);
         setEnd(false);
@@ -1693,6 +1772,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     active={showFollowingFeed ? 'Following' : active}
                     onChange={handleTabChange}
                     customLocation={customLocation}
+                    customFilterType={customFilterType}
                     userLocal={defaultLocal}
                     userRegional={defaultRegional}
                     userNational={defaultNational}
@@ -2014,6 +2094,13 @@ const styles = StyleSheet.create({
         paddingVertical: 0,
         borderWidth: 0,
         includeFontPadding: false,
+    },
+    feedDropdownSearchHint: {
+        marginTop: 5,
+        marginBottom: 4,
+        marginHorizontal: 14,
+        color: 'rgba(255,255,255,0.48)',
+        fontSize: 11,
     },
     feedDropdownSuggestionsWrap: {
         marginHorizontal: 12,

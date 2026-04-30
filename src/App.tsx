@@ -407,8 +407,9 @@ function PillTabs(props: {
   active: Tab;
   onChange: (t: Tab) => void;
   onClearCustom?: () => void;
-  onSearchLocation?: (location: string) => void;
+  onSearchLocation?: (location: string, filterType: 'location' | 'venue' | 'landmark') => void;
   customLocation?: string | null;
+  customFilterType?: 'location' | 'venue' | 'landmark' | null;
   userLocal?: string;
   userRegional?: string;
   userNational?: string;
@@ -442,6 +443,14 @@ function PillTabs(props: {
       'Paris', 'London', 'Dublin', 'Berlin', 'Madrid', 'Rome', 'Lisbon', 'Amsterdam', 'Tokyo',
       'Sao Paulo', 'Rio de Janeiro', 'New York', 'Los Angeles', 'Toronto', 'Sydney',
     ],
+    []
+  );
+  const fallbackVenues = React.useMemo(
+    () => ['3Arena', 'Phoenix Park Cafe', 'Madison Square Garden', 'O2 Arena', 'Louvre Cafe'],
+    []
+  );
+  const fallbackLandmarks = React.useMemo(
+    () => ['Eiffel Tower', 'Colosseum', 'Big Ben', 'Statue of Liberty', 'Christ the Redeemer'],
     []
   );
 
@@ -557,7 +566,15 @@ function PillTabs(props: {
       setLoadingSuggestions(false);
       return;
     }
-    const q = locationQuery.trim();
+    const raw = locationQuery.trim();
+    const parsedVenue = raw.match(/^venue\s*:\s*(.*)$/i);
+    const parsedLandmark = raw.match(/^landmark\s*:\s*(.*)$/i);
+    const searchMode: 'location' | 'venue' | 'landmark' = parsedVenue
+      ? 'venue'
+      : parsedLandmark
+        ? 'landmark'
+        : 'location';
+    const q = (parsedVenue?.[1] || parsedLandmark?.[1] || raw).trim();
     if (q.length < 2) {
       setLocationSuggestions([]);
       setUsingFallbackSuggestions(false);
@@ -570,22 +587,46 @@ function PillTabs(props: {
         setLoadingSuggestions(true);
         const res = await searchLocations(q, 6);
         if (!cancelled) {
-          const apiSuggestions = Array.isArray(res) ? res.slice(0, 6) : [];
+          const apiSuggestions = Array.isArray(res)
+            ? res
+                .filter((s) => {
+                  const t = String((s as any)?.type || '').toLowerCase();
+                  if (searchMode === 'venue') return t.includes('venue');
+                  if (searchMode === 'landmark') return t.includes('landmark');
+                  return !t.includes('venue') && !t.includes('landmark');
+                })
+                .slice(0, 6)
+            : [];
           if (apiSuggestions.length > 0) {
             setUsingFallbackSuggestions(false);
             setLocationSuggestions(apiSuggestions);
           } else {
-            const fallback = fallbackPlaces
+            const source =
+              searchMode === 'venue'
+                ? fallbackVenues
+                : searchMode === 'landmark'
+                  ? fallbackLandmarks
+                  : fallbackPlaces;
+            const fallback = source
               .filter((name) => name.toLowerCase().includes(q.toLowerCase()))
               .slice(0, 6)
-              .map((name) => ({ name, type: 'city' as const }));
+              .map((name) => ({
+                name,
+                type: searchMode === 'venue' ? 'city' as const : searchMode === 'landmark' ? 'city' as const : 'city' as const,
+              }));
             setUsingFallbackSuggestions(fallback.length > 0);
             setLocationSuggestions(fallback);
           }
         }
       } catch {
         if (!cancelled) {
-          const fallback = fallbackPlaces
+          const source =
+            searchMode === 'venue'
+              ? fallbackVenues
+              : searchMode === 'landmark'
+                ? fallbackLandmarks
+                : fallbackPlaces;
+          const fallback = source
             .filter((name) => name.toLowerCase().includes(q.toLowerCase()))
             .slice(0, 6)
             .map((name) => ({ name, type: 'city' as const }));
@@ -600,7 +641,7 @@ function PillTabs(props: {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [menuOpen, locationQuery]);
+  }, [menuOpen, locationQuery, fallbackPlaces, fallbackVenues, fallbackLandmarks]);
 
   React.useEffect(() => {
     const syncFullscreenState = () => {
@@ -692,9 +733,19 @@ function PillTabs(props: {
   ];
 
   const submitLocationSearch = () => {
-    const next = locationQuery.trim();
+    const raw = locationQuery.trim();
+    if (!raw) return;
+    let filterType: 'location' | 'venue' | 'landmark' = 'location';
+    let next = raw;
+    if (/^venue\s*:/i.test(raw)) {
+      filterType = 'venue';
+      next = raw.replace(/^venue\s*:/i, '').trim();
+    } else if (/^landmark\s*:/i.test(raw)) {
+      filterType = 'landmark';
+      next = raw.replace(/^landmark\s*:/i, '').trim();
+    }
     if (!next) return;
-    props.onSearchLocation?.(next);
+    props.onSearchLocation?.(next, filterType);
     setMenuOpen(false);
   };
 
@@ -722,7 +773,13 @@ function PillTabs(props: {
               className="inline-flex max-w-full items-center gap-2 rounded-lg bg-[#36454F] px-3 py-1.5 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
             >
               <span className="shrink-0" aria-hidden>
-                <FiMapPin className="h-4 w-4 text-white" />
+                {props.customFilterType === 'venue' ? (
+                  <FiHome className="h-4 w-4 text-white" />
+                ) : props.customFilterType === 'landmark' ? (
+                  <GiGreekTemple className="h-4 w-4 text-white" />
+                ) : (
+                  <FiMapPin className="h-4 w-4 text-white" />
+                )}
               </span>
               <span className={`shrink-0 h-2.5 w-2.5 rounded-full ${activeHeaderDotClass}`} aria-hidden />
               <span
@@ -769,6 +826,9 @@ function PillTabs(props: {
                       aria-label="Search location feed"
                     />
                   </div>
+                  <div className="px-1 pt-1.5 text-[11px] text-white/45">
+                    Tip: use <span className="text-white/65">venue:</span> or <span className="text-white/65">landmark:</span>
+                  </div>
                 </form>
                 <div className="py-1.5">
                   {locationQuery.trim().length >= 2 && (
@@ -782,8 +842,14 @@ function PillTabs(props: {
                               key={`${s.name}-${idx}`}
                               type="button"
                               onClick={() => {
+                                const raw = locationQuery.trim();
+                                const mode: 'location' | 'venue' | 'landmark' = /^venue\s*:/i.test(raw)
+                                  ? 'venue'
+                                  : /^landmark\s*:/i.test(raw)
+                                    ? 'landmark'
+                                    : 'location';
                                 setLocationQuery(s.name);
-                                props.onSearchLocation?.(s.name);
+                                props.onSearchLocation?.(s.name, mode);
                                 setMenuOpen(false);
                               }}
                               className="w-full px-3 py-2 text-left hover:bg-white/10 transition-colors"
@@ -5818,12 +5884,12 @@ function FeedPageWrapper() {
   // Initialize active tab based on user's national location, with fallback
   const defaultNational = user?.national || 'Ireland';
   const [active, setActive] = React.useState<Tab>(defaultNational);
-  const applyCustomLocationFromHeader = React.useCallback((location: string) => {
+  const applyCustomLocationFromHeader = React.useCallback((location: string, filterType: 'location' | 'venue' | 'landmark' = 'location') => {
     const next = location.trim();
     if (!next) return;
     setShowFollowingFeed(false);
     setCustomLocation(next);
-    setCustomFilterType('location');
+    setCustomFilterType(filterType);
     setPages([]);
     setCursor(0);
     setEnd(false);
@@ -7844,6 +7910,7 @@ function FeedPageWrapper() {
         onClearCustom={clearCustomLocationFromHeader}
         onSearchLocation={applyCustomLocationFromHeader}
         customLocation={customLocation}
+        customFilterType={customFilterType}
         userLocal={user?.local}
         userRegional={user?.regional}
         userNational={user?.national}
