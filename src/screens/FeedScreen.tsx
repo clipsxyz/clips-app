@@ -59,6 +59,7 @@ type Tab = string;
 function PillTabs({
     active,
     onChange,
+    customLocation = null,
     userLocal = 'Finglas',
     userRegional = 'Dublin',
     userNational = 'Ireland',
@@ -66,9 +67,12 @@ function PillTabs({
     onOpenBoost,
     onOpenInbox,
     onOpenDiscover,
+    onSearchLocation,
+    onClearCustom,
 }: {
     active: Tab;
     onChange: (t: Tab) => void;
+    customLocation?: string | null;
     userLocal?: string;
     userRegional?: string;
     userNational?: string;
@@ -76,13 +80,21 @@ function PillTabs({
     onOpenBoost: () => void;
     onOpenInbox: () => void;
     onOpenDiscover: () => void;
+    onSearchLocation?: (location: string) => void;
+    onClearCustom?: () => void;
 }) {
     const [menuOpen, setMenuOpen] = useState(false);
     const [showGazetteerTitle, setShowGazetteerTitle] = useState(true);
-    const activeLabel = active === userLocal ? 'Nearby' : active;
+    const [locationQuery, setLocationQuery] = useState('');
+    const [searchHintIndex, setSearchHintIndex] = useState(0);
+    const [searchInputFocused, setSearchInputFocused] = useState(false);
+    const searchHints = useMemo(() => ['Search any city', 'Search any country', 'Search any region'], []);
+    const activeLabel = customLocation || (active === userLocal ? 'Nearby' : active);
     const headerLabel = showGazetteerTitle ? 'Gazetteer' : activeLabel;
     const activeIndicatorColor =
-        active === userLocal
+        customLocation
+            ? '#EF4444'
+            : active === userLocal
             ? '#34D399'
             : active === userRegional
                 ? '#7A8AF0'
@@ -135,6 +147,27 @@ function PillTabs({
         return () => clearTimeout(timeout);
     }, []);
 
+    useEffect(() => {
+        if (!menuOpen) return;
+        setLocationQuery(customLocation || '');
+    }, [menuOpen, customLocation]);
+
+    useEffect(() => {
+        if (!menuOpen) return;
+        if (searchInputFocused || locationQuery.trim().length > 0) return;
+        const timer = setInterval(() => {
+            setSearchHintIndex((prev) => (prev + 1) % searchHints.length);
+        }, 2000);
+        return () => clearInterval(timer);
+    }, [menuOpen, searchInputFocused, locationQuery, searchHints.length]);
+
+    const submitLocationSearch = () => {
+        const next = locationQuery.trim();
+        if (!next) return;
+        onSearchLocation?.(next);
+        setMenuOpen(false);
+    };
+
     return (
         <View style={styles.tabContainer}>
             <View style={styles.feedHeaderPickerRow}>
@@ -161,6 +194,33 @@ function PillTabs({
 
                     {menuOpen && (
                         <View style={styles.feedDropdownMenu}>
+                            <View style={styles.feedDropdownSearchWrap}>
+                                <Icon name="search-outline" size={16} color="#CBD5E1" />
+                                <TextInput
+                                    value={locationQuery}
+                                    onChangeText={setLocationQuery}
+                                    placeholder={searchHints[searchHintIndex]}
+                                    placeholderTextColor="rgba(255,255,255,0.45)"
+                                    onFocus={() => setSearchInputFocused(true)}
+                                    onBlur={() => setSearchInputFocused(false)}
+                                    onSubmitEditing={submitLocationSearch}
+                                    returnKeyType="search"
+                                    autoCapitalize="words"
+                                    style={styles.feedDropdownSearchInput}
+                                />
+                            </View>
+                            {customLocation ? (
+                                <TouchableOpacity
+                                    style={styles.feedDropdownMenuItem}
+                                    onPress={() => {
+                                        onClearCustom?.();
+                                        setMenuOpen(false);
+                                    }}
+                                >
+                                    <Icon name="home-outline" size={18} color="#E5E7EB" />
+                                    <Text style={styles.feedDropdownMenuText}>Back to home feed</Text>
+                                </TouchableOpacity>
+                            ) : null}
                             {menuItems.map((item) => (
                                 <TouchableOpacity
                                     key={item.key}
@@ -1176,6 +1236,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [error, setError] = useState<string | null>(null);
     const [refreshing, setRefreshing] = useState(false);
     const [showFollowingFeed, setShowFollowingFeed] = useState(false);
+    const [customLocation, setCustomLocation] = useState<string | null>(null);
     const [commentsModalOpen, setCommentsModalOpen] = useState(false);
     const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
     const [selectedPostForComments, setSelectedPostForComments] = useState<Post | null>(null);
@@ -1187,7 +1248,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [showBoostPrompt, setShowBoostPrompt] = useState(false);
     const requestTokenRef = useRef(0);
 
-    const currentFilter = showFollowingFeed ? 'discover' : active;
+    const currentFilter = showFollowingFeed ? 'discover' : (customLocation || active);
 
     // Helper to update a post in pages
     const updatePost = (postId: string, updater: (post: Post) => Post) => {
@@ -1220,6 +1281,19 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             }
         }
     }, [user?.national, user?.regional, user?.local]);
+
+    useEffect(() => {
+        const requestedLocation = route?.params?.location;
+        if (!requestedLocation || typeof requestedLocation !== 'string') return;
+        const next = requestedLocation.trim();
+        if (!next) return;
+        setShowFollowingFeed(false);
+        setCustomLocation(next);
+        setPages([]);
+        setCursor(0);
+        setEnd(false);
+        setError(null);
+    }, [route?.params?.location]);
 
     useEffect(() => {
         setPages([]);
@@ -1347,11 +1421,32 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const handleTabChange = (tab: Tab) => {
         if (tab === 'Following') {
             setShowFollowingFeed(true);
+            setCustomLocation(null);
             setActive('Following'); // Set active to Following so it's highlighted
         } else {
             setShowFollowingFeed(false);
+            setCustomLocation(null);
             setActive(tab);
         }
+    };
+
+    const handleHeaderLocationSearch = (location: string) => {
+        const next = location.trim();
+        if (!next) return;
+        setShowFollowingFeed(false);
+        setCustomLocation(next);
+        setPages([]);
+        setCursor(0);
+        setEnd(false);
+        setError(null);
+    };
+
+    const clearCustomLocation = () => {
+        setCustomLocation(null);
+        setPages([]);
+        setCursor(0);
+        setEnd(false);
+        setError(null);
     };
 
     const flat = pages.flat();
@@ -1504,6 +1599,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 <PillTabs
                     active={showFollowingFeed ? 'Following' : active}
                     onChange={handleTabChange}
+                    customLocation={customLocation}
                     userLocal={defaultLocal}
                     userRegional={defaultRegional}
                     userNational={defaultNational}
@@ -1511,6 +1607,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     onOpenBoost={() => setShowBoostPrompt(true)}
                     onOpenInbox={() => navigation.navigate('Inbox')}
                     onOpenDiscover={() => navigation.navigate('Discover')}
+                    onSearchLocation={handleHeaderLocationSearch}
+                    onClearCustom={clearCustomLocation}
                 />
             </View>
 
@@ -1801,6 +1899,27 @@ const styles = StyleSheet.create({
         shadowRadius: 14,
         shadowOffset: { width: 0, height: 12 },
         elevation: 36,
+    },
+    feedDropdownSearchWrap: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginHorizontal: 12,
+        marginTop: 8,
+        marginBottom: 4,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: '#FFFFFF',
+        backgroundColor: 'rgba(0,0,0,0.28)',
+    },
+    feedDropdownSearchInput: {
+        flex: 1,
+        color: '#F9FAFB',
+        fontSize: 14,
+        marginLeft: 8,
+        paddingVertical: 0,
+        includeFontPadding: false,
     },
     feedDropdownMenuItem: {
         flexDirection: 'row',

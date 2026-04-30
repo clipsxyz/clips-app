@@ -402,7 +402,17 @@ function FeedBoostTabBadge({ active }: { active?: boolean }) {
   return <BoostPromoteBadge size="sm" active={active} />;
 }
 
-function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCustom?: () => void; userLocal?: string; userRegional?: string; userNational?: string; clipsCount?: number }) {
+function PillTabs(props: {
+  active: Tab;
+  onChange: (t: Tab) => void;
+  onClearCustom?: () => void;
+  onSearchLocation?: (location: string) => void;
+  customLocation?: string | null;
+  userLocal?: string;
+  userRegional?: string;
+  userNational?: string;
+  clipsCount?: number;
+}) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isMountedRef = React.useRef(false);
@@ -411,9 +421,16 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
   const [questionsCount, setQuestionsCount] = React.useState(0);
   const [showBoostPrompt, setShowBoostPrompt] = React.useState(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const [locationQuery, setLocationQuery] = React.useState('');
+  const [searchHintIndex, setSearchHintIndex] = React.useState(0);
+  const [searchInputFocused, setSearchInputFocused] = React.useState(false);
   const [isInFullscreen, setIsInFullscreen] = React.useState(false);
   const [showGazetteerTitle, setShowGazetteerTitle] = React.useState(true);
   const menuRef = React.useRef<HTMLDivElement>(null);
+  const searchHints = React.useMemo(
+    () => ['Search any city', 'Search any country', 'Search any region'],
+    []
+  );
 
   // Use user location from props or context, with fallback to defaults
   const local = props.userLocal || user?.local || 'Finglas';
@@ -478,9 +495,11 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
   }, [user?.handle]);
 
   const hasAnyNotifications = notificationCount > 0 || insightsCount > 0 || questionsCount > 0;
-  const activeLabel = props.active === local ? 'Nearby' : props.active;
+  const activeLabel = props.customLocation || (props.active === local ? 'Nearby' : props.active);
   const headerLabel = showGazetteerTitle ? 'Gazetteer' : activeLabel;
-  const activeHeaderDotClass = props.active === local
+  const activeHeaderDotClass = props.customLocation
+    ? 'bg-red-500'
+    : props.active === local
     ? 'bg-[#34D399]'
     : props.active === regional
       ? 'bg-[#7A8AF0]'
@@ -497,6 +516,7 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
 
   React.useEffect(() => {
     if (!menuOpen) return;
+    setLocationQuery(props.customLocation || '');
     const handleOutsideClick = (event: MouseEvent) => {
       if (!menuRef.current) return;
       if (!menuRef.current.contains(event.target as Node)) {
@@ -506,6 +526,15 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
     document.addEventListener('mousedown', handleOutsideClick);
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [menuOpen]);
+
+  React.useEffect(() => {
+    if (!menuOpen) return;
+    if (searchInputFocused || locationQuery.trim().length > 0) return;
+    const timer = window.setInterval(() => {
+      setSearchHintIndex((prev) => (prev + 1) % searchHints.length);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [menuOpen, searchInputFocused, locationQuery, searchHints.length]);
 
   React.useEffect(() => {
     const syncFullscreenState = () => {
@@ -596,6 +625,13 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
     },
   ];
 
+  const submitLocationSearch = () => {
+    const next = locationQuery.trim();
+    if (!next) return;
+    props.onSearchLocation?.(next);
+    setMenuOpen(false);
+  };
+
   return (
     <div role="tablist" aria-label="Locations" className="z-[140] bg-black py-1 relative isolate">
       {/* Not sticky: /feed uses an inner scroll container so this chrome stays pinned */}
@@ -646,7 +682,44 @@ function PillTabs(props: { active: Tab; onChange: (t: Tab) => void; onClearCusto
                 role="menu"
                 className="absolute top-[calc(100%+6px)] left-1/2 z-[160] w-[220px] -translate-x-1/2 overflow-hidden rounded-[22px] border border-white/10 bg-[#272b35]/92 shadow-[0_14px_30px_rgba(0,0,0,0.5)] backdrop-blur-xl"
               >
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    submitLocationSearch();
+                  }}
+                  className="px-3 pt-3"
+                >
+                  <div className="flex items-center gap-2 rounded-full border border-white bg-black/30 px-3 py-2">
+                    <FiSearch className="h-4 w-4 text-white/75" aria-hidden />
+                    <input
+                      type="text"
+                      value={locationQuery}
+                      onChange={(e) => setLocationQuery(e.target.value)}
+                      placeholder={searchHints[searchHintIndex]}
+                      onFocus={() => setSearchInputFocused(true)}
+                      onBlur={() => setSearchInputFocused(false)}
+                      className="w-full border-0 bg-transparent text-sm text-white placeholder:text-white/45 outline-none ring-0 shadow-none focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+                      style={{ WebkitAppearance: 'none', appearance: 'none' }}
+                      aria-label="Search location feed"
+                    />
+                  </div>
+                </form>
                 <div className="py-1.5">
+                  {props.customLocation && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        props.onClearCustom?.();
+                        setMenuOpen(false);
+                      }}
+                      className="w-full px-4 py-2.5 text-left text-white/95 hover:bg-white/10 transition-colors inline-flex items-center gap-2.5"
+                      style={{ fontSize: '17px', fontFamily: 'Urbanist, "Instagram Sans", Inter, sans-serif', fontWeight: 500 }}
+                    >
+                      <span className="shrink-0"><FiHome className="h-4 w-4 text-white/80" /></span>
+                      <span className="truncate">Back to home feed</span>
+                    </button>
+                  )}
                   {menuItems.map((item) => (
                     <button
                       key={item.key}
@@ -5648,6 +5721,38 @@ function FeedPageWrapper() {
   // Initialize active tab based on user's national location, with fallback
   const defaultNational = user?.national || 'Ireland';
   const [active, setActive] = React.useState<Tab>(defaultNational);
+  const applyCustomLocationFromHeader = React.useCallback((location: string) => {
+    const next = location.trim();
+    if (!next) return;
+    setShowFollowingFeed(false);
+    setCustomLocation(next);
+    setCustomFilterType('location');
+    setPages([]);
+    setCursor(0);
+    setEnd(false);
+    setError(null);
+  }, []);
+
+  const clearCustomLocationFromHeader = React.useCallback(() => {
+    try {
+      const params = new URLSearchParams(routerLocation.search);
+      if (params.has('location') || params.has('type')) {
+        params.delete('location');
+        params.delete('type');
+        const nextSearch = params.toString();
+        navigate(nextSearch ? `/feed?${nextSearch}` : '/feed', { replace: true });
+      }
+    } catch {
+      // ignore URL parsing errors
+    }
+    setCustomLocation(null);
+    setCustomFilterType(null);
+    setPages([]);
+    setCursor(0);
+    setEnd(false);
+    setError(null);
+  }, [routerLocation.search, navigate]);
+
 
   // Update active tab when user location changes
   React.useEffect(() => {
@@ -7636,82 +7741,26 @@ function FeedPageWrapper() {
         </div>
       )}
 
-      {/* Show location tabs only when not viewing a custom location */}
-      {!customLocation ? (
-        <PillTabs
-          active={active}
-          onChange={setActive}
-          onClearCustom={() => setCustomLocation(null)}
-          userLocal={user?.local}
-          userRegional={user?.regional}
-          userNational={user?.national}
-          clipsCount={(() => {
-            const uid = getStableUserId(user);
-            const userState = getState(uid);
-            return pages.flat().filter(p => {
-              const isFollowing = getFollowState(userState.follows, p.userHandle);
-              if (!isFollowing) return false;
-              // Check if this post's media was from a story
-              return p.mediaUrl && wasEverAStory(p.mediaUrl);
-            }).length;
-          })()}
-        />
-      ) : (
-        /* Show location header only when viewing custom location */
-        <div className="px-3 py-2">
-          <div className="relative inline-flex items-center">
-            <button
-              className="relative px-3 py-1.5 text-sm font-medium text-white rounded-lg"
-              onClick={() => setCustomLocation(null)}
-            >
-              {/* Monochrome gradient border for all search feed chips */}
-              <div
-                className="absolute inset-0 rounded-lg p-0.5 overflow-hidden"
-                style={{
-                  background: 'linear-gradient(90deg, rgba(255,255,255,0.45) 0%, rgba(255,255,255,1) 50%, rgba(255,255,255,0.45) 100%)',
-                }}
-              >
-                {/* Overlay that covers border initially, then rotates to reveal it */}
-                <div
-                  ref={locationBorderOverlayRef}
-                  className="absolute inset-0 bg-[#030712] rounded-lg"
-                  style={{
-                    maskImage: 'conic-gradient(from 0deg, black 360deg)',
-                    WebkitMaskImage: 'conic-gradient(from 0deg, black 360deg)',
-                  }}
-                />
-                <div className="w-full h-full rounded-lg bg-[#030712] relative z-10" />
-              </div>
-              {/* Content */}
-              <span className="relative z-10 flex items-center gap-2">
-                {customFilterType === 'venue' ? (
-                  <FiHome className="w-4 h-4" />
-                ) : customFilterType === 'landmark' ? (
-                  <GiGreekTemple className="w-4 h-4" />
-                ) : (
-                  <FiMapPin className="w-4 h-4" />
-                )}
-                {customFilterType === 'venue' ? (
-                  <>
-                    <span className="inline-block w-2 h-2 rounded-full bg-green-400" />
-                    {customLocation}
-                  </>
-                ) : customFilterType === 'landmark' ? (
-                  <>
-                    <span className="inline-block w-2 h-2 rounded-full bg-orange-400" />
-                    {customLocation}
-                  </>
-                ) : (
-                  <>
-                    <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
-                    {`${customLocation} Feed`}
-                  </>
-                )}
-              </span>
-            </button>
-          </div>
-        </div>
-      )}
+      <PillTabs
+        active={active}
+        onChange={setActive}
+        onClearCustom={clearCustomLocationFromHeader}
+        onSearchLocation={applyCustomLocationFromHeader}
+        customLocation={customLocation}
+        userLocal={user?.local}
+        userRegional={user?.regional}
+        userNational={user?.national}
+        clipsCount={(() => {
+          const uid = getStableUserId(user);
+          const userState = getState(uid);
+          return pages.flat().filter(p => {
+            const isFollowing = getFollowState(userState.follows, p.userHandle);
+            if (!isFollowing) return false;
+            // Check if this post's media was from a story
+            return p.mediaUrl && wasEverAStory(p.mediaUrl);
+          }).length;
+        })()}
+      />
       <div className="h-4" />
 
       {error && (
