@@ -1122,6 +1122,13 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
   const t = tab.toLowerCase();
   const isVenueFeed = t.startsWith('venue:');
   const isLandmarkFeed = t.startsWith('landmark:');
+  const isCustomLocationFeed =
+    !isVenueFeed &&
+    !isLandmarkFeed &&
+    t !== 'discover' &&
+    t !== 'finglas' &&
+    t !== 'dublin' &&
+    t !== 'ireland';
   // When API is off, use mock for all feeds. For Discover (Following), always use mock so local follows from localStorage are used (fixes phone/tablet where API might return empty).
   const useLaravelAPI = isLaravelApiEnabled() && t !== 'discover' && !isVenueFeed && !isLandmarkFeed;
 
@@ -1169,6 +1176,12 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
           }
         })
         .filter((x: Post | null): x is Post => x !== null);
+
+      // Guard custom location feeds from server over-broad matches.
+      // Keep only posts whose author/location metadata actually matches the queried location.
+      if (isCustomLocationFeed) {
+        transformedItems = transformedItems.filter((p) => postMatchesLocationTab(p, t));
+      }
 
       // Following (discover): trust the backend – it returns only posts from people the logged-in user follows (from auth token).
       // Do NOT filter by local follow state here: for backend signups local state is empty and we would empty the feed.

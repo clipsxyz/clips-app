@@ -24,6 +24,7 @@ import { useOnline } from './hooks/useOnline';
 import { getUnreadTotal, appendMessage, blockUser } from './api/messages';
 import { getUnreadNotificationCount } from './api/notifications';
 import { getStoryInsightsForUser } from './api/stories';
+import { searchLocations, type LocationSuggestion } from './api/locations';
 import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost, getAvaNormalPost, postMatchesLocationTab, posts as postsStore, consumePendingCreatedPost } from './api/posts';
 import { updatePost, checkFollowsMe } from './api/client';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory, fetchFollowedUsersStoryGroups } from './api/stories';
@@ -422,6 +423,9 @@ function PillTabs(props: {
   const [showBoostPrompt, setShowBoostPrompt] = React.useState(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [locationQuery, setLocationQuery] = React.useState('');
+  const [locationSuggestions, setLocationSuggestions] = React.useState<LocationSuggestion[]>([]);
+  const [usingFallbackSuggestions, setUsingFallbackSuggestions] = React.useState(false);
+  const [loadingSuggestions, setLoadingSuggestions] = React.useState(false);
   const [searchHintIndex, setSearchHintIndex] = React.useState(0);
   const [searchInputFocused, setSearchInputFocused] = React.useState(false);
   const [isInFullscreen, setIsInFullscreen] = React.useState(false);
@@ -429,6 +433,15 @@ function PillTabs(props: {
   const menuRef = React.useRef<HTMLDivElement>(null);
   const searchHints = React.useMemo(
     () => ['Search any city', 'Search any country', 'Search any region'],
+    []
+  );
+  const fallbackPlaces = React.useMemo(
+    () => [
+      'Brazil', 'France', 'Germany', 'Italy', 'Spain', 'Portugal', 'Ireland', 'United Kingdom', 'USA',
+      'Canada', 'Australia', 'India', 'Japan', 'South Korea', 'Mexico', 'Netherlands',
+      'Paris', 'London', 'Dublin', 'Berlin', 'Madrid', 'Rome', 'Lisbon', 'Amsterdam', 'Tokyo',
+      'Sao Paulo', 'Rio de Janeiro', 'New York', 'Los Angeles', 'Toronto', 'Sydney',
+    ],
     []
   );
 
@@ -517,6 +530,7 @@ function PillTabs(props: {
   React.useEffect(() => {
     if (!menuOpen) return;
     setLocationQuery(props.customLocation || '');
+    setLocationSuggestions([]);
     const handleOutsideClick = (event: MouseEvent) => {
       if (!menuRef.current) return;
       if (!menuRef.current.contains(event.target as Node)) {
@@ -535,6 +549,58 @@ function PillTabs(props: {
     }, 2000);
     return () => window.clearInterval(timer);
   }, [menuOpen, searchInputFocused, locationQuery, searchHints.length]);
+
+  React.useEffect(() => {
+    if (!menuOpen) {
+      setLocationSuggestions([]);
+      setUsingFallbackSuggestions(false);
+      setLoadingSuggestions(false);
+      return;
+    }
+    const q = locationQuery.trim();
+    if (q.length < 2) {
+      setLocationSuggestions([]);
+      setUsingFallbackSuggestions(false);
+      setLoadingSuggestions(false);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        setLoadingSuggestions(true);
+        const res = await searchLocations(q, 6);
+        if (!cancelled) {
+          const apiSuggestions = Array.isArray(res) ? res.slice(0, 6) : [];
+          if (apiSuggestions.length > 0) {
+            setUsingFallbackSuggestions(false);
+            setLocationSuggestions(apiSuggestions);
+          } else {
+            const fallback = fallbackPlaces
+              .filter((name) => name.toLowerCase().includes(q.toLowerCase()))
+              .slice(0, 6)
+              .map((name) => ({ name, type: 'city' as const }));
+            setUsingFallbackSuggestions(fallback.length > 0);
+            setLocationSuggestions(fallback);
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          const fallback = fallbackPlaces
+            .filter((name) => name.toLowerCase().includes(q.toLowerCase()))
+            .slice(0, 6)
+            .map((name) => ({ name, type: 'city' as const }));
+          setUsingFallbackSuggestions(fallback.length > 0);
+          setLocationSuggestions(fallback);
+        }
+      } finally {
+        if (!cancelled) setLoadingSuggestions(false);
+      }
+    }, 220);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [menuOpen, locationQuery]);
 
   React.useEffect(() => {
     const syncFullscreenState = () => {
@@ -689,7 +755,7 @@ function PillTabs(props: {
                   }}
                   className="px-3 pt-3"
                 >
-                  <div className="flex items-center gap-2 rounded-full border border-white bg-black/30 px-3 py-2">
+                  <div className="flex items-center gap-2 rounded-full border border-white bg-transparent px-3 py-2">
                     <FiSearch className="h-4 w-4 text-white/75" aria-hidden />
                     <input
                       type="text"
@@ -699,12 +765,43 @@ function PillTabs(props: {
                       onFocus={() => setSearchInputFocused(true)}
                       onBlur={() => setSearchInputFocused(false)}
                       className="w-full border-0 bg-transparent text-sm text-white placeholder:text-white/45 outline-none ring-0 shadow-none focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
-                      style={{ WebkitAppearance: 'none', appearance: 'none' }}
+                      style={{ WebkitAppearance: 'none', appearance: 'none', boxShadow: 'none', WebkitTapHighlightColor: 'transparent' }}
                       aria-label="Search location feed"
                     />
                   </div>
                 </form>
                 <div className="py-1.5">
+                  {locationQuery.trim().length >= 2 && (
+                    <div className="px-3 pb-1">
+                      {loadingSuggestions ? (
+                        <div className="px-2 py-1.5 text-xs text-white/60">Searching places...</div>
+                      ) : locationSuggestions.length > 0 ? (
+                        <div className="overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                          {locationSuggestions.map((s, idx) => (
+                            <button
+                              key={`${s.name}-${idx}`}
+                              type="button"
+                              onClick={() => {
+                                setLocationQuery(s.name);
+                                props.onSearchLocation?.(s.name);
+                                setMenuOpen(false);
+                              }}
+                              className="w-full px-3 py-2 text-left hover:bg-white/10 transition-colors"
+                            >
+                              <span className="text-sm text-white/90">{s.name}</span>
+                              {usingFallbackSuggestions ? (
+                                <span className="ml-1 text-xs text-white/45">· quick suggestion</span>
+                              ) : s.country ? (
+                                <span className="ml-1 text-xs text-white/55">· {s.country}</span>
+                              ) : null}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="px-2 py-1.5 text-xs text-white/50">No matches yet</div>
+                      )}
+                    </div>
+                  )}
                   {props.customLocation && (
                     <button
                       type="button"

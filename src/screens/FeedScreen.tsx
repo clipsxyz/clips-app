@@ -26,6 +26,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
+import { searchLocations, type LocationSuggestion } from '../api/locations';
 import {
     fetchPostsPage,
     toggleFollowForPost,
@@ -86,9 +87,21 @@ function PillTabs({
     const [menuOpen, setMenuOpen] = useState(false);
     const [showGazetteerTitle, setShowGazetteerTitle] = useState(true);
     const [locationQuery, setLocationQuery] = useState('');
+    const [locationSuggestions, setLocationSuggestions] = useState<LocationSuggestion[]>([]);
+    const [usingFallbackSuggestions, setUsingFallbackSuggestions] = useState(false);
+    const [loadingSuggestions, setLoadingSuggestions] = useState(false);
     const [searchHintIndex, setSearchHintIndex] = useState(0);
     const [searchInputFocused, setSearchInputFocused] = useState(false);
     const searchHints = useMemo(() => ['Search any city', 'Search any country', 'Search any region'], []);
+    const fallbackPlaces = useMemo(
+        () => [
+            'Brazil', 'France', 'Germany', 'Italy', 'Spain', 'Portugal', 'Ireland', 'United Kingdom', 'USA',
+            'Canada', 'Australia', 'India', 'Japan', 'South Korea', 'Mexico', 'Netherlands',
+            'Paris', 'London', 'Dublin', 'Berlin', 'Madrid', 'Rome', 'Lisbon', 'Amsterdam', 'Tokyo',
+            'Sao Paulo', 'Rio de Janeiro', 'New York', 'Los Angeles', 'Toronto', 'Sydney',
+        ],
+        []
+    );
     const activeLabel = customLocation || (active === userLocal ? 'Nearby' : active);
     const headerLabel = showGazetteerTitle ? 'Gazetteer' : activeLabel;
     const activeIndicatorColor =
@@ -150,6 +163,7 @@ function PillTabs({
     useEffect(() => {
         if (!menuOpen) return;
         setLocationQuery(customLocation || '');
+        setLocationSuggestions([]);
     }, [menuOpen, customLocation]);
 
     useEffect(() => {
@@ -160,6 +174,58 @@ function PillTabs({
         }, 2000);
         return () => clearInterval(timer);
     }, [menuOpen, searchInputFocused, locationQuery, searchHints.length]);
+
+    useEffect(() => {
+        if (!menuOpen) {
+            setLocationSuggestions([]);
+            setUsingFallbackSuggestions(false);
+            setLoadingSuggestions(false);
+            return;
+        }
+        const q = locationQuery.trim();
+        if (q.length < 2) {
+            setLocationSuggestions([]);
+            setUsingFallbackSuggestions(false);
+            setLoadingSuggestions(false);
+            return;
+        }
+        let cancelled = false;
+        const timer = setTimeout(async () => {
+            try {
+                setLoadingSuggestions(true);
+                const res = await searchLocations(q, 6);
+                if (!cancelled) {
+                    const apiSuggestions = Array.isArray(res) ? res.slice(0, 6) : [];
+                    if (apiSuggestions.length > 0) {
+                        setUsingFallbackSuggestions(false);
+                        setLocationSuggestions(apiSuggestions);
+                    } else {
+                        const fallback = fallbackPlaces
+                            .filter((name) => name.toLowerCase().includes(q.toLowerCase()))
+                            .slice(0, 6)
+                            .map((name) => ({ name, type: 'city' as const }));
+                        setUsingFallbackSuggestions(fallback.length > 0);
+                        setLocationSuggestions(fallback);
+                    }
+                }
+            } catch {
+                if (!cancelled) {
+                    const fallback = fallbackPlaces
+                        .filter((name) => name.toLowerCase().includes(q.toLowerCase()))
+                        .slice(0, 6)
+                        .map((name) => ({ name, type: 'city' as const }));
+                    setUsingFallbackSuggestions(fallback.length > 0);
+                    setLocationSuggestions(fallback);
+                }
+            } finally {
+                if (!cancelled) setLoadingSuggestions(false);
+            }
+        }, 220);
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+        };
+    }, [menuOpen, locationQuery]);
 
     const submitLocationSearch = () => {
         const next = locationQuery.trim();
@@ -201,6 +267,7 @@ function PillTabs({
                                     onChangeText={setLocationQuery}
                                     placeholder={searchHints[searchHintIndex]}
                                     placeholderTextColor="rgba(255,255,255,0.45)"
+                                    underlineColorAndroid="transparent"
                                     onFocus={() => setSearchInputFocused(true)}
                                     onBlur={() => setSearchInputFocused(false)}
                                     onSubmitEditing={submitLocationSearch}
@@ -209,6 +276,32 @@ function PillTabs({
                                     style={styles.feedDropdownSearchInput}
                                 />
                             </View>
+                            {locationQuery.trim().length >= 2 ? (
+                                <View style={styles.feedDropdownSuggestionsWrap}>
+                                    {loadingSuggestions ? (
+                                        <Text style={styles.feedDropdownSuggestionsMeta}>Searching places...</Text>
+                                    ) : locationSuggestions.length > 0 ? (
+                                        locationSuggestions.map((s, idx) => (
+                                            <TouchableOpacity
+                                                key={`${s.name}-${idx}`}
+                                                style={styles.feedDropdownSuggestionItem}
+                                                onPress={() => {
+                                                    setLocationQuery(s.name);
+                                                    onSearchLocation?.(s.name);
+                                                    setMenuOpen(false);
+                                                }}
+                                            >
+                                                <Text style={styles.feedDropdownSuggestionText}>
+                                                    {s.name}
+                                                    {usingFallbackSuggestions ? ' · quick suggestion' : (s.country ? ` · ${s.country}` : '')}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        ))
+                                    ) : (
+                                        <Text style={styles.feedDropdownSuggestionsMeta}>No matches yet</Text>
+                                    )}
+                                </View>
+                            ) : null}
                             {customLocation ? (
                                 <TouchableOpacity
                                     style={styles.feedDropdownMenuItem}
@@ -1911,7 +2004,7 @@ const styles = StyleSheet.create({
         borderRadius: 999,
         borderWidth: 1,
         borderColor: '#FFFFFF',
-        backgroundColor: 'rgba(0,0,0,0.28)',
+        backgroundColor: 'transparent',
     },
     feedDropdownSearchInput: {
         flex: 1,
@@ -1919,7 +2012,31 @@ const styles = StyleSheet.create({
         fontSize: 14,
         marginLeft: 8,
         paddingVertical: 0,
+        borderWidth: 0,
         includeFontPadding: false,
+    },
+    feedDropdownSuggestionsWrap: {
+        marginHorizontal: 12,
+        marginBottom: 4,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
+        backgroundColor: 'rgba(0,0,0,0.2)',
+        overflow: 'hidden',
+    },
+    feedDropdownSuggestionItem: {
+        paddingHorizontal: 12,
+        paddingVertical: 9,
+    },
+    feedDropdownSuggestionText: {
+        color: '#F9FAFB',
+        fontSize: 13,
+    },
+    feedDropdownSuggestionsMeta: {
+        color: 'rgba(255,255,255,0.55)',
+        fontSize: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 9,
     },
     feedDropdownMenuItem: {
         flexDirection: 'row',
