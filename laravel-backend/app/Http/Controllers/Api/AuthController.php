@@ -283,6 +283,231 @@ class AuthController extends Controller
     }
 
     /**
+     * Link the authenticated account to a Facebook profile ID.
+     */
+    public function linkFacebook(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'access_token' => ['required', 'string', 'min:20'],
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        try {
+            $profile = $this->fetchFacebookProfile((string) $request->input('access_token'));
+        } catch (\Throwable $e) {
+            Log::warning('Facebook profile fetch failed', ['error' => $e->getMessage()]);
+            return response()->json(['error' => 'Could not verify Facebook account.'], 422);
+        }
+
+        $facebookId = (string) ($profile['id'] ?? '');
+        if ($facebookId === '') {
+            return response()->json(['error' => 'Invalid Facebook account data.'], 422);
+        }
+
+        $takenByOther = User::where('facebook_id', $facebookId)->where('id', '!=', $user->id)->exists();
+        if ($takenByOther) {
+            return response()->json(['error' => 'That Facebook account is already linked to another user.'], 409);
+        }
+
+        $user->facebook_id = $facebookId;
+        $user->save();
+
+        return response()->json([
+            'ok' => true,
+            'facebook_id' => $facebookId,
+            'facebook_name' => $profile['name'] ?? null,
+        ]);
+    }
+
+    /**
+     * Fetch Facebook friends (who also authorized this app) and match them with app users.
+     */
+    public function findFacebookFriends(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'access_token' => ['required', 'string', 'min:20'],
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $accessToken = (string) $request->input('access_token');
+        $graphVersion = (string) config('services.facebook.graph_version', 'v20.0');
+
+        try {
+            $friendsRes = Http::timeout(12)->get("https://graph.facebook.com/{$graphVersion}/me/friends", [
+                'access_token' => $accessToken,
+                'fields' => 'id,name,picture',
+                'limit' => 200,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Facebook friends request failed', ['error' => $e->getMessage()]);
+            return response()->json(['error' => 'Could not contact Facebook right now.'], 502);
+        }
+
+        if (! $friendsRes->ok()) {
+            Log::warning('Facebook friends request non-200', [
+                'status' => $friendsRes->status(),
+                'body' => $friendsRes->body(),
+            ]);
+            return response()->json(['error' => 'Facebook friend sync failed.'], 422);
+        }
+
+        $friends = $friendsRes->json('data');
+        if (!is_array($friends)) {
+            $friends = [];
+        }
+
+        $friendIds = collect($friends)
+            ->map(fn ($f) => is_array($f) ? (string) ($f['id'] ?? '') : '')
+            ->filter(fn ($id) => $id !== '')
+            ->values();
+
+        if ($friendIds->isEmpty()) {
+            return response()->json([
+                'ok' => true,
+                'matched' => [],
+                'facebook_friend_count' => 0,
+                'matched_count' => 0,
+                'message' => 'No Facebook friends returned. This is expected unless friends also authorized this app.',
+            ]);
+        }
+
+        $friendMetaById = [];
+        foreach ($friends as $friend) {
+            if (!is_array($friend) || empty($friend['id'])) continue;
+            $friendMetaById[(string) $friend['id']] = [
+                'facebook_name' => $friend['name'] ?? null,
+                'facebook_picture' => $friend['picture']['data']['url'] ?? null,
+            ];
+        }
+
+        $matchedUsers = User::query()
+            ->whereIn('facebook_id', $friendIds->all())
+            ->where('id', '!=', $user->id)
+            ->select(['id', 'handle', 'display_name', 'avatar_url', 'facebook_id'])
+            ->limit(100)
+            ->get()
+            ->map(function (User $matched) use ($friendMetaById) {
+                $meta = $friendMetaById[(string) $matched->facebook_id] ?? [];
+                return [
+                    'id' => (string) $matched->id,
+                    'handle' => $matched->handle,
+                    'display_name' => $matched->display_name,
+                    'avatar_url' => $matched->avatar_url,
+                    'facebook_id' => $matched->facebook_id,
+                    'facebook_name' => $meta['facebook_name'] ?? null,
+                    'facebook_picture' => $meta['facebook_picture'] ?? null,
+                ];
+            })
+            ->values();
+
+        return response()->json([
+            'ok' => true,
+            'matched' => $matchedUsers,
+            'facebook_friend_count' => $friendIds->count(),
+            'matched_count' => $matchedUsers->count(),
+        ]);
+    }
+
+    /**
+     * Match phone contacts against users with verified phone numbers.
+     */
+    public function matchContacts(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'phones' => ['required', 'array', 'min:1', 'max:500'],
+            'phones.*' => ['required', 'string', 'max:32'],
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $normalized = collect((array) $request->input('phones', []))
+            ->map(fn ($p) => $this->normalizePhone((string) $p))
+            ->filter(fn ($p) => $p !== null)
+            ->unique()
+            ->values();
+
+        if ($normalized->isEmpty()) {
+            return response()->json([
+                'ok' => true,
+                'matched' => [],
+                'submitted_count' => 0,
+                'matched_count' => 0,
+            ]);
+        }
+
+        $matchedUsers = User::query()
+            ->whereIn('phone_number', $normalized->all())
+            ->whereNotNull('phone_verified_at')
+            ->where('id', '!=', $user->id)
+            ->select(['id', 'handle', 'display_name', 'avatar_url', 'phone_number'])
+            ->limit(200)
+            ->get()
+            ->map(fn (User $matched) => [
+                'id' => (string) $matched->id,
+                'handle' => $matched->handle,
+                'display_name' => $matched->display_name,
+                'avatar_url' => $matched->avatar_url,
+                'phone_number' => $matched->phone_number,
+            ])
+            ->values();
+
+        return response()->json([
+            'ok' => true,
+            'matched' => $matchedUsers,
+            'submitted_count' => $normalized->count(),
+            'matched_count' => $matchedUsers->count(),
+        ]);
+    }
+
+    private function fetchFacebookProfile(string $accessToken): array
+    {
+        $graphVersion = (string) config('services.facebook.graph_version', 'v20.0');
+        $res = Http::timeout(10)->get("https://graph.facebook.com/{$graphVersion}/me", [
+            'access_token' => $accessToken,
+            'fields' => 'id,name,picture',
+        ]);
+        if (! $res->ok()) {
+            throw new \RuntimeException('facebook_profile_request_failed');
+        }
+        $payload = $res->json();
+        return is_array($payload) ? $payload : [];
+    }
+
+    private function normalizePhone(string $raw): ?string
+    {
+        $trimmed = trim($raw);
+        if ($trimmed === '') return null;
+
+        $digits = preg_replace('/\D+/', '', $trimmed);
+        if (!is_string($digits) || strlen($digits) < 8 || strlen($digits) > 15) {
+            return null;
+        }
+
+        return '+' . $digits;
+    }
+
+    /**
      * Logout user
      */
     public function logout(Request $request): JsonResponse

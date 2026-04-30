@@ -30,6 +30,7 @@ class User extends Authenticatable
         'username',
         'email',
         'phone_number',
+        'facebook_id',
         'password',
         'display_name',
         'handle',

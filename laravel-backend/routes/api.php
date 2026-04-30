@@ -217,6 +217,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('auth')->group(function () {
         Route::get('/me', [AuthController::class, 'me']);
         Route::put('/profile', [AuthController::class, 'updateProfile']);
+        Route::post('/facebook/link', [AuthController::class, 'linkFacebook']);
+        Route::post('/facebook/friends', [AuthController::class, 'findFacebookFriends']);
+        Route::post('/contacts/match', [AuthController::class, 'matchContacts']);
         Route::post('/phone/send-code', [AuthController::class, 'sendPhoneCode']);
         Route::post('/phone/verify-code', [AuthController::class, 'verifyPhoneCode']);
         Route::post('/logout', [AuthController::class, 'logout']);

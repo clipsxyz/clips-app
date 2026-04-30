@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, FlatList, ActivityIndicator, Modal, ScrollView, Alert, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, FlatList, ActivityIndicator, Modal, ScrollView, Alert, TextInput, Share, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
@@ -9,7 +10,7 @@ import { getUserCollections } from '../api/collections';
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
 import { getUnreadTotal } from '../api/messages';
 import { setProfilePrivacy } from '../api/privacy';
-import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode } from '../api/client';
+import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, toggleFollow, type FacebookMatchedFriend, matchContactPhones } from '../api/client';
 import type { Post, Collection } from '../types';
 import Avatar from '../components/Avatar';
 import {
@@ -23,6 +24,7 @@ import {
     setCommentModerationPreferences,
     type CommentModerationPreferences,
 } from '../utils/commentModeration';
+import { getRuntimeEnv, getReactNativeDefaultApiBaseUrl } from '../config/runtimeEnv';
 
 const ProfileScreen: React.FC = ({ navigation }: any) => {
     const { user, logout, login } = useAuth();
@@ -34,6 +36,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [collectionsOpen, setCollectionsOpen] = useState(false);
     const [draftsOpen, setDraftsOpen] = useState(false);
     const [commentSafetyOpen, setCommentSafetyOpen] = useState(false);
+    const [inviteFriendsOpen, setInviteFriendsOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [unreadCount, setUnreadCount] = useState(0);
     const [commentModerationPrefs, setCommentModerationPrefs] = useState<CommentModerationPreferences>(getCommentModerationPreferences());
@@ -55,6 +58,9 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [phoneInput, setPhoneInput] = useState('');
     const [otpInput, setOtpInput] = useState('');
     const [pendingPhoneNumber, setPendingPhoneNumber] = useState('');
+    const [inviteSyncing, setInviteSyncing] = useState(false);
+    const [inviteMatchedFriends, setInviteMatchedFriends] = useState<FacebookMatchedFriend[]>([]);
+    const [contactsSyncing, setContactsSyncing] = useState(false);
 
     useEffect(() => {
         loadData();
@@ -272,6 +278,126 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         }
     };
 
+    const handleSyncFacebookFriends = async () => {
+        if (inviteSyncing) return;
+        setInviteSyncing(true);
+        try {
+            const fb = await import('react-native-fbsdk-next');
+            const result = await fb.LoginManager.logInWithPermissions(['public_profile', 'user_friends']);
+            if (result.isCancelled) {
+                setInviteSyncing(false);
+                return;
+            }
+
+            const tokenData = await fb.AccessToken.getCurrentAccessToken();
+            const accessToken = tokenData?.accessToken?.toString();
+            if (!accessToken) {
+                Alert.alert('Facebook login failed', 'No access token returned.');
+                setInviteSyncing(false);
+                return;
+            }
+
+            await linkFacebookAccount(accessToken);
+            const matches = await fetchFacebookFriendsMatches(accessToken);
+            setInviteMatchedFriends(matches.matched || []);
+            Alert.alert('Facebook synced', matches.matched_count
+                ? `Found ${matches.matched_count} friend${matches.matched_count === 1 ? '' : 's'}.`
+                : (matches.message || 'No matched Facebook friends yet.'));
+        } catch (error: any) {
+            Alert.alert('Sync failed', error?.message || 'Could not sync Facebook friends right now.');
+        } finally {
+            setInviteSyncing(false);
+        }
+    };
+
+    const handleMatchContacts = async () => {
+        setContactsSyncing(true);
+        try {
+            const ContactsModule = await import('react-native-contacts');
+            const Contacts = ContactsModule.default;
+            let permission = await Contacts.checkPermission();
+            if (permission === 'undefined') {
+                permission = await Contacts.requestPermission();
+            }
+            if (permission !== 'authorized') {
+                Alert.alert('Permission needed', 'Allow contacts permission to sync your contacts.');
+                return;
+            }
+
+            const deviceContacts = await Contacts.getAll();
+            const phones = deviceContacts
+                .flatMap((c: any) => Array.isArray(c.phoneNumbers) ? c.phoneNumbers : [])
+                .map((p: any) => String(p?.number || '').trim())
+                .filter(Boolean);
+            if (!phones.length) {
+                Alert.alert('No contacts found', 'No phone numbers were found on this device.');
+                return;
+            }
+
+            const result = await matchContactPhones(phones);
+            const asFriends: FacebookMatchedFriend[] = (result.matched || []).map((m) => ({
+                id: m.id,
+                handle: m.handle,
+                display_name: m.display_name,
+                avatar_url: m.avatar_url,
+                facebook_id: null,
+            }));
+            setInviteMatchedFriends(asFriends);
+            Alert.alert('Contacts matched', result.matched_count
+                ? `Matched ${result.matched_count} contact${result.matched_count === 1 ? '' : 's'}.`
+                : 'No matched contacts yet.');
+        } catch (error: any) {
+            Alert.alert('Match failed', error?.message || 'Could not match contacts right now.');
+        } finally {
+            setContactsSyncing(false);
+        }
+    };
+
+    const handleInviteByQrOrLink = async () => {
+        const apiBase = getRuntimeEnv('VITE_API_URL') || getReactNativeDefaultApiBaseUrl() || 'http://localhost:8000/api';
+        const apiOrigin = apiBase.replace(/\/api\/?$/, '');
+        const profileUrl = `${apiOrigin}/invite/${encodeURIComponent(String(user?.handle || '').replace(/^@/, ''))}`;
+        try {
+            await Share.share({
+                message: `Join me on Clips: ${profileUrl}`,
+                url: profileUrl,
+                title: 'Invite by link',
+            });
+        } catch {
+            // ignore share cancel
+        }
+        Clipboard.setString(profileUrl);
+        Alert.alert('Invite link copied', 'Your profile link was copied to clipboard.');
+    };
+
+    const handleShareInviteToWhatsApp = async () => {
+        const apiBase = getRuntimeEnv('VITE_API_URL') || getReactNativeDefaultApiBaseUrl() || 'http://localhost:8000/api';
+        const apiOrigin = apiBase.replace(/\/api\/?$/, '');
+        const inviteUrl = `${apiOrigin}/invite/${encodeURIComponent(String(user?.handle || '').replace(/^@/, ''))}`;
+        const text = `${user?.handle || 'A friend'} invited you to join Gazetteer\n\n${inviteUrl}`;
+        const link = `whatsapp://send?text=${encodeURIComponent(text)}`;
+        const can = await Linking.canOpenURL(link);
+        if (can) {
+            await Linking.openURL(link);
+        } else {
+            await Share.share({ message: text, url: inviteUrl, title: 'Share invite' });
+        }
+    };
+
+    const handleShareInviteToMessenger = async () => {
+        const apiBase = getRuntimeEnv('VITE_API_URL') || getReactNativeDefaultApiBaseUrl() || 'http://localhost:8000/api';
+        const apiOrigin = apiBase.replace(/\/api\/?$/, '');
+        const inviteUrl = `${apiOrigin}/invite/${encodeURIComponent(String(user?.handle || '').replace(/^@/, ''))}`;
+        const appId = getRuntimeEnv('VITE_FACEBOOK_APP_ID') || '';
+        const messengerLink = `fb-messenger://share/?link=${encodeURIComponent(inviteUrl)}${appId ? `&app_id=${encodeURIComponent(appId)}` : ''}`;
+        const can = await Linking.canOpenURL(messengerLink);
+        if (can) {
+            await Linking.openURL(messengerLink);
+        } else {
+            await Share.share({ message: `${user?.handle || 'A friend'} invited you to join Gazetteer ${inviteUrl}`, url: inviteUrl, title: 'Share invite' });
+        }
+    };
+
     if (loading) {
         return (
             <SafeAreaView style={styles.container}>
@@ -296,6 +422,14 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
 
             {/* Tabs: Messages, Drafts, Collections, Comment Safety, Settings */}
             <View style={styles.tabsContainer}>
+                <TouchableOpacity
+                    style={styles.tab}
+                    onPress={() => setInviteFriendsOpen(true)}
+                >
+                    <Icon name="people-outline" size={20} color="#67E8F9" />
+                    <Text style={styles.tabLabel}>Invite Friends</Text>
+                </TouchableOpacity>
+
                 <TouchableOpacity
                     style={styles.tab}
                     onPress={() => navigation.navigate('Inbox')}
@@ -551,6 +685,101 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                     <Text style={styles.securityPrimaryButtonText}>{securityBusy ? 'Verifying...' : 'Verify'}</Text>
                                 </TouchableOpacity>
                             </>
+                        )}
+                    </View>
+                </View>
+            </Modal>
+
+            <Modal
+                visible={inviteFriendsOpen}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => setInviteFriendsOpen(false)}
+            >
+                <View style={styles.securityOverlay}>
+                    <View style={styles.securityCard}>
+                        <View style={styles.inviteHeaderRow}>
+                            <Text style={styles.securityTitle}>Invite Friends</Text>
+                            <TouchableOpacity onPress={() => setInviteFriendsOpen(false)} style={styles.inviteCloseBtn}>
+                                <Icon name="close" size={18} color="#D1D5DB" />
+                            </TouchableOpacity>
+                        </View>
+                        <TouchableOpacity
+                            style={styles.inviteOption}
+                            onPress={handleSyncFacebookFriends}
+                            disabled={inviteSyncing}
+                        >
+                            <View style={styles.inviteOptionRow}>
+                                <Icon name="logo-facebook" size={16} color="#60A5FA" />
+                                <Text style={styles.inviteOptionTitle}>{inviteSyncing ? 'Syncing Facebook...' : 'Find Facebook Friends'}</Text>
+                            </View>
+                            <Text style={styles.inviteOptionBody}>Sync friends who connected with your app.</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={styles.inviteOption}
+                            onPress={handleShareInviteToWhatsApp}
+                        >
+                            <View style={styles.inviteOptionRow}>
+                                <Icon name="logo-whatsapp" size={16} color="#86EFAC" />
+                                <Text style={styles.inviteOptionTitle}>Share to WhatsApp</Text>
+                            </View>
+                            <Text style={styles.inviteOptionBody}>Share the Gazetteer app with friends.</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={styles.inviteOption}
+                            onPress={handleShareInviteToMessenger}
+                        >
+                            <View style={styles.inviteOptionRow}>
+                                <Icon name="chatbubble-ellipses" size={16} color="#60A5FA" />
+                                <Text style={styles.inviteOptionTitle}>Share to Messenger</Text>
+                            </View>
+                            <Text style={styles.inviteOptionBody}>Share the Gazetteer app with friends.</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={styles.inviteOption}
+                            onPress={handleMatchContacts}
+                            disabled={contactsSyncing}
+                        >
+                            <Text style={styles.inviteOptionTitle}>Find contacts</Text>
+                            <Text style={styles.inviteOptionBody}>{contactsSyncing ? 'Syncing your phone contacts...' : 'Sync your phone contacts to discover friends.'}</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={styles.inviteOption}
+                            onPress={handleInviteByQrOrLink}
+                        >
+                            <View style={styles.inviteOptionRow}>
+                                <Icon name="qr-code-outline" size={16} color="#D1D5DB" />
+                                <Text style={styles.inviteOptionTitle}>Invite by link or QR</Text>
+                            </View>
+                            <Text style={styles.inviteOptionBody}>Share your profile and connect faster.</Text>
+                        </TouchableOpacity>
+                        {inviteMatchedFriends.length > 0 && (
+                            <View style={styles.inviteMatchesWrap}>
+                                <Text style={styles.inviteMatchesLabel}>Facebook matches ({inviteMatchedFriends.length})</Text>
+                                {inviteMatchedFriends.map((friend) => (
+                                    <View key={friend.id} style={styles.inviteMatchRow}>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.inviteMatchTitle} numberOfLines={1}>
+                                                {friend.display_name || friend.handle || friend.facebook_name || 'User'}
+                                            </Text>
+                                            <Text style={styles.inviteMatchHandle} numberOfLines={1}>{friend.handle}</Text>
+                                        </View>
+                                        <TouchableOpacity
+                                            style={styles.inviteFollowBtn}
+                                            onPress={async () => {
+                                                try {
+                                                    await toggleFollow(friend.handle);
+                                                    Alert.alert('Followed', friend.handle);
+                                                } catch {
+                                                    Alert.alert('Error', 'Could not follow right now.');
+                                                }
+                                            }}
+                                        >
+                                            <Text style={styles.inviteFollowBtnText}>Follow</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                ))}
+                            </View>
                         )}
                     </View>
                 </View>
@@ -1634,6 +1863,88 @@ const styles = StyleSheet.create({
     securityPrimaryButtonText: {
         color: '#FFFFFF',
         fontSize: 15,
+        fontWeight: '700',
+    },
+    inviteHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 8,
+    },
+    inviteCloseBtn: {
+        width: 30,
+        height: 30,
+        borderRadius: 15,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#1F2937',
+    },
+    inviteOption: {
+        borderWidth: 1,
+        borderColor: '#374151',
+        backgroundColor: '#030712',
+        borderRadius: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 12,
+        marginBottom: 10,
+    },
+    inviteOptionTitle: {
+        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '700',
+        marginBottom: 2,
+    },
+    inviteOptionRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        columnGap: 8,
+        marginBottom: 2,
+    },
+    inviteOptionBody: {
+        color: '#9CA3AF',
+        fontSize: 12,
+    },
+    inviteMatchesWrap: {
+        marginTop: 4,
+    },
+    inviteMatchesLabel: {
+        color: '#9CA3AF',
+        fontSize: 11,
+        fontWeight: '700',
+        marginBottom: 8,
+        textTransform: 'uppercase',
+    },
+    inviteMatchRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        columnGap: 10,
+        borderWidth: 1,
+        borderColor: '#374151',
+        backgroundColor: '#030712',
+        borderRadius: 10,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        marginBottom: 8,
+    },
+    inviteMatchTitle: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '700',
+    },
+    inviteMatchHandle: {
+        color: '#9CA3AF',
+        fontSize: 11,
+        marginTop: 2,
+    },
+    inviteFollowBtn: {
+        backgroundColor: '#9F1239',
+        borderRadius: 999,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+    },
+    inviteFollowBtnText: {
+        color: '#FFFFFF',
+        fontSize: 12,
         fontWeight: '700',
     },
 });

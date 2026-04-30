@@ -150,6 +150,48 @@ export async function getCurrentUser() {
     return apiRequest('/auth/me');
 }
 
+export type FacebookMatchedFriend = {
+    id: string;
+    handle: string;
+    display_name?: string | null;
+    avatar_url?: string | null;
+    facebook_id?: string | null;
+    facebook_name?: string | null;
+    facebook_picture?: string | null;
+};
+
+export async function linkFacebookAccount(accessToken: string): Promise<{ ok: boolean; facebook_id?: string; facebook_name?: string | null }> {
+    return apiRequest('/auth/facebook/link', {
+        method: 'POST',
+        body: JSON.stringify({ access_token: accessToken }),
+    });
+}
+
+export async function fetchFacebookFriendsMatches(accessToken: string): Promise<{
+    ok: boolean;
+    matched: FacebookMatchedFriend[];
+    facebook_friend_count: number;
+    matched_count: number;
+    message?: string;
+}> {
+    return apiRequest('/auth/facebook/friends', {
+        method: 'POST',
+        body: JSON.stringify({ access_token: accessToken }),
+    });
+}
+
+export async function matchContactPhones(phones: string[]): Promise<{
+    ok: boolean;
+    matched: Array<{ id: string; handle: string; display_name?: string | null; avatar_url?: string | null; phone_number?: string | null }>;
+    submitted_count: number;
+    matched_count: number;
+}> {
+    return apiRequest('/auth/contacts/match', {
+        method: 'POST',
+        body: JSON.stringify({ phones }),
+    });
+}
+
 type PhoneSendCodeResponse = {
     ok: boolean;
     delivery: 'sms' | 'mock';
@@ -218,6 +260,7 @@ export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Rec
         socialLinks: (apiUser.social_links ?? apiUser.socialLinks) as Record<string, string> | undefined,
         is_private: apiUser.is_private as boolean | undefined,
         is_verified: apiUser.is_verified as boolean | undefined,
+        facebook_id: apiUser.facebook_id as string | undefined,
         accountType,
     };
 }

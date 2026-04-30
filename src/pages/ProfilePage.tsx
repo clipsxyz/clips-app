@@ -4,6 +4,8 @@ import { useAuth } from '../context/Auth';
 import Avatar from '../components/Avatar';
 import CreateGroupModal from '../components/CreateGroupModal';
 import { FiCamera, FiBookmark, FiMessageCircle, FiLock, FiUnlock, FiX, FiUser, FiMapPin, FiThumbsUp, FiGlobe, FiEdit3, FiLink2, FiUsers, FiUserCheck, FiPlus, FiSettings, FiFileText, FiLayers, FiType, FiImage, FiGrid, FiVideo } from 'react-icons/fi';
+import { FaFacebook } from 'react-icons/fa';
+import QRCode from 'qrcode';
 import Flag from '../components/Flag';
 import { getUserCollections } from '../api/collections';
 import type { Collection } from '../types';
@@ -15,9 +17,10 @@ import { setProfilePrivacy } from '../api/privacy';
 import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMaps';
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
 import { getUnreadTotal } from '../api/messages';
-import { fetchFollowers, fetchFollowing, updateAuthProfile, mapLaravelUserToAppFields, sendPhoneVerificationCode, verifyPhoneVerificationCode } from '../api/client';
+import { fetchFollowers, fetchFollowing, updateAuthProfile, mapLaravelUserToAppFields, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, toggleFollow, type FacebookMatchedFriend, matchContactPhones } from '../api/client';
 import type { Post, User } from '../types';
 import { getAvatarForHandle } from '../api/users';
+import { loginWithFacebookWeb } from '../services/facebookAuthWeb';
 import { 
   getNotificationPreferences, 
   saveNotificationPreferences, 
@@ -27,6 +30,7 @@ import {
 } from '../services/notifications';
 import { testBrowserNotification, testNotificationTypes, testImageNotification } from '../utils/testNotifications';
 import { runEndpointHealthCheck } from '../utils/endpointHealth';
+import { getRuntimeEnv } from '../config/runtimeEnv';
 import {
   getCommentModerationPreferences,
   setCommentModerationPreferences,
@@ -124,6 +128,10 @@ export default function ProfilePage() {
   const [collectionsOpen, setCollectionsOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [commentSafetyOpen, setCommentSafetyOpen] = React.useState(false);
+  const [inviteFriendsOpen, setInviteFriendsOpen] = React.useState(false);
+  const [inviteSyncing, setInviteSyncing] = React.useState(false);
+  const [inviteMatchedFriends, setInviteMatchedFriends] = React.useState<FacebookMatchedFriend[]>([]);
+  const [contactsSyncing, setContactsSyncing] = React.useState(false);
   const [draftsOpen, setDraftsOpen] = React.useState(false);
   const [myFeedOpen, setMyFeedOpen] = React.useState(false);
   const [myFeedVisible, setMyFeedVisible] = React.useState(false);
@@ -831,6 +839,156 @@ export default function ProfilePage() {
     }
   };
 
+  const handleSyncFacebookFriends = async () => {
+    if (inviteSyncing) return;
+    setInviteSyncing(true);
+    try {
+      const { accessToken } = await loginWithFacebookWeb();
+      await linkFacebookAccount(accessToken);
+      const result = await fetchFacebookFriendsMatches(accessToken);
+      setInviteMatchedFriends(result.matched || []);
+      if (!result.matched_count) {
+        showToast(result.message || 'No matched Facebook friends yet.');
+      } else {
+        showToast(`Found ${result.matched_count} friend${result.matched_count === 1 ? '' : 's'}.`);
+      }
+    } catch (err: any) {
+      Swal.fire(bottomSheet({
+        title: 'Facebook sync failed',
+        message: err?.message || 'Could not sync Facebook friends right now.',
+        icon: 'alert',
+      }));
+    } finally {
+      setInviteSyncing(false);
+    }
+  };
+
+  const handleMatchContacts = async () => {
+    let phones: string[] = [];
+    const contactsApi = (navigator as any)?.contacts;
+    if (contactsApi?.select) {
+      try {
+        const selected = await contactsApi.select(['tel'], { multiple: true });
+        phones = (selected || [])
+          .flatMap((entry: any) => Array.isArray(entry?.tel) ? entry.tel : [])
+          .map((tel: any) => String(tel || '').trim())
+          .filter(Boolean);
+      } catch {
+        // User cancelled or unsupported behavior; fallback below.
+      }
+    }
+
+    if (!phones.length) {
+      const input = await Swal.fire({
+        title: 'Find contacts',
+        input: 'textarea',
+        inputLabel: 'Browser contact sync is limited. Paste phone numbers to match contacts.',
+        inputPlaceholder: '+353871234567\n+447700900123',
+        showCancelButton: true,
+        confirmButtonText: 'Match contacts',
+        cancelButtonText: 'Cancel',
+        background: '#111111',
+        color: '#ffffff',
+        customClass: {
+          popup: 'swal-bottom-sheet-popup',
+          confirmButton: 'swal-bottom-sheet-confirm',
+          cancelButton: 'swal-bottom-sheet-cancel',
+        },
+        preConfirm: (value) => {
+          const parsed = String(value || '')
+            .split(/[\n,]+/)
+            .map((v) => v.trim())
+            .filter(Boolean);
+          if (!parsed.length) {
+            Swal.showValidationMessage('Enter at least one phone number.');
+            return null;
+          }
+          return parsed;
+        },
+      });
+      if (!input.isConfirmed || !input.value) return;
+      phones = input.value as string[];
+    }
+
+    setContactsSyncing(true);
+    try {
+      const result = await matchContactPhones(phones);
+      const asFriends: FacebookMatchedFriend[] = (result.matched || []).map((m) => ({
+        id: m.id,
+        handle: m.handle,
+        display_name: m.display_name,
+        avatar_url: m.avatar_url,
+        facebook_id: null,
+      }));
+      setInviteMatchedFriends(asFriends);
+      showToast(result.matched_count
+        ? `Matched ${result.matched_count} contact${result.matched_count === 1 ? '' : 's'}.`
+        : 'No matched contacts yet.');
+    } catch (err: any) {
+      Swal.fire(bottomSheet({
+        title: 'Contact match failed',
+        message: err?.message || 'Could not match contacts right now.',
+        icon: 'alert',
+      }));
+    } finally {
+      setContactsSyncing(false);
+    }
+  };
+
+  const handleInviteByQrOrLink = async () => {
+    const apiUrl = getRuntimeEnv('VITE_API_URL') || `${window.location.origin}/api`;
+    const apiOrigin = apiUrl.replace(/\/api\/?$/, '');
+    const inviteUrl = `${apiOrigin}/invite/${encodeURIComponent((user?.handle || '').replace(/^@/, ''))}`;
+    try {
+      const qr = await QRCode.toDataURL(inviteUrl, {
+        width: 220,
+        margin: 1,
+      });
+      await Swal.fire({
+        title: 'Invite by link or QR',
+        html: `
+          <div style="display:flex; flex-direction:column; align-items:center; gap:10px;">
+            <img src="${qr}" alt="Profile QR" style="width:220px; height:220px; border-radius:12px; background:#fff; padding:6px;" />
+            <div style="font-size:12px; color:#9ca3af; word-break:break-all; text-align:center;">${inviteUrl}</div>
+          </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'Copy link',
+        cancelButtonText: 'Close',
+        background: '#111111',
+        color: '#ffffff',
+        customClass: {
+          popup: 'swal-bottom-sheet-popup',
+          confirmButton: 'swal-bottom-sheet-confirm',
+          cancelButton: 'swal-bottom-sheet-cancel',
+        },
+      }).then(async (res) => {
+        if (res.isConfirmed) {
+          await navigator.clipboard.writeText(inviteUrl);
+          showToast('Invite link copied');
+        }
+      });
+    } catch {
+      await navigator.clipboard.writeText(inviteUrl);
+      showToast('QR unavailable, link copied instead');
+    }
+  };
+
+  const handleShareInviteToWhatsApp = async () => {
+    const apiUrl = getRuntimeEnv('VITE_API_URL') || `${window.location.origin}/api`;
+    const apiOrigin = apiUrl.replace(/\/api\/?$/, '');
+    const inviteUrl = `${apiOrigin}/invite/${encodeURIComponent((user?.handle || '').replace(/^@/, ''))}`;
+    const text = `${user?.handle || 'A friend'} invited you to join Gazetteer\n\n${inviteUrl}`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleShareInviteToMessenger = async () => {
+    const apiUrl = getRuntimeEnv('VITE_API_URL') || `${window.location.origin}/api`;
+    const apiOrigin = apiUrl.replace(/\/api\/?$/, '');
+    const inviteUrl = `${apiOrigin}/invite/${encodeURIComponent((user?.handle || '').replace(/^@/, ''))}`;
+    window.open(`https://www.facebook.com/dialog/send?link=${encodeURIComponent(inviteUrl)}&app_id=${encodeURIComponent(getRuntimeEnv('VITE_FACEBOOK_APP_ID') || '')}&redirect_uri=${encodeURIComponent(inviteUrl)}`, '_blank', 'noopener,noreferrer');
+  };
+
   const handleProfilePictureSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     console.log('File selected:', file);
@@ -947,6 +1105,20 @@ export default function ProfilePage() {
           {/* Quick actions rail: horizontal snap chips */}
           <div className="border-t border-gray-800 mt-3 pt-3">
             <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide pb-1 px-0.5" style={{ scrollSnapType: 'x mandatory' }}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setInviteFriendsOpen(true);
+                }}
+                className="shrink-0 min-h-[44px] px-3.5 py-2 rounded-xl border border-cyan-300/40 bg-cyan-900/30 text-cyan-100 hover:bg-cyan-900/45 transition-colors flex items-center gap-2"
+                style={{ scrollSnapAlign: 'start' }}
+              >
+                <FiUsers className="w-4 h-4" />
+                <span className="text-xs font-semibold">Invite Friends</span>
+              </button>
+
               <button
                 type="button"
                 onClick={(e) => {
@@ -2337,6 +2509,110 @@ export default function ProfilePage() {
                   </div>
                 ) : (
                   <p className="text-center text-gray-500 py-8">No collections yet</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Invite Friends Modal */}
+        {inviteFriendsOpen && (
+          <div className="fixed inset-0 z-[210] isolate bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setInviteFriendsOpen(false)}>
+            <div className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
+                <h2 className="text-xl font-bold text-gray-900">Invite Friends</h2>
+                <button onClick={() => setInviteFriendsOpen(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                  <FiX className="w-5 h-5 text-gray-600" />
+                </button>
+              </div>
+              <div className="p-5 space-y-3">
+                <button
+                  type="button"
+                  onClick={() => { void handleSyncFacebookFriends(); }}
+                  disabled={inviteSyncing}
+                  className="w-full rounded-xl border border-gray-200 px-4 py-3 text-left hover:bg-gray-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <div className="font-semibold text-gray-900 inline-flex items-center gap-2">
+                    <FaFacebook className="w-4 h-4 text-blue-600" />
+                    <span>{inviteSyncing ? 'Syncing Facebook...' : 'Find Facebook Friends'}</span>
+                  </div>
+                  <div className="text-sm text-gray-500">Sync friends who connected with your app.</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { void handleShareInviteToWhatsApp(); }}
+                  className="w-full rounded-xl border border-gray-200 px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+                >
+                  <div className="font-semibold text-gray-900 inline-flex items-center gap-2">
+                    <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-green-500 text-white text-[10px] font-bold">W</span>
+                    <span>Share to WhatsApp</span>
+                  </div>
+                  <div className="text-sm text-gray-500">Share the Gazetteer app with friends.</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { void handleShareInviteToMessenger(); }}
+                  className="w-full rounded-xl border border-gray-200 px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+                >
+                  <div className="font-semibold text-gray-900 inline-flex items-center gap-2">
+                    <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gradient-to-br from-[#00B2FF] to-[#006AFF] text-white text-[10px] font-bold">M</span>
+                    <span>Share to Messenger</span>
+                  </div>
+                  <div className="text-sm text-gray-500">Share the Gazetteer app with friends.</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { void handleMatchContacts(); }}
+                  disabled={contactsSyncing}
+                  className="w-full rounded-xl border border-gray-200 px-4 py-3 text-left hover:bg-gray-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <div className="font-semibold text-gray-900">{contactsSyncing ? 'Syncing contacts...' : 'Find contacts'}</div>
+                  <div className="text-sm text-gray-500">Sync your contacts to discover friends.</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { void handleInviteByQrOrLink(); }}
+                  className="w-full rounded-xl border border-gray-200 px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+                >
+                  <div className="font-semibold text-gray-900 inline-flex items-center gap-2">
+                    <FiGrid className="w-4 h-4 text-gray-800" />
+                    <span>Invite by link or QR</span>
+                  </div>
+                  <div className="text-sm text-gray-500">Share your profile and connect faster.</div>
+                </button>
+
+                {inviteMatchedFriends.length > 0 && (
+                  <div className="pt-2">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+                      Facebook matches ({inviteMatchedFriends.length})
+                    </div>
+                    <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                      {inviteMatchedFriends.map((friend) => (
+                        <div key={friend.id} className="rounded-xl border border-gray-200 px-3 py-2 flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-gray-900 truncate">
+                              {friend.display_name || friend.handle || friend.facebook_name || 'User'}
+                            </div>
+                            <div className="text-xs text-gray-500 truncate">{friend.handle}</div>
+                          </div>
+                          <button
+                            type="button"
+                            className="shrink-0 rounded-full bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold px-3 py-1.5 transition-colors"
+                            onClick={async () => {
+                              try {
+                                await toggleFollow(friend.handle);
+                                showToast(`Followed ${friend.handle}`);
+                              } catch {
+                                showToast('Could not follow right now.');
+                              }
+                            }}
+                          >
+                            Follow
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
