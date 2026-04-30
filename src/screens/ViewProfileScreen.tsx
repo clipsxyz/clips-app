@@ -14,6 +14,7 @@ import {
     Clipboard,
     TextInput,
     RefreshControl,
+    Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -57,6 +58,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     const [connectionRequestMap, setConnectionRequestMap] = useState<Record<string, boolean>>({});
     const [connectionActionLoadingMap, setConnectionActionLoadingMap] = useState<Record<string, boolean>>({});
     const [contentTab, setContentTab] = useState<'all' | 'videos' | 'photos' | 'text'>('all');
+    const socialLinks = (profileUser?.socialLinks || profileUser?.social_links || {}) as Record<string, string | undefined>;
 
     useEffect(() => {
         loadProfile();
@@ -201,6 +203,17 @@ export default function ViewProfileScreen({ route, navigation }: any) {
 
     const handleStoryPress = () => {
         navigation.navigate('Stories', { openUserHandle: handle });
+    };
+
+    const openExternalLink = async (rawUrl?: string) => {
+        const value = String(rawUrl || '').trim();
+        if (!value) return;
+        const url = value.startsWith('http') ? value : `https://${value}`;
+        try {
+            await Linking.openURL(url);
+        } catch {
+            Alert.alert('Invalid link', 'Could not open this link.');
+        }
     };
 
     const normalizeConnectionItems = (items: any[]): Array<{ handleNoAt: string; displayName: string; avatarUrl?: string; isRequested?: boolean }> => {
@@ -441,6 +454,32 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     <Text style={styles.userHandle}>{handle}</Text>
                     {profileUser?.bio && (
                         <Text style={styles.bio}>{profileUser.bio}</Text>
+                    )}
+                    {(socialLinks.website || socialLinks.podcast) && (
+                        <View style={styles.socialLinksRow}>
+                            {socialLinks.website ? (
+                                <TouchableOpacity
+                                    style={styles.socialLinkButton}
+                                    onPress={() => {
+                                        void openExternalLink(socialLinks.website);
+                                    }}
+                                >
+                                    <Icon name="link-outline" size={16} color="#FFFFFF" />
+                                    <Text style={styles.socialLinkText}>Website</Text>
+                                </TouchableOpacity>
+                            ) : null}
+                            {socialLinks.podcast ? (
+                                <TouchableOpacity
+                                    style={styles.socialLinkButton}
+                                    onPress={() => {
+                                        void openExternalLink(socialLinks.podcast);
+                                    }}
+                                >
+                                    <Icon name="mic-outline" size={16} color="#FFFFFF" />
+                                    <Text style={styles.socialLinkText}>Podcast</Text>
+                                </TouchableOpacity>
+                            ) : null}
+                        </View>
                     )}
                 </View>
 
@@ -882,6 +921,28 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: '#D1D5DB',
         marginTop: 4,
+    },
+    socialLinksRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+        marginTop: 10,
+    },
+    socialLinkButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        backgroundColor: '#000000',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.2)',
+        borderRadius: 10,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+    },
+    socialLinkText: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '600',
     },
     actionButtons: {
         flexDirection: 'row',

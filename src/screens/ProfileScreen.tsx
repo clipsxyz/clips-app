@@ -45,7 +45,8 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [editProfileOpen, setEditProfileOpen] = useState(false);
     const [profileNameDraft, setProfileNameDraft] = useState(user?.name || '');
     const [profileBioDraft, setProfileBioDraft] = useState(user?.bio || '');
-    const [profileWebsiteDraft, setProfileWebsiteDraft] = useState((user as any)?.website || '');
+    const [profileWebsiteDraft, setProfileWebsiteDraft] = useState((user as any)?.socialLinks?.website || (user as any)?.website || '');
+    const [profilePodcastDraft, setProfilePodcastDraft] = useState((user as any)?.socialLinks?.podcast || '');
 
     useEffect(() => {
         loadData();
@@ -58,8 +59,9 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     useEffect(() => {
         setProfileNameDraft(user?.name || '');
         setProfileBioDraft(user?.bio || '');
-        setProfileWebsiteDraft((user as any)?.website || '');
-    }, [user?.name, user?.bio, (user as any)?.website]);
+        setProfileWebsiteDraft((user as any)?.socialLinks?.website || (user as any)?.website || '');
+        setProfilePodcastDraft((user as any)?.socialLinks?.podcast || '');
+    }, [user?.name, user?.bio, (user as any)?.website, (user as any)?.socialLinks?.website, (user as any)?.socialLinks?.podcast]);
 
     const loadData = async () => {
         if (!user?.handle) return;
@@ -179,6 +181,11 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 display_name: profileNameDraft.trim() || undefined,
                 bio: profileBioDraft.trim() || undefined,
                 website: profileWebsiteDraft.trim() || undefined,
+                social_links: {
+                    ...((user as any)?.socialLinks || {}),
+                    website: profileWebsiteDraft.trim() || undefined,
+                    podcast: profilePodcastDraft.trim() || undefined,
+                },
             };
             await updateAuthProfile(payload);
             login({
@@ -186,6 +193,11 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 name: profileNameDraft.trim() || user.name,
                 bio: profileBioDraft.trim() || undefined,
                 website: profileWebsiteDraft.trim() || undefined,
+                socialLinks: {
+                    ...((user as any)?.socialLinks || {}),
+                    website: profileWebsiteDraft.trim() || undefined,
+                    podcast: profilePodcastDraft.trim() || undefined,
+                },
             } as any);
             setEditProfileOpen(false);
             Alert.alert('Saved', 'Your profile has been updated.');
@@ -512,6 +524,16 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                 value={profileWebsiteDraft}
                                 onChangeText={setProfileWebsiteDraft}
                                 placeholder="https://"
+                                placeholderTextColor="#6B7280"
+                                autoCapitalize="none"
+                            />
+
+                            <Text style={styles.inputLabel}>Podcast</Text>
+                            <TextInput
+                                style={styles.wordInput}
+                                value={profilePodcastDraft}
+                                onChangeText={setProfilePodcastDraft}
+                                placeholder="https://open.spotify.com/show/..."
                                 placeholderTextColor="#6B7280"
                                 autoCapitalize="none"
                             />

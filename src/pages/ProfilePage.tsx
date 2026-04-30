@@ -116,6 +116,7 @@ export default function ProfilePage() {
     x: user?.socialLinks?.x || '',
     instagram: user?.socialLinks?.instagram || '',
     tiktok: user?.socialLinks?.tiktok || '',
+    podcast: user?.socialLinks?.podcast || '',
   });
   const [countryFlag, setCountryFlag] = React.useState(user?.countryFlag || '');
   const [collections, setCollections] = React.useState<Collection[]>([]);
@@ -344,7 +345,8 @@ export default function ProfilePage() {
         website: user.socialLinks.website ?? '',
         x: user.socialLinks.x ?? '',
         instagram: user.socialLinks.instagram ?? '',
-        tiktok: user.socialLinks.tiktok ?? ''
+        tiktok: user.socialLinks.tiktok ?? '',
+        podcast: user.socialLinks.podcast ?? '',
       });
     }
   }, [user?.socialLinks]);
@@ -354,7 +356,7 @@ export default function ProfilePage() {
       Boolean(user?.avatarUrl),
       Boolean((user as any)?.profileBackgroundUrl),
       Boolean((bio || '').trim()),
-      Boolean((socialLinks.website || socialLinks.instagram || socialLinks.tiktok || socialLinks.x || '').trim()),
+      Boolean((socialLinks.website || socialLinks.instagram || socialLinks.tiktok || socialLinks.x || socialLinks.podcast || '').trim()),
       Boolean((national || regional || local || '').trim()),
     ];
     const completed = checks.filter(Boolean).length;
@@ -364,7 +366,7 @@ export default function ProfilePage() {
       total,
       percent: Math.round((completed / total) * 100),
     };
-  }, [user?.avatarUrl, (user as any)?.profileBackgroundUrl, bio, socialLinks.website, socialLinks.instagram, socialLinks.tiktok, socialLinks.x, national, regional, local]);
+  }, [user?.avatarUrl, (user as any)?.profileBackgroundUrl, bio, socialLinks.website, socialLinks.instagram, socialLinks.tiktok, socialLinks.x, socialLinks.podcast, national, regional, local]);
 
   React.useEffect(() => {
     if (user?.is_private !== undefined) {
@@ -1504,6 +1506,18 @@ export default function ProfilePage() {
                         className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
                       />
                     </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Podcast
+                      </label>
+                      <input
+                        type="text"
+                        value={socialLinks.podcast}
+                        onChange={(e) => setSocialLinks({ ...socialLinks, podcast: e.target.value })}
+                        placeholder="https://open.spotify.com/show/..."
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                      />
+                    </div>
                     <button
                       onClick={async () => {
                         const nextSocial = {
@@ -1511,6 +1525,7 @@ export default function ProfilePage() {
                           x: socialLinks.x.trim() || undefined,
                           instagram: socialLinks.instagram.trim() || undefined,
                           tiktok: socialLinks.tiktok.trim() || undefined,
+                          podcast: socialLinks.podcast.trim() || undefined,
                         };
                         const hasAny = Object.values(nextSocial).some(Boolean);
                         try {

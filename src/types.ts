@@ -19,6 +19,7 @@ export type User = {
     x?: string; // Twitter/X
     instagram?: string;
     tiktok?: string;
+    podcast?: string;
   };
   placesTraveled?: string[]; // Places the user has traveled to
   is_verified?: boolean; // Backend field
