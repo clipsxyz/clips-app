@@ -26,7 +26,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
-import { searchLocations, type LocationSuggestion } from '../api/locations';
+import { searchLocations } from '../api/locations';
 import {
     fetchPostsPage,
     toggleFollowForPost,
@@ -86,10 +86,11 @@ function PillTabs({
     onSearchLocation?: (location: string, filterType: 'location' | 'venue' | 'landmark') => void;
     onClearCustom?: () => void;
 }) {
+    type HeaderSuggestion = { name: string; type: 'location' | 'venue' | 'landmark'; country?: string };
     const [menuOpen, setMenuOpen] = useState(false);
     const [showGazetteerTitle, setShowGazetteerTitle] = useState(true);
     const [locationQuery, setLocationQuery] = useState('');
-    const [locationSuggestions, setLocationSuggestions] = useState<LocationSuggestion[]>([]);
+    const [locationSuggestions, setLocationSuggestions] = useState<HeaderSuggestion[]>([]);
     const [usingFallbackSuggestions, setUsingFallbackSuggestions] = useState(false);
     const [loadingSuggestions, setLoadingSuggestions] = useState(false);
     const [searchHintIndex, setSearchHintIndex] = useState(0);
@@ -105,7 +106,7 @@ function PillTabs({
         []
     );
     const fallbackVenues = useMemo(
-        () => ['3Arena', 'Phoenix Park Cafe', 'Madison Square Garden', 'O2 Arena', 'Louvre Cafe'],
+        () => ['Wembley Stadium', '3Arena', 'Phoenix Park Cafe', 'Madison Square Garden', 'O2 Arena', 'Louvre Cafe', 'Croke Park', 'Aviva Stadium'],
         []
     );
     const fallbackLandmarks = useMemo(
@@ -193,15 +194,24 @@ function PillTabs({
             return;
         }
         const raw = locationQuery.trim();
-        const parsedVenue = raw.match(/^venue\s*:\s*(.*)$/i);
-        const parsedLandmark = raw.match(/^landmark\s*:\s*(.*)$/i);
-        const searchMode: 'location' | 'venue' | 'landmark' = parsedVenue
-            ? 'venue'
-            : parsedLandmark
-                ? 'landmark'
-                : 'location';
+        const parsedVenue = raw.match(/^venue\b\s*:?\s*(.*)$/i);
+        const parsedLandmark = raw.match(/^landmark\b\s*:?\s*(.*)$/i);
+        const venueIntent = /^venue\b/i.test(raw) || /\b(cafe|coffee|bar|pub|restaurant|hotel|stadium|arena|mall|club|gym)\b/i.test(raw);
+        const landmarkIntent = /^landmark\b/i.test(raw) || /\b(landmark|tower|bridge|monument|statue|temple|cathedral|museum|palace)\b/i.test(raw);
+        const preferredType: 'location' | 'venue' | 'landmark' = venueIntent ? 'venue' : landmarkIntent ? 'landmark' : 'location';
         const q = (parsedVenue?.[1] || parsedLandmark?.[1] || raw).trim();
         if (q.length < 2) {
+            if (parsedVenue || parsedLandmark || preferredType === 'venue' || preferredType === 'landmark') {
+                const seedSource = preferredType === 'venue' ? fallbackVenues : fallbackLandmarks;
+                const seeded = seedSource.slice(0, 6).map((name) => ({
+                    name,
+                    type: preferredType,
+                }));
+                setUsingFallbackSuggestions(true);
+                setLocationSuggestions(seeded);
+                setLoadingSuggestions(false);
+                return;
+            }
             setLocationSuggestions([]);
             setUsingFallbackSuggestions(false);
             setLoadingSuggestions(false);
@@ -213,46 +223,54 @@ function PillTabs({
                 setLoadingSuggestions(true);
                 const res = await searchLocations(q, 6);
                 if (!cancelled) {
-                    const apiSuggestions = Array.isArray(res)
-                        ? res
-                            .filter((s) => {
-                                const t = String((s as any)?.type || '').toLowerCase();
-                                if (searchMode === 'venue') return t.includes('venue');
-                                if (searchMode === 'landmark') return t.includes('landmark');
-                                return !t.includes('venue') && !t.includes('landmark');
-                            })
-                            .slice(0, 6)
-                        : [];
-                    if (apiSuggestions.length > 0) {
+                    const allApiSuggestions = Array.isArray(res) ? res : [];
+                    const mappedApi: HeaderSuggestion[] = allApiSuggestions.map((s) => {
+                        const t = String((s as any)?.type || '').toLowerCase();
+                        const kind: 'location' | 'venue' | 'landmark' = t.includes('venue')
+                            ? 'venue'
+                            : t.includes('landmark')
+                                ? 'landmark'
+                                : 'location';
+                        return { name: s.name, country: (s as any).country, type: kind };
+                    });
+                    const fallbackCombined: HeaderSuggestion[] = [
+                        ...fallbackPlaces.map((name) => ({ name, type: 'location' as const })),
+                        ...fallbackVenues.map((name) => ({ name, type: 'venue' as const })),
+                        ...fallbackLandmarks.map((name) => ({ name, type: 'landmark' as const })),
+                    ];
+                    const filteredFallback = fallbackCombined.filter((x) => x.name.toLowerCase().includes(q.toLowerCase()));
+                    const merged = [...mappedApi, ...filteredFallback];
+                    const deduped = merged
+                        .filter((item, idx) => merged.findIndex((x) => x.name.toLowerCase() === item.name.toLowerCase()) === idx);
+                    const ordered = [...deduped].sort((a, b) => {
+                        const aBoost = a.type === preferredType ? 1 : 0;
+                        const bBoost = b.type === preferredType ? 1 : 0;
+                        return bBoost - aBoost;
+                    }).slice(0, 6);
+                    if (ordered.length > 0) {
                         setUsingFallbackSuggestions(false);
-                        setLocationSuggestions(apiSuggestions);
+                        setLocationSuggestions(ordered);
                     } else {
-                        const source =
-                            searchMode === 'venue'
-                                ? fallbackVenues
-                                : searchMode === 'landmark'
-                                    ? fallbackLandmarks
-                                    : fallbackPlaces;
-                        const fallback = source
+                        const fallback = [...fallbackPlaces, ...fallbackVenues, ...fallbackLandmarks]
                             .filter((name) => name.toLowerCase().includes(q.toLowerCase()))
                             .slice(0, 6)
-                            .map((name) => ({ name, type: 'city' as const }));
+                            .map((name) => ({
+                                name,
+                                type: fallbackVenues.includes(name) ? 'venue' as const : fallbackLandmarks.includes(name) ? 'landmark' as const : 'location' as const,
+                            }));
                         setUsingFallbackSuggestions(fallback.length > 0);
                         setLocationSuggestions(fallback);
                     }
                 }
             } catch {
                 if (!cancelled) {
-                    const source =
-                        searchMode === 'venue'
-                            ? fallbackVenues
-                            : searchMode === 'landmark'
-                                ? fallbackLandmarks
-                                : fallbackPlaces;
-                    const fallback = source
+                    const fallback = [...fallbackPlaces, ...fallbackVenues, ...fallbackLandmarks]
                         .filter((name) => name.toLowerCase().includes(q.toLowerCase()))
                         .slice(0, 6)
-                        .map((name) => ({ name, type: 'city' as const }));
+                        .map((name) => ({
+                            name,
+                            type: fallbackVenues.includes(name) ? 'venue' as const : fallbackLandmarks.includes(name) ? 'landmark' as const : 'location' as const,
+                        }));
                     setUsingFallbackSuggestions(fallback.length > 0);
                     setLocationSuggestions(fallback);
                 }
@@ -277,6 +295,10 @@ function PillTabs({
         } else if (/^landmark\s*:/i.test(raw)) {
             filterType = 'landmark';
             next = raw.replace(/^landmark\s*:/i, '').trim();
+        } else if (/\b(cafe|coffee|bar|pub|restaurant|hotel|stadium|arena|mall|club|gym)\b/i.test(raw)) {
+            filterType = 'venue';
+        } else if (/\b(landmark|tower|bridge|monument|statue|temple|cathedral|museum|palace)\b/i.test(raw)) {
+            filterType = 'landmark';
         }
         if (!next) return;
         onSearchLocation?.(next, filterType);
@@ -339,11 +361,15 @@ function PillTabs({
                                                 style={styles.feedDropdownSuggestionItem}
                                                 onPress={() => {
                                                     const raw = locationQuery.trim();
-                                                    const mode: 'location' | 'venue' | 'landmark' = /^venue\s*:/i.test(raw)
+                                                    const mode: 'location' | 'venue' | 'landmark' = s.type || (/^venue\s*:/i.test(raw)
                                                         ? 'venue'
                                                         : /^landmark\s*:/i.test(raw)
                                                             ? 'landmark'
-                                                            : 'location';
+                                                            : /\b(cafe|coffee|bar|pub|restaurant|hotel|stadium|arena|mall|club|gym)\b/i.test(raw)
+                                                                ? 'venue'
+                                                                : /\b(landmark|tower|bridge|monument|statue|temple|cathedral|museum|palace)\b/i.test(raw)
+                                                                    ? 'landmark'
+                                                                    : 'location');
                                                     setLocationQuery(s.name);
                                                     onSearchLocation?.(s.name, mode);
                                                     setMenuOpen(false);
@@ -351,7 +377,11 @@ function PillTabs({
                                             >
                                                 <Text style={styles.feedDropdownSuggestionText}>
                                                     {s.name}
-                                                    {usingFallbackSuggestions ? ' · quick suggestion' : (s.country ? ` · ${s.country}` : '')}
+                                                    {s.type === 'venue'
+                                                        ? ' · venue'
+                                                        : s.type === 'landmark'
+                                                            ? ' · landmark'
+                                                            : (usingFallbackSuggestions ? ' · quick suggestion' : (s.country ? ` · ${s.country}` : ''))}
                                                 </Text>
                                             </TouchableOpacity>
                                         ))
