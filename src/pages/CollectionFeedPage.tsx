@@ -7,7 +7,7 @@ import { useOnline } from '../hooks/useOnline';
 import { enqueue } from '../utils/mutationQueue';
 import type { Post } from '../types';
 import { FeedCard } from '../App';
-import { FiArrowLeft } from 'react-icons/fi';
+import { FiArrowLeft, FiX } from 'react-icons/fi';
 import CommentsModal from '../components/CommentsModal';
 import ShareModal from '../components/ShareModal';
 import ScenesModal from '../components/ScenesModal';
@@ -103,6 +103,13 @@ export default function CollectionFeedPage() {
                             {posts.length} {posts.length === 1 ? 'post' : 'posts'}
                         </p>
                     </div>
+                    <button
+                        onClick={() => nav('/profile')}
+                        className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                        aria-label="Close collections"
+                    >
+                        <FiX className="w-6 h-6 text-gray-700 dark:text-gray-300" />
+                    </button>
                 </div>
             </div>
 

@@ -221,7 +221,7 @@ class StoryController extends Controller
         $validator = Validator::make($request->all(), [
             'media_url' => 'nullable|url|max:500', // Made nullable for text-only stories
             'media_type' => 'nullable|in:image,video', // Made nullable for text-only stories
-            'text' => 'nullable|string|max:200',
+            'text' => 'nullable|string|max:500',
             'text_color' => 'nullable|string|max:50',
             'text_size' => 'nullable|in:small,medium,large',
             'location' => 'nullable|string|max:200',

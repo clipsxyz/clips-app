@@ -13,6 +13,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { createPost } from '../api/posts';
 import { useAuth } from '../context/Auth';
 import { saveDraft } from '../api/drafts';
+import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
 
 export default function TextOnlyCreateScreen({ navigation, route }: any) {
   const { user } = useAuth();
@@ -118,7 +119,20 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
           style={styles.textInput}
           multiline
           numberOfLines={10}
+          maxLength={TEXT_POST_BODY_MAX_LENGTH}
         />
+        <View style={styles.counterRow}>
+          <Text
+            style={[
+              styles.counterText,
+              text.length > TEXT_POST_BODY_MAX_LENGTH - 50
+                ? (text.length >= TEXT_POST_BODY_MAX_LENGTH ? styles.counterDanger : styles.counterWarn)
+                : null,
+            ]}
+          >
+            {text.length}/{TEXT_POST_BODY_MAX_LENGTH}
+          </Text>
+        </View>
 
         <View style={styles.locationRow}>
           <Icon name="location" size={18} color="#F8D26A" />
@@ -161,6 +175,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     borderWidth: 1,
     borderColor: '#374151',
+  },
+  counterRow: {
+    marginTop: 6,
+    alignItems: 'flex-end',
+  },
+  counterText: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  counterWarn: {
+    color: '#FBBF24',
+  },
+  counterDanger: {
+    color: '#F87171',
   },
   locationRow: {
     flexDirection: 'row',

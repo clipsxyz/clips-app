@@ -4159,24 +4159,16 @@ export default function StoriesPage() {
                                 </p>
                             </div>
                             <button
+                                type="button"
                                 onClick={() => {
-                                    // Navigate to create story page with the response pre-filled
                                     setSelectedResponse(null);
                                     setPaused(false);
                                     pausedRef.current = false;
-                                    navigate('/clip', {
-                                        state: {
-                                            replyToQuestion: {
-                                                question: currentStory?.question?.prompt,
-                                                response: selectedResponse.text,
-                                                responderHandle: selectedResponse.userHandle
-                                            }
-                                        }
-                                    });
+                                    navigate('/clip');
                                 }}
                                 className="w-full py-3 rounded-xl bg-gradient-to-tr from-purple-500 via-pink-500 to-pink-600 text-white font-semibold hover:opacity-90 transition-opacity"
                             >
-                                Reply in Story
+                                Create story
                             </button>
                         </div>
                     </div>

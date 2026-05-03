@@ -65,7 +65,7 @@ export default function CreateGroupModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[220] flex items-end justify-center sm:items-center">
+    <div className="fixed inset-0 z-[295] flex items-end justify-center sm:items-center">
       <div className="absolute inset-0 bg-black/85 backdrop-blur-[2px]" onClick={() => !busy && onClose()} />
       <div className="relative w-full max-w-md mx-3 sm:mx-4 rounded-t-2xl sm:rounded-2xl border border-white/15 bg-black shadow-2xl overflow-hidden mb-safe">
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 gap-3">

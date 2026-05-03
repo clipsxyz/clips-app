@@ -3042,20 +3042,11 @@ export default function MessagesPage() {
                                                                         <p className="text-white text-sm">{questionData.answer}</p>
                                                                     </div>
                                                                     <button
-                                                                        onClick={() => {
-                                                                            navigate('/clip', {
-                                                                                state: {
-                                                                                    replyToQuestion: {
-                                                                                        question: questionData.question,
-                                                                                        response: questionData.answer,
-                                                                                        responderHandle: msg.senderHandle
-                                                                                    }
-                                                                                }
-                                                                            });
-                                                                        }}
+                                                                        type="button"
+                                                                        onClick={() => navigate('/clip')}
                                                                         className="w-full py-2 px-4 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold hover:opacity-90 transition-opacity text-sm"
                                                                     >
-                                                                        Reply in Story
+                                                                        Create story
                                                                     </button>
                                                                 </div>
                                                             </div>

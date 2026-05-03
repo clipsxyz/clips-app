@@ -860,6 +860,48 @@ video {
   }
 }
 
+/* Share post → Stories modal — chrome silver + gold metallic shimmer */
+@keyframes gazetteerShimmerChromeGold {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+.gazetteer-shimmer-chrome-gold {
+  background: linear-gradient(
+    90deg,
+    #7a828c 0%,
+    #c5cad3 14%,
+    #eceef2 22%,
+    #e8d78a 34%,
+    #f6e27a 42%,
+    #fefce8 50%,
+    #d4af37 58%,
+    #c9cdd4 72%,
+    #9ca3af 86%,
+    #7a828c 100%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: gazetteerShimmerChromeGold 5s linear infinite;
+  display: inline-block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gazetteer-shimmer-chrome-gold {
+    animation: none;
+    background: linear-gradient(90deg, #c5cad3, #d4af37);
+    background-size: 100% 100%;
+  }
+}
+
 /* Passport shimmer effect - same as news feed tabs */
 .passport-shimmer {
   background: linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.3) 100%);

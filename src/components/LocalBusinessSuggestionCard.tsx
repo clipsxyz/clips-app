@@ -60,7 +60,7 @@ export default function LocalBusinessSuggestionCard({
   useMockBusinesses = false,
   pinnedPaidPostId,
   viewerHandle = null,
-  onFollowPost,
+  onFollowPost: _onFollowPost,
   onHideBusiness,
   onUnhideBusiness,
   onLikeBusiness,

@@ -14,8 +14,10 @@ import Flag from './Flag';
 import type { EffectConfig } from '../utils/effects';
 import { useAuth } from '../context/Auth';
 import { useOnline } from '../hooks/useOnline';
-import { addComment, addReply, fetchCommentsPage, toggleCommentLike, toggleReplyLike } from '../api/posts';
-import { getCollectionsForPost } from '../api/collections';
+import { addComment, addReply, fetchCommentsPage, toggleCommentLike, toggleReplyLike, deletePost } from '../api/posts';
+import { getCollectionsForPost, unsavePost, savePostToDefaultCollection } from '../api/collections';
+import { getStableUserId } from '../utils/userId';
+import { markFeedPostArchived, setPostNotificationsPref, hasPostNotificationsPref } from '../utils/feedPostPrefs';
 import { isProfilePrivate, canSendMessage, hasPendingFollowRequest, createFollowRequest } from '../api/privacy';
 import { getFollowedUsers, setFollowState } from '../api/posts';
 import Swal from 'sweetalert2';
@@ -292,6 +294,8 @@ export default function ScenesModal({
     const [menuOpen, setMenuOpen] = React.useState(false);
     const [createGroupOpen, setCreateGroupOpen] = React.useState(false);
     const [inviteToGroupOpen, setInviteToGroupOpen] = React.useState(false);
+    const [hasPostNotifications, setHasPostNotifications] = React.useState(false);
+    const [isQuickSaving, setIsQuickSaving] = React.useState(false);
     /** Bottom gradient + controls: hide while video plays idle (Reels-style); show on pause, sheet, or interaction. */
     const [scenesBottomChromeVisible, setScenesBottomChromeVisible] = React.useState(true);
     /** Vertical pull for swipe-down-to-dismiss (non-carousel, or carousel at first post). */
@@ -772,6 +776,26 @@ export default function ScenesModal({
         setSheetDragY(0);
         setIsCaptionExpanded(false);
         setExpandedReplyThreads({});
+        setHasPostNotifications(false);
+    }, [post.id]);
+
+    React.useEffect(() => {
+        if (!user?.id) {
+            setHasPostNotifications(false);
+            return;
+        }
+        const viewerId = getStableUserId(user);
+        setHasPostNotifications(hasPostNotificationsPref(viewerId, post.id));
+    }, [user, post.id]);
+
+    React.useEffect(() => {
+        const onPref = (e: Event) => {
+            const ce = e as CustomEvent<{ postId?: string; enabled?: boolean }>;
+            if (ce.detail?.postId !== post.id) return;
+            setHasPostNotifications(!!ce.detail?.enabled);
+        };
+        window.addEventListener('postNotificationPrefChanged', onPref as EventListener);
+        return () => window.removeEventListener('postNotificationPrefChanged', onPref as EventListener);
     }, [post.id]);
 
     React.useEffect(() => {
@@ -824,6 +848,43 @@ export default function ScenesModal({
             window.removeEventListener(`postSaved-${post.id}`, handlePostSaved);
         };
     }, [user?.id, post.id]);
+
+    const handleQuickSaveFromMenu = React.useCallback(async () => {
+        if (!user?.id || isQuickSaving) return;
+        setIsQuickSaving(true);
+        try {
+            if (isSaved) {
+                await unsavePost(user.id, post.id);
+                setIsSaved(false);
+                window.dispatchEvent(new CustomEvent(`postSaved-${post.id}`));
+                showToast('Removed from saved');
+            } else {
+                await savePostToDefaultCollection(user.id, post.id, post);
+                setIsSaved(true);
+                window.dispatchEvent(new CustomEvent(`postSaved-${post.id}`));
+                showToast('Saved', 2600, {
+                    actionLabel: 'Save to collection',
+                    onAction: () => setSaveModalOpen(true),
+                });
+            }
+        } catch (error) {
+            console.error('Scenes save/unsave error:', error);
+            showToast(isSaved ? 'Could not unsave post' : 'Could not save post');
+        } finally {
+            setIsQuickSaving(false);
+        }
+    }, [user?.id, isQuickSaving, post.id, post, isSaved]);
+
+    const handleBoostFromMenu = React.useCallback(async () => {
+        if (onBoost) {
+            await onBoost();
+            return;
+        }
+        navigate('/boost', { state: { focusPostId: post.id } });
+    }, [onBoost, navigate, post.id]);
+
+    const canDeleteThisPost =
+        Boolean(user?.handle && user.handle === post.userHandle && !post.originalUserHandle);
 
     async function handleLike() {
         if (likeBusy) return;
@@ -1500,10 +1561,6 @@ export default function ScenesModal({
     };
 
     if (!isOpen) return null;
-
-    React.useEffect(() => {
-        console.log('ScenesModal - shareModalOpen changed:', shareModalOpen);
-    }, [shareModalOpen]);
 
     const carouselIdx = effectivePosts.length > 0 ? Math.max(0, effectivePosts.findIndex((p) => p.id === post.id)) : 0;
     const carouselPrevPost = carouselIdx > 0 ? effectivePosts[carouselIdx - 1] : null;
@@ -2381,7 +2438,7 @@ export default function ScenesModal({
                         <>
                             {/* Backdrop - only from 30vh down, so video stays visible at top */}
                             <div
-                                className="fixed left-0 right-0 bottom-0 z-[110]"
+                                className="fixed left-0 right-0 bottom-0 z-[260]"
                                 // Leave more space for the video at the top when comments sheet is open.
                                 style={{
                                     top: `${commentsSheetTopPx}px`,
@@ -2393,7 +2450,7 @@ export default function ScenesModal({
                             {/* Comments sheet - TikTok style: white card, fixed to viewport; only handle bar triggers drag */}
                             <div
                                 ref={sheetRef}
-                                className="fixed left-0 right-0 bottom-0 z-[120] bg-white rounded-t-2xl flex flex-col shadow-[0_-4px_24px_rgba(0,0,0,0.2)]"
+                                className="fixed left-0 right-0 bottom-0 z-[270] bg-white rounded-t-2xl flex flex-col shadow-[0_-4px_24px_rgba(0,0,0,0.2)]"
                                 style={{
                                     top: `${commentsSheetTopPx}px`,
                                     bottom: 0,
@@ -2700,7 +2757,6 @@ export default function ScenesModal({
                     userId={user.id}
                     isOpen={menuOpen}
                     onClose={() => setMenuOpen(false)}
-                    onCopyLink={() => { }}
                     onShare={onShare}
                     onReport={() => {
                         console.log('Report post from Scenes:', post.id);
@@ -2720,30 +2776,78 @@ export default function ScenesModal({
                     onNotInterested={() => {
                         console.log('Not interested in post from Scenes:', post.id);
                     }}
-                    onDelete={async () => {
-                        console.log('Delete post from Scenes:', post.id);
-                    }}
+                    onDelete={
+                        canDeleteThisPost && user?.id
+                            ? async () => {
+                                  const result = await Swal.fire(
+                                      bottomSheet({
+                                          title: 'Delete post?',
+                                          message: "This can't be undone.",
+                                          icon: 'alert',
+                                          showCancelButton: true,
+                                          confirmButtonText: 'Delete',
+                                          cancelButtonText: 'Cancel',
+                                      }),
+                                  );
+                                  if (!result.isConfirmed) return;
+                                  try {
+                                      await deletePost(user.id, post.id, user?.handle);
+                                      window.dispatchEvent(
+                                          new CustomEvent('feedPostDeleted', { detail: { postId: post.id } }),
+                                      );
+                                      let savedTime: number | undefined;
+                                      if (videoRef.current && currentItem?.type === 'video') {
+                                          savedTime = videoRef.current.currentTime;
+                                      }
+                                      onClose(savedTime);
+                                  } catch (err) {
+                                      console.error('Delete post from Scenes failed:', err);
+                                      await Swal.fire(
+                                          bottomSheet({
+                                              title: 'Could not delete post',
+                                              message:
+                                                  err instanceof Error ? err.message : 'Please try again.',
+                                              icon: 'alert',
+                                          }),
+                                      );
+                                  }
+                              }
+                            : undefined
+                    }
                     onEdit={() => {
                         console.log('Edit post from Scenes:', post.id);
                     }}
                     onArchive={async () => {
-                        console.log('Archive post from Scenes:', post.id);
+                        const viewerId = getStableUserId(user);
+                        markFeedPostArchived(viewerId, post.id);
+                        showToast('Post archived');
+                        let savedTime: number | undefined;
+                        if (videoRef.current && currentItem?.type === 'video') {
+                            savedTime = videoRef.current.currentTime;
+                        }
+                        onClose(savedTime);
                     }}
-                    onBoost={onBoost}
+                    onBoost={handleBoostFromMenu}
                     onReclip={onReclip}
                     onTurnOnNotifications={() => {
-                        console.log('Turn on notifications for post from Scenes:', post.id);
+                        const viewerId = getStableUserId(user);
+                        setPostNotificationsPref(viewerId, post.id, true);
+                        setHasPostNotifications(true);
+                        showToast('You’ll get notifications about this post');
                     }}
                     onTurnOffNotifications={() => {
-                        console.log('Turn off notifications for post from Scenes:', post.id);
+                        const viewerId = getStableUserId(user);
+                        setPostNotificationsPref(viewerId, post.id, false);
+                        setHasPostNotifications(false);
+                        showToast('Post notifications off');
                     }}
                     isCurrentUser={user.handle === post.userHandle}
                     isFollowing={post.isFollowing === true}
                     isSaved={isSaved}
                     isMuted={false}
                     isBlocked={false}
-                    hasNotifications={false}
-                    onOpenSave={() => setSaveModalOpen(true)}
+                    hasNotifications={hasPostNotifications}
+                    onOpenSave={handleQuickSaveFromMenu}
                     onCreateGroup={
                         user?.id && user?.handle === post.userHandle
                             ? () => {

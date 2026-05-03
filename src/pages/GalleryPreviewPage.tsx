@@ -634,7 +634,7 @@ export default function GalleryPreviewPage() {
                 );
                 mediaItemsForPost = preparedItems.items.map((item) => ({
                     url: item.url,
-                    type: item.type,
+                    type: item.type === 'video' ? 'video' : 'image',
                     duration: item.duration,
                 }));
                 if (!videoPosterUrl) {

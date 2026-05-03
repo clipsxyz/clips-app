@@ -19,6 +19,7 @@ import { useAuth } from '../context/Auth';
 import { createPost } from '../api/posts';
 import { prepareMediaForPostNative } from '../utils/prepareMediaForPostNative';
 import { saveDraft } from '../api/drafts';
+import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
 
 export default function CreateScreen({ navigation, route }: any) {
     const { user } = useAuth();
@@ -493,7 +494,20 @@ export default function CreateScreen({ navigation, route }: any) {
                         style={[styles.textInput, isStory24Flow && { backgroundColor: activeStoryPreset.bg }]}
                         multiline
                         numberOfLines={6}
+                        maxLength={TEXT_POST_BODY_MAX_LENGTH}
                     />
+                    <View style={styles.captionCounterRow}>
+                        <Text
+                            style={[
+                                styles.captionCounterText,
+                                text.length > TEXT_POST_BODY_MAX_LENGTH - 50
+                                    ? (text.length >= TEXT_POST_BODY_MAX_LENGTH ? styles.captionCounterDanger : styles.captionCounterWarn)
+                                    : null,
+                            ]}
+                        >
+                            {text.length}/{TEXT_POST_BODY_MAX_LENGTH}
+                        </Text>
+                    </View>
                 </View>
 
                 {/* Location Input */}
@@ -786,6 +800,21 @@ const styles = StyleSheet.create({
         fontSize: 16,
         minHeight: 120,
         textAlignVertical: 'top',
+    },
+    captionCounterRow: {
+        marginTop: 8,
+        alignItems: 'flex-end',
+    },
+    captionCounterText: {
+        color: '#9CA3AF',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    captionCounterWarn: {
+        color: '#FBBF24',
+    },
+    captionCounterDanger: {
+        color: '#F87171',
     },
     locationInputContainer: {
         flexDirection: 'row',

@@ -2,7 +2,7 @@ import React from 'react';
 import * as Sentry from '@sentry/react';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { User } from '../types';
-import { setProfilePrivacy, initializePrivateMockUser } from '../api/privacy';
+import { setProfilePrivacy, initializePrivateMockUser, isProfilePrivate } from '../api/privacy';
 import { connectSocket, disconnectSocket } from '../services/socketio';
 import { db } from '../utils/db';
 
@@ -47,6 +47,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       let userToSet: User;
       if (parsed && !parsed.local) {
         // Old format - create new format with defaults; keep bio/socialLinks/placesTraveled if present
+        const migratedHandle = `${parsed.name || 'User'}@Unknown`;
+        const migratedPrivate =
+          typeof parsed.is_private === 'boolean'
+            ? parsed.is_private
+            : isProfilePrivate(migratedHandle);
         userToSet = {
           id: parsed.id || parsed.name?.toLowerCase() || 'me',
           name: parsed.name || 'Me',
@@ -57,24 +62,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           local: '',
           regional: '',
           national: '',
-          handle: `${parsed.name || 'User'}@Unknown`,
+          handle: migratedHandle,
           countryFlag: parsed.countryFlag || undefined,
           avatarUrl: parsed.avatarUrl || undefined,
           profileBackgroundUrl: parsed.profileBackgroundUrl || undefined,
           bio: parsed.bio || undefined,
           socialLinks: parsed.socialLinks || undefined,
           placesTraveled: parsed.placesTraveled || undefined,
-          is_private: parsed.is_private || false
+          is_private: migratedPrivate,
         };
         setUser(userToSet);
         if (userToSet.handle) {
-          setProfilePrivacy(userToSet.handle, userToSet.is_private || false);
+          setProfilePrivacy(userToSet.handle, !!userToSet.is_private);
         }
       } else {
-        userToSet = parsed;
+        const resolvedPrivate =
+          typeof parsed.is_private === 'boolean'
+            ? parsed.is_private
+            : parsed.handle
+              ? isProfilePrivate(parsed.handle)
+              : false;
+        userToSet = { ...parsed, is_private: resolvedPrivate };
         setUser(userToSet);
-        if (parsed.handle) {
-          setProfilePrivacy(parsed.handle, parsed.is_private || false);
+        if (userToSet.handle) {
+          setProfilePrivacy(userToSet.handle, !!userToSet.is_private);
         }
         if (parsed.handle) {
           try {
@@ -106,6 +117,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 }
                 setUser(updated);
                 localStorage.setItem('user', JSON.stringify(updated));
+                if (updated.handle && typeof updated.is_private === 'boolean') {
+                  setProfilePrivacy(updated.handle, updated.is_private);
+                }
               })
               .catch(() => {});
           });
@@ -161,7 +175,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       bio: userData.bio || undefined,
       socialLinks: userData.socialLinks || undefined,
       placesTraveled: userData.placesTraveled || undefined,
-      is_private: userData.is_private || false,
+      is_private:
+        typeof userData.is_private === 'boolean'
+          ? userData.is_private
+          : userData.handle
+            ? isProfilePrivate(String(userData.handle))
+            : false,
       termsAcceptedAt: userData.termsAcceptedAt,
       guidelinesAcceptedAt: userData.guidelinesAcceptedAt,
     };
@@ -175,7 +194,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem('user', JSON.stringify(toStore));
     // Sync privacy setting
     if (u.handle) {
-      setProfilePrivacy(u.handle, u.is_private || false);
+      setProfilePrivacy(u.handle, !!u.is_private);
       try {
         connectSocket(u.handle);
       } catch (e) {

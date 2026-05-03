@@ -4,7 +4,9 @@ import { createStory } from '../api/stories';
 import { incrementShares } from '../api/posts';
 import { showToast } from '../utils/toast';
 import { showUploadOverlay } from '../utils/uploadOverlay';
+import ShareToStoriesFeedIcon from './ShareToStoriesFeedIcon';
 import type { Post } from '../types';
+import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
 
 interface ShareToStoriesModalProps {
   isOpen: boolean;
@@ -62,7 +64,7 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
       return lines;
     }
 
-    const safeText = (text || 'Shared from the feed').slice(0, 240);
+    const safeText = (text || 'Shared from the feed').slice(0, TEXT_POST_BODY_MAX_LENGTH);
     let lines = wrapLines(safeText);
     // If too many lines, reduce font size
     while (lines.length > 10 && fontSize > 36) {
@@ -97,8 +99,7 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
     onShareSuccess?.(post.id);
 
     try {
-      // Truncate text to 200 characters for stories
-      const maxLength = 200;
+      const maxLength = TEXT_POST_BODY_MAX_LENGTH;
       const postText = post.text || post.text_content || post.caption || post.imageText || '';
       const truncatedText = postText && postText.length > maxLength
         ? postText.substring(0, maxLength) + '...'
@@ -178,78 +179,44 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="bg-white dark:bg-gray-900 rounded-2xl p-6 max-w-sm w-full mx-4 shadow-xl"
+        className="rounded-2xl border border-white/12 bg-black p-6 max-w-sm w-full mx-4 shadow-2xl shadow-black/50"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Icon */}
-        <div className="flex justify-center mb-4">
-          <div className="relative w-16 h-16">
-            <div className="absolute inset-0 rounded-full bg-gray-800 dark:bg-gray-700"></div>
-            <svg
-              className="absolute inset-0 w-full h-full"
-              viewBox="0 0 64 64"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <circle
-                cx="32"
-                cy="32"
-                r="30"
-                stroke="white"
-                strokeWidth="2"
-                strokeDasharray="4 4"
-                fill="none"
-              />
-              <line
-                x1="32"
-                y1="20"
-                x2="32"
-                y2="44"
-                stroke="white"
-                strokeWidth="3"
-                strokeLinecap="round"
-              />
-              <line
-                x1="20"
-                y1="32"
-                x2="44"
-                y2="32"
-                stroke="white"
-                strokeWidth="3"
-                strokeLinecap="round"
-              />
-            </svg>
+        {/* Icon — white on black canvas (same glyph as feed) */}
+        <div className="flex justify-center mb-5">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white/[0.06] ring-1 ring-white/10">
+            <ShareToStoriesFeedIcon className="h-[52px] w-[52px] text-white" />
           </div>
         </div>
 
-        {/* Title: Gazetteer says – purple/baby blue shimmer (wrapper centres inline-block) */}
         <div className="flex justify-center mb-2">
-          <p className="gazetteer-shimmer text-xs font-semibold uppercase tracking-wider">
+          <p className="gazetteer-shimmer-chrome-gold text-xs font-semibold uppercase tracking-wider">
             Gazetteer says
           </p>
         </div>
-        {/* Text */}
-        <p className="text-center text-gray-900 dark:text-gray-100 text-lg font-medium mb-6">
+
+        <p className="text-center text-lg font-medium text-white mb-6">
           Share this post to your stories
         </p>
 
-        {/* Buttons */}
         <div className="flex gap-3">
           <button
+            type="button"
             onClick={onClose}
-            className="flex-1 px-4 py-3 rounded-xl bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+            className="flex-1 rounded-xl border border-white/35 bg-transparent px-4 py-3 font-medium text-white transition-colors hover:bg-white/10"
             disabled={isSharing}
           >
             Cancel
           </button>
           <button
+            type="button"
             onClick={handleShare}
             disabled={isSharing}
-            className="flex-1 px-4 py-3 rounded-xl bg-blue-500 text-white font-medium hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-1 rounded-xl bg-white px-4 py-3 font-medium text-black transition-colors hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isSharing ? 'Sharing...' : 'OK'}
           </button>

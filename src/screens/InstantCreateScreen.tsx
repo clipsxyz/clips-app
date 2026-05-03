@@ -42,15 +42,27 @@ export default function InstantCreateScreen({ navigation }: any) {
   };
 
   const openLibrary = (mode: PickerMode) => {
-    ImagePicker.launchImageLibrary({ mediaType: 'mixed', quality: 0.9 }, (response) => {
-      const asset = response.assets?.[0];
-      if (!asset?.uri) return;
-      navigation.navigate('GalleryPreview', {
-        mediaUrl: asset.uri,
-        mediaType: asset.type?.startsWith('video') ? 'video' : 'image',
-        story24: mode === 'story24',
-      });
-    });
+    Alert.alert(
+      'Upload from your gallery',
+      'If you have videos from TikTok, Instagram, CapCut, or Instagram Edits saved on your phone, they appear in your gallery like any other clip.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Proceed',
+          onPress: () => {
+            ImagePicker.launchImageLibrary({ mediaType: 'mixed', quality: 0.9 }, (response) => {
+              const asset = response.assets?.[0];
+              if (!asset?.uri) return;
+              navigation.navigate('GalleryPreview', {
+                mediaUrl: asset.uri,
+                mediaType: asset.type?.startsWith('video') ? 'video' : 'image',
+                story24: mode === 'story24',
+              });
+            });
+          },
+        },
+      ],
+    );
   };
 
   return (

@@ -18,7 +18,6 @@ import {
     Modal,
     TextInput,
     Alert,
-    Share,
     Linking,
     Pressable,
 } from 'react-native';
@@ -32,8 +31,8 @@ import {
     toggleFollowForPost,
     toggleLike,
     incrementViews,
-    toggleBookmark,
     reclipPost,
+    deletePost,
     setReclipState,
     addComment,
     fetchComments,
@@ -50,12 +49,26 @@ import { blockUser } from '../api/messages';
 import { isUserBlocked } from '../api/messages';
 import { timeAgo } from '../utils/timeAgo';
 import { enqueue, drain } from '../utils/mutationQueue';
-import type { Post, Comment } from '../types';
+import type { Post } from '../types';
 import { getInstagramImageDimensions } from '../utils/imageDimensions';
 import { FEED_UI } from '../constants/feedUiTokens';
 import { Dimensions } from 'react-native';
 import FeedPostMeta from '../components/FeedPostMeta';
 import FeedEngagementRow from '../components/FeedEngagementRow';
+import FeedShareModal from '../components/FeedShareModal';
+import PostOverflowMenuModal from '../components/PostOverflowMenuModal';
+import PostCommentsSheet from '../components/PostCommentsSheet';
+import {
+    getCollectionsForPost,
+    savePostToDefaultCollection,
+    unsavePost,
+} from '../api/collections';
+import {
+    markFeedPostArchivedMobile,
+    isFeedPostArchivedMobile,
+    setPostNotificationsPrefMobile,
+    hasPostNotificationsPrefMobile,
+} from '../utils/feedEngagementPrefsMobile';
 
 type Tab = string;
 
@@ -501,12 +514,14 @@ function PostHeader({
     isCurrentUser,
     onProfileMenuPress,
     onHasStoryChange,
+    onOverflowPress,
 }: {
     post: Post;
     onFollow?: () => Promise<void>;
     isCurrentUser: boolean;
     onProfileMenuPress?: () => void;
     onHasStoryChange?: (hasStory: boolean) => void;
+    onOverflowPress?: () => void;
 }) {
     const [hasStory, setHasStory] = useState(false);
     const [showFollowCheck, setShowFollowCheck] = useState(post.isFollowing === true);
@@ -588,6 +603,18 @@ function PostHeader({
                 </TouchableOpacity>
             </View>
             <View style={styles.postHeaderRight}>
+                {onOverflowPress ? (
+                    <TouchableOpacity
+                        onPress={(e) => {
+                            e?.stopPropagation?.();
+                            onOverflowPress();
+                        }}
+                        style={styles.postOverflowButton}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                        <Icon name="ellipsis-horizontal" size={20} color="#9CA3AF" />
+                    </TouchableOpacity>
+                ) : null}
                 {post.locationLabel && (
                     <TouchableOpacity style={styles.locationButton}>
                         <Icon name="location" size={12} color="#8B5CF6" />
@@ -595,510 +622,6 @@ function PostHeader({
                 )}
             </View>
         </View>
-    );
-}
-
-function CommentsModal({
-    postId,
-    post,
-    isOpen,
-    onClose,
-    userId,
-    currentUserHandle,
-}: {
-    postId: string;
-    post?: Post | null;
-    isOpen: boolean;
-    onClose: () => void;
-    userId: string;
-    currentUserHandle?: string;
-}) {
-    const [comments, setComments] = useState<Comment[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [commentText, setCommentText] = useState('');
-    const [replyingToCommentId, setReplyingToCommentId] = useState<string | null>(null);
-    const [replyInputText, setReplyInputText] = useState('');
-    const [sortMode, setSortMode] = useState<'top' | 'newest'>('top');
-    const normalizedViewerHandle = String(currentUserHandle || '').trim().toLowerCase();
-    const isPostOwner =
-        Boolean(post?.userHandle) &&
-        String(post?.userHandle || '').trim().toLowerCase() === normalizedViewerHandle;
-
-    useEffect(() => {
-        if (isOpen && postId) {
-            loadComments();
-        }
-    }, [isOpen, postId]);
-
-    useEffect(() => {
-        if (!isOpen) {
-            setCommentText('');
-            setReplyingToCommentId(null);
-            setReplyInputText('');
-            setSortMode('top');
-        }
-    }, [isOpen, postId]);
-
-    const loadComments = async () => {
-        setLoading(true);
-        try {
-            const fetchedComments = await fetchComments(postId);
-            setComments(fetchedComments);
-        } catch (err) {
-            console.error('Error loading comments:', err);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleAddComment = async () => {
-        if (!commentText.trim()) return;
-        try {
-            const newComment = await addComment(postId, userId, commentText);
-            // Keep ordering consistent with Scenes-style comments: newest at the bottom.
-            setComments(prev => [...prev, newComment]);
-            setCommentText('');
-        } catch (err) {
-            console.error('Error adding comment:', err);
-            Alert.alert('Error', 'Failed to add comment');
-        }
-    };
-
-    const handleToggleCommentLike = async (commentId: string) => {
-        try {
-            // Optimistic update
-            setComments(prev =>
-                prev.map(c => {
-                    if (c.id !== commentId) return c;
-                    const nextLiked = !c.userLiked;
-                    const nextLikes = (c.likes || 0) + (nextLiked ? 1 : -1);
-                    return { ...c, userLiked: nextLiked, likes: nextLikes };
-                })
-            );
-            const updated = await toggleCommentLike(commentId);
-            setComments(prev => prev.map(c => (c.id === commentId ? updated : c)));
-        } catch (err) {
-            console.error('Error toggling comment like:', err);
-        }
-    };
-
-    const handleToggleReplyLike = async (parentCommentId: string, replyId: string) => {
-        try {
-            const updatedParent = await toggleReplyLike(parentCommentId, replyId);
-            setComments(prev => prev.map(c => (c.id === parentCommentId ? updatedParent : c)));
-        } catch (err) {
-            console.error('Error toggling reply like:', err);
-        }
-    };
-
-    const handleAddReply = async (parentId: string, text: string) => {
-        if (!text.trim()) return;
-        try {
-            const newReply = await addReply(postId, parentId, userId, text.trim());
-            setComments(prev =>
-                prev.map(c => {
-                    if (c.id !== parentId) return c;
-                    const existingReplies = c.replies || [];
-                    return {
-                        ...c,
-                        replies: [...existingReplies, newReply],
-                        replyCount: (c.replyCount || existingReplies.length) + 1,
-                    };
-                })
-            );
-            setReplyInputText('');
-            setReplyingToCommentId(null);
-        } catch (err) {
-            console.error('Error adding reply:', err);
-            Alert.alert('Error', 'Failed to add reply');
-        }
-    };
-
-    const handleModerateComment = async (commentId: string, action: 'hide' | 'unhide' | 'delete') => {
-        if (!isPostOwner) return;
-        if (action === 'delete') {
-            const ok = await deleteCommentById(commentId);
-            if (!ok) return;
-            setComments((prev) =>
-                prev
-                    .filter((comment) => comment.id !== commentId)
-                    .map((comment) => ({
-                        ...comment,
-                        replies: (comment.replies || []).filter((reply) => reply.id !== commentId),
-                        replyCount: (comment.replies || []).filter((reply) => reply.id !== commentId).length,
-                    }))
-            );
-            return;
-        }
-
-        const nextState = action === 'hide' ? 'hidden_by_filter' : 'visible';
-        const ok = await setCommentModerationState(commentId, nextState, 'creator_moderation');
-        if (!ok) return;
-        setComments((prev) =>
-            prev.map((comment) => {
-                if (comment.id === commentId) {
-                    return {
-                        ...comment,
-                        moderationState: nextState,
-                        moderationReason: nextState === 'hidden_by_filter' ? 'creator_moderation' : undefined,
-                    };
-                }
-                return {
-                    ...comment,
-                    replies: (comment.replies || []).map((reply) =>
-                        reply.id === commentId
-                            ? {
-                                ...reply,
-                                moderationState: nextState,
-                                moderationReason: nextState === 'hidden_by_filter' ? 'creator_moderation' : undefined,
-                            }
-                            : reply
-                    ),
-                };
-            })
-        );
-    };
-
-    const sortedComments = useMemo(() => {
-        const next = [...comments];
-        if (sortMode === 'newest') {
-            next.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-            return next;
-        }
-        next.sort((a, b) => {
-            const likesDelta = (b.likes || 0) - (a.likes || 0);
-            if (likesDelta !== 0) return likesDelta;
-            return (b.createdAt || 0) - (a.createdAt || 0);
-        });
-        return next;
-    }, [comments, sortMode]);
-
-    if (!isOpen) return null;
-
-    return (
-        <Modal
-            visible={isOpen}
-            animationType="slide"
-            transparent={true}
-            onRequestClose={onClose}
-        >
-            <View style={styles.modalOverlay}>
-                {post?.mediaUrl ? (
-                    <View style={styles.commentsMiniPreviewWrap}>
-                        <Image
-                            source={{ uri: post.mediaUrl }}
-                            style={styles.commentsMiniPreviewImage}
-                            resizeMode="cover"
-                        />
-                    </View>
-                ) : null}
-                <View style={styles.modalContent}>
-                    <View style={styles.modalHeader}>
-                        <Text style={styles.modalTitle}>
-                            {comments.length} {comments.length === 1 ? 'comment' : 'comments'}
-                        </Text>
-                        <View style={styles.modalHeaderRight}>
-                            <View style={styles.commentSortToggle}>
-                                <TouchableOpacity
-                                    onPress={() => setSortMode('top')}
-                                    style={[
-                                        styles.commentSortButton,
-                                        sortMode === 'top' && styles.commentSortButtonActive,
-                                    ]}
-                                >
-                                    <Text
-                                        style={[
-                                            styles.commentSortButtonText,
-                                            sortMode === 'top' && styles.commentSortButtonTextActive,
-                                        ]}
-                                    >
-                                        Top
-                                    </Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    onPress={() => setSortMode('newest')}
-                                    style={[
-                                        styles.commentSortButton,
-                                        sortMode === 'newest' && styles.commentSortButtonActive,
-                                    ]}
-                                >
-                                    <Text
-                                        style={[
-                                            styles.commentSortButtonText,
-                                            sortMode === 'newest' && styles.commentSortButtonTextActive,
-                                        ]}
-                                    >
-                                        Newest
-                                    </Text>
-                                </TouchableOpacity>
-                            </View>
-                            <TouchableOpacity onPress={onClose}>
-                                <Icon name="close" size={24} color="#FFFFFF" />
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-
-                    {loading ? (
-                        <ActivityIndicator size="small" color="#8B5CF6" style={styles.modalLoading} />
-                    ) : (
-                        <FlatList
-                            data={sortedComments}
-                            keyExtractor={(item) => item.id}
-                            style={styles.commentsList}
-                            renderItem={({ item }) => (
-                                <View style={styles.commentItem}>
-                                    <Avatar
-                                        src={undefined}
-                                        name={item.userHandle.split('@')[0]}
-                                        size={32}
-                                    />
-                                    <View style={styles.commentContent}>
-                                        <View style={styles.commentHeaderRow}>
-                                            <Text style={styles.commentUser}>{item.userHandle}</Text>
-                                            <Text style={styles.commentTime}>{timeAgo(item.createdAt)}</Text>
-                                        </View>
-                                        <Text style={styles.commentText}>
-                                            {item.moderationState === 'hidden_by_filter' &&
-                                            String(item.userHandle || '').trim().toLowerCase() !== normalizedViewerHandle
-                                                ? 'Comment hidden for safety.'
-                                                : item.text}
-                                        </Text>
-                                        {isPostOwner && (
-                                            <View style={styles.moderationActionsRow}>
-                                                <TouchableOpacity
-                                                    onPress={() =>
-                                                        handleModerateComment(
-                                                            item.id,
-                                                            item.moderationState === 'hidden_by_filter' ? 'unhide' : 'hide'
-                                                        )
-                                                    }
-                                                >
-                                                    <Text style={styles.moderationActionText}>
-                                                        {item.moderationState === 'hidden_by_filter' ? 'Unhide' : 'Hide'}
-                                                    </Text>
-                                                </TouchableOpacity>
-                                                <TouchableOpacity onPress={() => handleModerateComment(item.id, 'delete')}>
-                                                    <Text style={styles.moderationDeleteText}>Delete</Text>
-                                                </TouchableOpacity>
-                                            </View>
-                                        )}
-                                        <View style={styles.commentActionsRow}>
-                                            <TouchableOpacity
-                                                disabled={
-                                                    item.moderationState === 'hidden_by_filter' &&
-                                                    String(item.userHandle || '').trim().toLowerCase() !== normalizedViewerHandle
-                                                }
-                                                onPress={() => {
-                                                    setReplyingToCommentId(
-                                                        replyingToCommentId === item.id ? null : item.id
-                                                    );
-                                                    setReplyInputText('');
-                                                }}
-                                            >
-                                                <Text style={styles.commentReplyText}>
-                                                    {replyingToCommentId === item.id ? 'Cancel reply' : 'Reply'}
-                                                </Text>
-                                            </TouchableOpacity>
-                                            <TouchableOpacity
-                                                style={styles.commentLikeRow}
-                                                disabled={
-                                                    item.moderationState === 'hidden_by_filter' &&
-                                                    String(item.userHandle || '').trim().toLowerCase() !== normalizedViewerHandle
-                                                }
-                                                onPress={() => handleToggleCommentLike(item.id)}
-                                            >
-                                                <Icon
-                                                    name={item.userLiked ? 'heart' : 'heart-outline'}
-                                                    size={16}
-                                                    color={item.userLiked ? '#EF4444' : '#6B7280'}
-                                                />
-                                                <Text style={styles.commentLikeCount}>
-                                                    {item.likes ?? 0}
-                                                </Text>
-                                            </TouchableOpacity>
-                                        </View>
-
-                                        {/* Replies list */}
-                                        {item.replies && item.replies.length > 0 && (
-                                            <View style={styles.replyList}>
-                                                {item.replies.map(reply => (
-                                                    <View key={reply.id} style={styles.replyItem}>
-                                                        <Avatar
-                                                            src={undefined}
-                                                            name={reply.userHandle.split('@')[0]}
-                                                            size={24}
-                                                        />
-                                                        <View style={styles.replyContent}>
-                                                            <View style={styles.replyHeaderRow}>
-                                                                <Text style={styles.replyUser}>
-                                                                    {reply.userHandle}
-                                                                </Text>
-                                                                <Text style={styles.replyTime}>
-                                                                    {timeAgo(reply.createdAt)}
-                                                                </Text>
-                                                            </View>
-                                                            <Text style={styles.replyText}>
-                                                                {reply.moderationState === 'hidden_by_filter' &&
-                                                                String(reply.userHandle || '').trim().toLowerCase() !== normalizedViewerHandle
-                                                                    ? 'Comment hidden for safety.'
-                                                                    : reply.text}
-                                                            </Text>
-                                                            {isPostOwner && (
-                                                                <View style={styles.moderationActionsRow}>
-                                                                    <TouchableOpacity
-                                                                        onPress={() =>
-                                                                            handleModerateComment(
-                                                                                reply.id,
-                                                                                reply.moderationState === 'hidden_by_filter' ? 'unhide' : 'hide'
-                                                                            )
-                                                                        }
-                                                                    >
-                                                                        <Text style={styles.moderationActionText}>
-                                                                            {reply.moderationState === 'hidden_by_filter' ? 'Unhide' : 'Hide'}
-                                                                        </Text>
-                                                                    </TouchableOpacity>
-                                                                    <TouchableOpacity onPress={() => handleModerateComment(reply.id, 'delete')}>
-                                                                        <Text style={styles.moderationDeleteText}>Delete</Text>
-                                                                    </TouchableOpacity>
-                                                                </View>
-                                                            )}
-                                                            <TouchableOpacity
-                                                                style={styles.replyLikeRow}
-                                                                disabled={
-                                                                    reply.moderationState === 'hidden_by_filter' &&
-                                                                    String(reply.userHandle || '').trim().toLowerCase() !== normalizedViewerHandle
-                                                                }
-                                                                onPress={() =>
-                                                                    handleToggleReplyLike(item.id, reply.id)
-                                                                }
-                                                            >
-                                                                <Icon
-                                                                    name={
-                                                                        reply.userLiked
-                                                                            ? 'heart'
-                                                                            : 'heart-outline'
-                                                                    }
-                                                                    size={14}
-                                                                    color={
-                                                                        reply.userLiked
-                                                                            ? '#EF4444'
-                                                                            : '#6B7280'
-                                                                    }
-                                                                />
-                                                                <Text style={styles.replyLikeCount}>
-                                                                    {reply.likes ?? 0}
-                                                                </Text>
-                                                            </TouchableOpacity>
-                                                        </View>
-                                                    </View>
-                                                ))}
-                                            </View>
-                                        )}
-
-                                        {/* Inline reply input (Scenes-style) */}
-                                        {replyingToCommentId === item.id && (
-                                            <View style={styles.inlineReplyContainer}>
-                                                <TextInput
-                                                    style={styles.inlineReplyInput}
-                                                    placeholder="Write a reply..."
-                                                    placeholderTextColor="#6B7280"
-                                                    value={replyInputText}
-                                                    onChangeText={setReplyInputText}
-                                                    multiline
-                                                />
-                                                <TouchableOpacity
-                                                    style={styles.inlineReplySendButton}
-                                                    onPress={() => handleAddReply(item.id, replyInputText)}
-                                                >
-                                                    <Icon name="send" size={16} color="#8B5CF6" />
-                                                </TouchableOpacity>
-                                            </View>
-                                        )}
-                                    </View>
-                                </View>
-                            )}
-                        />
-                    )}
-
-                    <View style={styles.commentInputContainer}>
-                        <TextInput
-                            style={styles.commentInput}
-                            placeholder="Add a comment..."
-                            placeholderTextColor="#6B7280"
-                            value={commentText}
-                            onChangeText={setCommentText}
-                            multiline
-                        />
-                        <TouchableOpacity onPress={handleAddComment} style={styles.sendButton}>
-                            <Icon name="send" size={20} color="#8B5CF6" />
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </View>
-        </Modal>
-    );
-}
-
-function ShareModal({
-    post,
-    isOpen,
-    onClose,
-}: {
-    post: Post | null;
-    isOpen: boolean;
-    onClose: () => void;
-}) {
-    const handleShare = async () => {
-        if (!post) return;
-        try {
-            await Share.share({
-                message: post.text ? `${post.text} by ${post.userHandle}` : `Check out this post by ${post.userHandle}`,
-                url: post.mediaUrl,
-            });
-        } catch (err: any) {
-            console.error('Error sharing:', err);
-        } finally {
-            onClose();
-        }
-    };
-
-    const handleCopyLink = async () => {
-        if (!post) return;
-        // In React Native, you'd use Clipboard API
-        Alert.alert('Link copied', 'Post link copied to clipboard');
-        onClose();
-    };
-
-    if (!isOpen || !post) return null;
-
-    return (
-        <Modal
-            visible={isOpen}
-            animationType="slide"
-            transparent={true}
-            onRequestClose={onClose}
-        >
-            <View style={styles.modalOverlay}>
-                <View style={styles.shareModalContent}>
-                    <View style={styles.modalHeader}>
-                        <Text style={styles.modalTitle}>Share</Text>
-                        <TouchableOpacity onPress={onClose}>
-                            <Icon name="close" size={24} color="#FFFFFF" />
-                        </TouchableOpacity>
-                    </View>
-
-                    <TouchableOpacity onPress={handleShare} style={styles.shareOption}>
-                        <Icon name="share-social" size={24} color="#FFFFFF" />
-                        <Text style={styles.shareOptionText}>Share via...</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity onPress={handleCopyLink} style={styles.shareOption}>
-                        <Icon name="link" size={24} color="#FFFFFF" />
-                        <Text style={styles.shareOptionText}>Copy Link</Text>
-                    </TouchableOpacity>
-                </View>
-            </View>
-        </Modal>
     );
 }
 
@@ -1120,7 +643,8 @@ const FeedCard = React.memo(function FeedCard({
     onNotificationsPress,
     unreadCount,
     hasInbox,
-    isCurrentUser
+    isCurrentUser,
+    onOverflowPress,
 }: {
     post: Post;
     onLike: () => Promise<void>;
@@ -1139,6 +663,7 @@ const FeedCard = React.memo(function FeedCard({
     unreadCount?: number;
     hasInbox?: boolean;
     isCurrentUser: boolean;
+    onOverflowPress?: () => void;
 }) {
     const [imageDimensions, setImageDimensions] = React.useState<{ width: number; height: number } | null>(null);
     const [profileMenuVisible, setProfileMenuVisible] = React.useState(false);
@@ -1228,6 +753,7 @@ const FeedCard = React.memo(function FeedCard({
                 isCurrentUser={isCurrentUser}
                 onProfileMenuPress={() => setProfileMenuVisible(true)}
                 onHasStoryChange={setHeaderHasStory}
+                onOverflowPress={onOverflowPress}
             />
 
             {post.isBoosted && (
@@ -1415,6 +941,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [hasInbox, setHasInbox] = useState(false);
     const [reloadTick, setReloadTick] = useState(0);
     const [showBoostPrompt, setShowBoostPrompt] = useState(false);
+    /** Local overrides keyed by post id so bookmark rail matches collections without refetching whole feed. */
+    const [savedByPostId, setSavedByPostId] = useState<Record<string, boolean>>({});
+    const [overflowVisible, setOverflowVisible] = useState(false);
+    const [overflowPost, setOverflowPost] = useState<Post | null>(null);
+    const [overflowSaved, setOverflowSaved] = useState(false);
+    const [overflowNotify, setOverflowNotify] = useState(false);
     const requestTokenRef = useRef(0);
 
     useFocusEffect(
@@ -1423,15 +955,18 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         }, [])
     );
 
-    const currentFilter = showFollowingFeed
-        ? 'discover'
-        : (customLocation
-            ? (customFilterType === 'venue'
+    // Custom Gazetteer search must win over Following: otherwise the UI can show "Wembley Stadium"
+    // while `currentFilter` stays `discover` if `showFollowingFeed` were ever still true.
+    const currentFilter =
+        customLocation != null && String(customLocation).trim() !== ''
+            ? customFilterType === 'venue'
                 ? `venue:${customLocation}`
                 : customFilterType === 'landmark'
                     ? `landmark:${customLocation}`
-                    : customLocation)
-            : active);
+                    : customLocation
+            : showFollowingFeed
+                ? 'discover'
+                : active;
 
     // Helper to update a post in pages
     const updatePost = (postId: string, updater: (post: Post) => Post) => {
@@ -1454,7 +989,105 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         setSelectedPostForShare((prev) =>
             prev && String(prev.userHandle || '').trim().toLowerCase() === normalized ? null : prev
         );
+        setOverflowPost((prev) =>
+            prev && String(prev.userHandle || '').trim().toLowerCase() === normalized ? null : prev
+        );
+        setOverflowVisible(false);
     }, []);
+
+    const removePostFromFeed = React.useCallback((postId: string) => {
+        setPages((prev) =>
+            prev.map((page) => page.filter((p) => p.id !== postId)).filter((page) => page.length > 0)
+        );
+        setOverflowVisible(false);
+        setOverflowPost((prev) => (prev?.id === postId ? null : prev));
+    }, []);
+
+    const toggleCollectionsSaveForPost = React.useCallback(
+        async (target: Post) => {
+            try {
+                const cols = await getCollectionsForPost(userId, target.id);
+                if (cols.length > 0) {
+                    await unsavePost(userId, target.id);
+                    setSavedByPostId((prev) => ({ ...prev, [target.id]: false }));
+                    updatePost(target.id, (p) => ({ ...p, isBookmarked: false }));
+                } else {
+                    await savePostToDefaultCollection(userId, target.id, target);
+                    setSavedByPostId((prev) => ({ ...prev, [target.id]: true }));
+                    updatePost(target.id, (p) => ({ ...p, isBookmarked: true }));
+                }
+            } catch (err) {
+                console.error('Collections save toggle failed:', err);
+            }
+        },
+        [userId, updatePost]
+    );
+
+    useEffect(() => {
+        if (!overflowVisible || !overflowPost) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const cols = await getCollectionsForPost(userId, overflowPost.id);
+                const n = await hasPostNotificationsPrefMobile(userId, overflowPost.id);
+                if (!cancelled) {
+                    setOverflowSaved(cols.length > 0);
+                    setOverflowNotify(n);
+                }
+            } catch {
+                if (!cancelled) {
+                    setOverflowSaved(false);
+                    setOverflowNotify(false);
+                }
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [overflowVisible, overflowPost?.id, userId]);
+
+    const openShareForPost = React.useCallback(
+        async (p: Post) => {
+            setSelectedPostForShare(p);
+            setShareModalOpen(true);
+            try {
+                await incrementShares(userId, p.id);
+                updatePost(p.id, (prev) => ({
+                    ...prev,
+                    stats: { ...prev.stats, shares: prev.stats.shares + 1 },
+                }));
+            } catch (err) {
+                console.error('Error sharing post:', err);
+            }
+        },
+        [userId, updatePost]
+    );
+
+    const tryReclipPost = React.useCallback(
+        async (p: Post) => {
+            if (!user || p.userHandle === user.handle) {
+                Alert.alert('Cannot reclip', 'You cannot reclip your own post');
+                return;
+            }
+            if (p.userReclipped) {
+                Alert.alert('Already reclipped', 'You have already reclipped this post');
+                return;
+            }
+            const newReclips = p.stats.reclips + 1;
+            setReclipState(userId, p.id, true);
+            updatePost(p.id, (prev) => ({
+                ...prev,
+                userReclipped: true,
+                stats: { ...prev.stats, reclips: newReclips },
+            }));
+            try {
+                await reclipPost(userId, p.id, user.handle);
+            } catch (err: any) {
+                console.warn('Reclip failed (UI already updated):', err);
+            }
+        },
+        [userId, user, updatePost]
+    );
 
     useEffect(() => {
         if (user?.national) {
@@ -1490,6 +1123,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         setPages([]);
         setCursor(0);
         setEnd(false);
+        setLoading(false);
         requestTokenRef.current++;
     }, [userId, currentFilter]);
 
@@ -1585,6 +1219,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 visibleItems = checks.filter((row) => !row.blocked).map((row) => row.item);
             }
 
+            const archivedRows = await Promise.all(
+                visibleItems.map(async (item) => ({
+                    item,
+                    archived: await isFeedPostArchivedMobile(userId, item.id),
+                }))
+            );
+            visibleItems = archivedRows.filter((row) => !row.archived).map((row) => row.item);
+
             if (visibleItems.length === 0) {
                 setEnd(true);
             } else {
@@ -1610,6 +1252,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     };
 
     const handleTabChange = (tab: Tab) => {
+        // Reset pagination with the tab tap so load effects see cursor 0 (same race as web cache-first loader).
+        setPages([]);
+        setCursor(0);
+        setEnd(false);
+        setLoading(false);
+        setError(null);
+        requestTokenRef.current++;
         if (tab === 'Following') {
             setShowFollowingFeed(true);
             setCustomLocation(null);
@@ -1647,131 +1296,128 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const flat = pages.flat();
 
     // Memoize renderItem to prevent recreation on every render
-    const renderItem = React.useCallback(({ item: post }: { item: Post }) => (
-        <FeedCard
-            post={post}
-            onLike={async () => {
-                const updated = await toggleLike(userId, post.id, post);
-                // Update local state - find and update the post
-                setPages(prev => prev.map(page =>
-                    page.map(p => p.id === post.id ? updated : p)
-                ));
-            }}
-            onFollow={async () => {
-                if (!user) return;
-                try {
-                    // Use mock/local follow state as source of truth so it always works,
-                    // even if the backend is offline or slow.
-                    const updated = await toggleFollowForPost(userId, post.id, post.userHandle);
-                    // Update the local feed state so Follow / Following changes immediately
-                    setPages(prev =>
-                        prev.map(page =>
-                            page.map(p => (p.id === post.id ? updated : p))
-                        )
-                    );
-                } catch (err) {
-                    console.error('Error toggling follow in FeedScreen:', err);
-                    // Fallback: optimistic toggle if something went wrong
-                    setPages(prev =>
-                        prev.map(page =>
-                            page.map(p =>
-                                p.id === post.id
-                                    ? { ...p, isFollowing: !p.isFollowing }
-                                    : p
-                            )
-                        )
-                    );
-                }
-                // Refresh feed if viewing following feed
-                if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
-                    setPages([]);
-                    setCursor(0);
-                    setEnd(false);
-                    setError(null);
-                    requestTokenRef.current++;
-                    setTimeout(() => {
-                        loadMore();
-                    }, 200);
-                }
-            }}
-            onView={async () => {
-                await incrementViews(userId, post.id);
-            }}
-            onComment={() => {
-                setSelectedPostId(post.id);
-                setSelectedPostForComments(post);
-                setCommentsModalOpen(true);
-            }}
-            onShare={async () => {
-                setSelectedPostForShare(post);
-                setShareModalOpen(true);
-                try {
-                    await incrementShares(userId, post.id);
-                    updatePost(post.id, p => ({
-                        ...p,
-                        stats: { ...p.stats, shares: p.stats.shares + 1 }
-                    }));
-                } catch (err) {
-                    console.error('Error sharing post:', err);
-                }
-            }}
-            onReclip={async () => {
-                if (!user || post.userHandle === user.handle) {
-                    Alert.alert('Cannot reclip', 'You cannot reclip your own post');
-                    return;
-                }
-                if (post.userReclipped) {
-                    Alert.alert('Already reclipped', 'You have already reclipped this post');
-                    return;
-                }
-                const newReclips = post.stats.reclips + 1;
-                setReclipState(userId, post.id, true);
-                updatePost(post.id, p => ({
-                    ...p,
-                    userReclipped: true,
-                    stats: { ...p.stats, reclips: newReclips }
-                }));
-                try {
-                    await reclipPost(userId, post.id, user.handle);
-                } catch (err: any) {
-                    console.warn('Reclip failed (UI already updated):', err);
-                }
-            }}
-            onBookmark={async () => {
-                try {
-                    const updated = await toggleBookmark(userId, post.id);
-                    updatePost(post.id, _p => updated);
-                } catch (err) {
-                    console.error('Error bookmarking post:', err);
-                }
-            }}
-            onPostPress={() => navigation.navigate('PostDetail', { postId: post.id })}
-            onVisitProfile={() => navigation.navigate('ViewProfile', { handle: post.userHandle })}
-            onViewStories={() => navigation.navigate('Stories', { openUserHandle: post.userHandle })}
-            onBlockUser={async () => {
-                if (!user?.handle) return;
-                Alert.alert('Block user?', `Hide ${post.userHandle} from your feed?`, [
-                    { text: 'Cancel', style: 'cancel' },
-                    {
-                        text: 'Block',
-                        style: 'destructive',
-                        onPress: async () => {
-                            await blockUser(user.handle, post.userHandle);
-                            hideUserFromFeed(post.userHandle);
-                            Alert.alert('Blocked', `${post.userHandle} was blocked and removed from your feed.`);
-                        },
-                    },
-                ]);
-            }}
-            onReportUser={async () => {
-                Alert.alert('Reported', 'Thanks for reporting. We will review this content.');
-            }}
-            onNotificationsPress={() => navigation.navigate('Inbox')}
-            unreadCount={unreadCount}
-            hasInbox={hasInbox}
-            isCurrentUser={user?.handle === post.userHandle}
-        />
-    ), [userId, user, showFollowingFeed, currentFilter, unreadCount, hasInbox, navigation, updatePost, loadMore]);
+    const renderItem = React.useCallback(
+        ({ item: post }: { item: Post }) => {
+            const mergedPost: Post = {
+                ...post,
+                isBookmarked: savedByPostId[post.id] ?? post.isBookmarked,
+            };
+            return (
+                <FeedCard
+                    post={mergedPost}
+                    onLike={async () => {
+                        const updated = await toggleLike(userId, mergedPost.id, mergedPost);
+                        setPages((prev) =>
+                            prev.map((page) => page.map((p) => (p.id === mergedPost.id ? updated : p)))
+                        );
+                    }}
+                    onFollow={async () => {
+                        if (!user) return;
+                        try {
+                            const updated = await toggleFollowForPost(
+                                userId,
+                                mergedPost.id,
+                                mergedPost.userHandle
+                            );
+                            setPages((prev) =>
+                                prev.map((page) =>
+                                    page.map((p) => (p.id === mergedPost.id ? updated : p))
+                                )
+                            );
+                        } catch (err) {
+                            console.error('Error toggling follow in FeedScreen:', err);
+                            setPages((prev) =>
+                                prev.map((page) =>
+                                    page.map((p) =>
+                                        p.id === mergedPost.id ? { ...p, isFollowing: !p.isFollowing } : p
+                                    )
+                                )
+                            );
+                        }
+                        if (showFollowingFeed || currentFilter.toLowerCase() === 'discover') {
+                            setPages([]);
+                            setCursor(0);
+                            setEnd(false);
+                            setError(null);
+                            requestTokenRef.current++;
+                            setTimeout(() => {
+                                loadMore();
+                            }, 200);
+                        }
+                    }}
+                    onView={async () => {
+                        await incrementViews(userId, mergedPost.id);
+                    }}
+                    onComment={() => {
+                        setSelectedPostId(mergedPost.id);
+                        setSelectedPostForComments(mergedPost);
+                        setCommentsModalOpen(true);
+                    }}
+                    onShare={async () => {
+                        await openShareForPost(mergedPost);
+                    }}
+                    onReclip={async () => {
+                        await tryReclipPost(mergedPost);
+                    }}
+                    onBookmark={async () => {
+                        await toggleCollectionsSaveForPost(mergedPost);
+                    }}
+                    onOverflowPress={() => {
+                        setOverflowPost(mergedPost);
+                        setOverflowVisible(true);
+                    }}
+                    onPostPress={() => navigation.navigate('PostDetail', { postId: mergedPost.id })}
+                    onVisitProfile={() =>
+                        navigation.navigate('ViewProfile', { handle: mergedPost.userHandle })
+                    }
+                    onViewStories={() =>
+                        navigation.navigate('Stories', { openUserHandle: mergedPost.userHandle })
+                    }
+                    onBlockUser={async () => {
+                        if (!user?.handle) return;
+                        Alert.alert('Block user?', `Hide ${mergedPost.userHandle} from your feed?`, [
+                            { text: 'Cancel', style: 'cancel' },
+                            {
+                                text: 'Block',
+                                style: 'destructive',
+                                onPress: async () => {
+                                    await blockUser(user.handle, mergedPost.userHandle);
+                                    hideUserFromFeed(mergedPost.userHandle);
+                                    Alert.alert(
+                                        'Blocked',
+                                        `${mergedPost.userHandle} was blocked and removed from your feed.`
+                                    );
+                                },
+                            },
+                        ]);
+                    }}
+                    onReportUser={async () => {
+                        Alert.alert('Reported', 'Thanks for reporting. We will review this content.');
+                    }}
+                    onNotificationsPress={() => navigation.navigate('Inbox')}
+                    unreadCount={unreadCount}
+                    hasInbox={hasInbox}
+                    isCurrentUser={user?.handle === mergedPost.userHandle}
+                />
+            );
+        },
+        [
+            userId,
+            user,
+            showFollowingFeed,
+            currentFilter,
+            unreadCount,
+            hasInbox,
+            navigation,
+            updatePost,
+            loadMore,
+            savedByPostId,
+            openShareForPost,
+            tryReclipPost,
+            toggleCollectionsSaveForPost,
+            hideUserFromFeed,
+        ]
+    );
 
     return (
         <View style={styles.container}>
@@ -1792,7 +1438,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     </View>
                 </View>
                 <PillTabs
-                    active={showFollowingFeed ? 'Following' : active}
+                    active={showFollowingFeed && !customLocation ? 'Following' : active}
                     onChange={handleTabChange}
                     customLocation={customLocation}
                     customFilterType={customFilterType}
@@ -1884,28 +1530,139 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 </TouchableOpacity>
             </View>
 
-            {/* Comments Modal */}
-            <CommentsModal
+            <PostCommentsSheet
                 postId={selectedPostId || ''}
                 post={selectedPostForComments}
                 isOpen={commentsModalOpen}
+                commentAuthorHandle={user?.handle ?? ''}
+                currentUserHandle={user?.handle}
+                onAfterClose={() => {
+                    const pid = selectedPostId;
+                    if (!pid) return;
+                    fetchComments(pid)
+                        .then((list) =>
+                            updatePost(pid, (p) => ({
+                                ...p,
+                                stats: { ...p.stats, comments: list.length },
+                            }))
+                        )
+                        .catch(() => {});
+                }}
                 onClose={() => {
                     setCommentsModalOpen(false);
                     setSelectedPostId(null);
                     setSelectedPostForComments(null);
                 }}
-                userId={userId}
-                currentUserHandle={user?.handle}
             />
 
-            {/* Share Modal */}
-            <ShareModal
+            <FeedShareModal
                 post={selectedPostForShare}
                 isOpen={shareModalOpen}
                 onClose={() => {
                     setShareModalOpen(false);
                     setSelectedPostForShare(null);
                 }}
+            />
+
+            <PostOverflowMenuModal
+                visible={overflowVisible}
+                post={overflowPost}
+                viewerUserId={userId}
+                viewerHandle={user?.handle}
+                isSaved={overflowSaved}
+                hasNotifications={overflowNotify}
+                onClose={() => {
+                    setOverflowVisible(false);
+                    setOverflowPost(null);
+                }}
+                onShare={async () => {
+                    if (!overflowPost) return;
+                    await openShareForPost(overflowPost);
+                }}
+                onSaveToggle={async () => {
+                    if (!overflowPost) return;
+                    await toggleCollectionsSaveForPost(overflowPost);
+                    const cols = await getCollectionsForPost(userId, overflowPost.id);
+                    setOverflowSaved(cols.length > 0);
+                }}
+                onBoost={() => {
+                    setShowBoostPrompt(true);
+                }}
+                onArchive={async () => {
+                    if (!overflowPost) return;
+                    await markFeedPostArchivedMobile(userId, overflowPost.id);
+                    removePostFromFeed(overflowPost.id);
+                }}
+                onToggleNotifications={async () => {
+                    if (!overflowPost) return;
+                    const next = !overflowNotify;
+                    await setPostNotificationsPrefMobile(userId, overflowPost.id, next);
+                    setOverflowNotify(next);
+                }}
+                onReclip={async () => {
+                    if (!overflowPost) return;
+                    await tryReclipPost(overflowPost);
+                }}
+                onDelete={() =>
+                    new Promise<void>((resolve) => {
+                        if (!overflowPost || !user?.handle) {
+                            resolve();
+                            return;
+                        }
+                        const targetId = overflowPost.id;
+                        const handleVal = user.handle;
+                        Alert.alert('Delete post?', 'This cannot be undone.', [
+                            { text: 'Cancel', style: 'cancel', onPress: () => resolve() },
+                            {
+                                text: 'Delete',
+                                style: 'destructive',
+                                onPress: () => {
+                                    void (async () => {
+                                        try {
+                                            await deletePost(userId, targetId, handleVal);
+                                            removePostFromFeed(targetId);
+                                        } catch (e) {
+                                            console.error('Delete post failed:', e);
+                                            Alert.alert('Error', 'Could not delete this post.');
+                                        } finally {
+                                            resolve();
+                                        }
+                                    })();
+                                },
+                            },
+                        ]);
+                    })
+                }
+                onReport={async () => {
+                    Alert.alert('Reported', 'Thanks for reporting. We will review this content.');
+                }}
+                onBlock={() =>
+                    new Promise<void>((resolve) => {
+                        if (!overflowPost || !user?.handle) {
+                            resolve();
+                            return;
+                        }
+                        const blockedHandle = overflowPost.userHandle;
+                        Alert.alert('Block user?', `Hide ${blockedHandle} from your feed?`, [
+                            { text: 'Cancel', style: 'cancel', onPress: () => resolve() },
+                            {
+                                text: 'Block',
+                                style: 'destructive',
+                                onPress: () => {
+                                    void (async () => {
+                                        await blockUser(user.handle, blockedHandle);
+                                        hideUserFromFeed(blockedHandle);
+                                        Alert.alert(
+                                            'Blocked',
+                                            `${blockedHandle} was blocked and removed from your feed.`
+                                        );
+                                        resolve();
+                                    })();
+                                },
+                            },
+                        ]);
+                    })
+                }
             />
 
             <Modal visible={showBoostPrompt} transparent animationType="fade" onRequestClose={() => setShowBoostPrompt(false)}>
@@ -2382,9 +2139,14 @@ const styles = StyleSheet.create({
         color: '#9CA3AF',
     },
     postHeaderRight: {
-        flexDirection: 'column',
-        alignItems: 'flex-end',
-        gap: 8,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    postOverflowButton: {
+        padding: 4,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     gazetteerOverlayText: {
         fontSize: 12,
@@ -2481,244 +2243,6 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: 'rgba(0, 0, 0, 0.5)',
         justifyContent: 'flex-end',
-    },
-    commentsMiniPreviewWrap: {
-        alignSelf: 'center',
-        width: Math.min(Dimensions.get('window').width * 0.56, 260),
-        aspectRatio: 4 / 5,
-        borderRadius: 14,
-        overflow: 'hidden',
-        backgroundColor: '#111827',
-        marginBottom: 10,
-    },
-    commentsMiniPreviewImage: {
-        width: '100%',
-        height: '100%',
-    },
-    modalContent: {
-        backgroundColor: '#030712',
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        maxHeight: '58%',
-        paddingBottom: 20,
-    },
-    shareModalContent: {
-        backgroundColor: '#030712',
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        padding: 20,
-        paddingBottom: 40,
-    },
-    modalHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
-    },
-    modalHeaderRight: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        columnGap: 8,
-    },
-    commentSortToggle: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#111827',
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: '#374151',
-        padding: 2,
-    },
-    commentSortButton: {
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 6,
-    },
-    commentSortButtonActive: {
-        backgroundColor: '#8B5CF6',
-    },
-    commentSortButtonText: {
-        fontSize: 11,
-        color: '#9CA3AF',
-        fontWeight: '600',
-    },
-    commentSortButtonTextActive: {
-        color: '#FFFFFF',
-    },
-    modalTitle: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        color: '#FFFFFF',
-    },
-    modalLoading: {
-        padding: 20,
-    },
-    commentsList: {
-        flex: 1,
-        padding: 16,
-    },
-    commentItem: {
-        flexDirection: 'row',
-        marginBottom: 16,
-        columnGap: 12,
-    },
-    commentContent: {
-        flex: 1,
-        minHeight: 0,
-    },
-    commentHeaderRow: {
-        flexDirection: 'row',
-        alignItems: 'baseline',
-        justifyContent: 'flex-start',
-        columnGap: 8,
-        marginBottom: 2,
-    },
-    commentUser: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#FFFFFF',
-    },
-    commentTime: {
-        fontSize: 12,
-        color: '#6B7280',
-    },
-    commentText: {
-        fontSize: 14,
-        color: '#D1D5DB',
-        marginBottom: 8,
-    },
-    moderationActionsRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        columnGap: 12,
-        marginBottom: 8,
-    },
-    moderationActionText: {
-        fontSize: 11,
-        color: '#9CA3AF',
-        fontWeight: '600',
-    },
-    moderationDeleteText: {
-        fontSize: 11,
-        color: '#F87171',
-        fontWeight: '600',
-    },
-    commentActionsRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-    },
-    commentReplyText: {
-        fontSize: 12,
-        color: '#9CA3AF',
-        fontWeight: '500',
-    },
-    commentLikeRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        columnGap: 4,
-    },
-    commentLikeCount: {
-        fontSize: 12,
-        color: '#D1D5DB',
-    },
-    replyList: {
-        marginTop: 8,
-        paddingLeft: 24,
-        borderLeftWidth: 1,
-        borderLeftColor: '#1F2937',
-        rowGap: 8,
-    },
-    replyItem: {
-        flexDirection: 'row',
-        columnGap: 8,
-    },
-    replyContent: {
-        flex: 1,
-        minHeight: 0,
-    },
-    replyHeaderRow: {
-        flexDirection: 'row',
-        alignItems: 'baseline',
-        columnGap: 6,
-        marginBottom: 2,
-    },
-    replyUser: {
-        fontSize: 13,
-        fontWeight: '600',
-        color: '#FFFFFF',
-    },
-    replyTime: {
-        fontSize: 11,
-        color: '#6B7280',
-    },
-    replyText: {
-        fontSize: 13,
-        color: '#E5E7EB',
-        marginBottom: 4,
-    },
-    replyLikeRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        columnGap: 4,
-    },
-    replyLikeCount: {
-        fontSize: 11,
-        color: '#D1D5DB',
-    },
-    inlineReplyContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        columnGap: 8,
-        marginTop: 8,
-    },
-    inlineReplyInput: {
-        flex: 1,
-        backgroundColor: '#111827',
-        borderRadius: 999,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        color: '#FFFFFF',
-        fontSize: 13,
-        maxHeight: 80,
-    },
-    inlineReplySendButton: {
-        padding: 6,
-    },
-    commentInputContainer: {
-        flexDirection: 'row',
-        padding: 16,
-        borderTopWidth: 1,
-        borderTopColor: '#1F2937',
-        alignItems: 'center',
-        gap: 12,
-    },
-    commentInput: {
-        flex: 1,
-        backgroundColor: '#1F2937',
-        borderRadius: 20,
-        paddingHorizontal: 16,
-        paddingVertical: 10,
-        color: '#FFFFFF',
-        fontSize: 14,
-        maxHeight: 100,
-    },
-    sendButton: {
-        padding: 8,
-    },
-    shareOption: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: 16,
-        gap: 12,
-        borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
-    },
-    shareOptionText: {
-        fontSize: 16,
-        color: '#FFFFFF',
     },
     boostPromptCard: {
         margin: 24,

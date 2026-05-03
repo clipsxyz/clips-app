@@ -11,6 +11,7 @@ import { bottomSheet, saveDraftConfirmSheet } from '../utils/swalBottomSheet';
 import { FiX, FiSearch, FiLayers } from 'react-icons/fi';
 import { MdOutlineShareLocation } from 'react-icons/md';
 import { TEXT_STORY_TEMPLATES, TextStoryTemplate } from '../textStoryTemplates';
+import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
 import { showUploadOverlay } from '../utils/uploadOverlay';
 
 export default function TextOnlyPostPage() {
@@ -340,7 +341,7 @@ export default function TextOnlyPostPage() {
                                 value={text}
                                 onChange={(e) => setText(e.target.value)}
                                 placeholder="What's up?"
-                                maxLength={500}
+                                maxLength={TEXT_POST_BODY_MAX_LENGTH}
                                 className="w-full bg-transparent text-[17px] leading-snug resize-none border-none outline-none min-h-[96px] py-2 placeholder:text-gray-400 focus:outline-none focus:ring-0"
                                 rows={1}
                                 autoFocus={!isClip}
@@ -357,8 +358,8 @@ export default function TextOnlyPostPage() {
                             />
                         </div>
                         <div className="flex justify-end mt-1">
-                            <span className={`text-xs ${text.length > 450 ? (text.length >= 500 ? 'text-red-400' : 'text-amber-400') : 'text-gray-500'}`}>
-                                {text.length}/500
+                            <span className={`text-xs ${text.length > TEXT_POST_BODY_MAX_LENGTH - 50 ? (text.length >= TEXT_POST_BODY_MAX_LENGTH ? 'text-red-400' : 'text-amber-400') : 'text-gray-500'}`}>
+                                {text.length}/{TEXT_POST_BODY_MAX_LENGTH}
                             </span>
                         </div>
                     </div>

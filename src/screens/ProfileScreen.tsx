@@ -1,15 +1,34 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, FlatList, ActivityIndicator, Modal, ScrollView, Alert, TextInput, Share, Linking, Animated, Easing } from 'react-native';
+import {
+    View,
+    Text,
+    StyleSheet,
+    TouchableOpacity,
+    Image,
+    FlatList,
+    ActivityIndicator,
+    Modal,
+    ScrollView,
+    Alert,
+    TextInput,
+    Share,
+    Linking,
+    Animated,
+    Easing,
+    Platform,
+    DeviceEventEmitter,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
 import { approveHiddenComment, deleteHiddenComment, fetchHiddenCommentsForOwner, fetchPostsByUser, toggleLike, fetchComments, addComment, toggleCommentLike, toggleReplyLike, addReply, type HiddenCommentReviewItem } from '../api/posts';
-import { getUserCollections } from '../api/collections';
+import { getCollectionThumbnailUrl, getUserCollections } from '../api/collections';
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
 import { getUnreadTotal } from '../api/messages';
-import { setProfilePrivacy } from '../api/privacy';
+import { setProfilePrivacy, getEffectiveProfilePrivate } from '../api/privacy';
 import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, toggleFollow, type FacebookMatchedFriend, matchContactPhones } from '../api/client';
 import type { Post, Collection } from '../types';
 import Avatar from '../components/Avatar';
@@ -37,6 +56,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<'posts' | 'collections'>('posts');
     const [collectionsOpen, setCollectionsOpen] = useState(false);
+    const [brokenCollectionThumbs, setBrokenCollectionThumbs] = useState<Record<string, true>>({});
     const [draftsOpen, setDraftsOpen] = useState(false);
     const [commentSafetyOpen, setCommentSafetyOpen] = useState(false);
     const [inviteFriendsOpen, setInviteFriendsOpen] = useState(false);
@@ -56,7 +76,9 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [loadingHiddenCommentQueue, setLoadingHiddenCommentQueue] = useState(false);
     const [hiddenQueueFilter, setHiddenQueueFilter] = useState<'all' | 'comments' | 'replies'>('all');
     const [notificationPrefs, setNotificationPrefs] = useState<NotificationPreferences>(getNotificationPreferences());
-    const [isPrivate, setIsPrivate] = useState(!!user?.is_private);
+    const [isPrivate, setIsPrivate] = useState(() =>
+        getEffectiveProfilePrivate(user?.handle, user?.is_private)
+    );
     const [editProfileOpen, setEditProfileOpen] = useState(false);
     const [profileNameDraft, setProfileNameDraft] = useState(user?.name || '');
     const [profileBioDraft, setProfileBioDraft] = useState(user?.bio || '');
@@ -74,14 +96,25 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [contactsSyncing, setContactsSyncing] = useState(false);
     const [showTabsHint, setShowTabsHint] = useState(true);
     const tabsHintAnim = React.useRef(new Animated.Value(0)).current;
+    const tabsScrollRef = React.useRef<ScrollView | null>(null);
+    const tabsAutoNudgingRef = React.useRef(false);
+    const tabsHintNudgeDoneRef = React.useRef(false);
+    const [tabsStripLayoutW, setTabsStripLayoutW] = useState(0);
+    const [tabsStripContentW, setTabsStripContentW] = useState(0);
+    const tabsStripOverflow = React.useMemo(
+        () =>
+            tabsStripLayoutW > 0 &&
+            Math.round(tabsStripContentW) > Math.round(tabsStripLayoutW) + 2,
+        [tabsStripLayoutW, tabsStripContentW]
+    );
 
     useEffect(() => {
         loadData();
     }, [user?.handle]);
 
     useEffect(() => {
-        setIsPrivate(!!user?.is_private);
-    }, [user?.is_private]);
+        setIsPrivate(getEffectiveProfilePrivate(user?.handle, user?.is_private));
+    }, [user?.handle, user?.is_private]);
 
     useEffect(() => {
         setProfileNameDraft(user?.name || '');
@@ -107,23 +140,44 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         const loop = Animated.loop(
             Animated.sequence([
                 Animated.timing(tabsHintAnim, {
-                    toValue: 6,
-                    duration: 450,
+                    toValue: 5,
+                    duration: 420,
                     easing: Easing.out(Easing.cubic),
                     useNativeDriver: true,
                 }),
                 Animated.timing(tabsHintAnim, {
                     toValue: 0,
-                    duration: 450,
+                    duration: 420,
                     easing: Easing.in(Easing.cubic),
                     useNativeDriver: true,
                 }),
-                Animated.delay(1200),
+                Animated.delay(1100),
             ])
         );
-        if (showTabsHint) loop.start();
+        if (showTabsHint && tabsStripOverflow) loop.start();
         return () => loop.stop();
-    }, [showTabsHint, tabsHintAnim]);
+    }, [showTabsHint, tabsStripOverflow, tabsHintAnim]);
+
+    /** One-time horizontal jog — matches web profile rail so users notice overflow */
+    useEffect(() => {
+        if (!showTabsHint || !tabsStripOverflow || tabsHintNudgeDoneRef.current) return;
+        if (tabsStripLayoutW <= 0 || Math.round(tabsStripContentW) <= Math.round(tabsStripLayoutW) + 2)
+            return;
+        const t = setTimeout(() => {
+            const el = tabsScrollRef.current;
+            if (!el) return;
+            tabsHintNudgeDoneRef.current = true;
+            tabsAutoNudgingRef.current = true;
+            el.scrollTo({ x: 28, animated: true });
+            setTimeout(() => {
+                el.scrollTo({ x: 0, animated: true });
+                setTimeout(() => {
+                    tabsAutoNudgingRef.current = false;
+                }, 200);
+            }, 340);
+        }, 500);
+        return () => clearTimeout(t);
+    }, [showTabsHint, tabsStripOverflow, tabsStripLayoutW, tabsStripContentW]);
 
     const loadData = async () => {
         if (!user?.handle) return;
@@ -281,6 +335,30 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         }
     };
 
+    useEffect(() => {
+        if (collectionsOpen) setBrokenCollectionThumbs({});
+    }, [collectionsOpen]);
+
+    useEffect(() => {
+        if (!user?.id) return undefined;
+        const uid = String(user.id).trim();
+        const sub = DeviceEventEmitter.addListener(
+            'collectionsUpdated',
+            (evt?: { userId?: string }) => {
+                if (String(evt?.userId ?? '').trim() !== uid) return;
+                void (async () => {
+                    try {
+                        const next = await getUserCollections(uid);
+                        setCollections(next);
+                    } catch (error) {
+                        console.error('Error refreshing collections after save:', error);
+                    }
+                })();
+            }
+        );
+        return () => sub.remove();
+    }, [user?.id]);
+
     const handleDeleteDraft = async (draftId: string) => {
         try {
             await deleteDraft(draftId);
@@ -313,6 +391,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
         if (!user?.handle) return;
         const next = !isPrivate;
         setIsPrivate(next);
+        login({ ...user, is_private: next } as any);
         try {
             setProfilePrivacy(user.handle, next);
             await updateAuthProfile({ is_private: next } as any);
@@ -542,17 +621,27 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
             </View>
 
             {/* Tabs: Messages, Drafts, Collections, Comment Safety, Settings */}
-            <View style={styles.tabsWrap}>
-            <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.tabsContainer}
-                contentContainerStyle={styles.tabsContentContainer}
-                onScroll={(e) => {
-                    if (e.nativeEvent.contentOffset.x > 8) setShowTabsHint(false);
-                }}
-                scrollEventThrottle={16}
-            >
+            <View style={styles.tabsWrap} collapsable={false}>
+                {/*
+                  Fixed cue column (flex sibling) — avoids Android drawing ScrollView above overlays.
+                */}
+                <View style={styles.tabsRailShell} collapsable={false}>
+                    <ScrollView
+                        ref={tabsScrollRef}
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        removeClippedSubviews={false}
+                        style={styles.tabsScrollFlex}
+                        contentContainerStyle={styles.tabsContentContainer}
+                        fadingEdgeLength={Platform.OS === 'android' ? 32 : undefined}
+                        onLayout={(e) => setTabsStripLayoutW(e.nativeEvent.layout.width)}
+                        onContentSizeChange={(w) => setTabsStripContentW(w)}
+                        onScroll={(e) => {
+                            if (tabsAutoNudgingRef.current) return;
+                            if (e.nativeEvent.contentOffset.x > 8) setShowTabsHint(false);
+                        }}
+                        scrollEventThrottle={16}
+                    >
                 <TouchableOpacity
                     style={styles.tab}
                     onPress={() => setInviteFriendsOpen(true)}
@@ -632,16 +721,35 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     <Icon name="settings" size={20} color="#FFFFFF" />
                     <Text style={styles.tabLabel}>Settings</Text>
                 </TouchableOpacity>
-            </ScrollView>
-            {showTabsHint && (
-                <>
-                    <View pointerEvents="none" style={styles.tabsHintFade} />
-                    <Animated.View pointerEvents="none" style={[styles.tabsHintChip, { transform: [{ translateX: tabsHintAnim }] }]}>
-                        <Text style={styles.tabsHintText}>Swipe</Text>
-                        <Text style={styles.tabsHintText}>›</Text>
-                    </Animated.View>
-                </>
-            )}
+                    </ScrollView>
+
+                    {tabsStripOverflow ? (
+                        <View style={styles.tabsCueColumn} pointerEvents="box-none" collapsable={false}>
+                            <LinearGradient
+                                pointerEvents="none"
+                                colors={['rgba(3,7,18,0)', '#030712']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 0 }}
+                                style={StyleSheet.absoluteFillObject}
+                            />
+
+                            {showTabsHint ? (
+                                <Animated.View
+                                    pointerEvents="none"
+                                    style={[styles.tabsHintChipColumn, { transform: [{ translateY: tabsHintAnim }] }]}
+                                    collapsable={false}
+                                >
+                                    <Text style={styles.tabsHintTextColumn}>Swipe</Text>
+                                    <Text style={styles.tabsHintChevron}>›</Text>
+                                </Animated.View>
+                            ) : (
+                                <View pointerEvents="none" style={styles.tabsMoreCue} collapsable={false}>
+                                    <Text style={styles.tabsMoreCueGlyph}>›</Text>
+                                </View>
+                            )}
+                        </View>
+                    ) : null}
+                </View>
             </View>
 
             <View style={styles.profileSection}>
@@ -738,7 +846,15 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     <FlatList
                         data={collections}
                         keyExtractor={(item) => item.id}
-                        renderItem={({ item }) => (
+                        renderItem={({ item }) => {
+                            const thumbSrc = getCollectionThumbnailUrl(item, posts);
+                            const firstPost = item.postIds?.length
+                                ? posts.find((p) => p.id === item.postIds[0])
+                                : undefined;
+                            const textFallback = firstPost?.text || firstPost?.caption || firstPost?.text_content;
+                            const thumbBroken = !!brokenCollectionThumbs[item.id];
+                            const postCount = item.postIds?.length || 0;
+                            return (
                             <TouchableOpacity
                                 style={styles.collectionItem}
                                 onPress={() => navigation.navigate('CollectionFeed', {
@@ -746,8 +862,20 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                     collectionName: item.name,
                                 })}
                             >
-                                {item.thumbnailUrl ? (
-                                    <Image source={{ uri: item.thumbnailUrl }} style={styles.collectionThumbnail} />
+                                {thumbSrc && !thumbBroken ? (
+                                    <Image
+                                        source={{ uri: thumbSrc }}
+                                        style={styles.collectionThumbnail}
+                                        onError={() =>
+                                            setBrokenCollectionThumbs((prev) => ({ ...prev, [item.id]: true }))
+                                        }
+                                    />
+                                ) : postCount > 0 && textFallback ? (
+                                    <View style={[styles.collectionThumbnail, styles.collectionThumbnailTextFallback]}>
+                                        <Text style={styles.collectionThumbnailText} numberOfLines={4}>
+                                            {textFallback.length > 80 ? `${textFallback.slice(0, 80)}…` : textFallback}
+                                        </Text>
+                                    </View>
                                 ) : (
                                     <View style={styles.collectionThumbnailPlaceholder}>
                                         <Icon name="bookmark" size={24} color="#6B7280" />
@@ -756,11 +884,12 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                 <View style={styles.collectionInfo}>
                                     <Text style={styles.collectionName}>{item.name}</Text>
                                     <Text style={styles.collectionCount}>
-                                        {item.postIds?.length || 0} {item.postIds?.length === 1 ? 'post' : 'posts'}
+                                        {postCount} {postCount === 1 ? 'post' : 'posts'}
                                     </Text>
                                 </View>
                             </TouchableOpacity>
-                        )}
+                            );
+                        }}
                         ListEmptyComponent={
                             <View style={styles.emptyContainer}>
                                 <Text style={styles.emptyText}>No collections yet</Text>
@@ -1088,6 +1217,12 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             {collections.length > 0 ? (
                                 collections.map((collection) => {
                                     const postCount = collection.postIds?.length || 0;
+                                    const thumbSrc = getCollectionThumbnailUrl(collection, posts);
+                                    const firstPost = collection.postIds?.length
+                                        ? posts.find((p) => p.id === collection.postIds[0])
+                                        : undefined;
+                                    const textFallback = firstPost?.text || firstPost?.caption || firstPost?.text_content;
+                                    const thumbBroken = !!brokenCollectionThumbs[collection.id];
                                     return (
                                         <TouchableOpacity
                                             key={collection.id}
@@ -1100,8 +1235,23 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                                 });
                                             }}
                                         >
-                                            {collection.thumbnailUrl ? (
-                                                <Image source={{ uri: collection.thumbnailUrl }} style={styles.collectionModalThumbnail} />
+                                            {thumbSrc && !thumbBroken ? (
+                                                <Image
+                                                    source={{ uri: thumbSrc }}
+                                                    style={styles.collectionModalThumbnail}
+                                                    onError={() =>
+                                                        setBrokenCollectionThumbs((prev) => ({
+                                                            ...prev,
+                                                            [collection.id]: true,
+                                                        }))
+                                                    }
+                                                />
+                                            ) : postCount > 0 && textFallback ? (
+                                                <View style={[styles.collectionModalThumbnail, styles.collectionThumbnailTextFallback]}>
+                                                    <Text style={styles.collectionThumbnailText} numberOfLines={4}>
+                                                        {textFallback.length > 80 ? `${textFallback.slice(0, 80)}…` : textFallback}
+                                                    </Text>
+                                                </View>
                                             ) : (
                                                 <View style={styles.collectionModalThumbnailPlaceholder}>
                                                     <Icon name="bookmark" size={24} color="#6B7280" />
@@ -1727,17 +1877,34 @@ const styles = StyleSheet.create({
     },
     tabsWrap: {
         position: 'relative',
+        overflow: 'visible',
         borderBottomWidth: 1,
         borderBottomColor: '#1F2937',
     },
-    tabsContainer: {
+    /** ScrollView + fixed cue column (Android-safe — no z-order fights with ScrollView) */
+    tabsRailShell: {
+        flexDirection: 'row',
+        alignItems: 'stretch',
+        width: '100%',
+        minHeight: 66,
+    },
+    tabsScrollFlex: {
+        flex: 1,
         maxHeight: 66,
     },
     tabsContentContainer: {
         flexDirection: 'row',
         paddingVertical: 12,
         paddingHorizontal: 8,
+        paddingRight: 10,
         columnGap: 8,
+    },
+    tabsCueColumn: {
+        width: 48,
+        position: 'relative',
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#030712',
     },
     tab: {
         alignItems: 'center',
@@ -1750,26 +1917,54 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         marginTop: 4,
     },
-    tabsHintFade: {
-        position: 'absolute',
-        right: 0,
-        top: 0,
-        bottom: 0,
-        width: 42,
-        backgroundColor: 'rgba(3,7,18,0.75)',
-    },
-    tabsHintChip: {
-        position: 'absolute',
-        right: 8,
-        top: 46,
-        flexDirection: 'row',
+    tabsHintChipColumn: {
+        flexDirection: 'column',
         alignItems: 'center',
-        columnGap: 2,
+        justifyContent: 'center',
+        gap: 2,
+        paddingHorizontal: 8,
+        paddingVertical: 8,
+        borderRadius: 14,
+        backgroundColor: 'rgba(15,23,42,0.96)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.25)',
+        elevation: 6,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.35,
+        shadowRadius: 4,
     },
-    tabsHintText: {
-        color: '#9CA3AF',
-        fontSize: 11,
-        fontWeight: '600',
+    tabsHintTextColumn: {
+        color: '#F3F4F6',
+        fontSize: 10,
+        fontWeight: '800',
+        letterSpacing: 0.3,
+    },
+    tabsHintChevron: {
+        color: '#FFFFFF',
+        fontSize: 18,
+        fontWeight: '800',
+        marginTop: -2,
+        includeFontPadding: false,
+    },
+    /** After user scrolls: always-visible “more” arrow (fixed column — never under ScrollView) */
+    tabsMoreCue: {
+        width: 36,
+        height: 38,
+        borderRadius: 19,
+        backgroundColor: 'rgba(139,92,246,0.5)',
+        borderWidth: 1.5,
+        borderColor: 'rgba(255,255,255,0.5)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    tabsMoreCueGlyph: {
+        color: '#FFFFFF',
+        fontSize: 26,
+        fontWeight: '800',
+        marginLeft: 3,
+        marginTop: -3,
+        includeFontPadding: false,
     },
     badge: {
         position: 'absolute',
@@ -1801,6 +1996,17 @@ const styles = StyleSheet.create({
         backgroundColor: '#111827',
         justifyContent: 'center',
         alignItems: 'center',
+    },
+    collectionThumbnailTextFallback: {
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 6,
+        overflow: 'hidden',
+    },
+    collectionThumbnailText: {
+        fontSize: 10,
+        color: '#D1D5DB',
+        textAlign: 'center',
     },
     collectionInfo: {
         flex: 1,

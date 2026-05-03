@@ -42,85 +42,121 @@ function mapApiCollections(payload: any, fallbackUserId?: string): Collection[] 
     return list.map((item: any) => mapApiCollection(item, fallbackUserId));
 }
 
-// Get collections from localStorage
-function getCollectionsFromStorage(): CollectionWithPreviewMap[] {
+/** React Native persistence (Metro); absent on web/Vite. */
+function tryAsyncStorage(): { getItem: (k: string) => Promise<string | null>; setItem: (k: string, v: string) => Promise<void> } | null {
     try {
-        const stored = localStorage.getItem(COLLECTIONS_STORAGE_KEY);
-        return stored ? JSON.parse(stored) : [];
-    } catch (error) {
-        console.error('Error reading collections from localStorage:', error);
-        return [];
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const mod = require('@react-native-async-storage/async-storage');
+        return mod.default ?? mod;
+    } catch {
+        return null;
     }
 }
 
-// Save collections to localStorage
-function saveCollectionsToStorage(collections: CollectionWithPreviewMap[]): void {
-    const attemptWrite = (payload: CollectionWithPreviewMap[]) => {
-        localStorage.setItem(COLLECTIONS_STORAGE_KEY, JSON.stringify(payload));
-    };
-    const sanitizeForStorage = (input: CollectionWithPreviewMap[]): CollectionWithPreviewMap[] => {
-        return input.map((collection) => {
-            const next: CollectionWithPreviewMap = { ...collection };
-            if (typeof next.thumbnailUrl === 'string' && next.thumbnailUrl.startsWith('data:') && next.thumbnailUrl.length > MAX_INLINE_PREVIEW_URL_LENGTH) {
-                next.thumbnailUrl = undefined;
+function sanitizeCollectionsForStorage(input: CollectionWithPreviewMap[]): CollectionWithPreviewMap[] {
+    return input.map((collection) => {
+        const next: CollectionWithPreviewMap = { ...collection };
+        if (typeof next.thumbnailUrl === 'string' && next.thumbnailUrl.startsWith('data:') && next.thumbnailUrl.length > MAX_INLINE_PREVIEW_URL_LENGTH) {
+            next.thumbnailUrl = undefined;
+        }
+        if (!next.postPreviewMap) return next;
+        const compactMap: Record<string, Partial<Post>> = {};
+        for (const [postId, preview] of Object.entries(next.postPreviewMap)) {
+            const safePreview: Partial<Post> = { ...preview };
+            if (typeof safePreview.mediaUrl === 'string' && safePreview.mediaUrl.startsWith('data:') && safePreview.mediaUrl.length > MAX_INLINE_PREVIEW_URL_LENGTH) {
+                safePreview.mediaUrl = undefined;
             }
-            if (!next.postPreviewMap) return next;
-            const compactMap: Record<string, Partial<Post>> = {};
-            for (const [postId, preview] of Object.entries(next.postPreviewMap)) {
-                const safePreview: Partial<Post> = { ...preview };
-                if (typeof safePreview.mediaUrl === 'string' && safePreview.mediaUrl.startsWith('data:') && safePreview.mediaUrl.length > MAX_INLINE_PREVIEW_URL_LENGTH) {
-                    safePreview.mediaUrl = undefined;
-                }
-                if (typeof safePreview.videoPosterUrl === 'string' && safePreview.videoPosterUrl.startsWith('data:') && safePreview.videoPosterUrl.length > MAX_INLINE_PREVIEW_URL_LENGTH) {
-                    safePreview.videoPosterUrl = undefined;
-                }
-                // mediaItems can be very large for carousel data URLs; keep only the first lightweight item.
-                const candidate = Array.isArray(safePreview.mediaItems) && safePreview.mediaItems.length > 0
-                    ? safePreview.mediaItems.find((item) => !!item?.url) || safePreview.mediaItems[0]
-                    : undefined;
-                const candidateUrl = compactPersistedMediaUrl(candidate?.url);
-                if (candidate && candidateUrl && candidate.type && (candidate.type === 'image' || candidate.type === 'video')) {
-                    safePreview.mediaItems = [{ url: candidateUrl, type: candidate.type, duration: candidate.duration }];
-                    if (!safePreview.mediaUrl) safePreview.mediaUrl = candidateUrl;
-                } else {
-                    safePreview.mediaItems = undefined;
-                }
-                compactMap[postId] = safePreview;
+            if (typeof safePreview.videoPosterUrl === 'string' && safePreview.videoPosterUrl.startsWith('data:') && safePreview.videoPosterUrl.length > MAX_INLINE_PREVIEW_URL_LENGTH) {
+                safePreview.videoPosterUrl = undefined;
             }
-            next.postPreviewMap = compactMap;
-            return next;
-        });
+            const candidate = Array.isArray(safePreview.mediaItems) && safePreview.mediaItems.length > 0
+                ? safePreview.mediaItems.find((item) => !!item?.url) || safePreview.mediaItems[0]
+                : undefined;
+            const candidateUrl = compactPersistedMediaUrl(candidate?.url);
+            if (candidate && candidateUrl && candidate.type && (candidate.type === 'image' || candidate.type === 'video')) {
+                safePreview.mediaItems = [{ url: candidateUrl, type: candidate.type, duration: candidate.duration }];
+                if (!safePreview.mediaUrl) safePreview.mediaUrl = candidateUrl;
+            } else {
+                safePreview.mediaItems = undefined;
+            }
+            compactMap[postId] = safePreview;
+        }
+        next.postPreviewMap = compactMap;
+        return next;
+    });
+}
+
+function ultraCompactCollectionsForStorage(input: CollectionWithPreviewMap[]): CollectionWithPreviewMap[] {
+    return input.map((collection) => {
+        let thumb: string | undefined;
+        const u = typeof collection.thumbnailUrl === 'string' ? collection.thumbnailUrl.trim() : '';
+        if (
+            u &&
+            (u.startsWith('http://') ||
+                u.startsWith('https://') ||
+                u.startsWith('blob:') ||
+                (u.startsWith('data:') && u.length <= MAX_INLINE_PREVIEW_URL_LENGTH))
+        ) {
+            thumb = u;
+        }
+        const next: CollectionWithPreviewMap = {
+            ...collection,
+            thumbnailUrl: thumb,
+            postPreviewMap: undefined,
+        };
+        return next;
+    });
+}
+
+async function loadCollectionsFromPersistence(): Promise<CollectionWithPreviewMap[]> {
+    const asyncSt = tryAsyncStorage();
+    if (asyncSt) {
+        try {
+            const stored = await asyncSt.getItem(COLLECTIONS_STORAGE_KEY);
+            return stored ? JSON.parse(stored) : [];
+        } catch (error) {
+            console.error('Error reading collections from AsyncStorage:', error);
+            return [];
+        }
+    }
+    try {
+        if (typeof localStorage !== 'undefined') {
+            const stored = localStorage.getItem(COLLECTIONS_STORAGE_KEY);
+            return stored ? JSON.parse(stored) : [];
+        }
+    } catch (error) {
+        console.error('Error reading collections from localStorage:', error);
+    }
+    return [];
+}
+
+async function persistCollectionsToDisk(collections: CollectionWithPreviewMap[]): Promise<void> {
+    const asyncSt = tryAsyncStorage();
+    const writeJson = async (json: string) => {
+        if (asyncSt) {
+            await asyncSt.setItem(COLLECTIONS_STORAGE_KEY, json);
+            return;
+        }
+        if (typeof localStorage !== 'undefined') {
+            localStorage.setItem(COLLECTIONS_STORAGE_KEY, json);
+            return;
+        }
     };
-    const ultraCompactForStorage = (input: CollectionWithPreviewMap[]): CollectionWithPreviewMap[] => {
-        return input.map((collection) => {
-            const next: CollectionWithPreviewMap = {
-                ...collection,
-                // Preserve membership first; thumbnails/previews are optional.
-                thumbnailUrl:
-                    typeof collection.thumbnailUrl === 'string' &&
-                    (collection.thumbnailUrl.startsWith('http://') ||
-                        collection.thumbnailUrl.startsWith('https://') ||
-                        collection.thumbnailUrl.startsWith('blob:'))
-                        ? collection.thumbnailUrl
-                        : undefined,
-                postPreviewMap: undefined,
-            };
-            return next;
-        });
+
+    const attemptWrite = async (payload: CollectionWithPreviewMap[]) => {
+        await writeJson(JSON.stringify(payload));
     };
 
     try {
-        attemptWrite(collections);
-    } catch (error) {
+        await attemptWrite(collections);
+    } catch {
         try {
-            const compacted = sanitizeForStorage(collections);
-            attemptWrite(compacted);
-        } catch (retryError) {
+            await attemptWrite(sanitizeCollectionsForStorage(collections));
+        } catch {
             try {
-                const ultraCompacted = ultraCompactForStorage(collections);
-                attemptWrite(ultraCompacted);
+                await attemptWrite(ultraCompactCollectionsForStorage(collections));
             } catch (finalError) {
-                console.error('Error saving collections to localStorage:', finalError);
+                console.error('Error saving collections:', finalError);
                 throw new Error('Failed to save collection data.');
             }
         }
@@ -132,13 +168,26 @@ function delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function resolvePostThumbnail(post?: Partial<Post>): string | undefined {
+/** Exported for UI list thumbnails — resolves poster/media/carousel first item from live posts feed cache. */
+export function resolvePostThumbnail(post?: Partial<Post>): string | undefined {
     if (!post) return undefined;
     const firstMediaItem =
         Array.isArray(post.mediaItems) && post.mediaItems.length > 0
             ? post.mediaItems.find((item) => (item?.type === 'image' || item?.type === 'video') && !!item.url) || post.mediaItems[0]
             : undefined;
     return compactPersistedMediaUrl(post.videoPosterUrl || post.mediaUrl || firstMediaItem?.url || undefined);
+}
+
+/** List-row thumbnail: prefer live post URL so blobs/API paths stay valid after creating a collection. */
+export function getCollectionThumbnailUrl(collection: Collection, postPool?: Post[]): string | undefined {
+    const firstId = collection.postIds[0];
+    if (firstId) {
+        const fp = postPool?.find((p) => p.id === firstId) ?? posts.find((p) => p.id === firstId);
+        const live = resolvePostThumbnail(fp);
+        if (live) return live;
+    }
+    const t = typeof collection.thumbnailUrl === 'string' ? collection.thumbnailUrl.trim() : '';
+    return t || undefined;
 }
 
 function compactPersistedMediaUrl(url?: string): string | undefined {
@@ -151,9 +200,17 @@ function compactPersistedMediaUrl(url?: string): string | undefined {
 }
 
 function emitCollectionsUpdated(userId: string): void {
-    if (typeof window === 'undefined') return;
     const normalizedUserId = normalizeUserId(userId);
-    window.dispatchEvent(new CustomEvent('collectionsUpdated', { detail: { userId: normalizedUserId } }));
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+        window.dispatchEvent(new CustomEvent('collectionsUpdated', { detail: { userId: normalizedUserId } }));
+    }
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { DeviceEventEmitter } = require('react-native');
+        DeviceEventEmitter.emit('collectionsUpdated', { userId: normalizedUserId });
+    } catch {
+        /* not React Native */
+    }
 }
 
 function findDefaultCollection(collections: Collection[], userId: string): Collection | undefined {
@@ -295,7 +352,7 @@ export async function createCollection(userId: string, name: string, isPrivate: 
         updatedAt: Date.now()
     };
 
-    const collections = getCollectionsFromStorage();
+    const collections = await loadCollectionsFromPersistence();
     ensureDefaultCollection(collections, normalizedUserId);
     collections.push(collection);
     if (initialPostId) {
@@ -308,7 +365,7 @@ export async function createCollection(userId: string, name: string, isPrivate: 
             if (!defaults.thumbnailUrl) defaults.thumbnailUrl = thumbnailUrl;
         }
     }
-    saveCollectionsToStorage(collections);
+    await persistCollectionsToDisk(collections);
     emitCollectionsUpdated(normalizedUserId);
     return collection;
 }
@@ -329,25 +386,25 @@ export async function getUserCollections(userId: string): Promise<Collection[]> 
     await delay(100);
     const normalizedUserId = normalizeUserId(userId);
 
-    const collections = getCollectionsFromStorage();
+    const collections = await loadCollectionsFromPersistence();
     ensureDefaultCollection(collections, normalizedUserId);
-    saveCollectionsToStorage(collections);
+    await persistCollectionsToDisk(collections);
     const userCollections = collections
         .filter(c => normalizeUserId(c.userId) === normalizedUserId)
         .map(c => {
-            // Always update thumbnail from first post if available
-            if (c.postIds.length > 0) {
-                const firstPost = posts.find(p => p.id === c.postIds[0]);
-                const resolved = resolvePostThumbnail(firstPost);
-                if (resolved) {
-                    c.thumbnailUrl = resolved;
-                } else {
-                    // If first post has no media, clear thumbnail
-                    c.thumbnailUrl = undefined;
-                }
-            } else {
-                // If collection is empty, clear thumbnail
+            if (c.postIds.length === 0) {
                 c.thumbnailUrl = undefined;
+            } else {
+                const firstPost = posts.find(p => p.id === c.postIds[0]);
+                if (firstPost) {
+                    const resolved = resolvePostThumbnail(firstPost);
+                    if (resolved) {
+                        c.thumbnailUrl = resolved;
+                    } else {
+                        c.thumbnailUrl = undefined;
+                    }
+                }
+                // If first post isn't hydrated yet in `posts`, keep persisted/API thumbnailUrl — avoids broken flashes after create.
             }
             return c;
         })
@@ -373,7 +430,7 @@ export async function addPostToCollection(collectionId: string, postId: string, 
 
     await delay(150);
 
-    const collections = getCollectionsFromStorage();
+    const collections = await loadCollectionsFromPersistence();
     const collection = collections.find(c => c.id === collectionId);
     if (!collection) {
         throw new Error('Collection not found');
@@ -403,7 +460,7 @@ export async function addPostToCollection(collectionId: string, postId: string, 
     if (defaultThumb) defaultCollection.thumbnailUrl = defaultThumb;
     savePreviewForPost(defaultCollection as CollectionWithPreviewMap, postId, defaultPost);
 
-    saveCollectionsToStorage(collections);
+    await persistCollectionsToDisk(collections);
     emitCollectionsUpdated(collection.userId);
     return collection;
 }
@@ -411,7 +468,11 @@ export async function addPostToCollection(collectionId: string, postId: string, 
 /**
  * Remove a post from a collection
  */
-export async function removePostFromCollection(collectionId: string, postId: string): Promise<Collection> {
+export async function removePostFromCollection(
+    collectionId: string,
+    postId: string,
+    opts?: { unsaveMaster?: boolean }
+): Promise<Collection> {
     if (isLaravelApiEnabled()) {
         try {
             const payload = await apiClient.removePostFromCollectionApi(collectionId, postId);
@@ -425,14 +486,14 @@ export async function removePostFromCollection(collectionId: string, postId: str
 
     await delay(150);
 
-    const collections = getCollectionsFromStorage();
+    const collections = await loadCollectionsFromPersistence();
     const collection = collections.find(c => c.id === collectionId);
     if (!collection) {
         throw new Error('Collection not found');
     }
 
-    // Keep master collection immutable from per-collection removal, similar to Instagram's "all saved".
-    if (collection.name === DEFAULT_COLLECTION_NAME) {
+    // Keep master collection immutable from per-collection removal unless explicitly unsaving (`unsaveMaster`).
+    if (collection.name === DEFAULT_COLLECTION_NAME && !opts?.unsaveMaster) {
         return collection;
     }
 
@@ -451,9 +512,17 @@ export async function removePostFromCollection(collectionId: string, postId: str
         }
     }
 
-    saveCollectionsToStorage(collections);
+    await persistCollectionsToDisk(collections);
     emitCollectionsUpdated(collection.userId);
     return collection;
+}
+
+/** Remove this post from every collection it appears in for this user (full unsave). */
+export async function unsavePost(userId: string, postId: string): Promise<void> {
+    const cols = await getCollectionsForPost(userId, postId);
+    for (const c of cols) {
+        await removePostFromCollection(c.id, postId, { unsaveMaster: true });
+    }
 }
 
 export async function getCollection(collectionId: string): Promise<Collection | null> {
@@ -467,14 +536,14 @@ export async function getCollection(collectionId: string): Promise<Collection | 
     }
 
     await delay(50);
-    const collections = getCollectionsFromStorage();
+    const collections = await loadCollectionsFromPersistence();
     return collections.find((c) => c.id === collectionId) || null;
 }
 
 export async function savePostToDefaultCollection(userId: string, postId: string, postSnapshot?: Partial<Post>): Promise<Collection> {
     await delay(120);
     const normalizedUserId = normalizeUserId(userId);
-    const collections = getCollectionsFromStorage();
+    const collections = await loadCollectionsFromPersistence();
     const defaults = ensureDefaultCollection(collections, normalizedUserId);
     if (!defaults.postIds.includes(postId)) {
         defaults.postIds.unshift(postId);
@@ -485,7 +554,7 @@ export async function savePostToDefaultCollection(userId: string, postId: string
     const resolved = resolvePostThumbnail(post);
     if (resolved) defaults.thumbnailUrl = resolved;
     savePreviewForPost(defaults as CollectionWithPreviewMap, postId, post);
-    saveCollectionsToStorage(collections);
+    await persistCollectionsToDisk(collections);
     emitCollectionsUpdated(normalizedUserId);
     return defaults;
 }
@@ -512,7 +581,7 @@ export async function getCollectionPosts(collectionId: string): Promise<Post[]> 
 
     await delay(100);
 
-    const collections = getCollectionsFromStorage();
+    const collections = await loadCollectionsFromPersistence();
     const collection = collections.find(c => c.id === collectionId);
     if (!collection) {
         throw new Error('Collection not found');
@@ -556,7 +625,7 @@ export async function getCollectionPosts(collectionId: string): Promise<Post[]> 
 export async function isPostInCollection(collectionId: string, postId: string): Promise<boolean> {
     await delay(50);
 
-    const collections = getCollectionsFromStorage();
+    const collections = await loadCollectionsFromPersistence();
     const collection = collections.find(c => c.id === collectionId);
     if (!collection) {
         return false;
@@ -583,7 +652,7 @@ export async function getCollectionsForPost(userId: string, postId: string): Pro
     await delay(100);
     const normalizedUserId = normalizeUserId(userId);
 
-    const collections = getCollectionsFromStorage();
+    const collections = await loadCollectionsFromPersistence();
     return collections
         .filter(c => normalizeUserId(c.userId) === normalizedUserId && c.postIds.includes(postId))
         .sort((a, b) => b.updatedAt - a.updatedAt);
@@ -604,7 +673,7 @@ export async function deleteCollection(collectionId: string): Promise<void> {
 
     await delay(150);
 
-    const collections = getCollectionsFromStorage();
+    const collections = await loadCollectionsFromPersistence();
     const index = collections.findIndex(c => c.id === collectionId);
     if (index === -1) {
         throw new Error('Collection not found');
@@ -612,7 +681,7 @@ export async function deleteCollection(collectionId: string): Promise<void> {
 
     const deleted = collections[index];
     collections.splice(index, 1);
-    saveCollectionsToStorage(collections);
+    await persistCollectionsToDisk(collections);
     emitCollectionsUpdated(deleted?.userId || '');
 }
 

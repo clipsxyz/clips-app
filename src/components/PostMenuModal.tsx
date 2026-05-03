@@ -25,6 +25,7 @@ import {
 } from 'react-icons/fi';
 import SavePostModal from './SavePostModal';
 import QRCodeModal from './QRCodeModal';
+import { showToast } from '../utils/toast';
 
 interface PostMenuModalProps {
     post: Post;
@@ -106,14 +107,27 @@ export default function PostMenuModal({
     };
 
     const handleCopyLink = async () => {
+        const url = `${window.location.origin}/post/${post.id}`;
         try {
-            const url = `${window.location.origin}/post/${post.id}`;
-            await navigator.clipboard.writeText(url);
-            // Show toast or feedback
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(url);
+            } else {
+                const ta = document.createElement('textarea');
+                ta.value = url;
+                ta.setAttribute('readonly', '');
+                ta.style.position = 'fixed';
+                ta.style.left = '-9999px';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+            }
             onClose();
             onCopyLink?.();
+            showToast('Link copied');
         } catch (error) {
             console.error('Failed to copy link:', error);
+            showToast('Could not copy link');
         }
     };
 
@@ -207,7 +221,7 @@ export default function PostMenuModal({
 
     return (
         <>
-            <div className="fixed inset-0 z-[200] flex items-end justify-center">
+            <div className="fixed inset-0 z-[280] flex items-end justify-center">
                 {/* Backdrop – same as new Swal */}
                 <div
                     className="absolute inset-0 bg-black/65 backdrop-blur-[2px]"

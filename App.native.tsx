@@ -37,7 +37,6 @@ import SplashScreen from './src/screens/SplashScreen';
 import LandingScreen from './src/screens/LandingScreen';
 import TermsScreen from './src/screens/TermsScreen';
 import PublicPostScreen from './src/screens/PublicPostScreen';
-import ReplyQuestionScreen from './src/screens/ReplyQuestionScreen';
 import ClipScreen from './src/screens/ClipScreen';
 import { initializeNotifications, teardownNotifications } from './src/services/notifications';
 
@@ -237,7 +236,6 @@ function App(): React.JSX.Element {
           <Stack.Screen name="Landing" component={LandingScreen} />
           <Stack.Screen name="Terms" component={TermsScreen} />
           <Stack.Screen name="PublicPost" component={PublicPostScreen} />
-          <Stack.Screen name="ReplyQuestion" component={ReplyQuestionScreen} />
           <Stack.Screen name="Clip" component={ClipScreen} />
           </Stack.Navigator>
         </NavigationContainer>

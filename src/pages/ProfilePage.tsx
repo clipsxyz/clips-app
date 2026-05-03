@@ -7,13 +7,13 @@ import { FiCamera, FiBookmark, FiMessageCircle, FiLock, FiUnlock, FiX, FiUser, F
 import { FaFacebook } from 'react-icons/fa';
 import QRCode from 'qrcode';
 import Flag from '../components/Flag';
-import { getUserCollections } from '../api/collections';
+import { getCollectionThumbnailUrl, getUserCollections } from '../api/collections';
 import type { Collection } from '../types';
 import { addComment, addReply, approveHiddenComment, deleteHiddenComment, deletePost, fetchComments, fetchHiddenCommentsForOwner, getFollowedUsers, posts, toggleCommentLike, toggleLike, toggleReplyLike, type HiddenCommentReviewItem } from '../api/posts';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 import { showToast } from '../utils/toast';
-import { setProfilePrivacy } from '../api/privacy';
+import { setProfilePrivacy, getEffectiveProfilePrivate } from '../api/privacy';
 import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMaps';
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
 import { getUnreadTotal } from '../api/messages';
@@ -127,6 +127,8 @@ export default function ProfilePage() {
   const [countryFlag, setCountryFlag] = React.useState(user?.countryFlag || '');
   const [collections, setCollections] = React.useState<Collection[]>([]);
   const [collectionsOpen, setCollectionsOpen] = React.useState(false);
+  /** Collection modal thumbs that failed to load — show bookmark/text fallback */
+  const [brokenCollectionThumbs, setBrokenCollectionThumbs] = React.useState<Record<string, true>>({});
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [commentSafetyOpen, setCommentSafetyOpen] = React.useState(false);
   const [inviteFriendsOpen, setInviteFriendsOpen] = React.useState(false);
@@ -148,7 +150,9 @@ export default function ProfilePage() {
   const [myFeedOpeningPostId, setMyFeedOpeningPostId] = React.useState<string | null>(null);
   const myFeedListRef = React.useRef<HTMLDivElement | null>(null);
   const [drafts, setDrafts] = React.useState<Draft[]>([]);
-  const [isPrivate, setIsPrivate] = React.useState(user?.is_private || false);
+  const [isPrivate, setIsPrivate] = React.useState(() =>
+    getEffectiveProfilePrivate(user?.handle, user?.is_private)
+  );
   const [isTogglingPrivacy, setIsTogglingPrivacy] = React.useState(false);
   const [selectedCard, setSelectedCard] = React.useState<'bio' | 'social' | 'personal' | 'location' | 'interests' | 'flag' | 'followers' | 'following' | null>(null);
   const [followersCount, setFollowersCount] = React.useState(0);
@@ -170,6 +174,7 @@ export default function ProfilePage() {
   const [hiddenQueueFilter, setHiddenQueueFilter] = React.useState<'all' | 'comments' | 'replies'>('all');
   const [isInitializingNotifications, setIsInitializingNotifications] = React.useState(false);
   const quickRailRef = React.useRef<HTMLDivElement | null>(null);
+  const quickRailAutoNudgingRef = React.useRef(false);
   const [showQuickRailHint, setShowQuickRailHint] = React.useState(true);
   const ownProfileHandle = React.useMemo(() => (user?.handle || '').replace(/^@/, ''), [user?.handle]);
   const normalizedOwnHandle = React.useMemo(
@@ -212,19 +217,27 @@ export default function ProfilePage() {
     const el = quickRailRef.current;
     if (!el) return;
     const onScroll = () => {
+      if (quickRailAutoNudgingRef.current) return;
       if (el.scrollLeft > 8) setShowQuickRailHint(false);
     };
     el.addEventListener('scroll', onScroll, { passive: true });
     const t = window.setTimeout(() => {
       // Gentle nudge so users notice horizontal scrolling.
       if (el.scrollWidth > el.clientWidth && el.scrollLeft < 1) {
+        quickRailAutoNudgingRef.current = true;
         el.scrollTo({ left: 28, behavior: 'smooth' });
-        window.setTimeout(() => el.scrollTo({ left: 0, behavior: 'smooth' }), 320);
+        window.setTimeout(() => {
+          el.scrollTo({ left: 0, behavior: 'smooth' });
+          window.setTimeout(() => {
+            quickRailAutoNudgingRef.current = false;
+          }, 200);
+        }, 320);
       }
     }, 500);
     return () => {
       el.removeEventListener('scroll', onScroll);
       window.clearTimeout(t);
+      quickRailAutoNudgingRef.current = false;
     };
   }, []);
 
@@ -481,10 +494,8 @@ export default function ProfilePage() {
   }, [user?.avatarUrl, (user as any)?.profileBackgroundUrl, bio, socialLinks.website, socialLinks.instagram, socialLinks.tiktok, socialLinks.x, socialLinks.podcast, national, regional, local]);
 
   React.useEffect(() => {
-    if (user?.is_private !== undefined) {
-      setIsPrivate(user.is_private);
-    }
-  }, [user?.is_private]);
+    setIsPrivate(getEffectiveProfilePrivate(user?.handle, user?.is_private));
+  }, [user?.handle, user?.is_private]);
 
   // Initialize location state from user
   React.useEffect(() => {
@@ -591,6 +602,10 @@ export default function ProfilePage() {
     window.addEventListener('collectionsUpdated', handleCollectionsUpdated as EventListener);
     return () => window.removeEventListener('collectionsUpdated', handleCollectionsUpdated as EventListener);
   }, [user?.id]);
+
+  React.useEffect(() => {
+    if (collectionsOpen) setBrokenCollectionThumbs({});
+  }, [collectionsOpen]);
 
   React.useEffect(() => {
     loadDrafts();
@@ -2707,6 +2722,19 @@ export default function ProfilePage() {
                   <div className="space-y-3">
                     {collections.map((collection) => {
                       const postCount = collection.postIds?.length || 0;
+                      const thumbSrc = getCollectionThumbnailUrl(collection);
+                      const firstPost =
+                        collection.postIds?.length
+                          ? posts.find((p) => p.id === collection.postIds[0])
+                          : undefined;
+                      const isVideoThumb =
+                        !!thumbSrc &&
+                        (isVideoUrl(thumbSrc) ||
+                          firstPost?.mediaType === 'video' ||
+                          firstPost?.finalVideoUrl !== undefined);
+                      const thumbBroken = !!brokenCollectionThumbs[collection.id];
+                      const textFallback =
+                        firstPost?.text || firstPost?.caption || firstPost?.text_content;
                       return (
                         <button
                           key={collection.id}
@@ -2717,22 +2745,45 @@ export default function ProfilePage() {
                           className="w-full p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors text-left"
                         >
                           <div className="flex items-center gap-3">
-                            {collection.thumbnailUrl ? (
-                              isVideoUrl(collection.thumbnailUrl) ? (
+                            {thumbSrc && !thumbBroken ? (
+                              isVideoThumb ? (
                                 <video
-                                  src={collection.thumbnailUrl}
+                                  src={thumbSrc}
                                   className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
                                   muted
                                   playsInline
                                   preload="metadata"
+                                  onError={() =>
+                                    setBrokenCollectionThumbs((prev) => ({
+                                      ...prev,
+                                      [collection.id]: true,
+                                    }))
+                                  }
+                                  onLoadedMetadata={(e) => {
+                                    e.currentTarget.currentTime = 0;
+                                  }}
                                 />
                               ) : (
                                 <img
-                                  src={collection.thumbnailUrl}
+                                  src={thumbSrc}
                                   alt={collection.name}
                                   className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
+                                  onError={() =>
+                                    setBrokenCollectionThumbs((prev) => ({
+                                      ...prev,
+                                      [collection.id]: true,
+                                    }))
+                                  }
                                 />
                               )
+                            ) : postCount > 0 && textFallback ? (
+                              <div className="w-16 h-16 rounded-lg bg-gray-200 flex items-center justify-center flex-shrink-0 overflow-hidden p-1.5">
+                                <p className="text-[10px] text-gray-600 text-center line-clamp-4 leading-tight">
+                                  {textFallback.length > 80
+                                    ? textFallback.slice(0, 80) + '…'
+                                    : textFallback}
+                                </p>
+                              </div>
                             ) : (
                               <div className="w-16 h-16 rounded-lg bg-gray-200 flex items-center justify-center flex-shrink-0">
                                 <FiBookmark className="w-8 h-8 text-gray-400" />

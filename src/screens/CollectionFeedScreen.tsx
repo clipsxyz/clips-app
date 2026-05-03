@@ -57,7 +57,9 @@ export default function CollectionFeedScreen({ route, navigation }: any) {
                     <Icon name="arrow-back" size={24} color="#FFFFFF" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>{collectionName || 'Collection'}</Text>
-                <View style={{ width: 24 }} />
+                <TouchableOpacity onPress={() => navigation.goBack()}>
+                    <Icon name="close" size={24} color="#FFFFFF" />
+                </TouchableOpacity>
             </View>
 
             <View style={styles.infoContainer}>

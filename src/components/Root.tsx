@@ -29,7 +29,6 @@ import CanvaVideoEditor from '../pages/CanvaVideoEditor';
 import TextOnlyPostPage from '../pages/TextOnlyPostPage';
 import TextOnlyPostDetailsPage from '../pages/TextOnlyPostDetailsPage';
 import GalleryPreviewPage from '../pages/GalleryPreviewPage';
-import ReplyQuestionPage from '../pages/ReplyQuestionPage';
 import TermsPage from '../pages/TermsPage';
 import ContentPreferencesPage from '../pages/ContentPreferencesPage';
 import PublicPostPage from '../pages/PublicPostPage';
@@ -98,7 +97,6 @@ export default function Root() {
                             <Route path="messages/group/:groupId" element={<MessagesPage />} />
                             <Route path="messages/:handle" element={<MessagesPage />} />
                             <Route path="inbox" element={<InboxPage />} />
-                            <Route path="reply-question" element={<ReplyQuestionPage />} />
                         </Routes>
                     </BrowserRouter>
                 </ThemeProvider>

@@ -6,7 +6,7 @@ import { FiHome, FiUser, FiUserPlus, FiUserX, FiPlayCircle, FiPlusSquare, FiSear
 import { GiGreekTemple } from 'react-icons/gi';
 import { LuFlame, LuPlus } from 'react-icons/lu';
 import { VscLiveShare } from 'react-icons/vsc';
-import { SiFigshare } from 'react-icons/si';
+import ShareToStoriesFeedIcon from './components/ShareToStoriesFeedIcon';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from './constants';
 import TopBar from './components/TopBar';
 import CommentsModal from './components/CommentsModal';
@@ -50,7 +50,7 @@ import CreateGroupModal from './components/CreateGroupModal';
 import PickGroupToInviteFeedUserModal from './components/PickGroupToInviteFeedUserModal';
 import EditPostModal from './components/EditPostModal';
 import ShareToStoriesModal from './components/ShareToStoriesModal';
-import { getCollectionsForPost, savePostToDefaultCollection } from './api/collections';
+import { getCollectionsForPost, savePostToDefaultCollection, unsavePost } from './api/collections';
 import type { Post, Ad, StickerOverlay } from './types';
 import StickerOverlayComponent from './components/StickerOverlay';
 import EffectWrapper from './components/EffectWrapper';
@@ -61,6 +61,7 @@ import { getInstagramImageDimensions, getImageSize } from './utils/imageDimensio
 import Swal from 'sweetalert2';
 import { bottomSheet } from './utils/swalBottomSheet';
 import { showToast } from './utils/toast';
+import { markFeedPostArchived, isFeedPostArchived, setPostNotificationsPref, hasPostNotificationsPref } from './utils/feedPostPrefs';
 import { TEXT_STORY_TEMPLATES } from './textStoryTemplates';
 import { IMessageDmBubbleShell } from './components/IMessageDmBubbleShell';
 import { DM_RECEIVED_BG } from './constants/dmImessageTheme';
@@ -158,9 +159,10 @@ function BottomNav({ onCreateClick, onInboxClick }: { onCreateClick: () => void;
   const userInitials = user?.name ? getUserInitials(user.name) : 'U';
 
   const handleHomeClick = () => {
-    nav('/feed');
-    // Dispatch event to reset feed state
+    // Reset feed state while FeedPageWrapper is still mounted (same-route tap). When navigating
+    // from another route, listener may not exist yet — mount uses fresh state; this still helps /feed→/feed.
     window.dispatchEvent(new CustomEvent('resetFeed'));
+    nav('/feed');
   };
 
   // Helper to create square icon container (Uber Eats style)
@@ -4483,14 +4485,14 @@ function EngagementBar({
             <span className="text-xs text-white tabular-nums">{comments}</span>
           </button>
 
-          {/* Share to Stories – Gazetteer stories icon (SiFigshare) */}
+          {/* Share to stories — Instagram-style dashed ring + plus */}
           <button
             className={`flex items-center ${iconGap} min-h-[40px] px-1 -mx-1 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0`}
             onClick={shareClick}
             aria-label="Share post to stories"
             title="Share post to stories"
           >
-            <SiFigshare className={`${iconSize} text-white`} />
+            <ShareToStoriesFeedIcon className={`${iconSize} text-white`} />
             <span className="text-xs text-white tabular-nums">{shares}</span>
           </button>
 
@@ -4869,6 +4871,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   const [inviteToGroupOpen, setInviteToGroupOpen] = React.useState(false);
   const [editModalOpen, setEditModalOpen] = React.useState(false);
   const [isSaved, setIsSaved] = React.useState(false);
+  const [hasPostNotifications, setHasPostNotifications] = React.useState(false);
   const [isQuickSaving, setIsQuickSaving] = React.useState(false);
   const [carouselIndex, setCarouselIndex] = React.useState(0);
   const [showTaggedUsersModal, setShowTaggedUsersModal] = React.useState(false);
@@ -4977,6 +4980,25 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
     };
   }, [post.id, user?.id]);
 
+  React.useEffect(() => {
+    if (!user?.id) {
+      setHasPostNotifications(false);
+      return;
+    }
+    const viewerId = getStableUserId(user);
+    setHasPostNotifications(hasPostNotificationsPref(viewerId, post.id));
+  }, [user, post.id]);
+
+  React.useEffect(() => {
+    const onPref = (e: Event) => {
+      const ce = e as CustomEvent<{ postId?: string; enabled?: boolean }>;
+      if (ce.detail?.postId !== post.id) return;
+      setHasPostNotifications(!!ce.detail?.enabled);
+    };
+    window.addEventListener('postNotificationPrefChanged', onPref as EventListener);
+    return () => window.removeEventListener('postNotificationPrefChanged', onPref as EventListener);
+  }, [post.id]);
+
   // Track views when post comes into viewport (try/catch so mobile errors don't crash app)
   React.useEffect(() => {
     if (hasBeenViewed) return;
@@ -5022,20 +5044,27 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
     if (!user?.id || isQuickSaving) return;
     setIsQuickSaving(true);
     try {
-      await savePostToDefaultCollection(user.id, post.id, post);
-      setIsSaved(true);
-      window.dispatchEvent(new CustomEvent(`postSaved-${post.id}`));
-      showToast('Saved', 2600, {
-        actionLabel: 'Save to collection',
-        onAction: () => setSaveModalOpen(true),
-      });
+      if (isSaved) {
+        await unsavePost(user.id, post.id);
+        setIsSaved(false);
+        window.dispatchEvent(new CustomEvent(`postSaved-${post.id}`));
+        showToast('Removed from saved');
+      } else {
+        await savePostToDefaultCollection(user.id, post.id, post);
+        setIsSaved(true);
+        window.dispatchEvent(new CustomEvent(`postSaved-${post.id}`));
+        showToast('Saved', 2600, {
+          actionLabel: 'Save to collection',
+          onAction: () => setSaveModalOpen(true),
+        });
+      }
     } catch (error) {
-      console.error('Error quick-saving post:', error);
-      showToast('Could not save post');
+      console.error('Error saving or unsaving post:', error);
+      showToast(isSaved ? 'Could not unsave post' : 'Could not save post');
     } finally {
       setIsQuickSaving(false);
     }
-  }, [user?.id, isQuickSaving, post.id]);
+  }, [user?.id, isQuickSaving, post.id, post, isSaved]);
 
   const textOnlyFeedBylineRaw =
     post.isReclipped &&
@@ -5314,7 +5343,6 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             userId={user.id}
             isOpen={menuOpen}
             onClose={() => setMenuOpen(false)}
-            onCopyLink={() => { }}
             onShare={onShare}
             onReport={() => {
               // TODO: Implement report
@@ -5343,25 +5371,30 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
               setEditModalOpen(true);
             }}
             onArchive={async () => {
-              // TODO: Implement archive
-              console.log('Archive post:', post.id);
+              const viewerId = getStableUserId(user);
+              markFeedPostArchived(viewerId, post.id);
+              showToast('Post archived');
             }}
             onBoost={onBoost}
             onReclip={onReclip}
             onTurnOnNotifications={() => {
-              // TODO: Implement notifications
-              console.log('Turn on notifications for post:', post.id);
+              const viewerId = getStableUserId(user);
+              setPostNotificationsPref(viewerId, post.id, true);
+              setHasPostNotifications(true);
+              showToast('You’ll get notifications about this post');
             }}
             onTurnOffNotifications={() => {
-              // TODO: Implement notifications
-              console.log('Turn off notifications for post:', post.id);
+              const viewerId = getStableUserId(user);
+              setPostNotificationsPref(viewerId, post.id, false);
+              setHasPostNotifications(false);
+              showToast('Post notifications off');
             }}
             isCurrentUser={user.handle === post.userHandle}
             isFollowing={post.isFollowing === true}
             isSaved={isSaved}
             isMuted={false} // TODO: Check if muted
             isBlocked={false} // TODO: Check if blocked
-            hasNotifications={false} // TODO: Check notifications
+            hasNotifications={hasPostNotifications}
             onOpenSave={handleQuickSaveFromMenu}
             onCreateGroup={
               user?.id && user?.handle === post.userHandle
@@ -5961,6 +5994,8 @@ function FeedPageWrapper() {
   const routerLocation = useLocation();
   const navigate = useNavigate();
   const requestTokenRef = React.useRef(0);
+  /** Tracks route transitions so we can clear stuck loaders when re-entering /feed from elsewhere. */
+  const wasOnFeedPathRef = React.useRef(false);
 
   // Initialize active tab based on user's national location, with fallback
   const defaultNational = user?.national || 'Ireland';
@@ -5969,13 +6004,15 @@ function FeedPageWrapper() {
     const next = location.trim();
     if (!next) return;
     setShowFollowingFeed(false);
+    // Leaving `active === 'Following'` used to force discover via currentFilter; exit Following tab for UX + consistency.
+    setActive((prev) => (prev === 'Following' ? (user?.national || defaultNational) : prev));
     setCustomLocation(next);
     setCustomFilterType(filterType);
     setPages([]);
     setCursor(0);
     setEnd(false);
     setError(null);
-  }, []);
+  }, [user?.national, defaultNational]);
 
   const clearCustomLocationFromHeader = React.useCallback(() => {
     try {
@@ -6077,6 +6114,20 @@ function FeedPageWrapper() {
 
     window.addEventListener('feedUserBlocked', onFeedUserBlocked as EventListener);
     return () => window.removeEventListener('feedUserBlocked', onFeedUserBlocked as EventListener);
+  }, []);
+
+  React.useEffect(() => {
+    const removePostFromPages = (event: Event) => {
+      const postId = String((event as CustomEvent<{ postId?: string }>).detail?.postId || '');
+      if (!postId) return;
+      setPages((prev) => prev.map((page) => page.filter((p) => p.id !== postId)));
+    };
+    window.addEventListener('feedPostArchived', removePostFromPages as EventListener);
+    window.addEventListener('feedPostDeleted', removePostFromPages as EventListener);
+    return () => {
+      window.removeEventListener('feedPostArchived', removePostFromPages as EventListener);
+      window.removeEventListener('feedPostDeleted', removePostFromPages as EventListener);
+    };
   }, []);
 
   const readSuggestedPlacesPrefs = React.useCallback(() => {
@@ -6437,6 +6488,38 @@ function FeedPageWrapper() {
   // Internal state for Following feed (separate from tabs)
   const [showFollowingFeed, setShowFollowingFeed] = React.useState(false);
 
+  /**
+   * PillTabs tab selection: keep `active`, `showFollowingFeed`, pagination, and URL in sync in one gesture.
+   * If `showFollowingFeed` only flipped in useEffect, one render still had Following=true + active=Ireland → currentFilter stayed discover.
+   */
+  const handleFeedTabChange = React.useCallback(
+    (t: Tab) => {
+      setActive(t);
+      setShowFollowingFeed(t === 'Following');
+      setCustomLocation(null);
+      setCustomFilterType(null);
+      setPages([]);
+      setCursor(0);
+      setEnd(false);
+      setLoading(false);
+      setError(null);
+      pagesLoadedForFilterRef.current = null;
+      requestTokenRef.current++;
+      try {
+        const params = new URLSearchParams(routerLocation.search);
+        if (params.has('location') || params.has('type')) {
+          params.delete('location');
+          params.delete('type');
+          const qs = params.toString();
+          navigate(qs ? `/feed?${qs}` : '/feed', { replace: true });
+        }
+      } catch {
+        /* ignore */
+      }
+    },
+    [navigate, routerLocation.search],
+  );
+
   const handleFeedPullStart = React.useCallback((e: React.TouchEvent<HTMLDivElement>) => {
     // Keep native behavior for non-main feeds; this fallback is for main newsfeed only.
     if (customLocation || showFollowingFeed) return;
@@ -6474,12 +6557,20 @@ function FeedPageWrapper() {
     }
   }, [customLocation, showFollowingFeed]);
 
-  // Listen for setFollowingTab event from TopBar
+  // Listen for setFollowingTab event from TopBar (must align `active` + flags or useEffect([active]) clears Following mode)
   React.useEffect(() => {
     const handleSetFollowingTab = () => {
+      setActive('Following');
       setShowFollowingFeed(true);
       setCustomLocation(null);
-      // Don't change active tab, just show following feed
+      setCustomFilterType(null);
+      setPages([]);
+      setCursor(0);
+      setEnd(false);
+      setLoading(false);
+      setError(null);
+      pagesLoadedForFilterRef.current = null;
+      requestTokenRef.current++;
     };
     window.addEventListener('setFollowingTab', handleSetFollowingTab);
     return () => window.removeEventListener('setFollowingTab', handleSetFollowingTab);
@@ -6507,7 +6598,10 @@ function FeedPageWrapper() {
       setPages([]);
       setCursor(0);
       setEnd(false);
+      setLoading(false);
       setError(null);
+      pagesLoadedForFilterRef.current = null;
+      requestTokenRef.current++;
       // Clear any pending location from sessionStorage
       sessionStorage.removeItem('pendingLocation');
       sessionStorage.removeItem('pendingFilterType');
@@ -6554,17 +6648,40 @@ function FeedPageWrapper() {
     };
   }, [user?.handle]);
 
-  // Determine current filter - use 'discover' for Following; encode venue feeds explicitly.
+  // Custom Gazetteer / URL location must win over Following: `active` can stay `'Following'` after a header
+  // search while `showFollowingFeed` was cleared — old logic kept `currentFilter` on `discover` forever.
   const currentFilter =
-    (active === 'Following' || showFollowingFeed)
-      ? 'discover'
-      : (customLocation
-        ? (customFilterType === 'venue'
-          ? `venue:${customLocation}`
-          : customFilterType === 'landmark'
-            ? `landmark:${customLocation}`
-            : customLocation)
-        : active);
+    customLocation != null && String(customLocation).trim() !== ''
+      ? customFilterType === 'venue'
+        ? `venue:${customLocation}`
+        : customFilterType === 'landmark'
+          ? `landmark:${customLocation}`
+          : customLocation
+      : active === 'Following' || showFollowingFeed
+        ? 'discover'
+        : active;
+
+  const currentFilterRef = React.useRef(currentFilter);
+  currentFilterRef.current = currentFilter;
+
+  React.useLayoutEffect(() => {
+    const onFeed = routerLocation.pathname === '/feed';
+    if (onFeed && !wasOnFeedPathRef.current) {
+      setLoading(false);
+      requestTokenRef.current++;
+    }
+    wasOnFeedPathRef.current = onFeed;
+  }, [routerLocation.pathname]);
+
+  React.useEffect(() => {
+    if (routerLocation.pathname !== '/feed') return;
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      setLoading((busy) => (busy ? false : busy));
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [routerLocation.pathname]);
 
   // Read location from URL query (?location=...) when arriving from Discover
   React.useEffect(() => {
@@ -6591,6 +6708,8 @@ function FeedPageWrapper() {
     if (q) {
       console.log('URL provided location:', q, 'setting customLocation...');
       console.log('About to call setCustomLocation, will update from:', customLocation, 'to:', q);
+      setShowFollowingFeed(false);
+      setActive((prev) => (prev === 'Following' ? (user?.national || defaultNational) : prev));
       setCustomLocation(q);
       setCustomFilterType(
         type === 'venue' ? 'venue' : type === 'landmark' ? 'landmark' : 'location'
@@ -6611,7 +6730,7 @@ function FeedPageWrapper() {
       setEnd(false);
       setError(null);
     }
-  }, [routerLocation.search, routerLocation.pathname]); // Don't include customLocation to avoid infinite loops
+  }, [routerLocation.search, routerLocation.pathname, user?.national, defaultNational]); // Don't include customLocation to avoid infinite loops
 
   // Reset feed only when tab/location (currentFilter) changes
   React.useEffect(() => {
@@ -6619,6 +6738,7 @@ function FeedPageWrapper() {
     setPages([]);
     setCursor(0);
     setEnd(false);
+    setLoading(false);
     requestTokenRef.current++;
   }, [currentFilter]);
 
@@ -6663,6 +6783,8 @@ function FeedPageWrapper() {
       const location = event.detail.location;
       const filterType = event.detail.filterType as 'location' | 'venue' | 'landmark' | undefined;
       console.log('Feed received location change:', location);
+      setShowFollowingFeed(false);
+      setActive((prev) => (prev === 'Following' ? (user?.national || defaultNational) : prev));
       setCustomLocation(location);
       setCustomFilterType(filterType || 'location');
       setPages([]);
@@ -6679,6 +6801,7 @@ function FeedPageWrapper() {
 
     window.addEventListener('locationChange', handleLocationChange as EventListener);
 
+    let pendingTimer: number | undefined;
     // Check for pending location from Discover page
     const pendingLocation = sessionStorage.getItem('pendingLocation');
     const pendingFilterType = sessionStorage.getItem('pendingFilterType') as 'location' | 'venue' | 'landmark' | null;
@@ -6687,9 +6810,10 @@ function FeedPageWrapper() {
       console.log('Feed found pending location:', pendingLocation, 'setting customLocation...');
       sessionStorage.removeItem('pendingLocation');
       sessionStorage.removeItem('pendingFilterType');
-      // Use a small delay to ensure the component is mounted before setting state
-      setTimeout(() => {
+      pendingTimer = window.setTimeout(() => {
         console.log('Actually setting customLocation to:', pendingLocation);
+        setShowFollowingFeed(false);
+        setActive((prev) => (prev === 'Following' ? (user?.national || defaultNational) : prev));
         setCustomLocation(pendingLocation);
         setCustomFilterType(pendingFilterType || 'location');
         setPages([]);
@@ -6699,8 +6823,11 @@ function FeedPageWrapper() {
       }, 100);
     }
 
-    return () => window.removeEventListener('locationChange', handleLocationChange as EventListener);
-  }, []);
+    return () => {
+      window.removeEventListener('locationChange', handleLocationChange as EventListener);
+      if (pendingTimer != null) window.clearTimeout(pendingTimer);
+    };
+  }, [user?.national, defaultNational]);
 
   // Drain mutations when back online
   React.useEffect(() => {
@@ -6726,18 +6853,28 @@ function FeedPageWrapper() {
   };
 
   async function loadMore(silent = false) {
-    if (loading || end || cursor === null) {
+    if (loading || end) {
       return;
     }
+    const cursorForRequest = cursor ?? 0;
     if (!silent) setLoading(true);
     setError(null);
     try {
       requestTokenRef.current++;
       const filterForRequest = currentFilter;
-      const page = await fetchPostsPage(filterForRequest, cursor, 5, userId, user?.local || '', user?.regional || '', user?.national || '', user?.handle || '');
-      // Drop stale results if currentFilter changed since we started (i.e., user changed location)
-      if (filterForRequest !== currentFilter) {
-        console.warn('Dropping stale page for filter', filterForRequest, 'current filter is now:', currentFilter);
+      const page = await fetchPostsPage(
+        filterForRequest,
+        cursorForRequest,
+        5,
+        userId,
+        user?.local || '',
+        user?.regional || '',
+        user?.national || '',
+        user?.handle || '',
+      );
+      // After await, `currentFilter` in this closure is stale; use the ref updated every render.
+      if (filterForRequest !== currentFilterRef.current) {
+        console.warn('Dropping stale page for filter', filterForRequest, 'current filter is now:', currentFilterRef.current);
         return;
       }
       setPages(prev => {
@@ -7987,7 +8124,7 @@ function FeedPageWrapper() {
 
       <PillTabs
         active={active}
-        onChange={setActive}
+        onChange={handleFeedTabChange}
         onClearCustom={clearCustomLocationFromHeader}
         onSearchLocation={applyCustomLocationFromHeader}
         customLocation={customLocation}
@@ -8098,6 +8235,9 @@ function FeedPageWrapper() {
           }
 
           const p = feedItem.item as Post;
+          if (isFeedPostArchived(userId, p.id)) {
+            return null;
+          }
           postCounter += 1;
           const showStories24AfterThisPost =
             !customLocation && stories24Items.length > 0 && postCounter === 1;
@@ -8227,7 +8367,7 @@ function FeedPageWrapper() {
             }}
             showBoostIcon={user?.handle === p.userHandle && !p.originalUserHandle}
             onBoost={async () => {
-              showToast('Boost is managed in the mobile app.');
+              navigate('/boost', { state: { focusPostId: p.id } });
             }}
             onDelete={user?.handle === p.userHandle && !p.originalUserHandle ? async () => {
               const result = await Swal.fire(bottomSheet({
@@ -8792,7 +8932,7 @@ function FeedPageWrapper() {
             }}
             onOpenComments={() => handleOpenComments(p.id)}
             onBoost={async () => {
-              showToast('Boost is managed in the mobile app.');
+              navigate('/boost', { state: { focusPostId: p.id } });
             }}
             
             onReclip={async () => {
@@ -8846,8 +8986,16 @@ function BoostPageWrapper() {
   const [selectedPostForShare, setSelectedPostForShare] = React.useState<Post | null>(null);
   const [scenesOpen, setScenesOpen] = React.useState(false);
   const [selectedPostForScenes, setSelectedPostForScenes] = React.useState<Post | null>(null);
+  const selectedPostForScenesBoostRef = React.useRef<Post | null>(null);
+  React.useEffect(() => {
+    selectedPostForScenesBoostRef.current = selectedPostForScenes;
+  }, [selectedPostForScenes]);
   const [boostModalOpen, setBoostModalOpen] = React.useState(false);
   const [selectedPostForBoost, setSelectedPostForBoost] = React.useState<Post | null>(null);
+  const selectedPostForBoostRef = React.useRef<Post | null>(null);
+  React.useEffect(() => {
+    selectedPostForBoostRef.current = selectedPostForBoost;
+  }, [selectedPostForBoost]);
   const [recentlyBoostedPostId, setRecentlyBoostedPostId] = React.useState<string | null>(null);
   const [recentlyBoostedFeedType, setRecentlyBoostedFeedType] = React.useState<'local' | 'regional' | 'national' | null>(null);
   const [unreadCount, setUnreadCount] = React.useState(0);
@@ -8856,6 +9004,24 @@ function BoostPageWrapper() {
   const [boostSort, setBoostSort] = React.useState<'best' | 'recent'>('best');
   const [insightsRange, setInsightsRange] = React.useState<'24h' | '7d' | 'all'>('24h');
   const boostInsightsCacheRef = React.useRef<Map<string, { data: any; ts: number }>>(new Map());
+
+  React.useEffect(() => {
+    const onDeleted = (event: Event) => {
+      const postId = String((event as CustomEvent<{ postId?: string }>).detail?.postId || '');
+      if (!postId) return;
+      setPosts((prev) => prev.filter((p) => p.id !== postId));
+      if (selectedPostForScenesBoostRef.current?.id === postId) {
+        setScenesOpen(false);
+        setSelectedPostForScenes(null);
+      }
+      if (selectedPostForBoostRef.current?.id === postId) {
+        setBoostModalOpen(false);
+        setSelectedPostForBoost(null);
+      }
+    };
+    window.addEventListener('feedPostDeleted', onDeleted as EventListener);
+    return () => window.removeEventListener('feedPostDeleted', onDeleted as EventListener);
+  }, []);
 
   // Load only the current user's posts (no mock users)
   React.useEffect(() => {
@@ -8928,7 +9094,18 @@ function BoostPageWrapper() {
       // Clear the state to prevent re-triggering
       window.history.replaceState({ ...loc, showBoostModal: false }, '');
     }
-  }, [location.state, user?.handle, userId]);
+
+    const focusLoc = location.state as { focusPostId?: string } | null;
+    const focusPostId = focusLoc?.focusPostId;
+    if (focusPostId && !loading) {
+      const focusPost = posts.find((x) => x.id === focusPostId) || null;
+      if (focusPost) {
+        setSelectedPostForBoost(focusPost);
+        setBoostModalOpen(true);
+      }
+      window.history.replaceState({ ...(focusLoc || {}), focusPostId: undefined }, '');
+    }
+  }, [location.state, user?.handle, userId, posts, loading]);
 
   // Ensure boosted post gets Sponsored label when returning from payment (backup if refetch missed it)
   React.useEffect(() => {

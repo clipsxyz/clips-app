@@ -28,6 +28,9 @@ export const MIN_CLIPS = 1;
 // Default clip duration (in milliseconds)
 export const DEFAULT_CLIP_DURATION = 15000;
 
+/** Same limit as text-only posts (`PostController` max:500) and Stories API story text. */
+export const TEXT_POST_BODY_MAX_LENGTH = 500;
+
 // Gradient colors for templates
 export const TEMPLATE_GRADIENTS = {
   INSTAGRAM: 'linear-gradient(90deg, #feda75, #fa7e1e, #d62976, #962fbf, #4f5bd5, #feda75)',

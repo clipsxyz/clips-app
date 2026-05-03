@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     View,
     Text,
@@ -8,26 +8,51 @@ import {
     Dimensions,
     TouchableOpacity,
     ActivityIndicator,
+    Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
-import { getPostById, toggleLike, toggleBookmark, incrementViews } from '../api/posts';
+import {
+    getPostById,
+    toggleLike,
+    incrementViews,
+    incrementShares,
+    deletePost,
+    reclipPost,
+    setReclipState,
+    fetchComments,
+} from '../api/posts';
+import { blockUser } from '../api/messages';
+import { getCollectionsForPost, savePostToDefaultCollection, unsavePost } from '../api/collections';
+import {
+    markFeedPostArchivedMobile,
+    hasPostNotificationsPrefMobile,
+    setPostNotificationsPrefMobile,
+} from '../utils/feedEngagementPrefsMobile';
 import { timeAgo } from '../utils/timeAgo';
 import { getInstagramImageDimensions } from '../utils/imageDimensions';
 import { FEED_UI } from '../constants/feedUiTokens';
 import type { Post } from '../types';
 import Avatar from '../components/Avatar';
+import FeedShareModal from '../components/FeedShareModal';
+import PostOverflowMenuModal from '../components/PostOverflowMenuModal';
+import PostCommentsSheet from '../components/PostCommentsSheet';
 
 export default function PostDetailScreen({ route, navigation }: any) {
     const { postId } = route.params;
     const { user } = useAuth();
     const userId = user?.id ?? 'anon';
     const screenWidth = Dimensions.get('window').width;
-    
+
     const [post, setPost] = useState<Post | null>(null);
     const [loading, setLoading] = useState(true);
     const [mediaHeight, setMediaHeight] = useState(screenWidth * FEED_UI.media.maxAspect);
+    const [shareModalOpen, setShareModalOpen] = useState(false);
+    const [commentsOpen, setCommentsOpen] = useState(false);
+    const [overflowVisible, setOverflowVisible] = useState(false);
+    const [overflowSaved, setOverflowSaved] = useState(false);
+    const [overflowNotify, setOverflowNotify] = useState(false);
 
     useEffect(() => {
         loadPost();
@@ -45,9 +70,32 @@ export default function PostDetailScreen({ route, navigation }: any) {
             },
             () => {
                 setMediaHeight(screenWidth * FEED_UI.media.maxAspect);
-            },
+            }
         );
     }, [post?.mediaUrl, screenWidth]);
+
+    useEffect(() => {
+        if (!overflowVisible || !post) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const cols = await getCollectionsForPost(userId, post.id);
+                const n = await hasPostNotificationsPrefMobile(userId, post.id);
+                if (!cancelled) {
+                    setOverflowSaved(cols.length > 0);
+                    setOverflowNotify(n);
+                }
+            } catch {
+                if (!cancelled) {
+                    setOverflowSaved(false);
+                    setOverflowNotify(false);
+                }
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [overflowVisible, post?.id, userId]);
 
     const loadPost = async () => {
         try {
@@ -63,6 +111,37 @@ export default function PostDetailScreen({ route, navigation }: any) {
         }
     };
 
+    const toggleCollectionsSave = async () => {
+        if (!post) return;
+        try {
+            const cols = await getCollectionsForPost(userId, post.id);
+            if (cols.length > 0) {
+                await unsavePost(userId, post.id);
+                setPost((p) => (p ? { ...p, isBookmarked: false } : null));
+                setOverflowSaved(false);
+            } else {
+                await savePostToDefaultCollection(userId, post.id, post);
+                setPost((p) => (p ? { ...p, isBookmarked: true } : null));
+                setOverflowSaved(true);
+            }
+        } catch (err) {
+            console.error('Save toggle failed:', err);
+        }
+    };
+
+    const openShare = async () => {
+        if (!post) return;
+        setShareModalOpen(true);
+        try {
+            await incrementShares(userId, post.id);
+            setPost((p) =>
+                p ? { ...p, stats: { ...p.stats, shares: p.stats.shares + 1 } } : null
+            );
+        } catch (err) {
+            console.error('Error incrementing shares:', err);
+        }
+    };
+
     const handleLike = async () => {
         if (!post) return;
         try {
@@ -73,14 +152,36 @@ export default function PostDetailScreen({ route, navigation }: any) {
         }
     };
 
-    const handleBookmark = async () => {
-        if (!post) return;
-        try {
-            const updated = await toggleBookmark(userId, post.id);
-            setPost(updated);
-        } catch (err) {
-            console.error('Error bookmarking post:', err);
+    const tryReclip = async () => {
+        if (!post || !user?.handle) return;
+        if (post.userHandle === user.handle) {
+            Alert.alert('Cannot reclip', 'You cannot reclip your own post.');
+            return;
         }
+        if (post.userReclipped) {
+            Alert.alert('Already reclipped', 'You have already reclipped this post.');
+            return;
+        }
+        const newReclips = post.stats.reclips + 1;
+        setReclipState(userId, post.id, true);
+        setPost((p) =>
+            p
+                ? {
+                      ...p,
+                      userReclipped: true,
+                      stats: { ...p.stats, reclips: newReclips },
+                  }
+                : null
+        );
+        try {
+            await reclipPost(userId, post.id, user.handle);
+        } catch (err: any) {
+            console.warn('Reclip failed (UI already updated):', err);
+        }
+    };
+
+    const hideAndPopAfterArchiveOrDelete = () => {
+        navigation.goBack();
     };
 
     if (loading) {
@@ -106,20 +207,28 @@ export default function PostDetailScreen({ route, navigation }: any) {
                     <Icon name="arrow-back" size={24} color="#FFFFFF" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Post</Text>
-                <View style={{ width: 24 }} />
+                <TouchableOpacity
+                    onPress={() => setOverflowVisible(true)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                    <Icon name="ellipsis-horizontal" size={22} color="#E5E7EB" />
+                </TouchableOpacity>
             </View>
 
             <ScrollView style={styles.content}>
                 <View style={styles.postHeader}>
-                    <Avatar
-                        src={undefined}
-                        name={post.userHandle.split('@')[0]}
-                        size={40}
-                    />
-                    <View style={styles.postHeaderInfo}>
+                    <TouchableOpacity
+                        onPress={() => navigation.navigate('ViewProfile', { handle: post.userHandle })}
+                    >
+                        <Avatar src={undefined} name={post.userHandle.split('@')[0]} size={40} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={styles.postHeaderInfo}
+                        onPress={() => navigation.navigate('ViewProfile', { handle: post.userHandle })}
+                    >
                         <Text style={styles.userHandle}>{post.userHandle}</Text>
                         <Text style={styles.timeText}>{timeAgo(post.createdAt)}</Text>
-                    </View>
+                    </TouchableOpacity>
                 </View>
 
                 {post.mediaUrl && (
@@ -135,26 +244,33 @@ export default function PostDetailScreen({ route, navigation }: any) {
                 <View style={styles.engagementBar}>
                     <View style={styles.actionButtons}>
                         <TouchableOpacity onPress={handleLike} style={styles.actionButton}>
-                            <Icon name={post.userLiked ? "heart" : "heart-outline"} size={FEED_UI.icon.action} color={post.userLiked ? "#EF4444" : "#FFFFFF"} />
+                            <Icon
+                                name={post.userLiked ? 'heart' : 'heart-outline'}
+                                size={FEED_UI.icon.action}
+                                color={post.userLiked ? '#EF4444' : '#FFFFFF'}
+                            />
                             <Text style={styles.actionText}>{post.stats.likes}</Text>
                         </TouchableOpacity>
 
-                        <TouchableOpacity style={styles.actionButton}>
+                        <TouchableOpacity
+                            onPress={() => setCommentsOpen(true)}
+                            style={styles.actionButton}
+                        >
                             <Icon name="chatbubble-outline" size={FEED_UI.icon.action} color="#FFFFFF" />
                             <Text style={styles.actionText}>{post.stats.comments}</Text>
                         </TouchableOpacity>
 
-                        <TouchableOpacity style={styles.actionButton}>
+                        <TouchableOpacity onPress={openShare} style={styles.actionButton}>
                             <Icon name="share-outline" size={FEED_UI.icon.action} color="#FFFFFF" />
                             <Text style={styles.actionText}>{post.stats.shares}</Text>
                         </TouchableOpacity>
                     </View>
 
-                    <TouchableOpacity onPress={handleBookmark}>
+                    <TouchableOpacity onPress={toggleCollectionsSave}>
                         <Icon
-                            name={post.isBookmarked ? "bookmark" : "bookmark-outline"}
+                            name={post.isBookmarked ? 'bookmark' : 'bookmark-outline'}
                             size={FEED_UI.icon.action}
-                            color={post.isBookmarked ? "#8B5CF6" : "#FFFFFF"}
+                            color={post.isBookmarked ? '#8B5CF6' : '#FFFFFF'}
                         />
                     </TouchableOpacity>
                 </View>
@@ -165,6 +281,113 @@ export default function PostDetailScreen({ route, navigation }: any) {
                     </Text>
                 </View>
             </ScrollView>
+
+            <PostCommentsSheet
+                postId={post.id}
+                post={post}
+                isOpen={commentsOpen}
+                commentAuthorHandle={user?.handle ?? ''}
+                currentUserHandle={user?.handle}
+                onAfterClose={() => {
+                    fetchComments(post.id)
+                        .then((list) =>
+                            setPost((p) =>
+                                p ? { ...p, stats: { ...p.stats, comments: list.length } } : null
+                            )
+                        )
+                        .catch(() => {});
+                }}
+                onClose={() => setCommentsOpen(false)}
+            />
+
+            <FeedShareModal post={post} isOpen={shareModalOpen} onClose={() => setShareModalOpen(false)} />
+
+            <PostOverflowMenuModal
+                visible={overflowVisible}
+                post={post}
+                viewerUserId={userId}
+                viewerHandle={user?.handle}
+                isSaved={overflowSaved}
+                hasNotifications={overflowNotify}
+                onClose={() => setOverflowVisible(false)}
+                onShare={openShare}
+                onSaveToggle={async () => {
+                    await toggleCollectionsSave();
+                    const cols = await getCollectionsForPost(userId, post.id);
+                    setOverflowSaved(cols.length > 0);
+                }}
+                onBoost={() => {
+                    setOverflowVisible(false);
+                    navigation.navigate('Boost');
+                }}
+                onArchive={async () => {
+                    await markFeedPostArchivedMobile(userId, post.id);
+                    hideAndPopAfterArchiveOrDelete();
+                }}
+                onToggleNotifications={async () => {
+                    const next = !overflowNotify;
+                    await setPostNotificationsPrefMobile(userId, post.id, next);
+                    setOverflowNotify(next);
+                }}
+                onReclip={tryReclip}
+                onDelete={() =>
+                    new Promise<void>((resolve) => {
+                        if (!user?.handle) {
+                            resolve();
+                            return;
+                        }
+                        Alert.alert('Delete post?', 'This cannot be undone.', [
+                            { text: 'Cancel', style: 'cancel', onPress: () => resolve() },
+                            {
+                                text: 'Delete',
+                                style: 'destructive',
+                                onPress: () => {
+                                    void (async () => {
+                                        try {
+                                            await deletePost(userId, post.id, user.handle);
+                                            hideAndPopAfterArchiveOrDelete();
+                                        } catch (e) {
+                                            console.error('Delete post failed:', e);
+                                            Alert.alert('Error', 'Could not delete this post.');
+                                        } finally {
+                                            resolve();
+                                        }
+                                    })();
+                                },
+                            },
+                        ]);
+                    })
+                }
+                onReport={async () => {
+                    Alert.alert('Reported', 'Thanks for reporting. We will review this content.');
+                }}
+                onBlock={() =>
+                    new Promise<void>((resolve) => {
+                        if (!user?.handle) {
+                            resolve();
+                            return;
+                        }
+                        Alert.alert('Block user?', `Hide ${post.userHandle} from your feed?`, [
+                            { text: 'Cancel', style: 'cancel', onPress: () => resolve() },
+                            {
+                                text: 'Block',
+                                style: 'destructive',
+                                onPress: () => {
+                                    void (async () => {
+                                        await blockUser(user.handle, post.userHandle);
+                                        Alert.alert(
+                                            'Blocked',
+                                            `${post.userHandle} was blocked.`,
+                                            [{ text: 'OK', onPress: () => navigation.goBack() }]
+                                        );
+                                        resolve();
+                                    })();
+                                },
+                            },
+                        ]);
+                    })
+                }
+            />
         </SafeAreaView>
     );
 }
@@ -260,15 +483,3 @@ const styles = StyleSheet.create({
         marginTop: 40,
     },
 });
-
-
-
-
-
-
-
-
-
-
-
-

@@ -1,7 +1,15 @@
 import React from 'react';
 import { Collection, Post } from '../types';
 import { FiX, FiPlus, FiBookmark, FiCheck } from 'react-icons/fi';
-import { createCollection, getUserCollections, addPostToCollection, removePostFromCollection, getCollectionsForPost, savePostToDefaultCollection } from '../api/collections';
+import {
+    createCollection,
+    getUserCollections,
+    addPostToCollection,
+    removePostFromCollection,
+    getCollectionsForPost,
+    savePostToDefaultCollection,
+    getCollectionThumbnailUrl,
+} from '../api/collections';
 import { posts } from '../api/posts';
 import { showToast } from '../utils/toast';
 const DEFAULT_COLLECTION_NAME = 'All Posts';
@@ -23,6 +31,8 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
     const [isSaving, setIsSaving] = React.useState<string | null>(null); // Collection ID being saved to
     const [showSavedToast, setShowSavedToast] = React.useState(false);
     const autoSavedOnceRef = React.useRef(false);
+    /** Collection IDs whose thumbnail URL failed to load — fall back to text preview / bookmark icon */
+    const [brokenCollectionThumbs, setBrokenCollectionThumbs] = React.useState<Record<string, true>>({});
 
     // Load collections and check which ones contain this post
     React.useEffect(() => {
@@ -141,7 +151,7 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
     const isInDefaultCollection = !!defaultCollection && postCollections.includes(defaultCollection.id);
 
     return (
-        <div className="fixed inset-0 z-[200] flex items-end">
+        <div className="fixed inset-0 z-[280] flex items-end">
             {/* Backdrop */}
             <div
                 className="absolute inset-0 bg-black/50 backdrop-blur-sm"
@@ -291,6 +301,17 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
                                 {customCollections.map(collection => {
                                     const isInCollection = postCollections.includes(collection.id);
                                     const isSavingToThis = isSaving === collection.id;
+                                    const thumbSrc = getCollectionThumbnailUrl(collection);
+                                    const firstPost =
+                                        collection.postIds.length > 0 ? posts.find((p) => p.id === collection.postIds[0]) : null;
+                                    const isVideoThumb =
+                                        !!thumbSrc &&
+                                        (isLikelyVideoUrl(thumbSrc) ||
+                                            firstPost?.mediaType === 'video' ||
+                                            firstPost?.finalVideoUrl !== undefined);
+                                    const thumbBroken = !!brokenCollectionThumbs[collection.id];
+                                    const textFallback =
+                                        firstPost?.text || firstPost?.caption || firstPost?.text_content;
 
                                     return (
                                         <div
@@ -298,49 +319,46 @@ export default function SavePostModal({ post, userId, isOpen, onClose, onSaved }
                                             className="flex items-center gap-4 p-4 rounded-xl hover:bg-gray-700/50 dark:hover:bg-gray-600/50 transition-colors"
                                         >
                                             <div className="w-16 h-16 rounded-lg bg-gray-700 dark:bg-gray-600 flex items-center justify-center overflow-hidden flex-shrink-0">
-                                                {collection.thumbnailUrl ? (
-                                                    (() => {
-                                                        // Find the first post to check its mediaType
-                                                        const firstPost = collection.postIds.length > 0
-                                                            ? posts.find(p => p.id === collection.postIds[0])
-                                                            : null;
-                                                        const isVideo = isLikelyVideoUrl(collection.thumbnailUrl);
-                                                        return isVideo ? (
-                                                            <video
-                                                                src={collection.thumbnailUrl}
-                                                                className="w-full h-full object-cover"
-                                                                muted
-                                                                playsInline
-                                                                preload="metadata"
-                                                                onLoadedMetadata={(e) => {
-                                                                    // Ensure first frame is shown
-                                                                    const video = e.currentTarget;
-                                                                    video.currentTime = 0;
-                                                                }}
-                                                            />
-                                                        ) : (
-                                                            <img
-                                                                src={collection.thumbnailUrl}
-                                                                alt={collection.name}
-                                                                className="w-full h-full object-cover"
-                                                            />
-                                                        );
-                                                    })()
-                                                ) : collection.postIds.length > 0 ? (
-                                                    (() => {
-                                                        // Find the first post to show text preview
-                                                        const firstPost = posts.find(p => p.id === collection.postIds[0]);
-                                                        if (firstPost?.text) {
-                                                            return (
-                                                                <div className="w-full h-full p-2 flex items-center justify-center">
-                                                                    <p className="text-xs text-gray-300 text-center line-clamp-3 leading-tight">
-                                                                        {firstPost.text.length > 50 ? firstPost.text.substring(0, 50) + '...' : firstPost.text}
-                                                                    </p>
-                                                                </div>
-                                                            );
-                                                        }
-                                                        return <FiBookmark className="w-8 h-8 text-gray-400" />;
-                                                    })()
+                                                {thumbSrc && !thumbBroken ? (
+                                                    isVideoThumb ? (
+                                                        <video
+                                                            src={thumbSrc}
+                                                            className="w-full h-full object-cover"
+                                                            muted
+                                                            playsInline
+                                                            preload="metadata"
+                                                            onError={() =>
+                                                                setBrokenCollectionThumbs((prev) => ({
+                                                                    ...prev,
+                                                                    [collection.id]: true,
+                                                                }))
+                                                            }
+                                                            onLoadedMetadata={(e) => {
+                                                                const video = e.currentTarget;
+                                                                video.currentTime = 0;
+                                                            }}
+                                                        />
+                                                    ) : (
+                                                        <img
+                                                            src={thumbSrc}
+                                                            alt={collection.name}
+                                                            className="w-full h-full object-cover"
+                                                            onError={() =>
+                                                                setBrokenCollectionThumbs((prev) => ({
+                                                                    ...prev,
+                                                                    [collection.id]: true,
+                                                                }))
+                                                            }
+                                                        />
+                                                    )
+                                                ) : collection.postIds.length > 0 && textFallback ? (
+                                                    <div className="w-full h-full p-2 flex items-center justify-center">
+                                                        <p className="text-xs text-gray-300 text-center line-clamp-3 leading-tight">
+                                                            {textFallback.length > 50
+                                                                ? textFallback.substring(0, 50) + '...'
+                                                                : textFallback}
+                                                        </p>
+                                                    </div>
                                                 ) : (
                                                     <FiBookmark className="w-8 h-8 text-gray-400" />
                                                 )}

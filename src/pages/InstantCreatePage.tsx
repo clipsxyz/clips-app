@@ -9,12 +9,14 @@ import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 import { setGalleryPreviewMedia } from '../utils/galleryPreviewCache';
 import CreateGroupModal from '../components/CreateGroupModal';
+import CreateSourceAppsCarousel from '../components/CreateSourceAppsCarousel';
 import { prepareMediaForPost } from '../utils/prepareMediaForPost';
 import { useAuth } from '../context/Auth';
 
 export default function InstantCreatePage() {
     const { user } = useAuth();
     const navigate = useNavigate();
+
     const location = useLocation();
     const videoRef = React.useRef<HTMLVideoElement | null>(null);
     const previewVideoRef = React.useRef<HTMLVideoElement | null>(null);
@@ -44,6 +46,41 @@ export default function InstantCreatePage() {
     const [greenEnabled, setGreenEnabled] = React.useState(false);
     const [bgUrl, setBgUrl] = React.useState<string | null>(null);
     const cameraRollInputRef = React.useRef<HTMLInputElement | null>(null);
+
+    /** After Proceed, opens the same picker as Gallery on the orbit (photos/videos). */
+    const openGallerySourceExplainer = React.useCallback(async () => {
+        const result = await Swal.fire(
+            bottomSheet({
+                title: 'Upload from your gallery',
+                message:
+                    'If you have videos from TikTok, Instagram, CapCut, or Instagram Edits saved on your phone, they show up in your gallery like any other clip. Tap Proceed to pick photos or videos — same as choosing Gallery below.',
+                confirmButtonText: 'Proceed',
+                icon: 'none',
+                showGazetteer: true,
+            }),
+        );
+        if (!result.isConfirmed) return;
+
+        const openPicker = () => {
+            const input = cameraRollInputRef.current;
+            if (!input) return;
+            try {
+                if (typeof input.showPicker === 'function') {
+                    void input.showPicker();
+                    return;
+                }
+            } catch {
+                /* continue to click() */
+            }
+            input.click();
+        };
+
+        // After Swal tears down; double rAF helps some mobile browsers release the overlay before the native picker.
+        requestAnimationFrame(() => {
+            requestAnimationFrame(openPicker);
+        });
+    }, []);
+
     const bgInputRef = React.useRef<HTMLInputElement | null>(null);
     const greenCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
     const segRef = React.useRef<any>(null);
@@ -1381,17 +1418,19 @@ export default function InstantCreatePage() {
             {/* Top bar: mode picker (simple) vs camera controls */}
             <div className="absolute top-0 left-0 right-0 z-50 bg-gradient-to-b from-black/80 to-transparent px-4 py-3">
                 {showCreateModePicker && !previewUrl ? (
-                    <div className="flex items-center justify-between w-full">
+                    <div className="relative flex w-full items-center justify-between">
                         <button
                             type="button"
                             onClick={handleInstantBack}
-                            className="p-1.5 bg-black/60 backdrop-blur-sm text-white rounded-full hover:bg-black/80 active:scale-95 transition-colors"
+                            className="z-10 p-1.5 bg-black/60 backdrop-blur-sm text-white rounded-full hover:bg-black/80 active:scale-95 transition-colors"
                             aria-label="Back"
                         >
                             <FiArrowLeft className="w-4 h-4" />
                         </button>
-                        <span className="text-white text-sm font-semibold tracking-wide">Create</span>
-                        <div className="w-8" aria-hidden />
+                        <span className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-sm font-semibold tracking-wide text-white">
+                            Create
+                        </span>
+                        <div className="z-10 w-8 shrink-0" aria-hidden />
                     </div>
                 ) : (
                     <>
@@ -1680,12 +1719,15 @@ export default function InstantCreatePage() {
                                         })}
                                     </div>
                                 </div>
-                                <p
-                                    className="shrink-0 px-4 pb-4 text-center text-[11px] text-white/55"
+                                <div
+                                    className="flex shrink-0 flex-col items-center gap-2 px-4 text-center"
                                     style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0) + 0.75rem)' }}
                                 >
-                                    Rotate to choose · top icon is active · tap to open
-                                </p>
+                                    <CreateSourceAppsCarousel onExplainTap={openGallerySourceExplainer} />
+                                    <p className="text-[11px] leading-snug text-white/55">
+                                        Rotate to choose · top icon is active · tap to open
+                                    </p>
+                                </div>
                             </div>
                         )}
                         <CreateGroupModal

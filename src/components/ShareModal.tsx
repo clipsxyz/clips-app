@@ -342,7 +342,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
     ];
 
     return (
-        <div className="fixed inset-0 bg-black/50 flex items-end justify-center z-[200]" onClick={onClose}>
+        <div className="fixed inset-0 bg-black/50 flex items-end justify-center z-[280]" onClick={onClose}>
             <div
                 className="bg-gray-900 w-full max-w-md rounded-t-2xl shadow-2xl max-h-[85vh] flex flex-col"
                 onClick={e => e.stopPropagation()}
@@ -434,7 +434,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, post }) => {
                 </div>
             </div>
             {showResetConfirm && (
-                <div className="absolute inset-0 bg-black/70 flex items-center justify-center px-4 z-[210]">
+                <div className="absolute inset-0 bg-black/70 flex items-center justify-center px-4 z-[290]">
                     <div className="w-full max-w-sm rounded-xl border border-gray-700 bg-gray-900 p-4 shadow-2xl">
                         <h3 className="text-sm font-semibold text-white">Reset shared link?</h3>
                         <p className="mt-2 text-xs text-gray-300">
