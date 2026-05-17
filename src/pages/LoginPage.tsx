@@ -7,6 +7,7 @@ import PlaceAutocompleteField from '../components/PlaceAutocompleteField';
 import type { LocationSuggestion } from '../api/locations';
 import { parsedPlaceFeedFromSuggestion } from '../utils/placeFeedLevels';
 import { normalizeCountryFlagInput } from '../utils/countryFlag';
+import Flag from '../components/Flag';
 import { consumePublicShareReturnPath } from '../utils/publicShare';
 import { db } from '../utils/db';
 
@@ -29,7 +30,7 @@ function getLocalRegistrations(): Record<string, { password: string; userData: a
   }
 }
 
-/** Strip huge base64 blobs â€” they belong in IndexedDB, not localStorage. */
+/** Strip huge base64 blobs — they belong in IndexedDB, not localStorage. */
 function userDataForLocalStorage(userData: Record<string, unknown>) {
   const copy = { ...userData };
   if (typeof copy.avatarUrl === 'string' && copy.avatarUrl.length > 500) {
@@ -84,6 +85,7 @@ export default function LoginPage() {
   const [signupError, setSignupError] = React.useState('');
   const [signupFieldErrors, setSignupFieldErrors] = React.useState<Record<string, string>>({});
   const [loginLoading, setLoginLoading] = React.useState(false);
+  const [signupSubmitting, setSignupSubmitting] = React.useState(false);
   const [loginEmail, setLoginEmail] = React.useState('');
   const [loginPassword, setLoginPassword] = React.useState('');
 
@@ -119,11 +121,11 @@ export default function LoginPage() {
   const updateStep = React.useCallback((newStep: number) => {
     if (newStep >= 1 && newStep <= 4) {
       setSignupError('');
-      setSearchParams({ step: newStep.toString() });
+      setSearchParams({ mode: 'signup', step: newStep.toString() });
     }
   }, [setSearchParams]);
 
-  // Step 1: Location data
+  // Step 2: Profile & location
   const [name, setName] = React.useState('');
   const [local, setLocal] = React.useState('');
   const [regional, setRegional] = React.useState('');
@@ -172,6 +174,34 @@ export default function LoginPage() {
   const signupPlaceInputClass =
     'w-full rounded-xl border-2 border-white bg-gray-50 dark:bg-gray-900 py-2 sm:py-2.5 pr-3 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-white';
 
+  const MIN_AGE = 13;
+
+  function getAgeFromBirthday(): number | null {
+    const m = parseInt(birthMonth, 10);
+    const d = parseInt(birthDay, 10);
+    const y = parseInt(birthYear, 10);
+    if (!m || !d || !y || m < 1 || m > 12 || d < 1 || d > 31 || y < 1900 || y > new Date().getFullYear()) return null;
+    const today = new Date();
+    const birth = new Date(y, m - 1, d);
+    if (birth > today) return null;
+    let age = today.getFullYear() - birth.getFullYear();
+    const mDiff = today.getMonth() - birth.getMonth();
+    if (mDiff < 0 || (mDiff === 0 && today.getDate() < birth.getDate())) age--;
+    return age;
+  }
+
+  const handleFirstName = name.trim().split(/\s+/)[0] || 'yourname';
+  const handlePreview = regional ? `${handleFirstName}@${regional}` : `${handleFirstName}@yourregion`;
+  const previewCountryFlag = normalizeCountryFlagInput('', national);
+  const homeLocationComplete = Boolean(local && regional && national);
+  const birthdateComplete = React.useMemo(() => {
+    const age = getAgeFromBirthday();
+    return age !== null && age >= MIN_AGE;
+  }, [birthMonth, birthDay, birthYear]);
+  const step2CanContinue = Boolean(name.trim() && homeLocationComplete && birthdateComplete);
+  const step1CanContinue =
+    Boolean(accountType && email.trim() && password.length >= 8 && password === confirmPassword && acceptedTerms && acceptedGuidelines);
+
   function applyHomeLocation(suggestion: LocationSuggestion) {
     const parsed = parsedPlaceFeedFromSuggestion(suggestion);
     setLocal(parsed.local);
@@ -203,22 +233,6 @@ export default function LoginPage() {
     setPreferredLocations((prev) => prev.filter((p) => p !== label));
   }
 
-  const MIN_AGE = 13;
-
-  function getAgeFromBirthday(): number | null {
-    const m = parseInt(birthMonth, 10);
-    const d = parseInt(birthDay, 10);
-    const y = parseInt(birthYear, 10);
-    if (!m || !d || !y || m < 1 || m > 12 || d < 1 || d > 31 || y < 1900 || y > new Date().getFullYear()) return null;
-    const today = new Date();
-    const birth = new Date(y, m - 1, d);
-    if (birth > today) return null;
-    let age = today.getFullYear() - birth.getFullYear();
-    const mDiff = today.getMonth() - birth.getMonth();
-    if (mDiff < 0 || (mDiff === 0 && today.getDate() < birth.getDate())) age--;
-    return age;
-  }
-
   function handleAccountSubmit(e: React.FormEvent) {
     e.preventDefault();
     const nextErrors: Record<string, string> = {};
@@ -238,6 +252,9 @@ export default function LoginPage() {
     }
     if (password !== confirmPassword) {
       nextErrors.confirmPassword = 'Passwords do not match.';
+    }
+    if (password && password.length < 8) {
+      nextErrors.password = 'Password must be at least 8 characters.';
     }
     if (Object.keys(nextErrors).length > 0) {
       setSignupFieldErrors(nextErrors);
@@ -284,8 +301,10 @@ export default function LoginPage() {
 
   async function handleInterestsSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (signupSubmitting) return;
     setSignupFieldErrors({});
     setSignupError('');
+    setSignupSubmitting(true);
     const age = getAgeFromBirthday();
     const consentTimestamp = new Date().toISOString();
     const placesTraveled = preferredLocations.slice(0, 12);
@@ -345,6 +364,8 @@ export default function LoginPage() {
       console.error('Sign up error:', err);
       const message = err instanceof Error ? err.message : 'Something went wrong. Try again.';
       setSignupError(message);
+    } finally {
+      setSignupSubmitting(false);
     }
   }
 
@@ -563,11 +584,18 @@ export default function LoginPage() {
                   disabled={loginLoading}
                   className="w-full px-4 py-3 bg-white text-[#111827] rounded-xl transition-colors text-sm font-semibold hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {loginLoading ? 'Logging inâ€¦' : 'Log in'}
+                  {loginLoading ? 'Logging in…' : 'Log in'}
                 </button>
                 <p className="text-xs text-center text-gray-400">
                   Don&apos;t have an account?{' '}
-                  <button type="button" onClick={() => setMode('signup')} className="text-[#7A8AF0] hover:underline font-medium">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('signup');
+                      setSearchParams({ mode: 'signup', step: '1' });
+                    }}
+                    className="text-[#7A8AF0] hover:underline font-medium"
+                  >
                     Sign up
                   </button>
                 </p>
@@ -803,25 +831,35 @@ export default function LoginPage() {
               {signupFieldErrors.confirmPassword && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.confirmPassword}</p>}
             </div>
 
-            <label className="flex items-center gap-2 px-1 text-xs text-gray-300">
+            <label className="flex items-start gap-2 px-1 text-xs text-gray-300">
               <input
                 type="checkbox"
                 checked={acceptedTerms}
                 onChange={(e) => setAcceptedTerms(e.target.checked)}
-                className="h-4 w-4 rounded border-white/30 bg-black"
+                className="mt-0.5 h-4 w-4 rounded border-white/30 bg-black shrink-0"
               />
-              <span>I accept Terms & Conditions</span>
+              <span>
+                I accept{' '}
+                <Link to="/terms" target="_blank" rel="noopener noreferrer" className="text-[#7A8AF0] hover:underline">
+                  Terms & Conditions
+                </Link>
+              </span>
             </label>
             {signupFieldErrors.terms && <p className="text-xs text-red-400 px-1">{signupFieldErrors.terms}</p>}
 
-            <label className="flex items-center gap-2 px-1 text-xs text-gray-300">
+            <label className="flex items-start gap-2 px-1 text-xs text-gray-300">
               <input
                 type="checkbox"
                 checked={acceptedGuidelines}
                 onChange={(e) => setAcceptedGuidelines(e.target.checked)}
-                className="h-4 w-4 rounded border-white/30 bg-black"
+                className="mt-0.5 h-4 w-4 rounded border-white/30 bg-black shrink-0"
               />
-              <span>I accept Community Guidelines</span>
+              <span>
+                I accept{' '}
+                <Link to="/terms#community-guidelines" target="_blank" rel="noopener noreferrer" className="text-[#7A8AF0] hover:underline">
+                  Community Guidelines
+                </Link>
+              </span>
             </label>
             {signupFieldErrors.guidelines && <p className="text-xs text-red-400 px-1">{signupFieldErrors.guidelines}</p>}
 
@@ -906,30 +944,38 @@ export default function LoginPage() {
                 mode="location"
                 showIcon
                 showFeedLevels
-                placeholder="Search city or neighborhoodâ€¦"
+                placeholder="Search city or neighborhood…"
                 inputClassName={`${signupPlaceInputClass} pl-10`}
               />
               <p className="mt-1.5 text-[11px] text-gray-500 px-1">Type at least 2 characters, then pick a place from the list.</p>
               {signupFieldErrors.homeLocation && (
                 <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.homeLocation}</p>
               )}
-              {local && regional && national && (
-                <div className="mt-2 rounded-xl border border-white/15 bg-white/5 px-3 py-2.5 space-y-1">
-                  <p className="text-[11px] text-gray-400">Feed areas saved</p>
+              {homeLocationComplete && (
+                <div className="mt-2 rounded-xl border border-[#8ab4ff]/25 bg-[#8ab4ff]/8 px-3 py-2.5 space-y-1.5">
+                  <p className="text-[11px] text-[#dce9ff] flex items-center gap-1.5">
+                    <FiCheck className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                    Home area saved — your Local, Regional, and National feeds
+                  </p>
                   <p className="text-xs text-gray-200"><span className="text-gray-400">Local:</span> {local}</p>
                   <p className="text-xs text-gray-200"><span className="text-gray-400">Regional:</span> {regional}</p>
-                  <p className="text-xs text-gray-200"><span className="text-gray-400">National:</span> {national}</p>
+                  <p className="text-xs text-gray-200 flex items-center gap-1.5 flex-wrap">
+                    <span className="text-gray-400">National:</span>
+                    {previewCountryFlag ? <Flag value={previewCountryFlag} national={national} size={14} /> : null}
+                    <span>{national}</span>
+                  </p>
                   <button type="button" onClick={clearHomeLocation} className="mt-1 text-[11px] text-[#7A8AF0] hover:underline">Change location</button>
                 </div>
               )}
             </div>
 
             <div className="rounded-sm border border-white/10 bg-white/5 px-3 py-2">
-              <p className="text-[11px] text-gray-400">Your handle preview</p>
-              <p className="text-sm text-white font-medium">
-                @{(name.trim().split(/\s+/)[0] || 'yourname')}
-                {regional ? `@${regional}` : '@yourregion'}
+              <p className="text-[11px] text-gray-400">Your handle on posts</p>
+              <p className="text-sm text-white font-medium flex items-center gap-1.5 mt-0.5">
+                <span>@{handlePreview}</span>
+                {previewCountryFlag ? <Flag value={previewCountryFlag} national={national} size={16} /> : null}
               </p>
+              <p className="text-[11px] text-gray-500 mt-1">Country flag is set from your national feed area.</p>
             </div>
 
             <div className="rounded-sm border border-white/10 bg-white/5 px-3 py-2.5">
@@ -940,7 +986,7 @@ export default function LoginPage() {
                 onSelectSuggestion={addPreferredLocation}
                 mode="location"
                 showIcon
-                placeholder="Search places you followâ€¦"
+                placeholder="Search places you follow…"
                 inputClassName={`${signupPlaceInputClass} pl-10`}
               />
               {preferredLocations.length > 0 && (
@@ -964,7 +1010,7 @@ export default function LoginPage() {
                 </div>
               )}
               <p className="mt-1.5 text-[11px] text-gray-500">
-                {preferredLocations.length}/12 added. Pick from suggestions â€” same search as Discover.
+                {preferredLocations.length}/12 added. Pick from suggestions — same search as Discover.
               </p>
             </div>
           </>
@@ -972,6 +1018,14 @@ export default function LoginPage() {
 
         {step === 3 && (
           <>
+            <div className="rounded-sm border border-white/10 bg-white/5 px-3 py-2.5 mb-1">
+              <p className="text-[11px] text-gray-400">Signing up as</p>
+              <p className="text-sm text-white font-medium flex items-center gap-1.5 mt-0.5">
+                <span>@{handlePreview}</span>
+                {previewCountryFlag ? <Flag value={previewCountryFlag} national={national} size={16} /> : null}
+              </p>
+              <p className="text-[11px] text-gray-500 mt-1 truncate">{local} · {regional} · {national}</p>
+            </div>
             <div className="rounded-sm border border-white/10 bg-white/5 px-3 py-4">
               <p className="text-[11px] text-gray-400 mb-3">Profile picture (optional)</p>
               <div className="flex items-center gap-3">
@@ -1003,6 +1057,14 @@ export default function LoginPage() {
 
         {step === 4 && (
           <>
+            <div className="rounded-sm border border-white/10 bg-white/5 px-3 py-2.5">
+              <p className="text-[11px] text-gray-400">Almost done</p>
+              <p className="text-sm text-white font-medium flex items-center gap-1.5 mt-0.5">
+                <span>@{handlePreview}</span>
+                {previewCountryFlag ? <Flag value={previewCountryFlag} national={national} size={16} /> : null}
+              </p>
+              <p className="text-[11px] text-gray-500 mt-1">{name.trim() || 'Your name'} · {local}</p>
+            </div>
             <div className="rounded-xl border border-white/15 bg-white/5 px-4 py-4">
               <h2 className="text-sm font-medium text-white mb-1">Your interests</h2>
               <p className="text-xs text-gray-400 mb-3">Select up to 5 interests to personalize your feed (optional).</p>
@@ -1039,16 +1101,26 @@ export default function LoginPage() {
           <div className="flex-shrink-0 border-t border-gray-700 bg-black px-6 sm:px-10 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-3">
               <button
                 type="submit"
+                disabled={
+                  signupSubmitting ||
+                  (step === 1 && !step1CanContinue) ||
+                  (step === 2 && !step2CanContinue)
+                }
                 className="w-full px-4 py-3 bg-white text-[#111827] rounded-xl transition-colors text-sm font-semibold hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {step < 4 ? 'Continue' : 'Create account'}
+                {signupSubmitting
+                  ? 'Creating account…'
+                  : step < 4
+                    ? 'Continue'
+                    : 'Create account'}
               </button>
               
               {step > 1 && (
                 <button
                   type="button"
+                  disabled={signupSubmitting}
                   onClick={() => updateStep(step - 1)}
-                  className="w-full px-4 py-3 bg-white text-[#111827] rounded-xl hover:bg-gray-100 transition-colors text-sm font-semibold border border-white"
+                  className="w-full px-4 py-3 bg-white text-[#111827] rounded-xl hover:bg-gray-100 transition-colors text-sm font-semibold border border-white disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Back
                 </button>
@@ -1056,7 +1128,14 @@ export default function LoginPage() {
 
               <p className="text-xs text-center text-gray-400 mt-4">
                 Already have an account?{' '}
-                <button type="button" onClick={() => setMode('login')} className="text-[#7A8AF0] hover:underline font-medium">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('login');
+                    setSearchParams({ mode: 'login' });
+                  }}
+                  className="text-[#7A8AF0] hover:underline font-medium"
+                >
                   Log in
                 </button>
               </p>
