@@ -6,6 +6,7 @@ import { createPost } from '../api/posts';
 import { saveDraft } from '../api/drafts';
 import { showToast } from '../utils/toast';
 import UserTaggingModal from '../components/UserTaggingModal';
+import PlaceAutocompleteField from '../components/PlaceAutocompleteField';
 import Swal from 'sweetalert2';
 import { bottomSheet } from '../utils/swalBottomSheet';
 
@@ -267,36 +268,39 @@ export default function TextOnlyPostDetailsPage() {
                 {/* Location Input */}
                 <div className="flex items-center gap-3 p-4 rounded-xl bg-gray-900/30 border border-gray-800">
                     <FiMapPin className="w-5 h-5 text-gray-400 flex-shrink-0" />
-                    <input
-                        type="text"
+                    <PlaceAutocompleteField
+                        mode="location"
                         value={locationText}
-                        onChange={(e) => setLocationText(e.target.value)}
+                        onChange={setLocationText}
                         placeholder="Add location"
-                        className="flex-1 bg-transparent text-white placeholder-gray-500 text-base border-none outline-none"
+                        wrapperClassName="flex-1 min-w-0"
+                        inputClassName="w-full bg-transparent text-white placeholder-gray-500 text-base border-none outline-none"
                     />
                 </div>
 
                 {/* Venue Input - shown in metadata carousel on feed */}
                 <div className="flex items-center gap-3 p-4 rounded-xl bg-gray-900/30 border border-gray-800">
                     <FiMapPin className="w-5 h-5 text-gray-400 flex-shrink-0" />
-                    <input
-                        type="text"
+                    <PlaceAutocompleteField
+                        mode="venue"
                         value={venueText}
-                        onChange={(e) => setVenueText(e.target.value)}
+                        onChange={setVenueText}
                         placeholder="Add venue (e.g. café, stadium)"
-                        className="flex-1 bg-transparent text-white placeholder-gray-500 text-base border-none outline-none"
+                        wrapperClassName="flex-1 min-w-0"
+                        inputClassName="w-full bg-transparent text-white placeholder-gray-500 text-base border-none outline-none"
                     />
                 </div>
 
                 {/* Landmark — metadata carousel + landmark feeds */}
                 <div className="flex items-center gap-3 p-4 rounded-xl bg-gray-900/30 border border-gray-800">
                     <FiMapPin className="w-5 h-5 text-gray-400 flex-shrink-0" />
-                    <input
-                        type="text"
+                    <PlaceAutocompleteField
+                        mode="landmark"
                         value={landmarkText}
-                        onChange={(e) => setLandmarkText(e.target.value)}
+                        onChange={setLandmarkText}
                         placeholder="Add landmark (e.g. Phoenix Park, river)"
-                        className="flex-1 bg-transparent text-white placeholder-gray-500 text-base border-none outline-none"
+                        wrapperClassName="flex-1 min-w-0"
+                        inputClassName="w-full bg-transparent text-white placeholder-gray-500 text-base border-none outline-none"
                     />
                 </div>
 

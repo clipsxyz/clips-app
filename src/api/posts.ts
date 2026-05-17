@@ -1130,7 +1130,7 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
     t !== 'dublin' &&
     t !== 'ireland';
   // When API is off, use mock for all feeds. For Discover (Following), always use mock so local follows from localStorage are used (fixes phone/tablet where API might return empty).
-  const useLaravelAPI = isLaravelApiEnabled() && t !== 'discover' && !isVenueFeed && !isLandmarkFeed;
+  const useLaravelAPI = isLaravelApiEnabled() && t !== 'discover';
 
   if (useLaravelAPI) {
     try {
@@ -1138,6 +1138,8 @@ export async function fetchPostsPage(tab: string, cursor: string | number | null
       let filter: string;
       if (t === 'discover') {
         filter = 'Following';
+      } else if (isVenueFeed || isLandmarkFeed) {
+        filter = tab;
       } else if (t === 'finglas') {
         filter = 'Finglas';
       } else if (t === 'dublin') {

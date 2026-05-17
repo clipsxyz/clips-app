@@ -17,6 +17,7 @@
     "test:run": "vitest run",
     "fetch-music": "node scripts/fetchRoyaltyFreeMusic.js",
     "setup:ffmpeg-native": "node scripts/setup-ffmpeg-native.mjs",
+    "sync:env": "node scripts/sync-firebase-env.mjs",
     "clean:cache": "node -e \"const fs = require('fs'); const path = require('path'); const rimraf = (dir) => { try { fs.rmSync(dir, { recursive: true, force: true }); console.log('Cleared:', dir); } catch(e) {} }; rimraf(path.join(process.cwd(), 'node_modules/.vite')); rimraf(path.join(process.cwd(), 'dist')); console.log('Cache cleared!');\""
   },
   "dependencies": {

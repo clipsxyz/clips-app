@@ -5,11 +5,15 @@ import { MdOutlinePark } from 'react-icons/md';
 import { LuClock, LuLandmark } from 'react-icons/lu';
 import { TbTower, TbBuilding } from 'react-icons/tb';
 import { useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { fetchPostsByUser } from '../api/posts';
 import { unifiedSearch, type SearchSections } from '../api/search';
+import { searchLocations, type LocationSuggestion } from '../api/locations';
 import type { Post } from '../types';
 import { useAuth } from '../context/Auth';
 import { toggleFollow } from '../api/client';
+import { getPlaceFeedPickerOptions, resolvePlaceFeedSelection, type PlaceFeedSelection } from '../utils/pickPlaceFeedScope';
+import { parsedPlaceFeedFromSuggestion } from '../utils/placeFeedLevels';
 
 const MOCK_TOP_LOCATIONS = [
     { name: 'New York', type: 'City', country: 'USA' },
@@ -144,9 +148,13 @@ export default function SearchPage() {
     const [recentSearches, setRecentSearches] = React.useState<RecentSearchItem[]>(() => readSearchList(RECENT_SEARCHES_KEY));
     const [savedSearches, setSavedSearches] = React.useState<RecentSearchItem[]>(() => readSearchList(SAVED_SEARCHES_KEY));
     const [refinement, setRefinement] = React.useState<SearchRefinement>('all');
+    const [placeSuggestions, setPlaceSuggestions] = React.useState<LocationSuggestion[]>([]);
+    const [placeSuggestionsLoading, setPlaceSuggestionsLoading] = React.useState(false);
+    const [scopePicker, setScopePicker] = React.useState<LocationSuggestion | null>(null);
 
     // High-level search mode chips: location / venue / users / posts / near me
     const [searchMode, setSearchMode] = React.useState<SearchMode>('locations');
+    const isPlaceSearchMode = searchMode === 'locations' || searchMode === 'venues' || searchMode === 'landmarks';
 
     const modePlaceholder: Record<SearchMode, string> = {
         locations: 'Search by location',
@@ -156,6 +164,34 @@ export default function SearchPage() {
         users: 'Search by users',
         posts: 'Search by posts',
     };
+
+    // Google Places autocomplete (same API as Discover)
+    React.useEffect(() => {
+        const q = searchQuery.trim();
+        if (!isPlaceSearchMode || q.length < 2) {
+            setPlaceSuggestions([]);
+            setPlaceSuggestionsLoading(false);
+            return;
+        }
+        const ctrl = new AbortController();
+        const modeForApi =
+            searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
+        const id = setTimeout(async () => {
+            try {
+                setPlaceSuggestionsLoading(true);
+                const res = await searchLocations(q, 8, modeForApi, ctrl.signal);
+                if (!ctrl.signal.aborted) setPlaceSuggestions(res);
+            } catch (e) {
+                if (!ctrl.signal.aborted && (e as Error)?.name !== 'AbortError') setPlaceSuggestions([]);
+            } finally {
+                if (!ctrl.signal.aborted) setPlaceSuggestionsLoading(false);
+            }
+        }, 200);
+        return () => {
+            clearTimeout(id);
+            ctrl.abort();
+        };
+    }, [searchQuery, searchMode, isPlaceSearchMode]);
 
     // Debounced unified search – manual search only returns results
     // for the active high-level tab (locations / venues / users / posts / nearby).
@@ -298,30 +334,105 @@ export default function SearchPage() {
         });
     }, []);
 
+    const applyFeedSelection = React.useCallback(
+        (selection: PlaceFeedSelection) => {
+            addRecentSearch(selection.label, searchMode);
+            const filterType = searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
+            try {
+                sessionStorage.setItem('pendingLocation', selection.filter);
+                sessionStorage.setItem('pendingLocationLabel', selection.label);
+                sessionStorage.setItem('pendingLocationScope', selection.scope);
+                sessionStorage.setItem('pendingFilterType', filterType);
+                window.dispatchEvent(
+                    new CustomEvent('locationChange', {
+                        detail: {
+                            location: selection.filter,
+                            locationLabel: selection.label,
+                            locationScope: selection.scope,
+                            filterType,
+                        },
+                    })
+                );
+            } catch {
+                /* ignore */
+            }
+            const params = new URLSearchParams({
+                location: selection.filter,
+                label: selection.label,
+                scope: selection.scope,
+            });
+            if (filterType === 'venue') params.set('type', 'venue');
+            else if (filterType === 'landmark') params.set('type', 'landmark');
+            nav(`/feed?${params.toString()}`);
+        },
+        [searchMode, nav]
+    );
+
+    const onPlaceSuggestionSelected = React.useCallback(
+        (suggestion: LocationSuggestion) => {
+            if (getPlaceFeedPickerOptions(suggestion)) {
+                setScopePicker(suggestion);
+                return;
+            }
+            applyFeedSelection(resolvePlaceFeedSelection(suggestion));
+        },
+        [applyFeedSelection]
+    );
+
     const goToLocation = (loc: string) => {
-        addRecentSearch(loc, searchMode);
-        sessionStorage.setItem('pendingFilterType', 'location');
-        sessionStorage.setItem('pendingLocation', loc);
-        window.dispatchEvent(new CustomEvent('locationChange', { detail: { location: loc, filterType: 'location' } }));
-        nav('/feed?location=' + encodeURIComponent(loc));
+        applyFeedSelection(
+            resolvePlaceFeedSelection({
+                name: loc,
+                type: 'location',
+                country: loc,
+                national: loc,
+                local: loc,
+                regional: loc,
+            })
+        );
     };
 
     const goToVenue = (venue: string) => {
-        addRecentSearch(venue, searchMode);
-        // Reuse feed routing with custom filter key set to the venue name.
-        sessionStorage.setItem('pendingFilterType', 'venue');
-        sessionStorage.setItem('pendingLocation', venue);
-        window.dispatchEvent(new CustomEvent('locationChange', { detail: { location: venue, filterType: 'venue' } }));
-        nav('/feed?location=' + encodeURIComponent(venue) + '&type=venue');
+        applyFeedSelection(
+            resolvePlaceFeedSelection({
+                name: venue,
+                type: 'venue',
+                country: venue,
+                national: venue,
+                local: venue,
+                regional: venue,
+            })
+        );
     };
 
     const goToLandmark = (name: string) => {
-        addRecentSearch(name, searchMode);
-        sessionStorage.setItem('pendingFilterType', 'landmark');
-        sessionStorage.setItem('pendingLocation', name);
-        window.dispatchEvent(new CustomEvent('locationChange', { detail: { location: name, filterType: 'landmark' } }));
-        nav('/feed?location=' + encodeURIComponent(name) + '&type=landmark');
+        applyFeedSelection(
+            resolvePlaceFeedSelection({
+                name,
+                type: 'landmark',
+                country: name,
+                national: name,
+                local: name,
+                regional: name,
+            })
+        );
     };
+
+    const submitPlaceSearch = React.useCallback(
+        (raw: string) => {
+            const q = raw.trim();
+            if (!q) return;
+            if (placeSuggestions.length > 0) {
+                onPlaceSuggestionSelected(placeSuggestions[0]);
+                return;
+            }
+            const type = searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
+            applyFeedSelection(
+                resolvePlaceFeedSelection({ name: q, type, country: q, national: q, local: q, regional: q })
+            );
+        },
+        [placeSuggestions, onPlaceSuggestionSelected, applyFeedSelection, searchMode]
+    );
 
     const goToUser = (handle: string) => {
         addRecentSearch(handle, searchMode);
@@ -446,12 +557,8 @@ export default function SearchPage() {
                                 if (e.key === 'Enter') {
                                     const q = searchQuery.trim();
                                     if (!q) return;
-                                    if (searchMode === 'locations') {
-                                        goToLocation(q);
-                                    } else if (searchMode === 'venues') {
-                                        goToVenue(q);
-                                    } else if (searchMode === 'landmarks') {
-                                        goToLandmark(q);
+                                    if (isPlaceSearchMode) {
+                                        submitPlaceSearch(q);
                                     }
                                 }
                             }}
@@ -492,6 +599,37 @@ export default function SearchPage() {
                                 </>
                             );
                         })()}
+                    </div>
+                )}
+                {isPlaceSearchMode && query.length >= 2 && (
+                    <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-y-auto rounded-2xl border border-[#272727] bg-[#101010] shadow-xl">
+                        <ul className="divide-y divide-white/5">
+                            {placeSuggestionsLoading && placeSuggestions.length === 0 && (
+                                <li className="px-4 py-3 text-sm text-gray-400">Searching…</li>
+                            )}
+                            {!placeSuggestionsLoading && placeSuggestions.length === 0 && (
+                                <li className="px-4 py-3 text-sm text-gray-400">No places found. Try another spelling.</li>
+                            )}
+                            {placeSuggestions.slice(0, 8).map((s, idx) => (
+                                <li key={`${s.type}-${s.name}-${idx}`}>
+                                    <button
+                                        type="button"
+                                        onMouseDown={(e) => e.preventDefault()}
+                                        onClick={() => onPlaceSuggestionSelected(s)}
+                                        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-white/5"
+                                    >
+                                        <FiMapPin className="h-4 w-4 shrink-0 text-violet-400" />
+                                        <div className="flex min-w-0 flex-col">
+                                            <span className="truncate text-sm text-gray-100">{s.display_name || s.name.split(',')[0]}</span>
+                                            <span className="truncate text-[11px] text-gray-500">
+                                                {s.type === 'venue' ? 'Venue' : s.type === 'landmark' ? 'Landmark' : 'Location'}
+                                                {s.country ? ` · ${s.country}` : ` · ${s.name}`}
+                                            </span>
+                                        </div>
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
                     </div>
                 )}
             </div>
@@ -1163,6 +1301,43 @@ export default function SearchPage() {
             {/* Popular Tags removed per request */}
             </div>
         </div>
+
+            {scopePicker && (
+                <motion.div
+                    layout
+                    className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60 p-4 sm:items-center"
+                >
+                    <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#1a1524] p-5 shadow-2xl">
+                        <h2 className="text-lg font-semibold text-white">Which feed?</h2>
+                        <p className="mt-1 text-sm text-gray-400">{scopePicker.name}</p>
+                        <p className="mt-2 text-xs text-gray-500">
+                            Pick local, regional, or national — same as your home feed tabs.
+                        </p>
+                        <div className="mt-4 flex flex-col gap-2">
+                            {parsedPlaceFeedFromSuggestion(scopePicker).options.map((opt) => (
+                                <button
+                                    key={opt.scope}
+                                    type="button"
+                                    onClick={() => {
+                                        applyFeedSelection(resolvePlaceFeedSelection(scopePicker, opt.scope));
+                                        setScopePicker(null);
+                                    }}
+                                    className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm font-medium text-gray-100 hover:bg-white/10"
+                                >
+                                    {opt.label}
+                                </button>
+                            ))}
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setScopePicker(null)}
+                            className="mt-3 w-full rounded-xl py-2.5 text-sm text-gray-400 hover:text-white"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </motion.div>
+            )}
     </div>
     );
 }

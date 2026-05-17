@@ -5,12 +5,12 @@ importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-comp
 // Firebase configuration - will be replaced at build time or use environment variables
 // For now, using placeholder values that should be replaced
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_AUTH_DOMAIN",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_STORAGE_BUCKET",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID",
+  apiKey: "AIzaSyDwXNRlyVWVkR-wYs9015atOaaRyntypQs",
+  authDomain: "gazetter26.firebaseapp.com",
+  projectId: "gazetter26",
+  storageBucket: "gazetter26.firebasestorage.app",
+  messagingSenderId: "257169934666",
+  appId: "1:257169934666:web:852776ad1c87ce4126d9b3",
   measurementId: "YOUR_MEASUREMENT_ID"
 };
 

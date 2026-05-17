@@ -54,7 +54,7 @@ return [
     ],
 
     'google_maps' => [
-        'api_key' => env('GOOGLE_MAPS_API_KEY'),
+        'api_key' => env('GOOGLE_MAPS_API_KEY', env('Maps_API_KEY')),
     ],
 
     'twilio' => [

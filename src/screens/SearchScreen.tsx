@@ -5,6 +5,7 @@ import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { chipActiveMagenta, chipActiveMagentaText, glassPanel, glassSearch, glassSurface } from '../theme/gazetteerAmbientNative';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { unifiedSearch, type SearchSections } from '../api/search';
+import { searchLocations, type LocationSuggestion } from '../api/locations';
 import { fetchPostsByUser } from '../api/posts';
 import { toggleFollow } from '../api/client';
 import { useAuth } from '../context/Auth';
@@ -63,6 +64,8 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
     const [followBusyHandle, setFollowBusyHandle] = useState<string | null>(null);
     const [localFollowState, setLocalFollowState] = useState<Record<string, boolean>>({});
     const [suggestedUsers, setSuggestedUsers] = useState<Array<{ handle: string; display_name?: string; avatar_url?: string }>>([]);
+    const [placeSuggestions, setPlaceSuggestions] = useState<LocationSuggestion[]>([]);
+    const [placeSuggestionsLoading, setPlaceSuggestionsLoading] = useState(false);
     const modePlaceholder: Record<SearchMode, string> = {
         locations: 'Search by location',
         venues: 'Search by venue',
@@ -93,6 +96,37 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
             mounted = false;
         };
     }, []);
+
+    const isPlaceSearchMode = searchMode === 'locations' || searchMode === 'venues' || searchMode === 'landmarks';
+
+    useEffect(() => {
+        const q = searchQuery.trim();
+        if (!isPlaceSearchMode || q.length < 2) {
+            setPlaceSuggestions([]);
+            setPlaceSuggestionsLoading(false);
+            return;
+        }
+        const ctrl = new AbortController();
+        const modeForApi =
+            searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
+        const id = setTimeout(() => {
+            setPlaceSuggestionsLoading(true);
+            searchLocations(q, 8, modeForApi, ctrl.signal)
+                .then((res) => {
+                    if (!ctrl.signal.aborted) setPlaceSuggestions(res);
+                })
+                .catch((err) => {
+                    if (!ctrl.signal.aborted && (err as Error)?.name !== 'AbortError') setPlaceSuggestions([]);
+                })
+                .finally(() => {
+                    if (!ctrl.signal.aborted) setPlaceSuggestionsLoading(false);
+                });
+        }, 200);
+        return () => {
+            ctrl.abort();
+            clearTimeout(id);
+        };
+    }, [searchQuery, searchMode, isPlaceSearchMode]);
 
     useEffect(() => {
         const q = searchQuery.trim();
@@ -325,6 +359,33 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                         </TouchableOpacity>
                     )}
                 </View>
+                {isPlaceSearchMode && searchQuery.trim().length >= 2 && (
+                    <View style={styles.placeSuggestionsContainer}>
+                        {placeSuggestionsLoading && placeSuggestions.length === 0 && (
+                            <Text style={styles.placeSuggestionLoading}>Searching…</Text>
+                        )}
+                        {!placeSuggestionsLoading && placeSuggestions.length === 0 && (
+                            <Text style={styles.placeSuggestionLoading}>No places found. Try another spelling.</Text>
+                        )}
+                        {placeSuggestions.slice(0, 8).map((s, idx) => {
+                            const kind = searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
+                            const iconName = kind === 'venue' ? 'business' : kind === 'landmark' ? 'flag' : 'location';
+                            return (
+                                <TouchableOpacity
+                                    key={`${s.type}-${s.name}-${idx}`}
+                                    style={styles.placeSuggestionRow}
+                                    onPress={() => void goToLocation(s.name, kind)}
+                                >
+                                    <Icon name={iconName} size={18} color="#8B5CF6" />
+                                    <View style={styles.placeSuggestionTextWrap}>
+                                        <Text style={styles.placeSuggestionName} numberOfLines={2}>{s.name}</Text>
+                                        {s.country ? <Text style={styles.placeSuggestionMeta}>{s.type} • {s.country}</Text> : null}
+                                    </View>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </View>
+                )}
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.modeChipsRow}>
                     {[
                         { id: 'locations', label: 'Locations' },
@@ -717,6 +778,42 @@ const styles = StyleSheet.create({
         flex: 1,
         fontSize: 16,
         color: '#FFFFFF',
+    },
+    placeSuggestionsContainer: {
+        marginTop: 8,
+        ...glassPanel,
+        borderRadius: 14,
+        maxHeight: 260,
+        overflow: 'hidden',
+    },
+    placeSuggestionRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(255,255,255,0.08)',
+    },
+    placeSuggestionTextWrap: {
+        flex: 1,
+    },
+    placeSuggestionName: {
+        color: '#F9FAFB',
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    placeSuggestionMeta: {
+        color: '#9CA3AF',
+        fontSize: 11,
+        marginTop: 2,
+        textTransform: 'capitalize',
+    },
+    placeSuggestionLoading: {
+        color: '#9CA3AF',
+        fontSize: 13,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
     },
     tabs: {
         flexDirection: 'row',

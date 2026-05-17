@@ -1,12 +1,17 @@
-import React from 'react';
+﻿import React from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/Auth';
 import { FiMapPin, FiUser, FiGlobe, FiX, FiEye, FiEyeOff, FiFileText, FiShield, FiCheck } from 'react-icons/fi';
-import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMaps';
 import { loginUser, registerUser } from '../api/client';
+import PlaceAutocompleteField from '../components/PlaceAutocompleteField';
+import type { LocationSuggestion } from '../api/locations';
+import { parsedPlaceFeedFromSuggestion } from '../utils/placeFeedLevels';
+import { normalizeCountryFlagInput } from '../utils/countryFlag';
 import { consumePublicShareReturnPath } from '../utils/publicShare';
+import { db } from '../utils/db';
 
 const LOCAL_REGISTRATIONS_KEY = 'gazetteer_local_registrations';
+const avatarStorageKey = (id: string) => `clips_app_avatar_${id}`;
 const interestOptions = [
   'Food & Dining', 'Sports', 'Music', 'Art & Culture', 'Technology',
   'Travel', 'Fashion', 'Photography', 'Fitness', 'Gaming',
@@ -24,10 +29,39 @@ function getLocalRegistrations(): Record<string, { password: string; userData: a
   }
 }
 
-function saveLocalRegistration(email: string, password: string, userData: any) {
+/** Strip huge base64 blobs â€” they belong in IndexedDB, not localStorage. */
+function userDataForLocalStorage(userData: Record<string, unknown>) {
+  const copy = { ...userData };
+  if (typeof copy.avatarUrl === 'string' && copy.avatarUrl.length > 500) {
+    delete copy.avatarUrl;
+  }
+  if (typeof copy.profileBackgroundUrl === 'string' && copy.profileBackgroundUrl.length > 500) {
+    delete copy.profileBackgroundUrl;
+  }
+  delete copy.password;
+  return copy;
+}
+
+function saveLocalRegistration(email: string, password: string, userData: Record<string, unknown>) {
+  const key = email.toLowerCase().trim();
+  const slim = userDataForLocalStorage(userData);
   const reg = getLocalRegistrations();
-  reg[email.toLowerCase().trim()] = { password, userData };
-  localStorage.setItem(LOCAL_REGISTRATIONS_KEY, JSON.stringify(reg));
+  for (const k of Object.keys(reg)) {
+    if (reg[k]?.userData) {
+      reg[k].userData = userDataForLocalStorage(reg[k].userData);
+    }
+  }
+  reg[key] = { password, userData: slim };
+  try {
+    localStorage.setItem(LOCAL_REGISTRATIONS_KEY, JSON.stringify(reg));
+  } catch {
+    try {
+      localStorage.removeItem(LOCAL_REGISTRATIONS_KEY);
+      localStorage.setItem(LOCAL_REGISTRATIONS_KEY, JSON.stringify({ [key]: { password, userData: slim } }));
+    } catch {
+      // Backup login list is optional; signup should still succeed.
+    }
+  }
 }
 
 export default function LoginPage() {
@@ -70,11 +104,20 @@ export default function LoginPage() {
   
   // Get step from URL parameter, default to 1 - use URL as source of truth
   const stepFromUrl = parseInt(searchParams.get('step') || '1', 10);
-  const step = (stepFromUrl >= 1 && stepFromUrl <= 3) ? stepFromUrl : 1;
+  const step = (stepFromUrl >= 1 && stepFromUrl <= 4) ? stepFromUrl : 1;
+
+  const signupStepLabel =
+    step === 1
+      ? 'Step 1: Account security'
+      : step === 2
+        ? 'Step 2: Profile and location'
+        : step === 3
+          ? 'Step 3: Profile photo'
+          : 'Step 4: Your interests';
   
   // Helper function to update step (updates both state and URL)
   const updateStep = React.useCallback((newStep: number) => {
-    if (newStep >= 1 && newStep <= 3) {
+    if (newStep >= 1 && newStep <= 4) {
       setSignupError('');
       setSearchParams({ step: newStep.toString() });
     }
@@ -85,13 +128,9 @@ export default function LoginPage() {
   const [local, setLocal] = React.useState('');
   const [regional, setRegional] = React.useState('');
   const [national, setNational] = React.useState('');
-  const [countryFlag, setCountryFlag] = React.useState('');
-
-  // Dynamic location options
-  const [regionalOptions, setRegionalOptions] = React.useState<string[]>([]);
-  const [localOptions, setLocalOptions] = React.useState<string[]>([]);
-  const [loadingRegions, setLoadingRegions] = React.useState(false);
-  const [loadingCities, setLoadingCities] = React.useState(false);
+  const [homeLocationQuery, setHomeLocationQuery] = React.useState('');
+  const [preferredLocationQuery, setPreferredLocationQuery] = React.useState('');
+  const [preferredLocations, setPreferredLocations] = React.useState<string[]>([]);
 
   // Step 1: Account details (email, password, birthday)
   const [email, setEmail] = React.useState('');
@@ -100,7 +139,6 @@ export default function LoginPage() {
   const [birthMonth, setBirthMonth] = React.useState('');
   const [birthDay, setBirthDay] = React.useState('');
   const [birthYear, setBirthYear] = React.useState('');
-  const [preferredLocationsInput, setPreferredLocationsInput] = React.useState('');
   const [accountType, setAccountType] = React.useState<'personal' | 'business' | null>(null);
   const [interests, setInterests] = React.useState<string[]>([]);
   const [acceptedTerms, setAcceptedTerms] = React.useState(false);
@@ -131,101 +169,39 @@ export default function LoginPage() {
     return 0;
   }
 
-  const nationalOptions = [
-    // Europe
-    'Ireland', 'Northern Ireland', 'UK', 'Germany', 'France', 'Spain', 'Italy',
-    'Netherlands', 'Belgium', 'Switzerland', 'Austria', 'Poland', 'Portugal',
-    'Greece', 'Sweden', 'Norway', 'Denmark', 'Finland', 'Czech Republic',
-    'Romania', 'Hungary', 'Bulgaria', 'Croatia', 'Serbia', 'Slovakia', 'Slovenia',
-    'Lithuania', 'Latvia', 'Estonia', 'Luxembourg', 'Malta', 'Cyprus', 'Iceland',
-    'Ukraine', 'Belarus', 'Moldova', 'Albania', 'North Macedonia', 'Bosnia and Herzegovina',
-    'Montenegro', 'Kosovo', 'Monaco', 'Liechtenstein', 'Andorra', 'San Marino', 'Vatican City',
-    'Turkey',
-    
-    // Americas
-    'USA', 'Canada', 'Mexico', 'Brazil', 'Argentina', 'Chile', 'Colombia', 'Peru',
-    'Venezuela', 'Ecuador', 'Guatemala', 'Cuba', 'Haiti', 'Dominican Republic',
-    'Honduras', 'El Salvador', 'Nicaragua', 'Costa Rica', 'Panama', 'Uruguay',
-    'Paraguay', 'Bolivia', 'Jamaica', 'Trinidad and Tobago', 'Bahamas', 'Barbados',
-    'Belize', 'Guyana', 'Suriname', 'French Guiana', 'Saint Lucia', 'Antigua and Barbuda',
-    'Saint Vincent and the Grenadines', 'Grenada', 'Saint Kitts and Nevis', 'Dominica',
-    'Aruba', 'Curaçao', 'Bonaire', 'Sint Maarten', 'Sint Eustatius', 'Saba',
-    'Bermuda', 'Cayman Islands', 'British Virgin Islands', 'US Virgin Islands',
-    'Anguilla', 'Montserrat', 'Turks and Caicos Islands', 'Greenland', 'Saint Pierre and Miquelon',
-    
-    // Asia
-    'China', 'India', 'Japan', 'Russia', 'Indonesia', 'Pakistan', 'Bangladesh',
-    'Philippines', 'Vietnam', 'Thailand', 'Myanmar', 'South Korea', 'North Korea',
-    'Malaysia', 'Afghanistan', 'Iraq', 'Saudi Arabia', 'Uzbekistan', 'Yemen',
-    'Nepal', 'Sri Lanka', 'Kazakhstan', 'Cambodia', 'Jordan', 'Azerbaijan',
-    'United Arab Emirates', 'Tajikistan', 'Israel', 'Laos', 'Lebanon', 'Kyrgyzstan',
-    'Turkmenistan', 'Singapore', 'Oman', 'Palestine', 'Kuwait', 'Georgia', 'Mongolia',
-    'Armenia', 'Qatar', 'Bahrain', 'Timor-Leste', 'Bhutan', 'Maldives', 'Brunei',
-    'Iran', 'Syria',
-    
-    // Africa
-    'Nigeria', 'Ethiopia', 'Egypt', 'South Africa', 'Kenya', 'Uganda', 'Tanzania',
-    'Algeria', 'Sudan', 'Morocco', 'Angola', 'Mozambique', 'Ghana', 'Madagascar',
-    'Cameroon', 'Ivory Coast', 'Niger', 'Burkina Faso', 'Mali', 'Malawi', 'Zambia',
-    'Senegal', 'Chad', 'Somalia', 'Zimbabwe', 'Guinea', 'Rwanda', 'Benin', 'Tunisia',
-    'Burundi', 'South Sudan', 'Togo', 'Sierra Leone', 'Libya', 'Eritrea', 'Central African Republic',
-    'Liberia', 'Mauritania', 'Namibia', 'Botswana', 'Gambia', 'Gabon', 'Lesotho',
-    'Guinea-Bissau', 'Equatorial Guinea', 'Mauritius', 'Eswatini', 'Djibouti', 'Comoros',
-    'Cape Verde', 'São Tomé and Príncipe', 'Seychelles',
-    
-    // Oceania
-    'Australia', 'New Zealand', 'Papua New Guinea', 'Fiji', 'Solomon Islands',
-    'Vanuatu', 'New Caledonia', 'French Polynesia', 'Samoa', 'Guam', 'Kiribati',
-    'Micronesia', 'Tonga', 'Marshall Islands', 'Palau', 'American Samoa', 'Northern Mariana Islands',
-    'Cook Islands', 'Tuvalu', 'Wallis and Futuna', 'Nauru', 'Niue', 'Tokelau', 'Pitcairn Islands'
-  ];
+  const signupPlaceInputClass =
+    'w-full rounded-xl border-2 border-white bg-gray-50 dark:bg-gray-900 py-2 sm:py-2.5 pr-3 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-white';
 
-  // Fetch regions when national selection changes
-  React.useEffect(() => {
-    if (national) {
-      setLoadingRegions(true);
-      setRegionalOptions([]);
-      setRegional(''); // Reset regional selection
-      setLocal(''); // Reset local selection
-      setLocalOptions([]);
-      
-      fetchRegionsForCountry(national)
-        .then(regions => {
-          setRegionalOptions(regions.map(r => r.name));
-          setLoadingRegions(false);
-        })
-        .catch(error => {
-          console.error('Error loading regions:', error);
-          setLoadingRegions(false);
-        });
-    } else {
-      setRegionalOptions([]);
-      setLocalOptions([]);
-    }
-  }, [national]);
+  function applyHomeLocation(suggestion: LocationSuggestion) {
+    const parsed = parsedPlaceFeedFromSuggestion(suggestion);
+    setLocal(parsed.local);
+    setRegional(parsed.regional);
+    setNational(parsed.national);
+    setHomeLocationQuery(parsed.fullName || suggestion.name);
+  }
 
-  // Fetch cities when regional selection changes
-  React.useEffect(() => {
-    if (regional && national) {
-      setLoadingCities(true);
-      setLocalOptions([]);
-      setLocal(''); // Reset local selection
-      
-      console.log(`Fetching local areas for region: ${regional}, country: ${national}`);
-      fetchCitiesForRegion(regional, national)
-        .then(localAreas => {
-          console.log(`Received ${localAreas.length} local areas for ${regional}, ${national}:`, localAreas);
-          setLocalOptions(localAreas.map(c => c.name));
-          setLoadingCities(false);
-        })
-        .catch(error => {
-          console.error('Error loading local areas:', error);
-          setLoadingCities(false);
-        });
-    } else {
-      setLocalOptions([]);
-    }
-  }, [regional, national]);
+  function clearHomeLocation() {
+    setLocal('');
+    setRegional('');
+    setNational('');
+    setHomeLocationQuery('');
+  }
+
+  function addPreferredLocation(suggestion: LocationSuggestion) {
+    const parsed = parsedPlaceFeedFromSuggestion(suggestion);
+    const label = parsed.displayName || parsed.local || suggestion.name.split(',')[0].trim();
+    if (!label) return;
+    setPreferredLocations((prev) => {
+      if (prev.some((p) => p.toLowerCase() === label.toLowerCase())) return prev;
+      if (prev.length >= 12) return prev;
+      return [...prev, label];
+    });
+    setPreferredLocationQuery('');
+  }
+
+  function removePreferredLocation(label: string) {
+    setPreferredLocations((prev) => prev.filter((p) => p !== label));
+  }
 
   const MIN_AGE = 13;
 
@@ -276,11 +252,9 @@ export default function LoginPage() {
   function handleLocationSubmit(e: React.FormEvent) {
     e.preventDefault();
     const nextErrors: Record<string, string> = {};
-    if (!name || !local || !regional || !national) {
-      if (!name) nextErrors.name = 'Full name is required.';
-      if (!national) nextErrors.national = 'Select your national area.';
-      if (!regional) nextErrors.regional = 'Select your regional area.';
-      if (!local) nextErrors.local = 'Select your local area.';
+    if (!name) nextErrors.name = 'Full name is required.';
+    if (!local || !regional || !national) {
+      nextErrors.homeLocation = 'Search and select your home area from the suggestions.';
     }
     if (!birthMonth || !birthDay || !birthYear) {
       nextErrors.birthdate = 'Please enter your date of birth.';
@@ -301,19 +275,24 @@ export default function LoginPage() {
     updateStep(3);
   }
 
-  async function handleProfilePictureSubmit(e: React.FormEvent) {
+  function handleProfilePictureSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSignupFieldErrors({});
+    setSignupError('');
+    updateStep(4);
+  }
+
+  async function handleInterestsSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSignupFieldErrors({});
     setSignupError('');
     const age = getAgeFromBirthday();
     const consentTimestamp = new Date().toISOString();
-    const preferredLocations = preferredLocationsInput
-      .split(',')
-      .map((entry) => entry.trim())
-      .filter(Boolean)
-      .slice(0, 12);
+    const placesTraveled = preferredLocations.slice(0, 12);
 
+    const userId = email.trim().toLowerCase();
     const userData = {
+      id: userId,
       name: name.trim(),
       email: email.trim(),
       password: password,
@@ -323,13 +302,21 @@ export default function LoginPage() {
       regional: regional,
       national: national,
       handle: `${name.trim().split(/\s+/)[0] || name.trim()}@${regional}`,
-      countryFlag: countryFlag.trim(),
+      countryFlag: normalizeCountryFlagInput('', national),
       avatarUrl: profilePicture || undefined,
-      placesTraveled: preferredLocations.length > 0 ? preferredLocations : undefined,
+      placesTraveled: placesTraveled.length > 0 ? placesTraveled : undefined,
       accountType: accountType ?? 'personal',
       termsAcceptedAt: consentTimestamp,
       guidelinesAcceptedAt: consentTimestamp,
     };
+
+    if (profilePicture && profilePicture.length > 2000) {
+      try {
+        await db.set(avatarStorageKey(userId), profilePicture);
+      } catch {
+        // Non-fatal; login() also persists large avatars to IndexedDB.
+      }
+    }
 
     try {
       const apiResponse = await registerUser({
@@ -351,12 +338,13 @@ export default function LoginPage() {
     }
 
     try {
-      saveLocalRegistration(email.trim(), password, userData);
       login(userData);
+      saveLocalRegistration(email.trim(), password, userData);
       nav(getPostAuthRedirect(), { replace: true, state: { fromSignup: true } });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Sign up error:', err);
-      setSignupError(err?.message || 'Something went wrong. Try again.');
+      const message = err instanceof Error ? err.message : 'Something went wrong. Try again.';
+      setSignupError(message);
     }
   }
 
@@ -575,7 +563,7 @@ export default function LoginPage() {
                   disabled={loginLoading}
                   className="w-full px-4 py-3 bg-white text-[#111827] rounded-xl transition-colors text-sm font-semibold hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {loginLoading ? 'Logging in…' : 'Log in'}
+                  {loginLoading ? 'Logging inâ€¦' : 'Log in'}
                 </button>
                 <p className="text-xs text-center text-gray-400">
                   Don&apos;t have an account?{' '}
@@ -589,12 +577,20 @@ export default function LoginPage() {
           </div>
         ) : (
         <div
-          className="max-w-md mx-auto rounded-2xl p-[1.5px] shadow-lg flex-shrink-0"
+          className="w-full max-w-md mx-auto flex flex-1 flex-col min-h-0 rounded-2xl p-[1.5px] shadow-lg"
           style={{ background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 24%, #f4f4f4 48%, #bfc5cc 72%, #ffe8a3 100%)' }}
         >
         <form
-          onSubmit={step === 1 ? handleAccountSubmit : step === 2 ? handleLocationSubmit : handleProfilePictureSubmit}
-          className="rounded-2xl bg-black flex flex-col min-h-0"
+          onSubmit={
+            step === 1
+              ? handleAccountSubmit
+              : step === 2
+                ? handleLocationSubmit
+                : step === 3
+                  ? handleProfilePictureSubmit
+                  : handleInterestsSubmit
+          }
+          className="rounded-2xl bg-black flex flex-1 flex-col min-h-0 overflow-hidden"
         >
           {/* Header */}
           <div className="flex-shrink-0 px-6 sm:px-10 pt-4 sm:pt-10 pb-4 sm:pb-6">
@@ -623,7 +619,7 @@ export default function LoginPage() {
                 </span>
               </h1>
               <p className="text-xs sm:text-sm text-gray-400 mb-4 sm:mb-6 font-normal">
-                {step === 1 ? 'Step 1: Account security' : step === 2 ? 'Step 2: Profile and location' : 'Step 3: Profile photo'}
+                {signupStepLabel}
               </p>
               
               {/* Step Indicators */}
@@ -646,12 +642,21 @@ export default function LoginPage() {
                     ? { width: '80px', background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 24%, #f4f4f4 48%, #bfc5cc 72%, #ffe8a3 100%)' }
                     : { width: '40px' }}
                 ></div>
+                <div
+                  className={`h-1 rounded-full transition-all ${step >= 4 ? '' : 'bg-gray-300'}`}
+                  style={step >= 4
+                    ? { width: '80px', background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 24%, #f4f4f4 48%, #bfc5cc 72%, #ffe8a3 100%)' }
+                    : { width: '40px' }}
+                ></div>
               </div>
             </div>
           </div>
 
-          {/* Scrollable Content */}
-          <div className="flex-1 min-h-0 overflow-y-auto px-6 sm:px-10 pb-8 space-y-2 sm:space-y-3">
+          {/* Scrollable fields */}
+          <div
+            className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-6 sm:px-10 pb-4 space-y-2 sm:space-y-3"
+            style={{ WebkitOverflowScrolling: 'touch' }}
+          >
         {signupError && (
           <div className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
             {signupError}
@@ -798,27 +803,6 @@ export default function LoginPage() {
               {signupFieldErrors.confirmPassword && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.confirmPassword}</p>}
             </div>
 
-            <div className="rounded-sm border border-white/10 bg-white/5 px-3 py-2.5">
-              <p className="text-[11px] text-gray-400 mb-2">Select up to 5 interests</p>
-              <div className="flex flex-wrap gap-2">
-                {interestOptions.map((interest) => {
-                  const selected = interests.includes(interest);
-                  return (
-                    <button
-                      key={interest}
-                      type="button"
-                      onClick={() => toggleInterest(interest)}
-                      className={`rounded-full border px-2.5 py-1 text-[11px] ${
-                        selected ? 'border-[#8ab4ff] bg-[#8ab4ff]/15 text-[#dce9ff]' : 'border-white/20 text-gray-300'
-                      }`}
-                    >
-                      {interest}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
             <label className="flex items-center gap-2 px-1 text-xs text-gray-300">
               <input
                 type="checkbox"
@@ -906,94 +890,38 @@ export default function LoginPage() {
               {signupFieldErrors.birthdate && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.birthdate}</p>}
             </div>
 
-            {/* National Area */}
-            <div className="relative">
-              <select
-                value={national}
-                onChange={e => setNational(e.target.value)}
-                className="w-full rounded-xl border-2 border-white bg-gray-50 dark:bg-gray-900 px-3 py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-white appearance-none"
-                required
-              >
-                <option value="">National Area</option>
-                {nationalOptions.map(option => (
-                  <option key={option} value={option}>{option}</option>
-                ))}
-              </select>
-              <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-                <svg className="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </div>
-              {signupFieldErrors.national && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.national}</p>}
-            </div>
-
-            {/* Regional Area */}
-            <div className="relative">
-              <select
-                value={regional}
-                onChange={e => setRegional(e.target.value)}
-                disabled={!national || loadingRegions}
-                className="w-full rounded-xl border-2 border-white bg-gray-50 dark:bg-gray-900 px-3 py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-white disabled:opacity-50 disabled:cursor-not-allowed appearance-none"
-                required
-              >
-                <option value="">
-                  {loadingRegions ? 'Loading regions...' : national ? 'Regional Area' : 'Select national area first'}
-                </option>
-                {regionalOptions.map(option => (
-                  <option key={option} value={option}>{option}</option>
-                ))}
-              </select>
-              <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-                <svg className="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </div>
-              {signupFieldErrors.regional && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.regional}</p>}
-            </div>
-
-            {/* Local Area */}
-            <div className="relative">
-              <select
-                value={local}
-                onChange={e => setLocal(e.target.value)}
-                disabled={!regional || loadingCities}
-                className="w-full rounded-xl border-2 border-white bg-gray-50 dark:bg-gray-900 px-3 py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-white disabled:opacity-50 disabled:cursor-not-allowed appearance-none"
-                required
-              >
-                <option value="">
-                  {loadingCities 
-                    ? 'Loading local areas...' 
-                    : !regional 
-                      ? 'Select regional area first'
-                      : localOptions.length === 0
-                        ? 'No local areas found'
-                        : 'Local Area'}
-                </option>
-                {localOptions.map(option => (
-                  <option key={option} value={option}>{option}</option>
-                ))}
-              </select>
-              <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-                <svg className="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </div>
-              {!loadingCities && regional && localOptions.length === 0 && (
-                <p className="text-xs text-red-500 mt-1.5 px-1">
-                  No local areas found for {regional}. Check browser console for details or add Google Maps API key.
-                </p>
-              )}
-              {signupFieldErrors.local && <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.local}</p>}
-            </div>
-
             <div>
-              <input
-                value={countryFlag}
-                onChange={e => setCountryFlag(e.target.value)}
-                className="w-full rounded-xl border-2 border-white bg-gray-50 dark:bg-gray-900 px-3 py-2 sm:py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-white"
-                placeholder="Country Flag (emoji)"
-                maxLength={8}
+              <p className="text-xs text-gray-400 mb-2 px-1">Your home area for news feeds</p>
+              <PlaceAutocompleteField
+                value={homeLocationQuery}
+                onChange={(v) => {
+                  setHomeLocationQuery(v);
+                  if (local || regional || national) {
+                    setLocal('');
+                    setRegional('');
+                    setNational('');
+                  }
+                }}
+                onSelectSuggestion={applyHomeLocation}
+                mode="location"
+                showIcon
+                showFeedLevels
+                placeholder="Search city or neighborhoodâ€¦"
+                inputClassName={`${signupPlaceInputClass} pl-10`}
               />
+              <p className="mt-1.5 text-[11px] text-gray-500 px-1">Type at least 2 characters, then pick a place from the list.</p>
+              {signupFieldErrors.homeLocation && (
+                <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.homeLocation}</p>
+              )}
+              {local && regional && national && (
+                <div className="mt-2 rounded-xl border border-white/15 bg-white/5 px-3 py-2.5 space-y-1">
+                  <p className="text-[11px] text-gray-400">Feed areas saved</p>
+                  <p className="text-xs text-gray-200"><span className="text-gray-400">Local:</span> {local}</p>
+                  <p className="text-xs text-gray-200"><span className="text-gray-400">Regional:</span> {regional}</p>
+                  <p className="text-xs text-gray-200"><span className="text-gray-400">National:</span> {national}</p>
+                  <button type="button" onClick={clearHomeLocation} className="mt-1 text-[11px] text-[#7A8AF0] hover:underline">Change location</button>
+                </div>
+              )}
             </div>
 
             <div className="rounded-sm border border-white/10 bg-white/5 px-3 py-2">
@@ -1005,15 +933,39 @@ export default function LoginPage() {
             </div>
 
             <div className="rounded-sm border border-white/10 bg-white/5 px-3 py-2.5">
-              <p className="text-[11px] text-gray-400 mb-1">Preferred locations for suggestions (optional)</p>
-              <textarea
-                value={preferredLocationsInput}
-                onChange={e => setPreferredLocationsInput(e.target.value)}
-                className="w-full rounded-xl border-2 border-white bg-gray-50 dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-white"
-                placeholder="Dublin, Barcelona, New York"
-                rows={2}
+              <p className="text-[11px] text-gray-400 mb-2">Preferred locations for suggestions (optional)</p>
+              <PlaceAutocompleteField
+                value={preferredLocationQuery}
+                onChange={setPreferredLocationQuery}
+                onSelectSuggestion={addPreferredLocation}
+                mode="location"
+                showIcon
+                placeholder="Search places you followâ€¦"
+                inputClassName={`${signupPlaceInputClass} pl-10`}
               />
-              <p className="mt-1 text-[11px] text-gray-500">Comma separated. You can edit this later in profile settings.</p>
+              {preferredLocations.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {preferredLocations.map((place) => (
+                    <span
+                      key={place}
+                      className="inline-flex items-center gap-1 rounded-full border border-white/20 bg-white/5 px-2 py-0.5 text-[11px] text-gray-200"
+                    >
+                      {place}
+                      <button
+                        type="button"
+                        onClick={() => removePreferredLocation(place)}
+                        className="text-gray-400 hover:text-white"
+                        aria-label={`Remove ${place}`}
+                      >
+                        <FiX className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <p className="mt-1.5 text-[11px] text-gray-500">
+                {preferredLocations.length}/12 added. Pick from suggestions â€” same search as Discover.
+              </p>
             </div>
           </>
         )}
@@ -1049,13 +1001,47 @@ export default function LoginPage() {
           </>
         )}
 
-            {/* Footer - inside scroll area so T&C is reachable on mobile */}
-            <div className="pt-6 mt-4 border-t border-gray-700 space-y-3">
+        {step === 4 && (
+          <>
+            <div className="rounded-xl border border-white/15 bg-white/5 px-4 py-4">
+              <h2 className="text-sm font-medium text-white mb-1">Your interests</h2>
+              <p className="text-xs text-gray-400 mb-3">Select up to 5 interests to personalize your feed (optional).</p>
+              <div className="flex flex-wrap gap-2">
+                {interestOptions.map((interest) => {
+                  const selected = interests.includes(interest);
+                  return (
+                    <button
+                      key={interest}
+                      type="button"
+                      onClick={() => toggleInterest(interest)}
+                      className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
+                        selected
+                          ? 'border-[#8ab4ff] bg-[#8ab4ff]/15 text-[#dce9ff]'
+                          : 'border-white/20 text-gray-300 hover:border-white/40'
+                      }`}
+                    >
+                      {interest}
+                    </button>
+                  );
+                })}
+              </div>
+              {interests.length > 0 && (
+                <p className="mt-3 text-[11px] text-gray-500">
+                  {interests.length} of 5 selected
+                </p>
+              )}
+            </div>
+          </>
+        )}
+
+          </div>
+
+          <div className="flex-shrink-0 border-t border-gray-700 bg-black px-6 sm:px-10 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-3">
               <button
                 type="submit"
                 className="w-full px-4 py-3 bg-white text-[#111827] rounded-xl transition-colors text-sm font-semibold hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {step === 1 ? 'Continue' : step === 2 ? 'Continue' : 'Create account'}
+                {step < 4 ? 'Continue' : 'Create account'}
               </button>
               
               {step > 1 && (
@@ -1099,8 +1085,7 @@ export default function LoginPage() {
                   </Link>
                 </div>
               </div>
-            </div>
-        </div>
+          </div>
       </form>
       </div>
         )}

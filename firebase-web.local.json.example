@@ -1,0 +1,7 @@
+{
+  "apiKey": "auto-filled-by-npm-run-sync-env-when-firebase-auth-json-exists",
+  "appId": "1:257169934666:web:xxxxxxxxxxxxxxxx",
+  "vapidKey": "paste-web-push-key-pair-from-firebase-console-cloud-messaging",
+  "measurementId": "G-XXXXXXXXXX",
+  "mapsApiKey": "optional-override-if-different-from-laravel"
+}

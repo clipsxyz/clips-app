@@ -81,7 +81,7 @@ class PostController extends Controller
         $validator = Validator::make($request->all(), [
             'cursor' => 'nullable|string',
             'limit' => 'integer|min:1|max:50',
-            'filter' => 'string|in:Finglas,Dublin,Ireland,Following',
+            'filter' => 'nullable|string|max:200',
             'userId' => 'nullable|string'
         ]);
 

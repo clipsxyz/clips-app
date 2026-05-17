@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react'
 import { useAuth } from '../context/Auth';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { createPost } from '../api/posts';
+import PlaceAutocompleteField from '../components/PlaceAutocompleteField';
 import { FiImage, FiMapPin, FiX, FiZap, FiLayers, FiSmile, FiEdit, FiLoader, FiHome, FiSliders, FiType, FiCircle, FiUser } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import type { Post, StickerOverlay, Sticker } from '../types';
@@ -1448,7 +1449,7 @@ export default function CreatePage() {
             {showLocationMetaSheet && (
                 <div className="fixed inset-0 z-[100] flex items-end bg-black/50 dark:bg-black/60" onClick={() => setShowLocationMetaSheet(false)}>
                     <div
-                        className="w-full max-h-[85vh] overflow-y-auto bg-white dark:bg-black rounded-t-2xl border-t border-gray-200 dark:border-white/10 shadow-2xl"
+                        className="w-full max-h-[85vh] overflow-y-auto overflow-x-visible bg-white dark:bg-black rounded-t-2xl border-t border-gray-200 dark:border-white/10 shadow-2xl"
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="sticky top-0 z-10 bg-white dark:bg-black border-b border-gray-100 dark:border-white/10 px-4 py-3 flex items-center justify-between">
@@ -1462,35 +1463,35 @@ export default function CreatePage() {
                                 <FiX className="w-5 h-5" />
                             </button>
                         </div>
-                        <div className="p-4 space-y-4">
-                            <div>
+                        <div className="p-4 space-y-6 pb-8">
+                            <div className="relative z-0">
                                 <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Location</label>
-                                <input
-                                    type="text"
+                                <PlaceAutocompleteField
+                                    mode="location"
                                     value={location}
-                                    onChange={(e) => setLocation(e.target.value)}
-                                    placeholder="Add location"
-                                    className="w-full px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-black border border-gray-200 dark:border-white/15 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-white/30 dark:focus:ring-white/30"
+                                    onChange={setLocation}
+                                    placeholder="Add location (city, region, country)"
+                                    inputClassName="w-full px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-black border border-gray-200 dark:border-white/15 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-white/30 dark:focus:ring-white/30"
                                 />
                             </div>
-                            <div>
+                            <div className="relative z-0">
                                 <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Venue</label>
-                                <input
-                                    type="text"
+                                <PlaceAutocompleteField
+                                    mode="venue"
                                     value={venue}
-                                    onChange={(e) => setVenue(e.target.value)}
+                                    onChange={setVenue}
                                     placeholder="Add venue (e.g. café, stadium)"
-                                    className="w-full px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-black border border-gray-200 dark:border-white/15 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-white/30 dark:focus:ring-white/30"
+                                    inputClassName="w-full px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-black border border-gray-200 dark:border-white/15 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-white/30 dark:focus:ring-white/30"
                                 />
                             </div>
-                            <div>
+                            <div className="relative z-0">
                                 <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Landmark</label>
-                                <input
-                                    type="text"
+                                <PlaceAutocompleteField
+                                    mode="landmark"
                                     value={landmark}
-                                    onChange={(e) => setLandmark(e.target.value)}
+                                    onChange={setLandmark}
                                     placeholder="Add landmark (e.g. Phoenix Park, river)"
-                                    className="w-full px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-black border border-gray-200 dark:border-white/15 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-white/30 dark:focus:ring-white/30"
+                                    inputClassName="w-full px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-black border border-gray-200 dark:border-white/15 text-gray-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-white/30 dark:focus:ring-white/30"
                                 />
                             </div>
                         </div>

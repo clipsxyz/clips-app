@@ -96,6 +96,8 @@ import {
     subscribePendingFeedUploadComplete,
     subscribePendingFeedUploads,
 } from '../utils/pendingFeedUploadNative';
+import { feedHeaderLabelFromSuggestion } from '../utils/placeFeedLevels';
+import type { LocationSuggestion } from '../api/locations';
 
 type Tab = string;
 
@@ -103,6 +105,7 @@ function PillTabs({
     active,
     onChange,
     customLocation = null,
+    customLocationLabel = null,
     customFilterType = null,
     userLocal = 'Finglas',
     userRegional = 'Dublin',
@@ -117,6 +120,7 @@ function PillTabs({
     active: Tab;
     onChange: (t: Tab) => void;
     customLocation?: string | null;
+    customLocationLabel?: string | null;
     customFilterType?: 'location' | 'venue' | 'landmark' | null;
     userLocal?: string;
     userRegional?: string;
@@ -155,7 +159,7 @@ function PillTabs({
         () => ['Eiffel Tower', 'Colosseum', 'Big Ben', 'Statue of Liberty', 'Christ the Redeemer'],
         []
     );
-    const activeLabel = customLocation || (active === userLocal ? 'Nearby' : active);
+    const activeLabel = customLocationLabel || customLocation || (active === userLocal ? 'Nearby' : active);
     const headerLabel = showGazetteerTitle ? 'Gazetteer' : activeLabel;
     const activeIndicatorColor =
         customLocation
@@ -368,7 +372,13 @@ function PillTabs({
                             style={styles.feedDropdownActiveIcon}
                         />
                         <View style={[styles.feedDropdownActiveDot, { backgroundColor: activeIndicatorColor }]} />
-                        <Text style={styles.feedDropdownActiveText}>{headerLabel}</Text>
+                        <Text
+                            style={styles.feedDropdownActiveText}
+                            numberOfLines={1}
+                            ellipsizeMode="tail"
+                        >
+                            {headerLabel}
+                        </Text>
                         <Icon name={menuOpen ? 'chevron-up-outline' : 'chevron-down-outline'} size={16} color="#E5E7EB" />
                     </TouchableOpacity>
 
@@ -1017,6 +1027,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [refreshing, setRefreshing] = useState(false);
     const [showFollowingFeed, setShowFollowingFeed] = useState(false);
     const [customLocation, setCustomLocation] = useState<string | null>(null);
+    const [customLocationLabel, setCustomLocationLabel] = useState<string | null>(null);
     const [customFilterType, setCustomFilterType] = useState<'location' | 'venue' | 'landmark' | null>(null);
     const [commentsModalOpen, setCommentsModalOpen] = useState(false);
     const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
@@ -1292,12 +1303,26 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     useEffect(() => {
         const requestedLocation = route?.params?.location;
+        const requestedLabel = route?.params?.locationLabel;
         const requestedFilterType = route?.params?.filterType as 'location' | 'venue' | 'landmark' | undefined;
         if (!requestedLocation || typeof requestedLocation !== 'string') return;
         const next = requestedLocation.trim();
         if (!next) return;
+        const label =
+            typeof requestedLabel === 'string' && requestedLabel.trim()
+                ? requestedLabel.trim()
+                : feedHeaderLabelFromSuggestion({
+                      name: next,
+                      type:
+                          requestedFilterType === 'venue'
+                              ? 'venue'
+                              : requestedFilterType === 'landmark'
+                                ? 'landmark'
+                                : 'location',
+                  } as LocationSuggestion);
         setShowFollowingFeed(false);
         setCustomLocation(next);
+        setCustomLocationLabel(label);
         setCustomFilterType(
             requestedFilterType === 'venue'
                 ? 'venue'
@@ -1309,7 +1334,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         setCursor(0);
         setEnd(false);
         setError(null);
-    }, [route?.params?.location, route?.params?.filterType]);
+    }, [route?.params?.location, route?.params?.locationLabel, route?.params?.filterType]);
 
     useEffect(() => {
         setPages([]);
@@ -1482,11 +1507,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         if (tab === 'Following') {
             setShowFollowingFeed(true);
             setCustomLocation(null);
+            setCustomLocationLabel(null);
             setCustomFilterType(null);
             setActive('Following'); // Set active to Following so it's highlighted
         } else {
             setShowFollowingFeed(false);
             setCustomLocation(null);
+            setCustomLocationLabel(null);
             setCustomFilterType(null);
             setActive(tab);
         }
@@ -1497,6 +1524,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         if (!next) return;
         setShowFollowingFeed(false);
         setCustomLocation(next);
+        setCustomLocationLabel(
+            feedHeaderLabelFromSuggestion({ name: next, type: filterType } as LocationSuggestion)
+        );
         setCustomFilterType(filterType);
         setPages([]);
         setCursor(0);
@@ -1506,6 +1536,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const clearCustomLocation = () => {
         setCustomLocation(null);
+        setCustomLocationLabel(null);
         setCustomFilterType(null);
         setPages([]);
         setCursor(0);
@@ -1700,6 +1731,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     active={showFollowingFeed && !customLocation ? 'Following' : active}
                     onChange={handleTabChange}
                     customLocation={customLocation}
+                    customLocationLabel={customLocationLabel}
                     customFilterType={customFilterType}
                     userLocal={defaultLocal}
                     userRegional={defaultRegional}
@@ -2072,6 +2104,7 @@ const styles = StyleSheet.create({
     },
     feedHeaderCenter: {
         flex: 1,
+        minWidth: 0,
         alignItems: 'center',
         position: 'relative',
     },
@@ -2080,6 +2113,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         gap: 8,
+        maxWidth: '100%',
         paddingHorizontal: 12,
         paddingVertical: 6,
         borderRadius: 10,
@@ -2094,7 +2128,9 @@ const styles = StyleSheet.create({
         borderRadius: 999,
     },
     feedDropdownActiveText: {
-        fontSize: 20,
+        flexShrink: 1,
+        maxWidth: 160,
+        fontSize: 18,
         fontWeight: '700',
         color: '#E5E7EB',
         letterSpacing: 0.2,

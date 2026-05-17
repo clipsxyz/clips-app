@@ -5,6 +5,7 @@ import { User } from '../types';
 import { setProfilePrivacy, initializePrivateMockUser, isProfilePrivate } from '../api/privacy';
 import { connectSocket, disconnectSocket } from '../services/socketio';
 import { db } from '../utils/db';
+import { normalizeCountryFlagInput } from '../utils/countryFlag';
 
 const AVATAR_KEY = (id: string) => `clips_app_avatar_${id}`;
 type AuthCtx = { user: User | null; login: (userData: any) => void; logout: () => void };
@@ -63,7 +64,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           regional: '',
           national: '',
           handle: migratedHandle,
-          countryFlag: parsed.countryFlag || undefined,
+          countryFlag:
+            normalizeCountryFlagInput(parsed.countryFlag || '', parsed.national || '') || undefined,
           avatarUrl: parsed.avatarUrl || undefined,
           profileBackgroundUrl: parsed.profileBackgroundUrl || undefined,
           bio: parsed.bio || undefined,
@@ -82,8 +84,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             : parsed.handle
               ? isProfilePrivate(parsed.handle)
               : false;
-        userToSet = { ...parsed, is_private: resolvedPrivate };
+        const normalizedFlag = normalizeCountryFlagInput(
+          parsed.countryFlag || '',
+          parsed.national || ''
+        );
+        userToSet = {
+          ...parsed,
+          is_private: resolvedPrivate,
+          countryFlag: normalizedFlag || undefined,
+        };
         setUser(userToSet);
+        if (normalizedFlag && normalizedFlag !== parsed.countryFlag) {
+          try {
+            const stored = { ...userToSet };
+            if (stored.avatarUrl && String(stored.avatarUrl).length > 2000) {
+              delete (stored as { avatarUrl?: string }).avatarUrl;
+            }
+            localStorage.setItem('user', JSON.stringify(stored));
+          } catch {
+            /* ignore */
+          }
+        }
         if (userToSet.handle) {
           setProfilePrivacy(userToSet.handle, !!userToSet.is_private);
         }
@@ -169,7 +190,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       regional: userData.regional || '',
       national: userData.national || '',
       handle: userData.handle || `${(userData.name || '').trim().split(/\s+/)[0] || userData.name || 'User'}@Unknown`,
-      countryFlag: userData.countryFlag || undefined,
+      countryFlag:
+        normalizeCountryFlagInput(userData.countryFlag || '', userData.national || '') || undefined,
       avatarUrl: userData.avatarUrl || undefined,
       profileBackgroundUrl: userData.profileBackgroundUrl || undefined,
       bio: userData.bio || undefined,

@@ -159,7 +159,41 @@ class Post extends Model
 
     public function scopeByLocation($query, $location)
     {
-        return $query->where('location_label', 'LIKE', "%{$location}%");
+        $raw = trim((string) $location);
+        if ($raw === '') {
+            return $query;
+        }
+
+        if (str_starts_with(strtolower($raw), 'venue:')) {
+            $needle = trim(substr($raw, 6));
+            if ($needle === '') {
+                return $query;
+            }
+
+            return $query->where('venue', 'LIKE', "%{$needle}%");
+        }
+
+        if (str_starts_with(strtolower($raw), 'landmark:')) {
+            $needle = trim(substr($raw, 9));
+            if ($needle === '') {
+                return $query;
+            }
+
+            return $query->where('landmark', 'LIKE', "%{$needle}%");
+        }
+
+        $needle = $raw;
+
+        return $query->where(function ($q) use ($needle) {
+            $q->where('location_label', 'LIKE', "%{$needle}%")
+                ->orWhere('venue', 'LIKE', "%{$needle}%")
+                ->orWhere('landmark', 'LIKE', "%{$needle}%")
+                ->orWhereHas('user', function ($uq) use ($needle) {
+                    $uq->where('location_local', 'LIKE', "%{$needle}%")
+                        ->orWhere('location_regional', 'LIKE', "%{$needle}%")
+                        ->orWhere('location_national', 'LIKE', "%{$needle}%");
+                });
+        });
     }
 
     public function scopeFollowing($query, $userId)

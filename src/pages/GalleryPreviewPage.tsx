@@ -20,6 +20,7 @@ import { getKnownUserHandles } from '../api/users';
 import { getGalleryPreviewMedia, clearGalleryPreviewMedia } from '../utils/galleryPreviewCache';
 import { showUploadOverlay } from '../utils/uploadOverlay';
 import { prepareMediaForPost, prepareMediaItemsForPost } from '../utils/prepareMediaForPost';
+import PlaceAutocompleteField from '../components/PlaceAutocompleteField';
 
 const FILTER_NAMES = ['None', 'B&W', 'Sepia', 'Vivid', 'Cool', 'Vignette', 'Beauty'];
 const CAROUSEL_MAX = 10;
@@ -1156,13 +1157,15 @@ export default function GalleryPreviewPage() {
                             >
                                 <div className="rounded-[1rem] bg-[#020617] overflow-hidden">
                                     <label className="block px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wide">Story location</label>
-                                    <input
-                                        type="text"
-                                        value={storyLocation}
-                                        onChange={(e) => setStoryLocation(e.target.value)}
-                                        placeholder="Add story location"
-                                        className="w-full px-4 pb-3 bg-transparent text-white placeholder-gray-500 focus:outline-none focus:ring-0 text-sm"
-                                    />
+                                    <div className="px-4 pb-3">
+                                        <PlaceAutocompleteField
+                                            mode="location"
+                                            value={storyLocation}
+                                            onChange={setStoryLocation}
+                                            placeholder="Add story location"
+                                            inputClassName="w-full bg-transparent text-white placeholder-gray-500 focus:outline-none focus:ring-0 text-sm"
+                                        />
+                                    </div>
                                 </div>
                             </div>
 
@@ -1173,13 +1176,15 @@ export default function GalleryPreviewPage() {
                             >
                                 <div className="rounded-[1rem] bg-[#020617] overflow-hidden">
                                     <label className="block px-4 py-3 text-xs font-medium text-white/70 uppercase tracking-wide">Venue</label>
-                                    <input
-                                        type="text"
-                                        value={venue}
-                                        onChange={(e) => setVenue(e.target.value)}
-                                        placeholder="Add venue"
-                                        className="w-full px-4 pb-3 bg-transparent text-white placeholder-gray-500 focus:outline-none focus:ring-0 text-sm"
-                                    />
+                                    <div className="px-4 pb-3">
+                                        <PlaceAutocompleteField
+                                            mode="venue"
+                                            value={venue}
+                                            onChange={setVenue}
+                                            placeholder="Add venue"
+                                            inputClassName="w-full bg-transparent text-white placeholder-gray-500 focus:outline-none focus:ring-0 text-sm"
+                                        />
+                                    </div>
                                 </div>
                             </div>
 
@@ -1190,13 +1195,15 @@ export default function GalleryPreviewPage() {
                             >
                                 <div className="rounded-[1rem] bg-[#020617] overflow-hidden">
                                     <label className="block px-4 py-3 text-xs font-medium text-white/70 uppercase tracking-wide">Landmark</label>
-                                    <input
-                                        type="text"
-                                        value={landmark}
-                                        onChange={(e) => setLandmark(e.target.value)}
-                                        placeholder="Add landmark (optional)"
-                                        className="w-full px-4 pb-3 bg-transparent text-white placeholder-gray-500 focus:outline-none focus:ring-0 text-sm"
-                                    />
+                                    <div className="px-4 pb-3">
+                                        <PlaceAutocompleteField
+                                            mode="landmark"
+                                            value={landmark}
+                                            onChange={setLandmark}
+                                            placeholder="Add landmark (optional)"
+                                            inputClassName="w-full bg-transparent text-white placeholder-gray-500 focus:outline-none focus:ring-0 text-sm"
+                                        />
+                                    </div>
                                 </div>
                             </div>
 

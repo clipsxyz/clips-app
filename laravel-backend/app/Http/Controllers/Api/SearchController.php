@@ -21,12 +21,18 @@ class SearchController extends Controller
             'q' => 'required|string|max:200',
             'limit' => 'nullable|integer|min:1|max:20',
             'mode' => 'nullable|in:all,location,venue,landmark',
+            'level' => 'nullable|in:country,region,local',
+            'country' => 'nullable|string|max:120',
+            'region' => 'nullable|string|max:120',
         ]);
 
         $qRaw = trim((string) $request->query('q', ''));
         $q = strtolower($qRaw);
         $limit = min((int) $request->query('limit', 10), 20);
         $mode = (string) $request->query('mode', 'all');
+        $level = trim((string) $request->query('level', ''));
+        $countryName = trim((string) $request->query('country', ''));
+        $regionName = trim((string) $request->query('region', ''));
 
         if ($qRaw === '') {
             return response()->json([]);
@@ -35,53 +41,59 @@ class SearchController extends Controller
         $googleKey = config('services.google_maps.api_key');
         if (is_string($googleKey) && trim($googleKey) !== '') {
             try {
-                $google = Http::timeout(6)->get('https://maps.googleapis.com/maps/api/place/autocomplete/json', [
-                    'input' => $qRaw,
-                    'key' => $googleKey,
-                    'types' => 'geocode|establishment',
-                ]);
-                if ($google->ok()) {
-                    $payload = $google->json();
+                $searchInput = $this->autocompleteInputForLevel($qRaw, $level, $countryName, $regionName);
+                $countryIso = $this->countryNameToIso($countryName);
+                $payload = $this->googlePlaceAutocompletePayload(
+                    $searchInput,
+                    trim($googleKey),
+                    $mode,
+                    $level,
+                    $countryIso !== '' ? $countryIso : null
+                );
+                if (is_array($payload)) {
                     $predictions = is_array($payload['predictions'] ?? null) ? $payload['predictions'] : [];
                     $mapped = collect($predictions)
                         ->map(function ($item) {
                             $description = (string) ($item['description'] ?? '');
                             $types = is_array($item['types'] ?? null) ? $item['types'] : [];
                             $lowerTypes = array_map(fn($t) => strtolower((string) $t), $types);
+                            $kind = $this->classifyPlaceKind($lowerTypes);
 
-                            $kind = 'location';
-                            if (in_array('establishment', $lowerTypes, true) || in_array('point_of_interest', $lowerTypes, true)) {
-                                $kind = 'venue';
-                            }
-                            if (
-                                in_array('tourist_attraction', $lowerTypes, true) ||
-                                in_array('natural_feature', $lowerTypes, true) ||
-                                in_array('premise', $lowerTypes, true)
-                            ) {
-                                $kind = 'landmark';
-                            }
-
-                            $country = null;
-                            if (!empty($item['terms']) && is_array($item['terms'])) {
-                                $last = end($item['terms']);
-                                if (is_array($last) && !empty($last['value'])) {
-                                    $country = (string) $last['value'];
-                                }
-                            }
+                            $levels = $this->parsePlaceFeedLevels(
+                                is_array($item['terms'] ?? null) ? $item['terms'] : [],
+                                $description
+                            );
 
                             return [
                                 'name' => $description,
                                 'type' => $kind,
-                                'country' => $country,
+                                'country' => $levels['national'] ?: null,
+                                'local' => $levels['local'] ?: null,
+                                'regional' => $levels['regional'] ?: null,
+                                'national' => $levels['national'] ?: null,
+                                'display_name' => $levels['display_name'] ?: null,
+                                'feed_level' => $levels['feed_level'] ?: null,
                                 'place_id' => $item['place_id'] ?? null,
+                                'google_types' => $lowerTypes,
                             ];
                         })
-                        ->filter(function ($item) use ($mode) {
-                            if ($mode === 'all') return true;
-                            return ($item['type'] ?? 'location') === $mode;
+                        ->filter(function ($item) use ($mode, $level, $countryName, $regionName) {
+                            if ($mode !== 'all' && ($item['type'] ?? 'location') !== $mode) {
+                                return false;
+                            }
+                            if ($level === '') {
+                                return true;
+                            }
+
+                            return $this->matchesSignupLevel($item, $level, $countryName, $regionName);
                         })
                         ->take($limit)
                         ->values()
+                        ->map(function ($item) {
+                            unset($item['google_types']);
+
+                            return $item;
+                        })
                         ->toArray();
 
                     if (!empty($mapped)) {
@@ -96,7 +108,7 @@ class SearchController extends Controller
         // Fallback: local gazetteer for location mode + heuristics for venue/landmark strings.
         $results = [];
         $gazetteerPath = storage_path('app/data/locations.json');
-        if (file_exists($gazetteerPath)) {
+        if (($mode === 'all' || $mode === 'location') && file_exists($gazetteerPath)) {
             $data = json_decode(file_get_contents($gazetteerPath), true);
             $scored = collect(is_array($data) ? $data : [])
                 ->map(function ($item) use ($q) {
@@ -113,10 +125,18 @@ class SearchController extends Controller
                 ->values();
 
             foreach ($scored as $row) {
+                $name = (string) ($row['name'] ?? '');
+                $country = (string) ($row['country'] ?? '');
+                $levels = $this->parsePlaceFeedLevels([], $country ? "{$name}, {$country}" : $name);
                 $results[] = [
-                    'name' => (string) ($row['name'] ?? ''),
+                    'name' => $name,
                     'type' => 'location',
-                    'country' => $row['country'] ?? null,
+                    'country' => $country ?: null,
+                    'local' => $levels['local'] ?: null,
+                    'regional' => $levels['regional'] ?: null,
+                    'national' => $levels['national'] ?: null,
+                    'display_name' => $levels['display_name'] ?: null,
+                    'feed_level' => $levels['feed_level'] ?: null,
                     'place_id' => null,
                 ];
                 if (count($results) >= $limit) break;
@@ -142,6 +162,13 @@ class SearchController extends Controller
 
         $deduped = collect($results)
             ->filter(fn($item) => !empty($item['name']))
+            ->filter(function ($item) use ($mode) {
+                if ($mode === 'all') {
+                    return true;
+                }
+
+                return ($item['type'] ?? 'location') === $mode;
+            })
             ->unique(fn($item) => strtolower((string) $item['name']))
             ->take($limit)
             ->values()
@@ -271,7 +298,9 @@ class SearchController extends Controller
             $posts = Post::query()
                 ->where(function ($query) use ($q) {
                     $query->whereRaw("LOWER(COALESCE(text_content, '')) LIKE ?", ["%$q%"])
-                        ->orWhereRaw("LOWER(COALESCE(location_label, '')) LIKE ?", ["%$q%"]);
+                        ->orWhereRaw("LOWER(COALESCE(location_label, '')) LIKE ?", ["%$q%"])
+                        ->orWhereRaw("LOWER(COALESCE(venue, '')) LIKE ?", ["%$q%"])
+                        ->orWhereRaw("LOWER(COALESCE(landmark, '')) LIKE ?", ["%$q%"]);
                 })
                 ->select('id', 'user_id', 'user_handle', 'text_content', 'media_url', 'media_type', 'location_label', 'created_at')
                 ->orderByRaw(
@@ -300,6 +329,268 @@ class SearchController extends Controller
             'q' => $qRaw,
             'sections' => $sections
         ]);
+    }
+
+    /**
+     * Google Places Autocomplete (legacy). Tries Laravel Http first; on Windows SSL issues
+     * falls back to file_get_contents which uses PHP's default CA bundle.
+     *
+     * @return array<string, mixed>|null
+     */
+    /**
+     * @param  array<int, array{value?: string}>  $terms
+     * @return array{local: string, regional: string, national: string, display_name: string, feed_level: string}
+     */
+    private function parsePlaceFeedLevels(array $terms, string $description): array
+    {
+        $values = [];
+        foreach ($terms as $term) {
+            if (!is_array($term)) {
+                continue;
+            }
+            $value = trim((string) ($term['value'] ?? ''));
+            if ($value !== '') {
+                $values[] = $value;
+            }
+        }
+
+        $parts = array_values(array_filter(array_map('trim', explode(',', $description))));
+        if (count($values) === 0 && count($parts) > 0) {
+            $values = $parts;
+        }
+
+        $national = $values !== [] ? (string) $values[count($values) - 1] : '';
+        $local = $values[0] ?? ($parts[0] ?? $description);
+        $regional = count($values) >= 3
+            ? (string) $values[count($values) - 2]
+            : (count($values) === 2 ? (string) $values[1] : $local);
+
+        $feedLevel = 'local';
+        $displayName = $local;
+        if (count($values) <= 1) {
+            $feedLevel = 'national';
+            $displayName = $national !== '' ? $national : $local;
+            $local = $displayName;
+            $regional = $displayName;
+            $national = $displayName;
+        } elseif (count($values) === 2) {
+            $feedLevel = 'regional';
+            $displayName = $local;
+        }
+
+        return [
+            'local' => $local,
+            'regional' => $regional,
+            'national' => $national !== '' ? $national : $local,
+            'display_name' => $displayName,
+            'feed_level' => $feedLevel,
+        ];
+    }
+
+    /**
+     * Map app search tab → Google Places Autocomplete types restriction.
+     * @see https://developers.google.com/maps/documentation/places/web-service/autocomplete
+     */
+    private function googleAutocompleteTypesForMode(string $mode): ?string
+    {
+        return match ($mode) {
+            'venue' => 'establishment',
+            'location' => 'geocode',
+            default => null,
+        };
+    }
+
+    private function classifyPlaceKind(array $lowerTypes): string
+    {
+        $landmarkHints = [
+            'tourist_attraction', 'natural_feature', 'park', 'museum', 'church',
+            'mosque', 'synagogue', 'hindu_temple', 'university', 'cemetery',
+        ];
+        $venueHints = [
+            'establishment', 'point_of_interest', 'restaurant', 'bar', 'cafe',
+            'stadium', 'night_club', 'shopping_mall', 'gym', 'lodging', 'store',
+        ];
+
+        foreach ($landmarkHints as $type) {
+            if (in_array($type, $lowerTypes, true)) {
+                return 'landmark';
+            }
+        }
+        foreach ($venueHints as $type) {
+            if (in_array($type, $lowerTypes, true)) {
+                return 'venue';
+            }
+        }
+
+        return 'location';
+    }
+
+    private function autocompleteInputForLevel(string $qRaw, string $level, string $countryName, string $regionName): string
+    {
+        if ($level === 'local' && $regionName !== '' && $countryName !== '') {
+            return trim($qRaw) === ''
+                ? "{$regionName}, {$countryName}"
+                : "{$qRaw}, {$regionName}, {$countryName}";
+        }
+        if ($level === 'region' && $countryName !== '' && trim($qRaw) === '') {
+            return $countryName;
+        }
+
+        return $qRaw;
+    }
+
+    /**
+     * @param  array<string, mixed>  $item
+     */
+    private function matchesSignupLevel(array $item, string $level, string $countryName, string $regionName): bool
+    {
+        $name = strtolower((string) ($item['name'] ?? ''));
+        $national = strtolower((string) ($item['national'] ?? ''));
+        $regional = strtolower((string) ($item['regional'] ?? ''));
+        $feedLevel = (string) ($item['feed_level'] ?? '');
+        $types = is_array($item['google_types'] ?? null) ? $item['google_types'] : [];
+        $countryLower = strtolower($countryName);
+
+        if ($countryLower !== '') {
+            $inCountry = str_contains($name, $countryLower)
+                || $national === $countryLower
+                || str_ends_with($name, ", {$countryLower}");
+            if (!$inCountry) {
+                return false;
+            }
+        }
+
+        if ($level === 'country') {
+            if (in_array('country', $types, true)) {
+                return true;
+            }
+
+            return $feedLevel === 'national';
+        }
+
+        if ($level === 'region') {
+            if ($countryLower !== '' && ($national === $countryLower && $feedLevel === 'national')) {
+                return false;
+            }
+            if (in_array('administrative_area_level_1', $types, true)) {
+                return true;
+            }
+
+            return $feedLevel === 'regional' || ($feedLevel === 'local' && $countryLower !== '');
+        }
+
+        if ($level === 'local') {
+            $regionLower = strtolower($regionName);
+            if ($regionLower !== '') {
+                $inRegion = str_contains($name, $regionLower) || $regional === $regionLower;
+                if (!$inRegion) {
+                    return false;
+                }
+            }
+            if (in_array('locality', $types, true) || in_array('sublocality', $types, true)) {
+                return true;
+            }
+
+            return $feedLevel === 'local';
+        }
+
+        return true;
+    }
+
+    private function countryNameToIso(string $countryName): string
+    {
+        $map = [
+            'Ireland' => 'ie', 'Northern Ireland' => 'gb', 'UK' => 'gb', 'Germany' => 'de', 'France' => 'fr',
+            'Spain' => 'es', 'Italy' => 'it', 'Netherlands' => 'nl', 'Belgium' => 'be', 'Switzerland' => 'ch',
+            'Brazil' => 'br', 'USA' => 'us', 'United States' => 'us', 'Canada' => 'ca', 'Mexico' => 'mx',
+            'Argentina' => 'ar', 'Australia' => 'au', 'New Zealand' => 'nz', 'Japan' => 'jp', 'China' => 'cn',
+            'India' => 'in', 'Portugal' => 'pt', 'Poland' => 'pl', 'Sweden' => 'se', 'Norway' => 'no',
+            'Denmark' => 'dk', 'Finland' => 'fi', 'Austria' => 'at', 'Greece' => 'gr', 'Turkey' => 'tr',
+            'South Africa' => 'za', 'Nigeria' => 'ng', 'Egypt' => 'eg', 'Kenya' => 'ke', 'Colombia' => 'co',
+            'Chile' => 'cl', 'Peru' => 'pe', 'Venezuela' => 've', 'Ecuador' => 'ec', 'Russia' => 'ru',
+            'Singapore' => 'sg', 'Thailand' => 'th', 'Vietnam' => 'vn', 'Philippines' => 'ph', 'Indonesia' => 'id',
+        ];
+        $trimmed = trim($countryName);
+        if ($trimmed === '') {
+            return '';
+        }
+        if (isset($map[$trimmed])) {
+            return $map[$trimmed];
+        }
+        foreach ($map as $name => $iso) {
+            if (strcasecmp($name, $trimmed) === 0) {
+                return $iso;
+            }
+        }
+
+        return '';
+    }
+
+    private function googleAutocompleteTypesForSignupLevel(string $level): ?string
+    {
+        return match ($level) {
+            'country' => '(regions)',
+            'region' => '(regions)',
+            'local' => '(cities)',
+            default => null,
+        };
+    }
+
+    private function googlePlaceAutocompletePayload(
+        string $input,
+        string $apiKey,
+        string $mode = 'all',
+        string $level = '',
+        ?string $countryIso = null
+    ): ?array {
+        $query = [
+            'input' => $input,
+            'key' => $apiKey,
+        ];
+        $signupTypes = $this->googleAutocompleteTypesForSignupLevel($level);
+        if ($signupTypes !== null) {
+            $query['types'] = $signupTypes;
+        } else {
+            $types = $this->googleAutocompleteTypesForMode($mode);
+            if ($types !== null) {
+                $query['types'] = $types;
+            }
+        }
+        if ($countryIso !== null && $countryIso !== '') {
+            $query['components'] = 'country:'.strtolower($countryIso);
+        }
+
+        try {
+            $response = Http::timeout(6)->get(
+                'https://maps.googleapis.com/maps/api/place/autocomplete/json',
+                $query
+            );
+            if ($response->ok()) {
+                $payload = $response->json();
+                if (is_array($payload) && ($payload['status'] ?? '') === 'OK') {
+                    return $payload;
+                }
+            }
+        } catch (\Throwable $_) {
+            // Guzzle/cURL SSL errors on some Windows PHP installs — try stream fallback.
+        }
+
+        $url = 'https://maps.googleapis.com/maps/api/place/autocomplete/json?'
+            .http_build_query($query);
+        $context = stream_context_create([
+            'http' => ['timeout' => 6],
+            'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
+        ]);
+        $body = @file_get_contents($url, false, $context);
+        if ($body === false) {
+            return null;
+        }
+        $payload = json_decode($body, true);
+        if (!is_array($payload) || ($payload['status'] ?? '') !== 'OK') {
+            return null;
+        }
+
+        return $payload;
     }
 }
 

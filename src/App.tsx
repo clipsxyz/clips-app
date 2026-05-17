@@ -455,6 +455,7 @@ function PillTabs(props: {
   onClearCustom?: () => void;
   onSearchLocation?: (location: string, filterType: 'location' | 'venue' | 'landmark') => void;
   customLocation?: string | null;
+  customLocationLabel?: string | null;
   customFilterType?: 'location' | 'venue' | 'landmark' | null;
   userLocal?: string;
   userRegional?: string;
@@ -565,7 +566,7 @@ function PillTabs(props: {
 
   const hasAnyNotifications = notificationCount > 0 || insightsCount > 0 || questionsCount > 0;
   const passportInitials = ((user?.name || user?.handle || 'U').trim().split(/\s+/).map((s) => s[0]).slice(0, 2).join('') || 'U').toUpperCase();
-  const activeLabel = props.customLocation || (props.active === local ? 'Nearby' : props.active);
+  const activeLabel = props.customLocationLabel || props.customLocation || (props.active === local ? 'Nearby' : props.active);
   const headerLabel = showGazetteerTitle ? 'Gazetteer' : activeLabel;
   const activeHeaderDotClass = props.customLocation
     ? 'bg-red-500'
@@ -849,9 +850,9 @@ function PillTabs(props: {
               </span>
               <span className={`shrink-0 h-2.5 w-2.5 rounded-full ${activeHeaderDotClass}`} aria-hidden />
               <span
-                className="truncate"
+                className="max-w-[9rem] truncate sm:max-w-[11rem]"
                 style={{
-                  fontSize: '20px',
+                  fontSize: '18px',
                   fontWeight: 700,
                   lineHeight: '1.1',
                   fontFamily: 'Urbanist, "Instagram Sans", Inter, sans-serif',
@@ -1574,6 +1575,7 @@ function PostHeader({
                   <span className="truncate max-w-[min(52vw,14rem)] inline-block align-bottom">{isReclippedPost ? post.originalUserHandle : post.userHandle}</span>
                   <Flag
                     value={isCurrentUser ? user?.countryFlag || '' : getFlagForHandle(isReclippedPost ? post.originalUserHandle! : post.userHandle) || ''}
+                    national={isCurrentUser ? user?.national : undefined}
                     size={16}
                   />
                 </span>
@@ -1874,6 +1876,7 @@ function PostHeader({
                 <span className="truncate max-w-[min(52vw,14rem)] inline-block align-bottom">{isReclippedPost ? post.originalUserHandle : post.userHandle}</span>
                 <Flag
                   value={isCurrentUser ? (user?.countryFlag || '') : (getFlagForHandle(isReclippedPost ? post.originalUserHandle! : post.userHandle) || '')}
+                  national={isCurrentUser ? user?.national : undefined}
                   size={16}
                 />
               </h3>
@@ -6017,8 +6020,10 @@ function FeedPageWrapper() {
   const clearCustomLocationFromHeader = React.useCallback(() => {
     try {
       const params = new URLSearchParams(routerLocation.search);
-      if (params.has('location') || params.has('type')) {
+      if (params.has('location') || params.has('type') || params.has('label') || params.has('scope')) {
         params.delete('location');
+        params.delete('label');
+        params.delete('scope');
         params.delete('type');
         const nextSearch = params.toString();
         navigate(nextSearch ? `/feed?${nextSearch}` : '/feed', { replace: true });
@@ -6027,12 +6032,50 @@ function FeedPageWrapper() {
       // ignore URL parsing errors
     }
     setCustomLocation(null);
+    setCustomLocationLabel(null);
     setCustomFilterType(null);
     setPages([]);
     setCursor(0);
     setEnd(false);
     setError(null);
   }, [routerLocation.search, navigate]);
+
+  /** Reset to the user's national home feed and strip Discover location from state + URL. */
+  const goHomeFeed = React.useCallback(() => {
+    setShowFollowingFeed(false);
+    setActive(user?.national || defaultNational);
+    setCustomLocation(null);
+    setCustomLocationLabel(null);
+    setCustomFilterType(null);
+    setPages([]);
+    setCursor(0);
+    setEnd(false);
+    setLoading(false);
+    setError(null);
+    pagesLoadedForFilterRef.current = null;
+    requestTokenRef.current++;
+    try {
+      sessionStorage.removeItem('pendingLocation');
+      sessionStorage.removeItem('pendingLocationLabel');
+      sessionStorage.removeItem('pendingLocationScope');
+      sessionStorage.removeItem('pendingFilterType');
+    } catch {
+      /* ignore */
+    }
+    try {
+      const params = new URLSearchParams(routerLocation.search);
+      if (params.has('location') || params.has('type') || params.has('label') || params.has('scope')) {
+        params.delete('location');
+        params.delete('label');
+        params.delete('scope');
+        params.delete('type');
+        const nextSearch = params.toString();
+        navigate(nextSearch ? `/feed?${nextSearch}` : '/feed', { replace: true });
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [user?.national, defaultNational, routerLocation.search, navigate]);
 
 
   // Update active tab when user location changes
@@ -6060,6 +6103,7 @@ function FeedPageWrapper() {
     return () => window.removeEventListener('locationUpdated', handleLocationUpdate as EventListener);
   }, [active]);
   const [customLocation, setCustomLocation] = React.useState<string | null>(null);
+  const [customLocationLabel, setCustomLocationLabel] = React.useState<string | null>(null);
   const [customFilterType, setCustomFilterType] = React.useState<'location' | 'venue' | 'landmark' | null>(null);
   const [pages, setPages] = React.useState<Post[][]>([]);
   const [ads, setAds] = React.useState<Ad[]>([]);
@@ -6462,6 +6506,8 @@ function FeedPageWrapper() {
     return loc !== '' && loc !== local && loc !== regional && loc !== national;
   }, [customLocation, user?.local, user?.regional, user?.national]);
 
+  const customLocationDisplay = customLocationLabel || customLocation;
+
   const isNotifyOnForCurrentLocation = React.useMemo(() => {
     if (!customLocation) return false;
     const key = customLocation.trim().toLowerCase();
@@ -6497,6 +6543,7 @@ function FeedPageWrapper() {
       setActive(t);
       setShowFollowingFeed(t === 'Following');
       setCustomLocation(null);
+      setCustomLocationLabel(null);
       setCustomFilterType(null);
       setPages([]);
       setCursor(0);
@@ -6507,8 +6554,10 @@ function FeedPageWrapper() {
       requestTokenRef.current++;
       try {
         const params = new URLSearchParams(routerLocation.search);
-        if (params.has('location') || params.has('type')) {
+        if (params.has('location') || params.has('type') || params.has('label') || params.has('scope')) {
           params.delete('location');
+          params.delete('label');
+          params.delete('scope');
           params.delete('type');
           const qs = params.toString();
           navigate(qs ? `/feed?${qs}` : '/feed', { replace: true });
@@ -6589,26 +6638,10 @@ function FeedPageWrapper() {
 
   // Listen for resetFeed event from Home button
   React.useEffect(() => {
-    const handleResetFeed = () => {
-      console.log('resetFeed event received, clearing customLocation and resetting feed');
-      setShowFollowingFeed(false);
-      setActive(user?.national || 'Ireland');
-      setCustomLocation(null);
-      setCustomFilterType(null);
-      setPages([]);
-      setCursor(0);
-      setEnd(false);
-      setLoading(false);
-      setError(null);
-      pagesLoadedForFilterRef.current = null;
-      requestTokenRef.current++;
-      // Clear any pending location from sessionStorage
-      sessionStorage.removeItem('pendingLocation');
-      sessionStorage.removeItem('pendingFilterType');
-    };
+    const handleResetFeed = () => goHomeFeed();
     window.addEventListener('resetFeed', handleResetFeed);
     return () => window.removeEventListener('resetFeed', handleResetFeed);
-  }, [user?.national]);
+  }, [goHomeFeed]);
 
   // Listen for unread messages count
   React.useEffect(() => {
@@ -6687,6 +6720,7 @@ function FeedPageWrapper() {
   React.useEffect(() => {
     const params = new URLSearchParams(routerLocation.search);
     const q = params.get('location');
+    const label = params.get('label');
     const type = params.get('type');
     console.log('URL params changed, location param:', q, 'type:', type, 'current customLocation:', customLocation, 'pathname:', routerLocation.pathname);
 
@@ -6696,6 +6730,7 @@ function FeedPageWrapper() {
       if (customLocation) {
         console.log('Not on feed page, clearing customLocation...');
         setCustomLocation(null);
+        setCustomLocationLabel(null);
         setCustomFilterType(null);
         setPages([]);
         setCursor(0);
@@ -6711,6 +6746,7 @@ function FeedPageWrapper() {
       setShowFollowingFeed(false);
       setActive((prev) => (prev === 'Following' ? (user?.national || defaultNational) : prev));
       setCustomLocation(q);
+      setCustomLocationLabel(label?.trim() || q);
       setCustomFilterType(
         type === 'venue' ? 'venue' : type === 'landmark' ? 'landmark' : 'location'
       );
@@ -6724,6 +6760,7 @@ function FeedPageWrapper() {
       // URL param was cleared AND we're on feed page, clear customLocation too
       console.log('URL param cleared on feed page, clearing customLocation...');
       setCustomLocation(null);
+      setCustomLocationLabel(null);
       setCustomFilterType(null);
       setPages([]);
       setCursor(0);
@@ -6781,11 +6818,13 @@ function FeedPageWrapper() {
   React.useEffect(() => {
     const handleLocationChange = (event: CustomEvent) => {
       const location = event.detail.location;
+      const locationLabel = event.detail.locationLabel || location;
       const filterType = event.detail.filterType as 'location' | 'venue' | 'landmark' | undefined;
       console.log('Feed received location change:', location);
       setShowFollowingFeed(false);
       setActive((prev) => (prev === 'Following' ? (user?.national || defaultNational) : prev));
       setCustomLocation(location);
+      setCustomLocationLabel(locationLabel);
       setCustomFilterType(filterType || 'location');
       setPages([]);
       setCursor(0);
@@ -6804,17 +6843,21 @@ function FeedPageWrapper() {
     let pendingTimer: number | undefined;
     // Check for pending location from Discover page
     const pendingLocation = sessionStorage.getItem('pendingLocation');
+    const pendingLocationLabel = sessionStorage.getItem('pendingLocationLabel');
     const pendingFilterType = sessionStorage.getItem('pendingFilterType') as 'location' | 'venue' | 'landmark' | null;
     console.log('Checking for pending location, found:', pendingLocation);
     if (pendingLocation) {
       console.log('Feed found pending location:', pendingLocation, 'setting customLocation...');
       sessionStorage.removeItem('pendingLocation');
+      sessionStorage.removeItem('pendingLocationLabel');
+      sessionStorage.removeItem('pendingLocationScope');
       sessionStorage.removeItem('pendingFilterType');
       pendingTimer = window.setTimeout(() => {
         console.log('Actually setting customLocation to:', pendingLocation);
         setShowFollowingFeed(false);
         setActive((prev) => (prev === 'Following' ? (user?.national || defaultNational) : prev));
         setCustomLocation(pendingLocation);
+        setCustomLocationLabel(pendingLocationLabel || pendingLocation);
         setCustomFilterType(pendingFilterType || 'location');
         setPages([]);
         setCursor(0);
@@ -8128,6 +8171,7 @@ function FeedPageWrapper() {
         onClearCustom={clearCustomLocationFromHeader}
         onSearchLocation={applyCustomLocationFromHeader}
         customLocation={customLocation}
+        customLocationLabel={customLocationLabel}
         customFilterType={customFilterType}
         userLocal={user?.local}
         userRegional={user?.regional}
@@ -8461,10 +8505,10 @@ function FeedPageWrapper() {
                   You’re early to this feed
                 </div>
                 <div className="text-xl font-semibold mb-2 text-white">
-                  {`No locals are posting in ${customLocation} yet`}
+                  {`No locals are posting in ${customLocationDisplay} yet`}
                 </div>
                 <div className="text-sm text-gray-400 mb-5">
-                  {`We’ll light up this feed once people in ${customLocation} start sharing.`}
+                  {`We’ll light up this feed once people in ${customLocationDisplay} start sharing.`}
                 </div>
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 justify-center">
                   <button
@@ -8476,22 +8520,18 @@ function FeedPageWrapper() {
                         : 'bg-gradient-to-r from-sky-500 via-indigo-500 to-purple-500 text-white hover:brightness-110'
                     }`}
                   >
-                    {isNotifyOnForCurrentLocation ? 'You’ll be notified' : `Notify me when ${customLocation} wakes up`}
+                    {isNotifyOnForCurrentLocation ? 'You’ll be notified' : `Notify me when ${customLocationDisplay} wakes up`}
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      // Use the existing resetFeed flow and navigate cleanly back to /feed (no ?location)
-                      window.dispatchEvent(new CustomEvent('resetFeed'));
-                      navigate('/feed');
-                    }}
+                    onClick={() => goHomeFeed()}
                     className="inline-flex items-center justify-center px-4 py-2.5 rounded-full text-sm font-medium text-gray-300 hover:text-white hover:bg-white/5 border border-white/40 transition-colors"
                   >
                     Back to your home feed
                   </button>
                 </div>
                 <div className="mt-4 text-[11px] text-gray-500">
-                  Feed warming up · we’ll only ping you when real clips from {customLocation} start to appear.
+                  Feed warming up · we’ll only ping you when real clips from {customLocationDisplay} start to appear.
                 </div>
               </div>
             ) : (
@@ -8500,7 +8540,7 @@ function FeedPageWrapper() {
                   Your home feed
                 </div>
                 <div className="text-xl font-semibold mb-2 text-white">
-                  {`No posts in your ${customLocation} feed yet`}
+                  {`No posts in your ${customLocationDisplay} feed yet`}
                 </div>
                 <div className="text-sm text-gray-400 mb-4">
                   You can be the first to post here. Share what’s happening around you to start this feed.

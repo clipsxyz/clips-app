@@ -14,6 +14,8 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
 import { searchLocations, type LocationSuggestion } from '../api/locations';
+import { pickPlaceFeedScopeNative } from '../utils/pickPlaceFeedScope.native';
+import { resolvePlaceFeedSelection } from '../utils/pickPlaceFeedScope';
 import { unifiedSearch, type SearchSections } from '../api/search';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
@@ -102,18 +104,21 @@ export default function DiscoverScreen({ navigation }: any) {
     }, []);
 
     useEffect(() => {
-        if (!query.trim()) {
+        const q = query.trim();
+        if (q.length < 2) {
             setSuggestions([]);
+            setLoading(false);
             return;
         }
         const ctrl = new AbortController();
+        const modeForApi = discoverMode === 'venue' ? 'venue' : discoverMode === 'landmark' ? 'landmark' : 'all';
         const id = setTimeout(async () => {
             try {
                 setLoading(true);
-                const res = await searchLocations(query.trim(), 20);
+                const res = await searchLocations(q, 20, modeForApi, ctrl.signal);
                 if (!ctrl.signal.aborted) setSuggestions(res);
             } catch (e) {
-                if (!ctrl.signal.aborted) setSuggestions([]);
+                if (!ctrl.signal.aborted && (e as Error)?.name !== 'AbortError') setSuggestions([]);
             } finally {
                 if (!ctrl.signal.aborted) setLoading(false);
             }
@@ -122,7 +127,7 @@ export default function DiscoverScreen({ navigation }: any) {
             clearTimeout(id);
             ctrl.abort();
         };
-    }, [query]);
+    }, [query, discoverMode]);
 
     useEffect(() => {
         const q = query.trim();
@@ -162,16 +167,51 @@ export default function DiscoverScreen({ navigation }: any) {
         });
     };
 
-    const selectLocation = async (name: string, type: 'location' | 'venue' | 'landmark' = 'location') => {
+    const openFeedSelection = async (
+        selection: ReturnType<typeof resolvePlaceFeedSelection>,
+        type: 'location' | 'venue' | 'landmark' = 'location'
+    ) => {
         try {
-            addRecent(name, discoverMode);
-            await AsyncStorage.setItem('pendingLocation', name);
+            addRecent(selection.label, discoverMode);
+            await AsyncStorage.setItem('pendingLocation', selection.filter);
+            await AsyncStorage.setItem('pendingLocationLabel', selection.label);
+            await AsyncStorage.setItem('pendingLocationScope', selection.scope);
             await AsyncStorage.setItem('pendingFilterType', type);
-            // Navigate to feed with location
-            navigation.navigate('Home', { location: name, filterType: type });
+            navigation.navigate('Home', {
+                location: selection.filter,
+                locationLabel: selection.label,
+                locationScope: selection.scope,
+                filterType: type,
+            });
         } catch (err) {
             console.error('Error saving location:', err);
         }
+    };
+
+    const onPlaceSuggestionPress = (suggestion: LocationSuggestion) => {
+        const kind =
+            discoverMode === 'venue' ? 'venue' : discoverMode === 'landmark' ? 'landmark' : 'location';
+        if (kind !== 'location') {
+            void openFeedSelection(resolvePlaceFeedSelection(suggestion), kind);
+            return;
+        }
+        pickPlaceFeedScopeNative(suggestion, (selection) => {
+            void openFeedSelection(selection, 'location');
+        });
+    };
+
+    const selectPopularCity = (name: string) => {
+        void openFeedSelection(
+            resolvePlaceFeedSelection({
+                name,
+                type: 'location',
+                country: name,
+                national: name,
+                local: name,
+                regional: name,
+            }),
+            discoverMode === 'venue' ? 'venue' : discoverMode === 'landmark' ? 'landmark' : 'location'
+        );
     };
 
     const rawName = user?.name || 'Friend';
@@ -179,7 +219,9 @@ export default function DiscoverScreen({ navigation }: any) {
     const filteredSuggestionList = suggestions.filter((s) => isTypeMatchForMode((s as any)?.type, discoverMode));
     const displayList = filteredSuggestionList.length > 0
         ? filteredSuggestionList.slice(0, 8)
-        : results.slice(0, 6).map(r => ({ name: r, type: 'city' as const }));
+        : suggestions.length > 0
+            ? suggestions.slice(0, 8)
+            : results.slice(0, 6).map(r => ({ name: r, type: 'city' as const }));
     const topUsers = Array.isArray(topSections.users?.items) ? topSections.users!.items.slice(0, 3) : [];
     const topLocations = Array.isArray(topSections.locations?.items)
         ? topSections.locations!.items.filter((loc: any) => isTypeMatchForMode(loc?.type, discoverMode)).slice(0, 3)
@@ -191,9 +233,11 @@ export default function DiscoverScreen({ navigation }: any) {
         const trimmed = query.trim();
         if (!trimmed) return;
         const current = activeIndex >= 0 && displayList[activeIndex] ? displayList[activeIndex] : null;
-        const selected = current?.name || trimmed;
-        const type = discoverMode === 'venue' ? 'venue' : discoverMode === 'landmark' ? 'landmark' : 'location';
-        void selectLocation(selected, type);
+        if (current) {
+            onPlaceSuggestionPress(current as LocationSuggestion);
+            return;
+        }
+        selectPopularCity(trimmed);
     };
 
     return (
@@ -232,7 +276,7 @@ export default function DiscoverScreen({ navigation }: any) {
                                 return (
                                 <TouchableOpacity
                                     key={city}
-                                    onPress={() => selectLocation(city, discoverMode === 'venue' ? 'venue' : discoverMode === 'landmark' ? 'landmark' : 'location')}
+                                    onPress={() => selectPopularCity(city)}
                                     style={styles.cityButton}
                                 >
                                     <Icon name="location" size={16} color={colors[index % colors.length]} />
@@ -254,6 +298,57 @@ export default function DiscoverScreen({ navigation }: any) {
 
                     {/* Search input */}
                     <View style={styles.searchContainer}>
+                        {query.trim().length >= 2 && (
+                            <View style={styles.suggestionsContainer}>
+                                {loading && displayList.length === 0 && (
+                                    <Text style={styles.suggestionEmpty}>Searching…</Text>
+                                )}
+                                {!loading && displayList.length === 0 && (
+                                    <Text style={styles.suggestionEmpty}>No places found. Try another spelling.</Text>
+                                )}
+                                {displayList.length > 0 && (
+                                <FlatList
+                                    data={displayList}
+                                    keyExtractor={(item, idx) => `${item.type}-${item.name}-${idx}`}
+                                    keyboardShouldPersistTaps="handled"
+                                    renderItem={({ item, index }) => (
+                                        <TouchableOpacity
+                                            onPress={() =>
+                                                onPlaceSuggestionPress({
+                                                    name: item.name,
+                                                    type:
+                                                        discoverMode === 'venue'
+                                                            ? 'venue'
+                                                            : discoverMode === 'landmark'
+                                                                ? 'landmark'
+                                                                : 'location',
+                                                    country: (item as any).country,
+                                                    local: (item as any).local,
+                                                    regional: (item as any).regional,
+                                                    national: (item as any).national,
+                                                    display_name: (item as any).display_name,
+                                                })
+                                            }
+                                            style={[
+                                                styles.suggestionItem,
+                                                activeIndex === index && styles.suggestionItemActive
+                                            ]}
+                                        >
+                                            <Icon name="location" size={16} color="#f472b6" />
+                                            <View style={styles.suggestionContent}>
+                                                <Text style={styles.suggestionName}>{item.name}</Text>
+                                                {item.country && (
+                                                    <Text style={styles.suggestionMeta}>
+                                                        {item.type} • {item.country}
+                                                    </Text>
+                                                )}
+                                            </View>
+                                        </TouchableOpacity>
+                                    )}
+                                />
+                                )}
+                            </View>
+                        )}
                         <View style={styles.searchInputWrapper}>
                             <Icon name="search" size={20} color="#9CA3AF" style={styles.searchIcon} />
                             <TextInput
@@ -283,44 +378,6 @@ export default function DiscoverScreen({ navigation }: any) {
                                 <ActivityIndicator size="small" color="#8B5CF6" style={styles.loadingIndicator} />
                             )}
                         </View>
-
-                        {/* Suggestions dropdown */}
-                        {query && displayList.length > 0 && (
-                            <View style={styles.suggestionsContainer}>
-                                <FlatList
-                                    data={displayList}
-                                    keyExtractor={(item, idx) => `${item.type}-${item.name}-${idx}`}
-                                    renderItem={({ item, index }) => (
-                                        <TouchableOpacity
-                                            onPress={() =>
-                                                selectLocation(
-                                                    item.name,
-                                                    discoverMode === 'venue'
-                                                        ? 'venue'
-                                                        : discoverMode === 'landmark'
-                                                            ? 'landmark'
-                                                            : 'location'
-                                                )
-                                            }
-                                            style={[
-                                                styles.suggestionItem,
-                                                activeIndex === index && styles.suggestionItemActive
-                                            ]}
-                                        >
-                                            <Icon name="location" size={16} color="#f472b6" />
-                                            <View style={styles.suggestionContent}>
-                                                <Text style={styles.suggestionName}>{item.name}</Text>
-                                                {item.country && (
-                                                    <Text style={styles.suggestionMeta}>
-                                                        {item.type} • {item.country}
-                                                    </Text>
-                                                )}
-                                            </View>
-                                        </TouchableOpacity>
-                                    )}
-                                />
-                            </View>
-                        )}
                     </View>
                     {!!query.trim() && (
                         <View style={styles.topResultsCard}>
@@ -329,7 +386,13 @@ export default function DiscoverScreen({ navigation }: any) {
                                 <TouchableOpacity
                                     key={`loc-${loc.name}-${idx}`}
                                     style={styles.topResultRow}
-                                    onPress={() => selectLocation(loc.name, discoverMode === 'venue' ? 'venue' : discoverMode === 'landmark' ? 'landmark' : 'location')}
+                                    onPress={() =>
+                                        onPlaceSuggestionPress({
+                                            name: loc.name,
+                                            type: loc.type || 'location',
+                                            country: loc.country,
+                                        })
+                                    }
                                 >
                                     <Icon name="location-outline" size={15} color="#93C5FD" />
                                     <Text style={styles.topResultText}>{loc.name}</Text>
@@ -510,11 +573,17 @@ const styles = StyleSheet.create({
         marginLeft: 8,
     },
     suggestionsContainer: {
-        marginTop: 8,
+        marginBottom: 8,
         ...glassPanel,
         borderRadius: 16,
-        maxHeight: 300,
+        maxHeight: 220,
         overflow: 'hidden',
+    },
+    suggestionEmpty: {
+        color: '#9CA3AF',
+        fontSize: 13,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
     },
     suggestionItem: {
         flexDirection: 'row',

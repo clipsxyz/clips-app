@@ -13,6 +13,7 @@ import { MdOutlineShareLocation } from 'react-icons/md';
 import { TEXT_STORY_TEMPLATES, TextStoryTemplate } from '../textStoryTemplates';
 import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
 import { showUploadOverlay } from '../utils/uploadOverlay';
+import PlaceAutocompleteField from '../components/PlaceAutocompleteField';
 
 export default function TextOnlyPostPage() {
     const { user } = useAuth();
@@ -370,7 +371,7 @@ export default function TextOnlyPostPage() {
             {showLocationSheet && (
                 <div className="fixed inset-0 z-50 flex items-end bg-black/60" onClick={() => setShowLocationSheet(false)}>
                     <div
-                        className="w-full max-h-[85vh] overflow-y-auto bg-black rounded-t-2xl border-t border-white/10"
+                        className="w-full max-h-[85vh] overflow-y-auto overflow-x-visible bg-black rounded-t-2xl border-t border-white/10"
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="sticky top-0 bg-black border-b border-white/10 px-4 py-3 flex items-center justify-between">
@@ -383,35 +384,35 @@ export default function TextOnlyPostPage() {
                                 <FiX className="w-5 h-5" />
                             </button>
                         </div>
-                        <div className="p-4 space-y-4">
+                        <div className="p-4 space-y-6 pb-8">
                             <div>
                                 <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Location</label>
-                                <input
-                                    type="text"
+                                <PlaceAutocompleteField
+                                    mode="location"
                                     value={locationText}
-                                    onChange={(e) => setLocationText(e.target.value)}
-                                    placeholder="Add location"
-                                    className="w-full px-3 py-2.5 rounded-lg bg-black border border-white/15 text-white text-sm outline-none focus:ring-2 focus:ring-white/30"
+                                    onChange={setLocationText}
+                                    placeholder="Add location (city, region, country)"
+                                    inputClassName="w-full px-3 py-2.5 rounded-lg bg-black border border-white/15 text-white text-sm outline-none focus:ring-2 focus:ring-white/30"
                                 />
                             </div>
                             <div>
                                 <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Venue</label>
-                                <input
-                                    type="text"
+                                <PlaceAutocompleteField
+                                    mode="venue"
                                     value={venueText}
-                                    onChange={(e) => setVenueText(e.target.value)}
+                                    onChange={setVenueText}
                                     placeholder="Add venue (e.g. café, stadium)"
-                                    className="w-full px-3 py-2.5 rounded-lg bg-black border border-white/15 text-white text-sm outline-none focus:ring-2 focus:ring-white/30"
+                                    inputClassName="w-full px-3 py-2.5 rounded-lg bg-black border border-white/15 text-white text-sm outline-none focus:ring-2 focus:ring-white/30"
                                 />
                             </div>
                             <div>
                                 <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Landmark</label>
-                                <input
-                                    type="text"
+                                <PlaceAutocompleteField
+                                    mode="landmark"
                                     value={landmarkText}
-                                    onChange={(e) => setLandmarkText(e.target.value)}
+                                    onChange={setLandmarkText}
                                     placeholder="Add landmark (e.g. Phoenix Park, river)"
-                                    className="w-full px-3 py-2.5 rounded-lg bg-black border border-white/15 text-white text-sm outline-none focus:ring-2 focus:ring-white/30"
+                                    inputClassName="w-full px-3 py-2.5 rounded-lg bg-black border border-white/15 text-white text-sm outline-none focus:ring-2 focus:ring-white/30"
                                 />
                             </div>
                             <div>

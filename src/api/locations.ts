@@ -1,62 +1,70 @@
-import { getRuntimeEnv, getReactNativeDefaultApiBaseUrl } from '../config/runtimeEnv';
+import { getApiBaseUrl } from './apiBaseUrl';
 
-function resolveLocationsApiBase(): string {
-    const envUrl = getRuntimeEnv('VITE_API_URL');
-    if (envUrl) {
-        // React Native: avoid localhost API URL on physical devices.
-        if (typeof window === 'undefined') {
-            try {
-                const parsed = new URL(envUrl);
-                if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
-                    const rn = getReactNativeDefaultApiBaseUrl();
-                    if (rn) {
-                        const rnParsed = new URL(rn);
-                        parsed.protocol = rnParsed.protocol;
-                        parsed.hostname = rnParsed.hostname;
-                        parsed.port = rnParsed.port;
-                        return parsed.toString().replace(/\/$/, '');
-                    }
-                }
-            } catch {
-                // Keep original env URL when invalid/relative.
-            }
-        }
-        return envUrl;
+const API_BASE_URL = getApiBaseUrl();
+
+function buildPlacesUrl(path: string, params: Record<string, string>): string {
+    const base = API_BASE_URL.replace(/\/$/, '');
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+    const fullPath = `${base}${normalizedPath}`;
+    const url = fullPath.startsWith('http')
+        ? new URL(fullPath)
+        : new URL(fullPath, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+    for (const [key, value] of Object.entries(params)) {
+        url.searchParams.set(key, value);
     }
-    const rn = getReactNativeDefaultApiBaseUrl();
-    if (rn) return rn;
-    return 'http://localhost:8000/api';
+    return url.toString();
 }
-
-const API_BASE_URL = resolveLocationsApiBase();
 
 export type LocationSuggestion = {
     name: string;
     type: 'local' | 'city' | 'country' | 'location' | 'venue' | 'landmark';
     country?: string;
     city?: string;
+    local?: string;
+    regional?: string;
+    national?: string;
+    display_name?: string;
+    feed_level?: 'local' | 'regional' | 'national';
     place_id?: string | null;
+};
+
+export type SignupLocationLevel = 'country' | 'region' | 'local';
+
+export type SearchLocationsOptions = {
+    level?: SignupLocationLevel;
+    country?: string;
+    region?: string;
 };
 
 export async function searchLocations(
     query: string,
     limit = 20,
-    mode: 'all' | 'location' | 'venue' | 'landmark' = 'all'
+    mode: 'all' | 'location' | 'venue' | 'landmark' = 'all',
+    signal?: AbortSignal,
+    scope?: SearchLocationsOptions
 ): Promise<LocationSuggestion[]> {
-    const url = new URL(`${API_BASE_URL}/search/places`);
-    url.searchParams.set('q', query);
-    url.searchParams.set('limit', String(limit));
-    url.searchParams.set('mode', mode);
-    const res = await fetch(url.toString());
-    if (res.ok) return res.json();
+    const params: Record<string, string> = {
+        q: query,
+        limit: String(limit),
+        mode,
+    };
+    if (scope?.level) params.level = scope.level;
+    if (scope?.country?.trim()) params.country = scope.country.trim();
+    if (scope?.region?.trim()) params.region = scope.region.trim();
 
-    // Backward-compat fallback for environments without the new endpoint.
-    const legacy = new URL(`${API_BASE_URL}/locations/search`);
-    legacy.searchParams.set('q', query);
-    legacy.searchParams.set('limit', String(limit));
-    const legacyRes = await fetch(legacy.toString());
+    const url = buildPlacesUrl('/search/places', params);
+    const res = await fetch(url, { signal });
+    if (res.ok) {
+        const data = await res.json();
+        return Array.isArray(data) ? data : [];
+    }
+
+    const legacyUrl = buildPlacesUrl('/locations/search', {
+        q: query,
+        limit: String(limit),
+    });
+    const legacyRes = await fetch(legacyUrl, { signal });
     if (!legacyRes.ok) throw new Error('Failed to fetch locations');
-    return legacyRes.json();
+    const legacyData = await legacyRes.json();
+    return Array.isArray(legacyData) ? legacyData : [];
 }
-
-

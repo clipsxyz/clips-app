@@ -3,6 +3,7 @@ env.zip
 src.zip
 .env
 .env.local
+firebase-web.local.json
 dist/
 
 # PHPUnit coverage (Laravel backend)
