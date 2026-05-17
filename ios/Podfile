@@ -15,6 +15,10 @@ if linkage != nil
 end
 
 target 'ClipsApp' do
+  # Vendored iOS binaries (npm run setup:ffmpeg-native). Must be before RN autolink.
+  pod 'ffmpeg-kit-ios-https-gpl', :podspec => './ffmpeg-kit-ios-https-gpl-local.podspec'
+  pod 'ffmpeg-kit-react-native-alt', :subspecs => ['https-gpl'], :podspec => '../node_modules/ffmpeg-kit-react-native-alt/ffmpeg-kit-react-native-alt.podspec'
+
   config = use_native_modules!
 
   use_react_native!(

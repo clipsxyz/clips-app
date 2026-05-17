@@ -10,6 +10,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
+import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import { chipActiveMagenta, chipActiveMagentaText, glassPanel, glassSearch, gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import LiveStreamInterface from '../components/LiveStreamInterface';
 import { useLiveStreaming } from '../hooks/useLiveStreaming';
 
@@ -104,7 +106,7 @@ const LiveStreamScreen: React.FC = () => {
                 {location}
             </Text>
             {selectedLocation === location && (
-                <Icon name="checkmark" size={20} color="#8B5CF6" />
+                <Icon name="checkmark" size={20} color="#f472b6" />
             )}
         </TouchableOpacity>
     );
@@ -120,7 +122,7 @@ const LiveStreamScreen: React.FC = () => {
     }
 
     return (
-        <SafeAreaView style={styles.container}>
+        <GazetteerScreenShell>
             <View style={styles.content}>
                 <View style={styles.header}>
                     <Text style={styles.title}>Go Live</Text>
@@ -156,15 +158,15 @@ const LiveStreamScreen: React.FC = () => {
                     <View style={styles.featuresContainer}>
                         <Text style={styles.featuresTitle}>Live Stream Features</Text>
                         <View style={styles.featureItem}>
-                            <Icon name="chatbubble" size={20} color="#8B5CF6" />
+                            <Icon name="chatbubble" size={20} color="#f472b6" />
                             <Text style={styles.featureText}>Real-time comments</Text>
                         </View>
                         <View style={styles.featureItem}>
-                            <Icon name="heart" size={20} color="#8B5CF6" />
+                            <Icon name="heart" size={20} color="#f472b6" />
                             <Text style={styles.featureText}>Live reactions</Text>
                         </View>
                         <View style={styles.featureItem}>
-                            <Icon name="eye" size={20} color="#8B5CF6" />
+                            <Icon name="eye" size={20} color="#f472b6" />
                             <Text style={styles.featureText}>Viewer count</Text>
                         </View>
                     </View>
@@ -190,7 +192,7 @@ const LiveStreamScreen: React.FC = () => {
                     <View style={styles.modalHeader}>
                         <Text style={styles.modalTitle}>Select Location</Text>
                         <TouchableOpacity onPress={() => setShowLocationModal(false)}>
-                            <Icon name="close" size={24} color="#6B7280" />
+                            <Icon name="close" size={24} color="#9CA3AF" />
                         </TouchableOpacity>
                     </View>
 
@@ -209,15 +211,11 @@ const LiveStreamScreen: React.FC = () => {
                     </View>
                 </SafeAreaView>
             </Modal>
-        </SafeAreaView>
+        </GazetteerScreenShell>
     );
 };
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#FFFFFF',
-    },
     content: {
         flex: 1,
         paddingHorizontal: 16,
@@ -229,12 +227,12 @@ const styles = StyleSheet.create({
     title: {
         fontSize: 28,
         fontWeight: 'bold',
-        color: '#111827',
+        color: '#FFFFFF',
         marginBottom: 8,
     },
     subtitle: {
         fontSize: 16,
-        color: '#6B7280',
+        color: '#9CA3AF',
         textAlign: 'center',
     },
     formContainer: {
@@ -246,40 +244,43 @@ const styles = StyleSheet.create({
     label: {
         fontSize: 16,
         fontWeight: '600',
-        color: '#111827',
+        color: '#E5E7EB',
         marginBottom: 8,
     },
     textInput: {
-        backgroundColor: '#F3F4F6',
         borderRadius: 12,
         paddingHorizontal: 16,
         paddingVertical: 12,
         fontSize: 16,
-        color: '#111827',
+        color: '#FFFFFF',
+        ...glassSearch,
     },
     locationButton: {
-        backgroundColor: '#F3F4F6',
         borderRadius: 12,
         paddingHorizontal: 16,
         paddingVertical: 12,
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
+        ...glassSearch,
     },
     locationButtonText: {
         fontSize: 16,
         color: '#9CA3AF',
     },
     locationButtonTextSelected: {
-        color: '#111827',
+        color: '#FFFFFF',
     },
     featuresContainer: {
         marginTop: 24,
+        borderRadius: 12,
+        padding: 14,
+        ...glassPanel,
     },
     featuresTitle: {
         fontSize: 18,
         fontWeight: '600',
-        color: '#111827',
+        color: '#FFFFFF',
         marginBottom: 16,
     },
     featureItem: {
@@ -290,10 +291,10 @@ const styles = StyleSheet.create({
     },
     featureText: {
         fontSize: 16,
-        color: '#374151',
+        color: '#D1D5DB',
     },
     startButton: {
-        backgroundColor: '#8B5CF6',
+        backgroundColor: '#d91b5c',
         borderRadius: 12,
         paddingVertical: 16,
         flexDirection: 'row',
@@ -303,7 +304,7 @@ const styles = StyleSheet.create({
         marginBottom: 32,
     },
     startButtonDisabled: {
-        backgroundColor: '#D1D5DB',
+        backgroundColor: 'rgba(217, 27, 92, 0.35)',
     },
     startButtonText: {
         color: '#FFFFFF',
@@ -312,7 +313,7 @@ const styles = StyleSheet.create({
     },
     modalContainer: {
         flex: 1,
-        backgroundColor: '#FFFFFF',
+        backgroundColor: '#0b0711',
     },
     modalHeader: {
         flexDirection: 'row',
@@ -320,13 +321,12 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingHorizontal: 16,
         paddingVertical: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#E5E7EB',
+        ...gazetteerHeader,
     },
     modalTitle: {
         fontSize: 20,
         fontWeight: '600',
-        color: '#111827',
+        color: '#FFFFFF',
     },
     locationsList: {
         flex: 1,
@@ -338,33 +338,33 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingVertical: 16,
         borderBottomWidth: 1,
-        borderBottomColor: '#F3F4F6',
+        borderBottomColor: 'rgba(255, 255, 255, 0.08)',
     },
     selectedLocationItem: {
-        backgroundColor: '#F3F4F6',
+        ...chipActiveMagenta,
     },
     locationText: {
         fontSize: 16,
-        color: '#111827',
+        color: '#E5E7EB',
     },
     selectedLocationText: {
-        color: '#8B5CF6',
+        ...chipActiveMagentaText,
         fontWeight: '600',
     },
     modalFooter: {
         paddingHorizontal: 16,
         paddingVertical: 16,
         borderTopWidth: 1,
-        borderTopColor: '#E5E7EB',
+        borderTopColor: 'rgba(255, 255, 255, 0.08)',
     },
     confirmButton: {
-        backgroundColor: '#8B5CF6',
+        backgroundColor: '#d91b5c',
         borderRadius: 12,
         paddingVertical: 16,
         alignItems: 'center',
     },
     confirmButtonDisabled: {
-        backgroundColor: '#D1D5DB',
+        backgroundColor: 'rgba(217, 27, 92, 0.35)',
     },
     confirmButtonText: {
         color: '#FFFFFF',

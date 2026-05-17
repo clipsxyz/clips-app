@@ -273,8 +273,10 @@ export async function updateAuthProfile(data: {
     location_regional?: string | null;
     location_national?: string | null;
     social_links?: Record<string, string | undefined>;
+    profile_background_url?: string | null;
     account_type?: 'personal' | 'business';
     is_business?: boolean;
+    is_private?: boolean;
 }) {
     return apiRequest('/auth/profile', {
         method: 'PUT',

@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   StyleSheet,
   Text,
@@ -8,106 +7,71 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { createPost } from '../api/posts';
-import { useAuth } from '../context/Auth';
-import { saveDraft } from '../api/drafts';
+import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import { glassPanel, gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
 
 export default function TextOnlyCreateScreen({ navigation, route }: any) {
-  const { user } = useAuth();
   const isStory24 = !!route.params?.story24;
-  const [text, setText] = useState('');
-  const [location, setLocation] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [text, setText] = useState(String(route.params?.text || ''));
 
-  const handlePost = async () => {
+  useEffect(() => {
+    if (route.params?.text != null) {
+      setText(String(route.params.text));
+    }
+  }, [route.params?.text]);
+
+  useEffect(() => {
+    if (!route.params?.fromDraft) return;
+    const body = String(route.params?.text || route.params?.textBody || '').trim();
+    if (!body) return;
+    navigation.replace('TextOnlyPostDetails', {
+      text: body,
+      fromDraft: true,
+      location: route.params?.location || '',
+      venue: route.params?.venue || '',
+      landmark: route.params?.landmark || '',
+      taggedUsers: route.params?.taggedUsers || [],
+      story24: isStory24 || undefined,
+    });
+  }, [
+    isStory24,
+    navigation,
+    route.params?.fromDraft,
+    route.params?.landmark,
+    route.params?.location,
+    route.params?.taggedUsers,
+    route.params?.text,
+    route.params?.textBody,
+    route.params?.venue,
+  ]);
+
+  const handleContinue = () => {
     if (!text.trim()) {
-      Alert.alert('Text required', 'Add text before posting.');
+      Alert.alert('Text required', 'Add text before continuing.');
       return;
     }
-    if (!user) {
-      Alert.alert('Login required', 'Please log in to continue.');
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      await createPost(
-        user.id,
-        user.handle,
-        text.trim(),
-        location.trim() || user.regional || 'Unknown',
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        user.local,
-        user.regional,
-        user.national,
-      );
-      Alert.alert('Posted', isStory24 ? 'Your Story 24 text post is live.' : 'Your text-only post is live.', [
-        {
-          text: 'OK',
-          onPress: () => navigation.navigate(isStory24 ? 'Stories' : 'Home', { forceRefreshAt: Date.now() }),
-        },
-      ]);
-    } catch (err: any) {
-      Alert.alert('Post failed', err?.message || 'Could not publish your post.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleSaveDraft = async () => {
-    if (!text.trim() && !location.trim()) {
-      Alert.alert('Nothing to save', 'Add text or location before saving.');
-      return;
-    }
-    if (isSavingDraft) return;
-    setIsSavingDraft(true);
-    try {
-      await saveDraft({
-        videoUrl: '',
-        videoDuration: 0,
-        isTextOnly: true,
-        textBody: text.trim() || undefined,
-        caption: text.trim() || undefined,
-        location: location.trim() || undefined,
-      });
-      Alert.alert('Saved', 'Draft saved to your profile drafts.');
-    } catch (err: any) {
-      Alert.alert('Draft failed', err?.message || 'Could not save draft.');
-    } finally {
-      setIsSavingDraft(false);
-    }
+    navigation.navigate('TextOnlyPostDetails', {
+      text: text.trim(),
+      story24: isStory24 || undefined,
+    });
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <GazetteerScreenShell>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={24} color="#FFFFFF" />
         </TouchableOpacity>
-        <Text style={styles.title}>Text-only post</Text>
-        <View style={styles.headerActions}>
-          <TouchableOpacity onPress={handleSaveDraft} disabled={isSavingDraft || isSubmitting}>
-            {isSavingDraft ? (
-              <ActivityIndicator size="small" color="#9CA3AF" />
-            ) : (
-              <Text style={styles.draftText}>Draft</Text>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handlePost} disabled={isSubmitting}>
-            {isSubmitting ? (
-              <ActivityIndicator size="small" color="#F8D26A" />
-            ) : (
-              <Text style={styles.postText}>Post</Text>
-            )}
-          </TouchableOpacity>
-        </View>
+        <Text style={styles.title}>{isStory24 ? 'Story 24 text' : 'Text-only post'}</Text>
+        <TouchableOpacity
+          onPress={handleContinue}
+          disabled={!text.trim()}
+          style={[styles.continueBtn, text.trim() && styles.continueBtnActive]}
+        >
+          <Text style={[styles.continueText, !text.trim() && styles.continueTextDisabled]}>Continue</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.body}>
@@ -120,6 +84,7 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
           multiline
           numberOfLines={10}
           maxLength={TEXT_POST_BODY_MAX_LENGTH}
+          autoFocus
         />
         <View style={styles.counterRow}>
           <Text
@@ -133,48 +98,43 @@ export default function TextOnlyCreateScreen({ navigation, route }: any) {
             {text.length}/{TEXT_POST_BODY_MAX_LENGTH}
           </Text>
         </View>
-
-        <View style={styles.locationRow}>
-          <Icon name="location" size={18} color="#F8D26A" />
-          <TextInput
-            value={location}
-            onChangeText={setLocation}
-            placeholder="Add location (optional)"
-            placeholderTextColor="#6B7280"
-            style={styles.locationInput}
-          />
-        </View>
       </View>
-    </SafeAreaView>
+    </GazetteerScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#030712' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1F2937',
+    ...gazetteerHeader,
   },
-  title: { color: '#FFFFFF', fontSize: 18, fontWeight: '700' },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  draftText: { color: '#9CA3AF', fontSize: 14, fontWeight: '700' },
-  postText: { color: '#F8D26A', fontSize: 15, fontWeight: '700' },
+  title: { color: '#FFFFFF', fontSize: 18, fontWeight: '700', flex: 1, marginHorizontal: 10 },
+  continueBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#374151',
+  },
+  continueBtnActive: {
+    backgroundColor: 'rgba(244, 114, 182, 0.25)',
+    borderWidth: 1,
+    borderColor: 'rgba(244, 114, 182, 0.55)',
+  },
+  continueText: { color: '#f472b6', fontSize: 15, fontWeight: '700' },
+  continueTextDisabled: { color: '#6B7280' },
   body: { padding: 16, gap: 14 },
   textInput: {
-    minHeight: 220,
-    backgroundColor: '#111827',
+    minHeight: 280,
     color: '#FFFFFF',
     borderRadius: 14,
     padding: 14,
     textAlignVertical: 'top',
     fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#374151',
+    ...glassPanel,
   },
   counterRow: {
     marginTop: 6,
@@ -191,16 +151,4 @@ const styles = StyleSheet.create({
   counterDanger: {
     color: '#F87171',
   },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: '#111827',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#374151',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  locationInput: { flex: 1, color: '#FFFFFF', fontSize: 15 },
 });

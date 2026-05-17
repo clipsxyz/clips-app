@@ -1,8 +1,9 @@
 import React from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/Ionicons';
+import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import { chipActiveMagenta, chipActiveMagentaText, glassPanel, glassSearch, glassSurface, gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
 import { updateAuthProfile } from '../api/client';
 
@@ -119,7 +120,7 @@ export default function ContentPreferencesScreen({ navigation }: any) {
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <GazetteerScreenShell>
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={18} color="#FFFFFF" />
@@ -144,7 +145,7 @@ export default function ContentPreferencesScreen({ navigation }: any) {
           <View style={styles.chipWrap}>
             {parsedLocations.map((place) => (
               <View key={place} style={styles.chipStatic}>
-                <Text style={styles.chipText}>{place}</Text>
+                <Text style={styles.chipStaticText}>{place}</Text>
               </View>
             ))}
           </View>
@@ -175,31 +176,27 @@ export default function ContentPreferencesScreen({ navigation }: any) {
           'No liked business preferences.'
         )}
       </ScrollView>
-    </SafeAreaView>
+    </GazetteerScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#030712' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1F2937',
+    ...gazetteerHeader,
   },
   backButton: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   backText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
   headerTitle: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
   content: { padding: 16, gap: 12 },
   section: {
-    backgroundColor: '#111827',
     borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#1F2937',
     padding: 12,
+    ...glassPanel,
   },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   sectionTitle: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
@@ -208,39 +205,34 @@ const styles = StyleSheet.create({
     marginTop: 10,
     minHeight: 90,
     borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#374151',
-    backgroundColor: '#030712',
     color: '#FFFFFF',
     padding: 10,
     textAlignVertical: 'top',
+    ...glassSearch,
   },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
   chip: {
     borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#374151',
-    backgroundColor: '#1F2937',
     paddingHorizontal: 10,
     paddingVertical: 5,
+    ...chipActiveMagenta,
   },
   chipStatic: {
     borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#374151',
-    backgroundColor: '#0B1220',
     paddingHorizontal: 10,
     paddingVertical: 5,
+    ...glassSurface,
   },
-  chipText: { color: '#E5E7EB', fontSize: 11 },
+  chipText: { color: '#FBCFE8', fontSize: 11 },
+  chipStaticText: { color: '#E5E7EB', fontSize: 11 },
   saveButton: {
     marginTop: 12,
     borderRadius: 8,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#d91b5c',
     paddingVertical: 10,
     alignItems: 'center',
   },
-  saveButtonText: { color: '#030712', fontWeight: '700', fontSize: 13 },
+  saveButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13 },
   resetText: { color: '#D1D5DB', fontSize: 12, textDecorationLine: 'underline' },
   emptyText: { marginTop: 8, color: '#9CA3AF', fontSize: 12 },
 });

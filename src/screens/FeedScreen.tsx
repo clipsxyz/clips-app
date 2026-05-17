@@ -20,6 +20,7 @@ import {
     Alert,
     Linking,
     Pressable,
+    Platform,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -42,6 +43,7 @@ import {
     addReply,
     deleteCommentById,
     setCommentModerationState,
+    decorateForUser,
 } from '../api/posts';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle } from '../api/stories';
 import { getUnreadTotal } from '../api/messages';
@@ -52,6 +54,24 @@ import { enqueue, drain } from '../utils/mutationQueue';
 import type { Post } from '../types';
 import { getInstagramImageDimensions } from '../utils/imageDimensions';
 import { FEED_UI } from '../constants/feedUiTokens';
+import FeedPostMedia from '../components/FeedPostMedia.native';
+import { isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
+import NetInfo from '@react-native-community/netinfo';
+import {
+    getFeedAutoplayPref,
+    resolveFeedAutoplayAllowed,
+    subscribeFeedAutoplayPref,
+    type FeedAutoplayPref,
+} from '../utils/feedAutoplayPrefNative';
+import { setActiveFeedVideoPostId } from '../utils/feedActiveVideoNative';
+import {
+    getGlobalVideoMutedNative,
+    subscribeGlobalVideoMuted,
+} from '../utils/globalVideoMuteNative';
+import GazetteerAmbientBackground from '../components/GazetteerAmbientBackground';
+import { glassPanel, glassSurface } from '../theme/gazetteerAmbientNative';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { navigateMainTab } from '../navigation/mainTabs';
 import { Dimensions } from 'react-native';
 import FeedPostMeta from '../components/FeedPostMeta';
 import FeedEngagementRow from '../components/FeedEngagementRow';
@@ -69,6 +89,13 @@ import {
     setPostNotificationsPrefMobile,
     hasPostNotificationsPrefMobile,
 } from '../utils/feedEngagementPrefsMobile';
+import {
+    dismissPendingFeedUpload,
+    getPendingFeedUploads,
+    pendingUploadToPost,
+    subscribePendingFeedUploadComplete,
+    subscribePendingFeedUploads,
+} from '../utils/pendingFeedUploadNative';
 
 type Tab = string;
 
@@ -617,7 +644,7 @@ function PostHeader({
                 ) : null}
                 {post.locationLabel && (
                     <TouchableOpacity style={styles.locationButton}>
-                        <Icon name="location" size={12} color="#8B5CF6" />
+                        <Icon name="location" size={12} color="#f472b6" />
                     </TouchableOpacity>
                 )}
             </View>
@@ -645,6 +672,8 @@ const FeedCard = React.memo(function FeedCard({
     hasInbox,
     isCurrentUser,
     onOverflowPress,
+    isVideoActive,
+    feedVideoMuted,
 }: {
     post: Post;
     onLike: () => Promise<void>;
@@ -664,6 +693,8 @@ const FeedCard = React.memo(function FeedCard({
     hasInbox?: boolean;
     isCurrentUser: boolean;
     onOverflowPress?: () => void;
+    isVideoActive?: boolean;
+    feedVideoMuted?: boolean;
 }) {
     const [imageDimensions, setImageDimensions] = React.useState<{ width: number; height: number } | null>(null);
     const [profileMenuVisible, setProfileMenuVisible] = React.useState(false);
@@ -671,29 +702,44 @@ const FeedCard = React.memo(function FeedCard({
     const lastMediaTapRef = React.useRef(0);
     const singleMediaTapTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const screenWidth = Dimensions.get('window').width;
+    const cardMediaWidth = screenWidth - 20;
     const DOUBLE_TAP_DELAY_MS = 260;
 
     // Auto-detect image dimensions if not provided
+    const isClientUploading = post.clientUploadStatus === 'uploading';
+    const isClientUploadFailed = post.clientUploadStatus === 'failed';
+    const textOnlyPost = isTextOnlyPost(post);
+    const hasFeedMedia = !textOnlyPost && Boolean(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0));
+    const mediaSizingUrl = React.useMemo(() => {
+        if (!hasFeedMedia) return null;
+        if (isVideoPost(post) && post.videoPosterUrl) return post.videoPosterUrl;
+        return post.mediaUrl || post.mediaItems?.[0]?.url || null;
+    }, [hasFeedMedia, post]);
+
     React.useEffect(() => {
-        if (post.mediaUrl && !imageDimensions) {
+        setImageDimensions(null);
+    }, [mediaSizingUrl]);
+
+    React.useEffect(() => {
+        if (mediaSizingUrl && !imageDimensions) {
             Image.getSize(
-                post.mediaUrl,
+                mediaSizingUrl,
                 (width, height) => {
                     // Calculate Instagram-style dimensions with clamping
-                    const dimensions = getInstagramImageDimensions(width, height, screenWidth);
-                    const minHeight = screenWidth * FEED_UI.media.minAspect;
-                    const maxHeight = screenWidth * FEED_UI.media.maxAspect;
+                    const dimensions = getInstagramImageDimensions(width, height, cardMediaWidth);
+                    const minHeight = cardMediaWidth * FEED_UI.media.minAspect;
+                    const maxHeight = cardMediaWidth * FEED_UI.media.maxAspect;
                     const portraitFirstHeight = Math.min(Math.max(dimensions.height, minHeight), maxHeight);
                     setImageDimensions({ width: dimensions.width, height: portraitFirstHeight });
                 },
                 (error) => {
                     console.error('Error getting image size:', error);
                     // Fallback to default dimensions
-                    setImageDimensions({ width: screenWidth, height: screenWidth * FEED_UI.media.maxAspect });
+                    setImageDimensions({ width: cardMediaWidth, height: cardMediaWidth * FEED_UI.media.maxAspect });
                 }
             );
         }
-    }, [post.mediaUrl, screenWidth]);
+    }, [mediaSizingUrl, cardMediaWidth, imageDimensions]);
 
     // Calculate image style with Instagram clamping
     const imageStyle = React.useMemo(() => {
@@ -701,16 +747,16 @@ const FeedCard = React.memo(function FeedCard({
             return {
                 width: imageDimensions.width,
                 height: imageDimensions.height,
-                backgroundColor: '#111827',
+                backgroundColor: '#000000',
             };
         }
         // Default while loading
         return {
-            width: screenWidth,
-            height: screenWidth * FEED_UI.media.maxAspect, // Default to max portrait aspect ratio
-            backgroundColor: '#111827',
+            width: cardMediaWidth,
+            height: cardMediaWidth * FEED_UI.media.maxAspect, // Default to max portrait aspect ratio
+            backgroundColor: '#000000',
         };
-    }, [imageDimensions, screenWidth]);
+    }, [imageDimensions, cardMediaWidth]);
 
     const handleMediaPress = React.useCallback(() => {
         const now = Date.now();
@@ -765,32 +811,46 @@ const FeedCard = React.memo(function FeedCard({
                 </View>
             )}
 
-            {post.mediaUrl && (
-                <Pressable onPress={handleMediaPress}>
-                    <Image
-                        source={{ uri: post.mediaUrl }}
-                        style={imageStyle}
-                        onLoad={onView}
-                        resizeMode="cover"
-                    // Performance optimizations
-                    // Note: React Native Image automatically caches and lazy loads
-                    // Progressive rendering is handled by the platform
+            {(textOnlyPost || hasFeedMedia) && (
+                <View style={styles.mediaWrap}>
+                    <FeedPostMedia
+                        post={post}
+                        width={cardMediaWidth}
+                        height={typeof imageStyle.height === 'number' ? imageStyle.height : cardMediaWidth}
+                        onPress={isClientUploading || isClientUploadFailed ? undefined : handleMediaPress}
+                        onMediaLoad={isClientUploading ? undefined : onView}
+                        mode="feed"
+                        isActive={isVideoActive && !isClientUploading}
+                        muted={feedVideoMuted}
                     />
-                </Pressable>
-            )}
-
-            {post.text && (
-                <View style={styles.textCardWrapper}>
-                    <View style={styles.textCard}>
-                        <View style={styles.textCardDecorativeLine} />
-                        <Text style={styles.textCardContent}>{post.text}</Text>
-                        <View style={styles.textCardDecorativeLine} />
-                    </View>
-                    <View style={styles.textCardTail} />
+                    {isClientUploading ? (
+                        <View style={styles.uploadingOverlay} pointerEvents="none">
+                            <ActivityIndicator size="large" color="#FFFFFF" />
+                            <Text style={styles.uploadingOverlayTitle}>Posting…</Text>
+                            <Text style={styles.uploadingOverlaySubtitle}>Preparing your post</Text>
+                        </View>
+                    ) : null}
+                    {isClientUploadFailed ? (
+                        <View style={styles.uploadingOverlay}>
+                            <Icon name="alert-circle-outline" size={28} color="#FCA5A5" />
+                            <Text style={styles.uploadingOverlayTitle}>Post failed</Text>
+                            <Text style={styles.uploadingOverlaySubtitle} numberOfLines={2}>
+                                {post.clientUploadError || 'Could not post. Tap to dismiss.'}
+                            </Text>
+                        </View>
+                    ) : null}
                 </View>
             )}
 
-            <View style={styles.engagementBar}>
+            {!textOnlyPost && post.text?.trim() && hasFeedMedia ? (
+                <View style={styles.captionWrap}>
+                    <Text style={styles.captionText} numberOfLines={4}>
+                        {post.text}
+                    </Text>
+                </View>
+            ) : null}
+
+            <View style={[styles.engagementBar, (isClientUploading || isClientUploadFailed) && styles.engagementBarDimmed]}>
                 <View style={styles.actionButtons}>
                     <FeedEngagementRow
                         likes={post.stats.likes}
@@ -912,6 +972,33 @@ const FeedCard = React.memo(function FeedCard({
             )}
         </TouchableOpacity>
     );
+}, (prev, next) => {
+    const a = prev.post;
+    const b = next.post;
+    return (
+        a.id === b.id &&
+        a.userLiked === b.userLiked &&
+        a.isBookmarked === b.isBookmarked &&
+        a.isFollowing === b.isFollowing &&
+        a.stats.likes === b.stats.likes &&
+        a.stats.comments === b.stats.comments &&
+        a.stats.views === b.stats.views &&
+        a.stats.reclips === b.stats.reclips &&
+        a.mediaUrl === b.mediaUrl &&
+        a.videoPosterUrl === b.videoPosterUrl &&
+        a.templateId === b.templateId &&
+        a.text === b.text &&
+        JSON.stringify(a.textStyle) === JSON.stringify(b.textStyle) &&
+        a.isBoosted === b.isBoosted &&
+        prev.isCurrentUser === next.isCurrentUser &&
+        prev.unreadCount === next.unreadCount &&
+        prev.hasInbox === next.hasInbox &&
+        prev.isVideoActive === next.isVideoActive &&
+        prev.feedVideoMuted === next.feedVideoMuted &&
+        a.clientUploadStatus === b.clientUploadStatus &&
+        a.clientUploadError === b.clientUploadError &&
+        a.clientLocalMediaUri === b.clientLocalMediaUri
+    );
 });
 
 function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
@@ -937,8 +1024,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [selectedPostForShare, setSelectedPostForShare] = useState<Post | null>(null);
     const [unreadCount, setUnreadCount] = useState(0);
-    const [footerActive, setFooterActive] = useState<'home' | 'discover' | 'create' | 'search' | 'inbox'>('home');
     const [hasInbox, setHasInbox] = useState(false);
+    const insets = useSafeAreaInsets();
     const [reloadTick, setReloadTick] = useState(0);
     const [showBoostPrompt, setShowBoostPrompt] = useState(false);
     /** Local overrides keyed by post id so bookmark rail matches collections without refetching whole feed. */
@@ -947,11 +1034,116 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [overflowPost, setOverflowPost] = useState<Post | null>(null);
     const [overflowSaved, setOverflowSaved] = useState(false);
     const [overflowNotify, setOverflowNotify] = useState(false);
+    const [activeVideoPostId, setActiveVideoPostId] = useState<string | null>(null);
+    const [feedAutoplayAllowed, setFeedAutoplayAllowed] = useState(true);
+    const [feedVideoMuted, setFeedVideoMuted] = useState(true);
+    const [pendingUploadTick, setPendingUploadTick] = useState(0);
     const requestTokenRef = useRef(0);
+    const autoplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const lastFeedAutoplayAtMsRef = useRef(0);
+    const viewabilityConfigRef = useRef({
+        itemVisiblePercentThreshold: 55,
+        minimumViewTime: 180,
+    });
+
+    const feedAutoplayPrefRef = useRef<FeedAutoplayPref>('wifi');
+
+    const syncFeedAutoplayAllowed = useCallback(async (pref: FeedAutoplayPref) => {
+        feedAutoplayPrefRef.current = pref;
+        const allowed = await resolveFeedAutoplayAllowed(pref);
+        setFeedAutoplayAllowed(allowed);
+    }, []);
+
+    useEffect(() => {
+        let cancelled = false;
+        void getFeedAutoplayPref().then((pref) => {
+            if (cancelled) return;
+            void syncFeedAutoplayAllowed(pref);
+        });
+        void getGlobalVideoMutedNative().then((muted) => {
+            if (!cancelled) setFeedVideoMuted(muted);
+        });
+        const unsubPref = subscribeFeedAutoplayPref((pref) => {
+            void syncFeedAutoplayAllowed(pref);
+        });
+        const unsubMute = subscribeGlobalVideoMuted(setFeedVideoMuted);
+        const unsubNet = NetInfo.addEventListener(() => {
+            void syncFeedAutoplayAllowed(feedAutoplayPrefRef.current);
+        });
+        return () => {
+            cancelled = true;
+            unsubPref();
+            unsubMute();
+            unsubNet();
+        };
+    }, [syncFeedAutoplayAllowed]);
+
+    const feedAutoplayAllowedRef = useRef(feedAutoplayAllowed);
+    feedAutoplayAllowedRef.current = feedAutoplayAllowed;
+
+    const scheduleActiveFeedVideo = useCallback((postId: string | null) => {
+        if (autoplayTimerRef.current) {
+            clearTimeout(autoplayTimerRef.current);
+            autoplayTimerRef.current = null;
+        }
+        if (!feedAutoplayAllowedRef.current || !postId) {
+            setActiveVideoPostId(null);
+            setActiveFeedVideoPostId(null);
+            return;
+        }
+        const minGapMs = 320;
+        const sinceLast = Date.now() - lastFeedAutoplayAtMsRef.current;
+        const delayMs = sinceLast >= minGapMs ? 0 : minGapMs - sinceLast;
+        autoplayTimerRef.current = setTimeout(() => {
+            setActiveVideoPostId(postId);
+            setActiveFeedVideoPostId(postId);
+            lastFeedAutoplayAtMsRef.current = Date.now();
+            autoplayTimerRef.current = null;
+        }, delayMs);
+    }, []);
+
+    const scheduleActiveFeedVideoRef = useRef(scheduleActiveFeedVideo);
+    scheduleActiveFeedVideoRef.current = scheduleActiveFeedVideo;
+
+    useEffect(() => {
+        if (!feedAutoplayAllowed) {
+            scheduleActiveFeedVideo(null);
+        }
+    }, [feedAutoplayAllowed, scheduleActiveFeedVideo]);
+
+    const onViewableItemsChanged = useRef(
+        ({ viewableItems }: { viewableItems: Array<{ isViewable?: boolean; item?: Post; index?: number | null }> }) => {
+            if (!feedAutoplayAllowedRef.current) {
+                scheduleActiveFeedVideoRef.current(null);
+                return;
+            }
+            let best: Post | null = null;
+            let bestIndex = Number.POSITIVE_INFINITY;
+            for (const token of viewableItems) {
+                if (!token.isViewable || !token.item) continue;
+                const candidate = token.item as Post;
+                if (!isVideoPost(candidate)) continue;
+                const idx = token.index ?? 0;
+                if (idx < bestIndex) {
+                    best = candidate;
+                    bestIndex = idx;
+                }
+            }
+            scheduleActiveFeedVideoRef.current(best?.id ?? null);
+        }
+    ).current;
 
     useFocusEffect(
         useCallback(() => {
             setFooterActive('home');
+            return () => {
+                if (autoplayTimerRef.current) {
+                    clearTimeout(autoplayTimerRef.current);
+                    autoplayTimerRef.current = null;
+                }
+                setActiveVideoPostId(null);
+                setActiveFeedVideoPostId(null);
+            };
         }, [])
     );
 
@@ -1185,6 +1377,34 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         setReloadTick(prev => prev + 1);
     }, [route?.params?.forceRefreshAt]);
 
+    useEffect(() => {
+        return subscribePendingFeedUploads(() => {
+            setPendingUploadTick((tick) => tick + 1);
+        });
+    }, []);
+
+    useEffect(() => {
+        return subscribePendingFeedUploadComplete((tempId, createdPost) => {
+            const decorated = decorateForUser(userId, createdPost);
+            setPages((prev) => {
+                if (prev.length === 0) {
+                    return [[decorated]];
+                }
+                const [first, ...rest] = prev;
+                const nextFirst = [
+                    decorated,
+                    ...first.filter(
+                        (p) =>
+                            String(p.id) !== String(tempId) &&
+                            String(p.id) !== String(decorated.id),
+                    ),
+                ];
+                return [nextFirst, ...rest];
+            });
+            setPendingUploadTick((tick) => tick + 1);
+        });
+    }, [userId]);
+
     async function loadMore() {
         if (loading || end || cursor === null) {
             return;
@@ -1293,7 +1513,17 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         setError(null);
     };
 
-    const flat = pages.flat();
+    const pendingPosts = React.useMemo(
+        () =>
+            getPendingFeedUploads().map((job) => decorateForUser(userId, pendingUploadToPost(job))),
+        [pendingUploadTick, userId],
+    );
+
+    const flat = React.useMemo(() => {
+        const pendingIds = new Set(pendingPosts.map((p) => p.id));
+        const loaded = pages.flat().filter((p) => !pendingIds.has(p.id));
+        return [...pendingPosts, ...loaded];
+    }, [pages, pendingPosts]);
 
     // Memoize renderItem to prevent recreation on every render
     const renderItem = React.useCallback(
@@ -1302,17 +1532,23 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 ...post,
                 isBookmarked: savedByPostId[post.id] ?? post.isBookmarked,
             };
+            const isPendingUpload =
+                mergedPost.clientUploadStatus === 'uploading' ||
+                mergedPost.clientUploadStatus === 'failed';
             return (
                 <FeedCard
                     post={mergedPost}
+                    isVideoActive={activeVideoPostId === mergedPost.id}
+                    feedVideoMuted={feedVideoMuted}
                     onLike={async () => {
+                        if (isPendingUpload) return;
                         const updated = await toggleLike(userId, mergedPost.id, mergedPost);
                         setPages((prev) =>
                             prev.map((page) => page.map((p) => (p.id === mergedPost.id ? updated : p)))
                         );
                     }}
                     onFollow={async () => {
-                        if (!user) return;
+                        if (isPendingUpload || !user) return;
                         try {
                             const updated = await toggleFollowForPost(
                                 userId,
@@ -1346,27 +1582,46 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         }
                     }}
                     onView={async () => {
+                        if (isPendingUpload) return;
                         await incrementViews(userId, mergedPost.id);
                     }}
                     onComment={() => {
+                        if (isPendingUpload) return;
                         setSelectedPostId(mergedPost.id);
                         setSelectedPostForComments(mergedPost);
                         setCommentsModalOpen(true);
                     }}
                     onShare={async () => {
+                        if (isPendingUpload) return;
                         await openShareForPost(mergedPost);
                     }}
                     onReclip={async () => {
+                        if (isPendingUpload) return;
                         await tryReclipPost(mergedPost);
                     }}
                     onBookmark={async () => {
+                        if (isPendingUpload) return;
                         await toggleCollectionsSaveForPost(mergedPost);
                     }}
                     onOverflowPress={() => {
+                        if (isPendingUpload) {
+                            if (mergedPost.clientUploadStatus === 'failed') {
+                                dismissPendingFeedUpload(mergedPost.id);
+                            }
+                            return;
+                        }
                         setOverflowPost(mergedPost);
                         setOverflowVisible(true);
                     }}
-                    onPostPress={() => navigation.navigate('PostDetail', { postId: mergedPost.id })}
+                    onPostPress={() => {
+                        if (isPendingUpload) {
+                            if (mergedPost.clientUploadStatus === 'failed') {
+                                dismissPendingFeedUpload(mergedPost.id);
+                            }
+                            return;
+                        }
+                        navigation.navigate('PostDetail', { postId: mergedPost.id });
+                    }}
                     onVisitProfile={() =>
                         navigation.navigate('ViewProfile', { handle: mergedPost.userHandle })
                     }
@@ -1394,7 +1649,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     onReportUser={async () => {
                         Alert.alert('Reported', 'Thanks for reporting. We will review this content.');
                     }}
-                    onNotificationsPress={() => navigation.navigate('Inbox')}
+                    onNotificationsPress={() => navigateMainTab(navigation, 'Inbox', { initialTab: 'notifications' })}
                     unreadCount={unreadCount}
                     hasInbox={hasInbox}
                     isCurrentUser={user?.handle === mergedPost.userHandle}
@@ -1416,11 +1671,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             tryReclipPost,
             toggleCollectionsSaveForPost,
             hideUserFromFeed,
+            activeVideoPostId,
+            feedVideoMuted,
+            pendingUploadTick,
         ]
     );
 
     return (
         <View style={styles.container}>
+            <GazetteerAmbientBackground />
             <View style={styles.stickyTabsContainer}>
                 <View style={styles.feedHeaderTopRow}>
                     <View style={styles.topHeaderRow}>
@@ -1448,7 +1707,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     hasNotifications={hasInbox || unreadCount > 0}
                     onOpenBoost={() => setShowBoostPrompt(true)}
                     onOpenPassport={() => navigation.navigate('Profile')}
-                    onOpenDiscover={() => navigation.navigate('Discover')}
+                    onOpenDiscover={() => navigateMainTab(navigation, 'Discover')}
                     onSearchLocation={handleHeaderLocationSearch}
                     onClearCustom={clearCustomLocation}
                 />
@@ -1464,12 +1723,15 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 data={flat}
                 renderItem={renderItem}
                 keyExtractor={(item) => item.id}
+                extraData={`${activeVideoPostId}-${pendingUploadTick}`}
+                onViewableItemsChanged={onViewableItemsChanged}
+                viewabilityConfig={viewabilityConfigRef.current}
                 // Performance optimizations - Instagram-style
-                initialNumToRender={3}              // Only render first 3 items on mount
-                maxToRenderPerBatch={3}            // Render max 3 items per batch
-                windowSize={5}                     // Keep ~5 screen heights of items in memory
-                updateCellsBatchingPeriod={50}    // Batch updates every 50ms
-                removeClippedSubviews={true}      // Remove off-screen views (test carefully)
+                initialNumToRender={2}
+                maxToRenderPerBatch={2}
+                windowSize={7}
+                updateCellsBatchingPeriod={50}
+                removeClippedSubviews={Platform.OS === 'ios'}
                 // Scroll performance
                 scrollEventThrottle={16}           // Smooth scroll events (60fps)
                 decelerationRate="fast"            // Faster deceleration for snappier feel
@@ -1497,38 +1759,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     ) : null
                 }
                 showsVerticalScrollIndicator={false}
-                contentContainerStyle={styles.feedContent}
+                contentContainerStyle={[
+                    styles.feedContent,
+                    { paddingBottom: Math.max(insets.bottom, 8) + 12 },
+                ]}
             />
-
-            <View style={styles.bottomFooterNav}>
-                <TouchableOpacity style={[styles.bottomFooterItem, footerActive === 'home' && styles.bottomFooterItemActive]} onPress={() => { setFooterActive('home'); navigation.navigate('Home'); }}>
-                    <Icon name="home" size={18} color={footerActive === 'home' ? '#F9FAFB' : '#FFFFFF'} />
-                    <Text style={[styles.bottomFooterLabel, footerActive === 'home' && styles.bottomFooterLabelActive]}>Home</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.bottomFooterItem, footerActive === 'discover' && styles.bottomFooterItemActive]} onPress={() => { setFooterActive('discover'); navigation.navigate('Discover'); }}>
-                    <Icon name="compass-outline" size={18} color={footerActive === 'discover' ? '#F9FAFB' : '#FFFFFF'} />
-                    <Text style={[styles.bottomFooterLabel, footerActive === 'discover' && styles.bottomFooterLabelActive]}>Discover</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.bottomFooterItem, footerActive === 'create' && styles.bottomFooterItemActive]} onPress={() => { setFooterActive('create'); navigation.navigate('CreateComposer', { addYours: true }); }}>
-                    <Icon name="add-circle-outline" size={18} color={footerActive === 'create' ? '#F9FAFB' : '#FFFFFF'} />
-                    <Text style={[styles.bottomFooterLabel, footerActive === 'create' && styles.bottomFooterLabelActive]}>Create</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.bottomFooterItem, footerActive === 'search' && styles.bottomFooterItemActive]} onPress={() => { setFooterActive('search'); navigation.navigate('Search'); }}>
-                    <Icon name="search-outline" size={18} color={footerActive === 'search' ? '#F9FAFB' : '#FFFFFF'} />
-                    <Text style={[styles.bottomFooterLabel, footerActive === 'search' && styles.bottomFooterLabelActive]}>Search</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.bottomFooterItem, footerActive === 'inbox' && styles.bottomFooterItemActive]} onPress={() => { setFooterActive('inbox'); navigation.navigate('Inbox'); }}>
-                    <View style={styles.bottomFooterInboxIconWrap}>
-                        <Icon name="chatbox-ellipses-outline" size={18} color={footerActive === 'inbox' ? '#F9FAFB' : '#FFFFFF'} />
-                        {unreadCount > 0 ? (
-                            <View style={styles.bottomFooterBadge}>
-                                <Text style={styles.bottomFooterBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
-                            </View>
-                        ) : null}
-                    </View>
-                    <Text style={[styles.bottomFooterLabel, footerActive === 'inbox' && styles.bottomFooterLabelActive]}>Inbox</Text>
-                </TouchableOpacity>
-            </View>
 
             <PostCommentsSheet
                 postId={selectedPostId || ''}
@@ -1694,7 +1929,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#000000',
+        backgroundColor: 'transparent',
     },
     stickyTabsContainer: {
         position: 'absolute',
@@ -1702,7 +1937,9 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         zIndex: 1000,
-        backgroundColor: '#000000',
+        backgroundColor: 'rgba(11, 7, 17, 0.72)',
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(255, 255, 255, 0.08)',
         elevation: 10,
         width: '100%',
     },
@@ -1729,9 +1966,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         gap: 4,
         borderRadius: 999,
-        borderWidth: 1,
-        borderColor: '#374151',
-        backgroundColor: '#111827',
+        ...glassSurface,
         paddingHorizontal: 10,
         paddingVertical: 5,
     },
@@ -1787,17 +2022,15 @@ const styles = StyleSheet.create({
     profileMenuCard: {
         marginTop: 60,
         marginLeft: 16,
-        backgroundColor: '#020617',
         borderRadius: 12,
         paddingVertical: 4,
         minWidth: 170,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: '#1F2937',
         shadowColor: '#000',
         shadowOpacity: 0.35,
         shadowRadius: 10,
         shadowOffset: { width: 0, height: 6 },
         elevation: 12,
+        ...glassPanel,
     },
     profileMenuItem: {
         flexDirection: 'row',
@@ -1958,67 +2191,52 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     feedContent: {
-        paddingBottom: 92,
         paddingTop: 92,
     },
-    bottomFooterNav: {
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        bottom: 0,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-around',
-        backgroundColor: 'rgba(0,0,0,0.92)',
-        borderTopWidth: 1,
-        borderTopColor: '#1F2937',
-        paddingTop: 6,
-        paddingBottom: 10,
-        paddingHorizontal: 6,
-        zIndex: 1200,
-    },
-    bottomFooterItem: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        rowGap: 2,
-        borderRadius: 12,
-        paddingVertical: 3,
-    },
-    bottomFooterItemActive: {
-        backgroundColor: '#111827',
-    },
-    bottomFooterLabel: {
-        fontSize: 10,
-        fontWeight: '600',
-        color: '#FFFFFF',
-    },
-    bottomFooterLabelActive: {
-        color: '#F9FAFB',
-    },
-    bottomFooterInboxIconWrap: {
-        position: 'relative',
-    },
-    bottomFooterBadge: {
-        position: 'absolute',
-        top: -6,
-        right: -10,
-        minWidth: 16,
-        height: 16,
-        borderRadius: 8,
-        backgroundColor: '#EF4444',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: 3,
-    },
-    bottomFooterBadgeText: {
-        color: '#FFFFFF',
-        fontSize: 9,
-        fontWeight: '700',
-    },
     feedCard: {
-        backgroundColor: '#000000',
+        marginHorizontal: 10,
         marginBottom: FEED_UI.spacing.cardGap,
+        borderRadius: 16,
+        overflow: 'hidden',
+        ...glassPanel,
+    },
+    mediaWrap: {
+        width: '100%',
+        backgroundColor: '#000000',
+        position: 'relative',
+        overflow: 'hidden',
+    },
+    uploadingOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.55)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 20,
+        gap: 6,
+    },
+    uploadingOverlayTitle: {
+        color: '#FFFFFF',
+        fontSize: 15,
+        fontWeight: '700',
+        marginTop: 4,
+    },
+    uploadingOverlaySubtitle: {
+        color: '#D1D5DB',
+        fontSize: 12,
+        textAlign: 'center',
+    },
+    engagementBarDimmed: {
+        opacity: 0.45,
+    },
+    captionWrap: {
+        paddingHorizontal: FEED_UI.spacing.inset,
+        paddingTop: 8,
+        paddingBottom: 4,
+    },
+    captionText: {
+        fontSize: 14,
+        lineHeight: 20,
+        color: '#E5E7EB',
     },
     sponsoredBadge: {
         flexDirection: 'row',
@@ -2091,9 +2309,9 @@ const styles = StyleSheet.create({
         width: 20,
         height: 20,
         borderRadius: 10,
-        backgroundColor: '#3B82F6',
+        backgroundColor: '#d91b5c',
         borderWidth: 2,
-        borderColor: '#030712',
+        borderColor: 'rgba(26, 21, 36, 0.95)',
         justifyContent: 'center',
         alignItems: 'center',
         zIndex: 30,
@@ -2107,7 +2325,7 @@ const styles = StyleSheet.create({
         borderRadius: 10,
         backgroundColor: '#22c55e',
         borderWidth: 2,
-        borderColor: '#030712',
+        borderColor: 'rgba(26, 21, 36, 0.95)',
         justifyContent: 'center',
         alignItems: 'center',
         zIndex: 30,
@@ -2158,7 +2376,7 @@ const styles = StyleSheet.create({
         width: 28,
         height: 28,
         borderRadius: 14,
-        backgroundColor: 'rgba(139, 92, 246, 0.1)',
+        backgroundColor: 'rgba(217, 27, 92, 0.18)',
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -2175,21 +2393,22 @@ const styles = StyleSheet.create({
     textCard: {
         padding: 16,
         borderRadius: 16,
-        backgroundColor: '#FFFFFF',
         flexDirection: 'row',
         alignItems: 'center',
         width: '100%',
+        ...glassSurface,
     },
     textCardDecorativeLine: {
         width: 2,
         height: 40,
-        backgroundColor: '#E5E7EB',
+        backgroundColor: 'rgba(255, 255, 255, 0.18)',
         marginHorizontal: 8,
     },
     textCardContent: {
         flex: 1,
         fontSize: 16,
-        color: '#000000',
+        color: '#F3F4F6',
+        lineHeight: 22,
     },
     textCardTail: {
         width: 0,
@@ -2199,7 +2418,7 @@ const styles = StyleSheet.create({
         borderTopWidth: 8,
         borderLeftColor: 'transparent',
         borderRightColor: 'transparent',
-        borderTopColor: '#FFFFFF',
+        borderTopColor: 'rgba(24, 24, 28, 0.65)',
         marginTop: -1,
     },
     engagementBar: {
@@ -2208,6 +2427,8 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingHorizontal: FEED_UI.spacing.inset,
         paddingVertical: 7,
+        borderTopWidth: 1,
+        borderTopColor: 'rgba(255, 255, 255, 0.06)',
     },
     actionButtons: {
         flexDirection: 'row',
@@ -2246,12 +2467,10 @@ const styles = StyleSheet.create({
     },
     boostPromptCard: {
         margin: 24,
-        backgroundColor: '#030712',
         borderRadius: 14,
-        borderWidth: 1,
-        borderColor: '#374151',
         padding: 16,
         gap: 10,
+        ...glassPanel,
     },
     boostPromptTitle: {
         color: '#FFFFFF',
@@ -2271,11 +2490,9 @@ const styles = StyleSheet.create({
     boostPromptSecondaryBtn: {
         flex: 1,
         borderRadius: 10,
-        borderWidth: 1,
-        borderColor: '#374151',
-        backgroundColor: '#111827',
         paddingVertical: 10,
         alignItems: 'center',
+        ...glassSurface,
     },
     boostPromptSecondaryText: {
         color: '#E5E7EB',
@@ -2285,12 +2502,12 @@ const styles = StyleSheet.create({
     boostPromptPrimaryBtn: {
         flex: 1,
         borderRadius: 10,
-        backgroundColor: '#FBBF24',
+        backgroundColor: '#d91b5c',
         paddingVertical: 10,
         alignItems: 'center',
     },
     boostPromptPrimaryText: {
-        color: '#111827',
+        color: '#FFFFFF',
         fontSize: 13,
         fontWeight: '800',
     },

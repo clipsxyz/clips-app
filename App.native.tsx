@@ -3,20 +3,23 @@
  * Social media app with live streaming
  */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { StatusBar, useColorScheme } from 'react-native';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { AuthProvider } from './src/context/Auth';
+import { AuthProvider, useAuth } from './src/context/Auth';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { getUnreadTotal } from './src/api/messages';
+import { navigateMainTab } from './src/navigation/mainTabs';
 
 // Import screens
 import FeedScreen from './src/screens/FeedScreen';
 import BoostScreen from './src/screens/BoostScreen';
 import SearchScreen from './src/screens/SearchScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
+import ProfileCoverScreen from './src/screens/ProfileCoverScreen';
 import LiveStreamScreen from './src/screens/LiveStreamScreen';
 import DiscoverScreen from './src/screens/DiscoverScreen';
 import LoginScreen from './src/screens/LoginScreen';
@@ -26,11 +29,14 @@ import ViewProfileScreen from './src/screens/ViewProfileScreen';
 import CreateScreen from './src/screens/CreateScreen';
 import InstantCreateScreen from './src/screens/InstantCreateScreen';
 import GalleryPreviewScreen from './src/screens/GalleryPreviewScreen';
+import InstantFiltersScreen from './src/screens/InstantFiltersScreen';
 import TextOnlyCreateScreen from './src/screens/TextOnlyCreateScreen';
+import TextOnlyPostDetailsScreen from './src/screens/TextOnlyPostDetailsScreen';
 import MessagesScreen from './src/screens/MessagesScreen';
 import InboxScreen from './src/screens/InboxScreen';
 import CollectionFeedScreen from './src/screens/CollectionFeedScreen';
 import ContentPreferencesScreen from './src/screens/ContentPreferencesScreen';
+import VideoPlaybackSettingsScreen from './src/screens/VideoPlaybackSettingsScreen';
 import PaymentScreen from './src/screens/PaymentScreen';
 import PaymentSuccessScreen from './src/screens/PaymentSuccessScreen';
 import SplashScreen from './src/screens/SplashScreen';
@@ -44,57 +50,79 @@ const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 const navigationRef = createNavigationContainerRef();
 
+const TAB_BAR_STYLE = {
+  backgroundColor: 'rgba(11, 7, 17, 0.94)',
+  borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  borderTopWidth: 1,
+} as const;
+
 function MainTabs() {
-  const isDarkMode = useColorScheme() === 'dark';
+  const { user } = useAuth();
+  const [inboxUnread, setInboxUnread] = useState(0);
+
+  useEffect(() => {
+    if (!user?.handle) {
+      setInboxUnread(0);
+      return;
+    }
+    let mounted = true;
+    const refresh = async () => {
+      try {
+        const total = await getUnreadTotal(user.handle);
+        if (mounted) setInboxUnread(total);
+      } catch {
+        // ignore polling errors
+      }
+    };
+    void refresh();
+    const interval = setInterval(refresh, 30000);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, [user?.handle]);
+
+  const inboxBadge =
+    inboxUnread > 0 ? (inboxUnread > 99 ? '99+' : inboxUnread) : undefined;
 
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         tabBarIcon: ({ focused, color, size }) => {
           let iconName: string;
-
           if (route.name === 'Home') {
             iconName = focused ? 'home' : 'home-outline';
+          } else if (route.name === 'Discover') {
+            iconName = focused ? 'compass' : 'compass-outline';
           } else if (route.name === 'Create') {
-            iconName = focused ? 'camera' : 'camera-outline';
+            iconName = focused ? 'add-circle' : 'add-circle-outline';
           } else if (route.name === 'Search') {
             iconName = focused ? 'search' : 'search-outline';
-          } else if (route.name === 'Passport') {
-            iconName = focused ? 'person' : 'person-outline';
+          } else if (route.name === 'Inbox') {
+            iconName = focused ? 'chatbox-ellipses' : 'chatbox-ellipses-outline';
           } else {
-            iconName = 'circle';
+            iconName = 'ellipse-outline';
           }
-
           return <Icon name={iconName} size={size} color={color} />;
         },
-        tabBarActiveTintColor: '#8B5CF6',
-        tabBarInactiveTintColor: 'gray',
-        tabBarStyle: {
-          backgroundColor: isDarkMode ? '#1F2937' : '#FFFFFF',
-          borderTopColor: isDarkMode ? '#374151' : '#E5E7EB',
-        },
+        tabBarActiveTintColor: '#f472b6',
+        tabBarInactiveTintColor: '#9CA3AF',
+        tabBarStyle: TAB_BAR_STYLE,
         headerShown: false,
       })}
     >
+      <Tab.Screen name="Home" component={FeedScreen} options={{ title: 'Home' }} />
+      <Tab.Screen name="Discover" component={DiscoverScreen} options={{ title: 'Discover' }} />
+      <Tab.Screen name="Create" component={InstantCreateScreen} options={{ title: 'Create' }} />
+      <Tab.Screen name="Search" component={SearchScreen} options={{ title: 'Search' }} />
       <Tab.Screen
-        name="Home"
-        component={FeedScreen}
-        options={{ title: 'Home' }}
-      />
-      <Tab.Screen
-        name="Create"
-        component={InstantCreateScreen}
-        options={{ title: 'Create' }}
-      />
-      <Tab.Screen
-        name="Search"
-        component={SearchScreen}
-        options={{ title: 'Search' }}
-      />
-      <Tab.Screen
-        name="Passport"
-        component={ProfileScreen}
-        options={{ title: 'Passport' }}
+        name="Inbox"
+        component={InboxScreen}
+        options={{
+          title: 'Inbox',
+          tabBarBadge: inboxBadge,
+          tabBarBadgeStyle: { backgroundColor: '#EF4444', fontSize: 10 },
+        }}
       />
     </Tab.Navigator>
   );
@@ -131,7 +159,7 @@ function App(): React.JSX.Element {
       return;
     }
 
-    nav.navigate('Inbox', { initialTab: 'notifications' });
+    navigateMainTab(nav, 'Inbox', { initialTab: 'notifications' });
   }, []);
 
   React.useEffect(() => {
@@ -149,44 +177,32 @@ function App(): React.JSX.Element {
           <Stack.Navigator
             screenOptions={{
               headerShown: false,
-              contentStyle: { backgroundColor: '#030712' },
+              contentStyle: { backgroundColor: '#0b0711' },
             }}
           >
           <Stack.Screen name="MainTabs" component={MainTabs} />
-          <Stack.Screen 
-            name="Discover" 
-            component={DiscoverScreen}
-            options={{ presentation: 'modal' }}
-          />
-          <Stack.Screen 
-            name="Boost" 
+          <Stack.Screen name="Profile" component={ProfileScreen} />
+          <Stack.Screen name="ProfileCover" component={ProfileCoverScreen} />
+          <Stack.Screen
+            name="Boost"
             component={BoostScreen}
             options={{ presentation: 'modal' }}
           />
-          <Stack.Screen 
-            name="Live" 
+          <Stack.Screen
+            name="Live"
             component={LiveStreamScreen}
             options={{ presentation: 'modal' }}
           />
-          <Stack.Screen 
-            name="Login" 
-            component={LoginScreen}
-          />
-          <Stack.Screen 
-            name="PostDetail" 
-            component={PostDetailScreen}
-          />
-          <Stack.Screen 
-            name="Stories" 
+          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="PostDetail" component={PostDetailScreen} />
+          <Stack.Screen
+            name="Stories"
             component={StoriesScreen}
             options={{ presentation: 'fullScreenModal' }}
           />
-          <Stack.Screen 
-            name="ViewProfile" 
-            component={ViewProfileScreen}
-          />
-          <Stack.Screen 
-            name="CreateComposer" 
+          <Stack.Screen name="ViewProfile" component={ViewProfileScreen} />
+          <Stack.Screen
+            name="CreateComposer"
             component={CreateScreen}
             options={{ presentation: 'modal' }}
           />
@@ -201,25 +217,30 @@ function App(): React.JSX.Element {
             options={{ presentation: 'modal' }}
           />
           <Stack.Screen
+            name="InstantFilters"
+            component={InstantFiltersScreen}
+            options={{ presentation: 'modal' }}
+          />
+          <Stack.Screen
             name="TextOnlyCreate"
             component={TextOnlyCreateScreen}
             options={{ presentation: 'modal' }}
           />
-          <Stack.Screen 
-            name="Messages" 
-            component={MessagesScreen}
+          <Stack.Screen
+            name="TextOnlyPostDetails"
+            component={TextOnlyPostDetailsScreen}
+            options={{ presentation: 'modal' }}
           />
-          <Stack.Screen 
-            name="Inbox" 
-            component={InboxScreen}
-          />
-          <Stack.Screen 
-            name="CollectionFeed" 
-            component={CollectionFeedScreen}
-          />
+          <Stack.Screen name="Messages" component={MessagesScreen} />
+          <Stack.Screen name="CollectionFeed" component={CollectionFeedScreen} />
           <Stack.Screen
             name="ContentPreferences"
             component={ContentPreferencesScreen}
+            options={{ presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="VideoPlaybackSettings"
+            component={VideoPlaybackSettingsScreen}
             options={{ presentation: 'modal' }}
           />
           <Stack.Screen

@@ -1,7 +1,8 @@
 import React from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
+import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import { glassPanel, gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
 import { activateBoost } from '../api/boost';
 
@@ -49,7 +50,7 @@ export default function PaymentScreen({ route, navigation }: any) {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <GazetteerScreenShell>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconButton}>
           <Icon name="arrow-back" size={22} color="#FFFFFF" />
@@ -77,23 +78,18 @@ export default function PaymentScreen({ route, navigation }: any) {
           <Text style={styles.payButtonText}>{isProcessing ? 'Processing...' : `Pay EUR ${amount.toFixed(2)}`}</Text>
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+    </GazetteerScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#030712',
-  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1F2937',
+    ...gazetteerHeader,
   },
   iconButton: {
     width: 32,
@@ -110,9 +106,7 @@ const styles = StyleSheet.create({
     margin: 16,
     padding: 16,
     borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#374151',
-    backgroundColor: '#111827',
+    ...glassPanel,
   },
   label: {
     color: '#9CA3AF',
@@ -142,7 +136,7 @@ const styles = StyleSheet.create({
   },
   payButton: {
     marginTop: 20,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#d91b5c',
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',

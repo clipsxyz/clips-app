@@ -1,0 +1,62 @@
+---
+description: React Native mobile rules — use RN components/APIs, not web React
+globs: App.native.tsx,src/screens/**/*.{tsx,ts},**/*.native.{tsx,ts}
+alwaysApply: false
+---
+
+# React Native (mobile) — mandatory context
+
+Official references (prefer these over web React docs):
+
+- Core: https://reactnative.dev/docs/getting-started
+- Components: https://reactnative.dev/docs/components-and-apis
+- StyleSheet: https://reactnative.dev/docs/stylesheet
+- Navigation (this app): https://reactnavigation.org/docs/getting-started
+
+## This repo is dual-client
+
+| Client | Entry / paths | Stack |
+|--------|----------------|-------|
+| **Web** | `src/App.tsx`, `src/pages/`, most `src/components/` | Vite, React DOM, `react-router-dom`, CSS |
+| **Native (iOS/Android)** | `App.native.tsx`, `src/screens/`, `*.native.tsx` | **Bare React Native** (not Expo), `@react-navigation/native` |
+
+When editing files matched by this rule, you are on **native only**. Do not copy patterns from `src/pages/` or web-only components unless you also add a `.native.tsx` implementation.
+
+## Never use web HTML in native code
+
+Do **not** use: `<motion.div>`, `<div>`, `<span>`, `<p>`, `<a>`, `<img>`, `<button>`, `<input>`, `className`, global CSS, `document`, `window` (except rare RN-safe cases), `react-router-dom`, `framer-motion`, `react-dom`, Stripe web SDK, etc.
+
+Use React Native core / project primitives:
+
+- Layout: `<View>`, `<ScrollView>`, `<FlatList>`, `<SafeAreaView>` (or `GazetteerScreenShell.native`)
+- Text: `<Text>` (all user-visible strings must be inside `<Text>`)
+- Touch: `<Pressable>`, `<TouchableOpacity>`
+- Media: `<Image>`, `react-native-video`, `react-native-image-picker`
+- Text input: `<TextInput>`
+- Styling: `StyleSheet.create({ ... })` only — no `className`, no `index.css` imports in screens
+
+## Styling on native
+
+- Reuse Gazetteer tokens from `src/theme/gazetteerAmbientNative.ts` (`glassPanel`, `glassSurface`, `gazetteerHeader`, etc.).
+- Ambient shell: `GazetteerScreenShell.native` + `GazetteerAmbientBackground.native` — do not reintroduce solid `#030712` full-screen backgrounds on stack screens unless media must be black (feed video, story viewer).
+- Flexbox works like RN flex, not full CSS (no `grid`, limited `gap` support depending on RN version — prefer `margin`/`padding` if unsure).
+
+## Navigation & modules
+
+- Routes live in `App.native.tsx` (`createNativeStackNavigator`, `createBottomTabNavigator`).
+- Screen files: `src/screens/*Screen.tsx` — navigate with `navigation.navigate('ScreenName', params)`, not URLs.
+- Prefer existing native libraries already in `package.json` (`react-native-vector-icons`, `@react-native-async-storage/async-storage`, etc.).
+- Do **not** assume Expo (`expo-router`, `expo-camera`) — this project uses bare RN scripts: `npm run dev:ios`, `npm run dev:android`.
+
+## File split convention
+
+- Shared logic/types/API: `src/api/`, `src/types/`, `src/utils/` (no DOM).
+- Web UI: `src/pages/`, `src/components/Foo.tsx`
+- Native UI: `src/screens/` or `src/components/Foo.native.tsx`
+- After adding native-only deps (e.g. `react-native-svg`): remind user `cd ios && pod install` and rebuild.
+
+## Before finishing native UI work
+
+1. Confirm no HTML tags or web-only imports in touched files.
+2. Confirm styles are `StyleSheet` objects, not CSS classes.
+3. If the same feature exists on web, update **both** clients only when the user asked for parity; otherwise scope to native paths only.

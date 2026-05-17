@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import { chipActiveMagenta, chipActiveMagentaText, glassPanel, glassSurface, gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
 import { fetchPostsByUser, decorateForUser } from '../api/posts';
 import type { Post } from '../types';
 import BoostSelectionModal from '../components/BoostSelectionModal';
+import ProfileGridThumb from '../components/ProfileGridThumb.native';
 import { getBoostAnalytics, type BoostAnalytics } from '../api/boost';
 
 function buildInstantAnalytics(post: Post): BoostAnalytics {
@@ -154,30 +156,30 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
 
     if (!user) {
         return (
-            <SafeAreaView style={styles.container}>
+            <GazetteerScreenShell contentStyle={styles.centeredShell}>
                 <Text style={styles.errorText}>Please sign in to view your posts</Text>
-            </SafeAreaView>
+            </GazetteerScreenShell>
         );
     }
 
     if (loading) {
         return (
-            <SafeAreaView style={styles.container}>
-                <ActivityIndicator size="large" color="#8B5CF6" />
-            </SafeAreaView>
+            <GazetteerScreenShell contentStyle={styles.centeredShell}>
+                <ActivityIndicator size="large" color="#f472b6" />
+            </GazetteerScreenShell>
         );
     }
 
     if (error) {
         return (
-            <SafeAreaView style={styles.container}>
+            <GazetteerScreenShell contentStyle={styles.centeredShell}>
                 <Text style={styles.errorText}>{error}</Text>
-            </SafeAreaView>
+            </GazetteerScreenShell>
         );
     }
 
     return (
-        <SafeAreaView style={styles.container} edges={['top']}>
+        <GazetteerScreenShell>
             <View style={styles.header}>
                 <Text style={styles.title}>Your Posts</Text>
                 <Text style={styles.subtitle}>Boost your posts to reach more people</Text>
@@ -262,9 +264,9 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
                             ]}
                         >
                             <View style={styles.postHeader}>
-                                {item.mediaUrl && (
-                                    <Image source={{ uri: item.mediaUrl }} style={styles.postThumbnail} />
-                                )}
+                                <View style={styles.postThumbnail}>
+                                    <ProfileGridThumb post={item} />
+                                </View>
                                 <View style={styles.postInfo}>
                                     <Text style={styles.postText} numberOfLines={2}>
                                         {item.text || 'No caption'}
@@ -352,19 +354,19 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
                     });
                 }}
             />
-        </SafeAreaView>
+        </GazetteerScreenShell>
     );
 };
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#030712',
+    centeredShell: {
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 24,
     },
     header: {
         padding: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        ...gazetteerHeader,
     },
     title: {
         fontSize: 20,
@@ -396,13 +398,10 @@ const styles = StyleSheet.create({
         paddingHorizontal: 10,
         paddingVertical: 6,
         borderRadius: 999,
-        borderWidth: 1,
-        borderColor: '#334155',
-        backgroundColor: '#111827',
+        ...glassSurface,
     },
     filterChipActive: {
-        borderColor: '#FFFFFF',
-        backgroundColor: '#FFFFFF',
+        ...chipActiveMagenta,
     },
     filterChipText: {
         fontSize: 11,
@@ -410,23 +409,20 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     filterChipTextActive: {
-        color: '#0F172A',
+        ...chipActiveMagentaText,
     },
     smallChip: {
         paddingHorizontal: 9,
         paddingVertical: 5,
         borderRadius: 999,
-        borderWidth: 1,
-        borderColor: '#334155',
-        backgroundColor: '#111827',
+        ...glassSurface,
     },
     smallChipActive: {
-        borderColor: '#FFFFFF',
-        backgroundColor: '#FFFFFF',
+        ...chipActiveMagenta,
     },
     rangeChipActive: {
-        borderColor: '#38BDF8',
-        backgroundColor: 'rgba(14,165,233,0.20)',
+        borderColor: 'rgba(244, 114, 182, 0.55)',
+        backgroundColor: 'rgba(217, 27, 92, 0.25)',
     },
     smallChipText: {
         fontSize: 10,
@@ -434,7 +430,7 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     smallChipTextActive: {
-        color: '#0F172A',
+        ...chipActiveMagentaText,
     },
     emptyContainer: {
         flex: 1,
@@ -451,7 +447,7 @@ const styles = StyleSheet.create({
     createButton: {
         paddingHorizontal: 24,
         paddingVertical: 12,
-        backgroundColor: '#3B82F6',
+        backgroundColor: '#d91b5c',
         borderRadius: 8,
     },
     createButtonText: {
@@ -460,17 +456,15 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     postCard: {
+        marginHorizontal: 12,
+        marginVertical: 8,
         padding: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        borderRadius: 12,
+        ...glassPanel,
     },
     postCardSelected: {
-        borderColor: '#38BDF8',
-        borderWidth: 1,
-        borderRadius: 12,
-        marginHorizontal: 10,
-        marginVertical: 6,
-        backgroundColor: 'rgba(14,165,233,0.08)',
+        borderColor: 'rgba(244, 114, 182, 0.65)',
+        backgroundColor: 'rgba(217, 27, 92, 0.15)',
     },
     postHeader: {
         flexDirection: 'row',
@@ -482,6 +476,7 @@ const styles = StyleSheet.create({
         height: 80,
         borderRadius: 8,
         backgroundColor: '#111827',
+        overflow: 'hidden',
     },
     postInfo: {
         flex: 1,
@@ -503,7 +498,7 @@ const styles = StyleSheet.create({
     selectedHintText: {
         marginTop: 8,
         fontSize: 12,
-        color: '#67E8F9',
+        color: '#FBCFE8',
         fontWeight: '600',
     },
     postActionsRow: {
@@ -517,22 +512,18 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
         paddingVertical: 8,
         borderRadius: 8,
-        borderWidth: 1,
-        borderColor: '#1D4ED8',
-        backgroundColor: 'rgba(37,99,235,0.15)',
+        ...glassSurface,
     },
     secondaryButtonText: {
-        color: '#93C5FD',
+        color: '#FBCFE8',
         fontSize: 13,
         fontWeight: '600',
     },
     analyticsCard: {
-        borderWidth: 1,
-        borderColor: '#334155',
-        backgroundColor: '#111827',
         borderRadius: 10,
         padding: 10,
         marginBottom: 10,
+        ...glassSurface,
     },
     analyticsTitle: {
         color: '#E2E8F0',
@@ -563,7 +554,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         gap: 8,
         paddingVertical: 12,
-        backgroundColor: '#8B5CF6',
+        backgroundColor: '#d91b5c',
         borderRadius: 8,
     },
     boostButtonText: {

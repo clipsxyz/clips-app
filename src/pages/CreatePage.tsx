@@ -10,6 +10,7 @@ import StickerOverlayComponent from '../components/StickerOverlay';
 import TextStickerModal from '../components/TextStickerModal';
 import UserTaggingModal from '../components/UserTaggingModal';
 import { showToast } from '../utils/toast';
+import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas';
 
 const STICKER_SAFE_ZONE_TOP = 18;
 const STICKER_SAFE_ZONE_BOTTOM = 82;
@@ -990,26 +991,28 @@ export default function CreatePage() {
     }, [locationState?.filterInfo, currentFilterStyle]);
 
     return (
-        <div className="min-h-screen bg-white dark:bg-gray-950 transition-colors duration-200">
+        <div className="relative min-h-screen overflow-hidden bg-[#0b0711]">
+            <DiscoverAmbientCanvas />
+            <div className="relative z-10 min-h-screen transition-colors duration-200">
             {/* Header - Enhanced with better animations */}
-            <div className="sticky top-0 z-40 bg-white/95 dark:bg-gray-950/95 backdrop-blur-md border-b border-gray-100 dark:border-gray-800 shadow-sm">
+            <div className="sticky top-0 z-40 border-b border-white/10 bg-black/35 backdrop-blur-md">
                 <div className="mx-auto max-w-md px-3 h-14 flex items-center justify-between">
                     <div className="flex items-center gap-3">
                         <button
                             onClick={() => navigate('/feed')}
-                            className="p-2 -ml-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-all duration-200 active:scale-95"
+                            className="p-2 -ml-2 text-gray-200 hover:text-white hover:bg-white/10 rounded-full transition-all duration-200 active:scale-95"
                             aria-label="Go to Home Feed"
                             title="Home"
                         >
                             <FiHome className="w-5 h-5" />
                         </button>
                     </div>
-                    <h1 className="font-semibold text-base text-gray-900 dark:text-gray-100">New Post</h1>
+                    <h1 className="font-semibold text-base text-gray-100">New Post</h1>
                     <div className="flex items-center gap-1">
                     <button
                         type="button"
                         onClick={() => setShowLocationMetaSheet(true)}
-                        className="p-2 rounded-full text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-all"
+                        className="p-2 rounded-full text-gray-300 hover:bg-white/10 transition-all"
                         aria-label="Add location, venue, and landmark"
                         title="Location & details"
                     >
@@ -1039,7 +1042,7 @@ export default function CreatePage() {
             {/* Content - Enhanced spacing and animations */}
             <div className="mx-auto max-w-md pb-24">
                 {/* User Info - Enhanced with better styling */}
-                <div className="flex items-center gap-3 px-4 py-3.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50">
+                <div className="flex items-center gap-3 px-4 py-3.5 border-b border-white/10 bg-black/25 backdrop-blur-sm">
                     <Avatar
                         src={user?.avatarUrl}
                         name={user?.name || 'User'}
@@ -1809,6 +1812,7 @@ export default function CreatePage() {
                     </div>
                 </div>
             )}
+            </div>
         </div>
     );
 }

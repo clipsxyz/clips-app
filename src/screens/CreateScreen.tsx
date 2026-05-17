@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     View,
     Text,
@@ -9,17 +9,39 @@ import {
     ScrollView,
     ActivityIndicator,
     Alert,
+    LayoutChangeEvent,
+    Pressable,
+    Keyboard,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import * as ImagePicker from 'react-native-image-picker';
 import ImageCropPicker from 'react-native-image-crop-picker';
-import Video from 'react-native-video';
+import Video, { type VideoRef } from 'react-native-video';
+import VideoCoverControls from '../components/VideoCoverControls.native';
 import { useAuth } from '../context/Auth';
 import { createPost } from '../api/posts';
 import { prepareMediaForPostNative } from '../utils/prepareMediaForPostNative';
 import { saveDraft } from '../api/drafts';
 import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
+import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import { glassPanel, glassSurface } from '../theme/gazetteerAmbientNative';
+import StickerPickerNative from '../components/StickerPicker.native';
+import StickerOverlayNative from '../components/StickerOverlay.native';
+import TextStickerModalNative from '../components/TextStickerModal.native';
+import type { Sticker, StickerOverlay } from '../types';
+import { clampStickerY } from '../utils/stickerLayoutNative';
+import { hapticLight, hapticSuccess } from '../utils/hapticsNative';
+import {
+    buildFilterInfo,
+    getFilterOverlayStyle,
+    INSTANT_FILTER_NAMES,
+    isFiltered,
+    type InstantFilterInfo,
+    type InstantFilterName,
+} from '../utils/instantFiltersNative';
+import { captureFilteredPreviewFromRef } from '../utils/captureFilteredPreviewNative';
+import { addPendingFeedUpload } from '../utils/pendingFeedUploadNative';
+import { startBackgroundFeedUpload } from '../utils/runBackgroundFeedUploadNative';
 
 export default function CreateScreen({ navigation, route }: any) {
     const { user } = useAuth();
@@ -60,8 +82,6 @@ export default function CreateScreen({ navigation, route }: any) {
     );
     const [isUploading, setIsUploading] = useState(false);
     const [isSavingDraft, setIsSavingDraft] = useState(false);
-    const [trimStart, setTrimStart] = useState<number>(Number(route.params?.trimStart || 0));
-    const [trimEnd, setTrimEnd] = useState<number>(Number(route.params?.trimEnd || 0));
     const [videoCoverTime, setVideoCoverTime] = useState<number>(Number(route.params?.videoCoverTime || 0));
     const [isVideoPaused, setIsVideoPaused] = useState(false);
     const [videoDurationSec, setVideoDurationSec] = useState<number>(Math.max(1, Number(route.params?.videoDuration || 0) || 15));
@@ -77,7 +97,42 @@ export default function CreateScreen({ navigation, route }: any) {
     );
     const [storyTextPresetId, setStoryTextPresetId] = useState<string>('none');
     const activeStoryPreset = storyTextPresets.find((preset) => preset.id === storyTextPresetId) || storyTextPresets[0];
-    const taggedUsers = React.useMemo(
+    const filterInfo = route.params?.filterInfo as InstantFilterInfo | undefined;
+    const draftFilterBaked = !!route.params?.draftFilterBaked;
+    const draftFilterActive = route.params?.draftFilterActive as InstantFilterName | undefined;
+    const [imageFilterName, setImageFilterName] = useState<InstantFilterName>(() => {
+        if (draftFilterBaked) return 'None';
+        if (draftFilterActive && draftFilterActive !== 'None') return draftFilterActive;
+        return (filterInfo?.active as InstantFilterName) || 'None';
+    });
+    const [stickers, setStickers] = useState<StickerOverlay[]>(
+        Array.isArray(route.params?.draftStickers) ? route.params.draftStickers : [],
+    );
+    const [showStickerPicker, setShowStickerPicker] = useState(false);
+    const [showTextStickerModal, setShowTextStickerModal] = useState(false);
+    const [selectedStickerOverlay, setSelectedStickerOverlay] = useState<string | null>(null);
+    const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
+    const videoRef = useRef<VideoRef>(null);
+    const previewCaptureRef = useRef<View>(null);
+
+    useEffect(() => {
+        if (filterInfo?.active) {
+            setImageFilterName(filterInfo.active as InstantFilterName);
+        }
+    }, [filterInfo?.active]);
+
+    const activeFilterName = (
+        mediaType === 'video' ? filterInfo?.active || 'None' : imageFilterName
+    ) as InstantFilterName;
+    const filterOverlayStyle = useMemo(
+        () => getFilterOverlayStyle(activeFilterName),
+        [activeFilterName],
+    );
+    const hasAppliedFilter =
+        mediaType === 'video'
+            ? isFiltered(filterInfo) || !!route.params?.filtered
+            : imageFilterName !== 'None';
+    const taggedUsers = useMemo(
         () =>
             taggedUsersInput
                 .split(',')
@@ -86,7 +141,86 @@ export default function CreateScreen({ navigation, route }: any) {
         [taggedUsersInput],
     );
 
-    React.useEffect(() => {
+    const handlePreviewLayout = useCallback((event: LayoutChangeEvent) => {
+        const { width, height } = event.nativeEvent.layout;
+        if (width > 0 && height > 0) {
+            setPreviewSize({ width, height });
+        }
+    }, []);
+
+    const handleSelectSticker = useCallback((sticker: Sticker) => {
+        const newOverlay: StickerOverlay = {
+            id: `sticker-${Date.now()}-${Math.random()}`,
+            stickerId: sticker.id,
+            sticker,
+            x: 50,
+            y: clampStickerY(50),
+            scale: 1,
+            rotation: 0,
+            opacity: 1,
+        };
+        setStickers((prev) => [...prev, newOverlay]);
+        setSelectedStickerOverlay(newOverlay.id);
+    }, []);
+
+    const handleAddTextSticker = useCallback((textValue: string, fontSize: 'small' | 'medium' | 'large', color: string) => {
+        const textSticker: Sticker = {
+            id: `text-sticker-${Date.now()}`,
+            name: textValue,
+            category: 'Text',
+        };
+        const newOverlay: StickerOverlay = {
+            id: `sticker-${Date.now()}-${Math.random()}`,
+            stickerId: textSticker.id,
+            sticker: textSticker,
+            x: 50,
+            y: clampStickerY(50),
+            scale: fontSize === 'small' ? 0.8 : fontSize === 'large' ? 1.2 : 1,
+            rotation: 0,
+            opacity: 1,
+            textContent: textValue,
+            textColor: color,
+            fontSize,
+        };
+        setStickers((prev) => [...prev, newOverlay]);
+        setSelectedStickerOverlay(newOverlay.id);
+    }, []);
+
+    const handleUpdateSticker = useCallback((id: string, updated: StickerOverlay) => {
+        setStickers((prev) => prev.map((s) => (s.id === id ? updated : s)));
+    }, []);
+
+    const handleRemoveSticker = useCallback((id: string) => {
+        setStickers((prev) => prev.filter((s) => s.id !== id));
+        setSelectedStickerOverlay((current) => (current === id ? null : current));
+    }, []);
+
+    const openStickerPicker = useCallback(() => {
+        if (!selectedMedia) {
+            Alert.alert('Media required', 'Add a photo or video before adding stickers.');
+            return;
+        }
+        setShowStickerPicker(true);
+    }, [selectedMedia]);
+
+    const openFilters = useCallback(() => {
+        if (!selectedMedia) {
+            Alert.alert('Media required', 'Add a photo or video before choosing a filter.');
+            return;
+        }
+        if (mediaType === 'video') {
+            navigation.navigate('InstantFilters', {
+                videoUrl: selectedMedia,
+                mediaUrl: selectedMedia,
+                videoDuration: videoDurationSec,
+                videoCoverTime,
+                story24: isStory24Flow || undefined,
+                returnToComposer: true,
+            });
+        }
+    }, [isStory24Flow, mediaType, navigation, selectedMedia, videoCoverTime, videoDurationSec]);
+
+    useEffect(() => {
         if (!isAddYoursFlow) return;
         setText((prev) => (prev && prev.trim().length > 0 ? prev : 'Add Yours: '));
     }, [isAddYoursFlow]);
@@ -184,6 +318,56 @@ export default function CreateScreen({ navigation, route }: any) {
         }
     };
 
+    const captureVideoPoster = useCallback(async (): Promise<string> => {
+        if (mediaType === 'video') {
+            videoRef.current?.seek(Math.max(0, videoCoverTime));
+            setIsVideoPaused(true);
+            await new Promise((resolve) => setTimeout(resolve, 400));
+        }
+        return captureFilteredPreviewFromRef(previewCaptureRef);
+    }, [mediaType, videoCoverTime]);
+
+    const prepareComposerMedia = useCallback(async () => {
+        if (!selectedMedia || !mediaType) {
+            return {
+                mediaUrl: undefined as string | undefined,
+                mediaType: undefined as 'image' | 'video' | undefined,
+                videoPosterUrl: undefined as string | undefined,
+                filterExportFailed: false,
+                videoCompressFailed: false,
+            };
+        }
+        const filterForExport = hasAppliedFilter ? buildFilterInfo(activeFilterName) : null;
+        try {
+            return await prepareMediaForPostNative({
+                mediaUrl: selectedMedia,
+                mediaType,
+                filterInfo: filterForExport,
+                captureVideoPoster:
+                    mediaType === 'video' || (filterForExport && mediaType === 'image')
+                        ? captureVideoPoster
+                        : undefined,
+                videoCoverTime,
+            });
+        } catch (err) {
+            console.warn('prepareComposerMedia failed, using local media', err);
+            return {
+                mediaUrl: selectedMedia,
+                mediaType,
+                videoPosterUrl: undefined,
+                filterExportFailed: true,
+                videoCompressFailed: true,
+            };
+        }
+    }, [
+        activeFilterName,
+        captureVideoPoster,
+        hasAppliedFilter,
+        mediaType,
+        selectedMedia,
+        videoCoverTime,
+    ]);
+
     const handlePost = async () => {
         if (!selectedMedia && !text.trim()) {
             Alert.alert('Error', 'Please add media or text to your post');
@@ -195,26 +379,70 @@ export default function CreateScreen({ navigation, route }: any) {
             return;
         }
 
+        if (isUploading) return;
+
+        const filterForExport = hasAppliedFilter ? buildFilterInfo(activeFilterName) : null;
+        const captionText = text.trim();
+        const locationLabel = location.trim() || user.regional || 'Unknown';
+
+        if (!isStory24Flow) {
+            setIsUploading(true);
+            const tempId = `pending-${Date.now()}`;
+            const localThumbUri = selectedMedia || null;
+            addPendingFeedUpload({
+                tempId,
+                userId: user.id,
+                userHandle: user.handle,
+                text: captionText,
+                location: locationLabel,
+                localMediaUri: selectedMedia,
+                localThumbUri,
+                mediaType,
+                videoCoverTime,
+                filterForExport,
+                userLocal: user.local,
+                userRegional: user.regional,
+                userNational: user.national,
+                stickers: stickers.length > 0 ? stickers : undefined,
+                taggedUsers: taggedUsers.length > 0 ? taggedUsers : undefined,
+                venue: venue.trim() || undefined,
+                landmark: landmark.trim() || undefined,
+            });
+            hapticLight();
+            navigation.navigate('Home', { forceRefreshAt: Date.now() });
+            setIsUploading(false);
+            startBackgroundFeedUpload(tempId);
+            return;
+        }
+
         setIsUploading(true);
         try {
-            const preparedMedia = await prepareMediaForPostNative({
-                mediaUrl: selectedMedia,
-                mediaType,
-            });
+            const preparedMedia = await prepareComposerMedia();
+
+            if (preparedMedia.filterExportFailed && filterForExport) {
+                console.warn(
+                    'Filter bake partially failed; uploaded media may differ slightly from preview.',
+                );
+            }
+            if (preparedMedia.videoCompressFailed && mediaType === 'video') {
+                console.warn(
+                    'Video compression failed; original file was uploaded and may be larger than expected.',
+                );
+            }
 
             await createPost(
                 user.id,
                 user.handle,
-                text.trim(),
-                location.trim() || user.regional || 'Unknown',
+                captionText,
+                locationLabel,
                 preparedMedia.mediaUrl,
                 preparedMedia.mediaType,
                 undefined,
-                preparedMedia.mediaUrl ? text.trim() || undefined : undefined,
+                preparedMedia.mediaUrl ? captionText || undefined : undefined,
                 user.local,
                 user.regional,
                 user.national,
-                undefined,
+                stickers.length > 0 ? stickers : undefined,
                 undefined,
                 undefined,
                 undefined,
@@ -232,20 +460,22 @@ export default function CreateScreen({ navigation, route }: any) {
                 undefined,
                 preparedMedia.videoPosterUrl,
             );
+            hapticSuccess();
             const storyAudienceLabel =
                 storyAudience === 'close_friends' ? 'Close Friends' : storyAudience === 'only_me' ? 'Only Me' : 'Public';
             Alert.alert(
                 'Success',
-                isStory24Flow ? `Story 24 published (${storyAudienceLabel}).` : 'Post created successfully!',
+                `Story 24 published (${storyAudienceLabel}).`,
                 [
-                {
-                    text: 'OK',
-                    onPress: () =>
-                        navigation.navigate(isStory24Flow ? 'Stories' : 'Home', {
-                            forceRefreshAt: Date.now(),
-                        }),
-                },
-            ]);
+                    {
+                        text: 'OK',
+                        onPress: () =>
+                            navigation.navigate('Stories', {
+                                forceRefreshAt: Date.now(),
+                            }),
+                    },
+                ],
+            );
         } catch (error: any) {
             console.error('Error creating post:', error);
             Alert.alert('Error', error?.message || 'Failed to create post');
@@ -262,19 +492,43 @@ export default function CreateScreen({ navigation, route }: any) {
         if (isSavingDraft) return;
         setIsSavingDraft(true);
         try {
+            let mediaUrl = selectedMedia || '';
+            let savedMediaType = mediaType || undefined;
+            let videoPosterUrl: string | undefined;
+            let filterBaked = false;
+            let filterActiveToStore: InstantFilterName | undefined;
+
+            if (selectedMedia && mediaType) {
+                const filterForExport = hasAppliedFilter ? buildFilterInfo(activeFilterName) : null;
+                const prepared = await prepareComposerMedia();
+                if (prepared.mediaUrl) {
+                    mediaUrl = prepared.mediaUrl;
+                }
+                savedMediaType = prepared.mediaType || mediaType;
+                videoPosterUrl = prepared.videoPosterUrl;
+                filterBaked = Boolean(filterForExport && !prepared.filterExportFailed);
+                if (!filterBaked && hasAppliedFilter && activeFilterName !== 'None') {
+                    filterActiveToStore = activeFilterName;
+                }
+            }
+
             await saveDraft({
-                videoUrl: selectedMedia || '',
-                videoDuration: mediaType === 'video' ? Math.max(trimEnd - trimStart, 0) : 0,
+                videoUrl: mediaUrl,
+                videoDuration: savedMediaType === 'video' ? videoDurationSec : 0,
                 caption: text.trim() || undefined,
                 textBody: text.trim() || undefined,
                 location: location.trim() || undefined,
                 venue: venue.trim() || undefined,
                 landmark: landmark.trim() || undefined,
                 taggedUsers: taggedUsers.length > 0 ? taggedUsers : undefined,
-                mediaType: mediaType || undefined,
-                trimStart: mediaType === 'video' ? trimStart : undefined,
-                trimEnd: mediaType === 'video' ? trimEnd : undefined,
+                mediaType: savedMediaType,
+                videoPosterUrl,
+                videoCoverTime: savedMediaType === 'video' ? videoCoverTime : undefined,
+                filterActive: filterActiveToStore,
+                filterBaked,
+                stickers: stickers.length > 0 ? stickers : undefined,
             });
+            hapticLight();
             Alert.alert('Saved', 'Draft saved to your profile drafts.');
         } catch (err: any) {
             Alert.alert('Draft failed', err?.message || 'Could not save draft.');
@@ -284,7 +538,7 @@ export default function CreateScreen({ navigation, route }: any) {
     };
 
     return (
-        <SafeAreaView style={styles.container} edges={['top']}>
+        <GazetteerScreenShell edges={['top', 'bottom']}>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()}>
                     <Icon name="close" size={24} color="#FFFFFF" />
@@ -312,7 +566,15 @@ export default function CreateScreen({ navigation, route }: any) {
                 </View>
             </View>
 
-            <ScrollView style={styles.content}>
+            <ScrollView
+                style={styles.content}
+                contentContainerStyle={styles.contentContainer}
+                keyboardShouldPersistTaps="handled"
+                onScrollBeginDrag={() => {
+                    Keyboard.dismiss();
+                    setSelectedStickerOverlay(null);
+                }}
+            >
                 {isAddYoursFlow && (
                     <View style={styles.addYoursBanner}>
                         <Icon name="sparkles" size={16} color="#111827" />
@@ -392,47 +654,76 @@ export default function CreateScreen({ navigation, route }: any) {
                 {/* Media Preview */}
                 {selectedMedia && (
                     <View style={styles.mediaPreview}>
-                        {mediaType === 'video' ? (
-                            <View style={styles.videoPreviewWrap}>
-                                <Video
-                                    source={{ uri: selectedMedia }}
-                                    style={styles.previewImage}
-                                    resizeMode="contain"
-                                    paused={isVideoPaused}
-                                    repeat
-                                    controls
-                                    muted
-                                    onLoad={(event) => {
-                                        const duration = Number(event?.duration || 0);
-                                        if (!Number.isFinite(duration) || duration <= 0) return;
-                                        const rounded = Math.max(1, Math.floor(duration));
-                                        setVideoDurationSec(rounded);
-                                        setTrimEnd((prev) => {
-                                            const next = prev > 0 ? prev : rounded;
-                                            return Math.min(rounded, Math.max(trimStart + 1, next));
-                                        });
-                                        setTrimStart((prev) => Math.min(prev, Math.max(0, rounded - 1)));
-                                        setVideoCoverTime((prev) => Math.min(prev, rounded));
-                                    }}
-                                />
+                        {hasAppliedFilter ? (
+                            <View style={styles.filterBadge}>
+                                <Icon name="color-filter" size={12} color="#FBCFE8" />
+                                <Text style={styles.filterBadgeText}>{activeFilterName}</Text>
+                            </View>
+                        ) : null}
+                        <View style={styles.videoPreviewWrap} onLayout={handlePreviewLayout}>
+                            <View ref={previewCaptureRef} style={styles.previewCaptureFrame} collapsable={false}>
+                                {mediaType === 'video' ? (
+                                    <Video
+                                        ref={videoRef}
+                                        source={{ uri: selectedMedia }}
+                                        style={styles.previewImage}
+                                        resizeMode="contain"
+                                        paused={isVideoPaused}
+                                        repeat
+                                        controls
+                                        muted
+                                        onLoad={(event) => {
+                                            const duration = Number(event?.duration || 0);
+                                            if (!Number.isFinite(duration) || duration <= 0) return;
+                                            const rounded = Math.max(0.1, Math.floor(duration * 10) / 10);
+                                            setVideoDurationSec(rounded);
+                                            setVideoCoverTime((prev) => Math.min(Math.max(0, prev), rounded));
+                                        }}
+                                    />
+                                ) : (
+                                    <Image
+                                        source={{ uri: selectedMedia }}
+                                        style={styles.previewImage}
+                                        resizeMode="contain"
+                                    />
+                                )}
+                                {filterOverlayStyle ? (
+                                    <View pointerEvents="none" style={[styles.filterOverlay, filterOverlayStyle]} />
+                                ) : null}
+                            </View>
+                            <Pressable
+                                style={styles.stickerDeselectLayer}
+                                onPress={() => setSelectedStickerOverlay(null)}
+                            />
+                            {previewSize.width > 0 &&
+                                stickers.map((overlay) => (
+                                    <StickerOverlayNative
+                                        key={overlay.id}
+                                        overlay={overlay}
+                                        onUpdate={(updated) => handleUpdateSticker(overlay.id, updated)}
+                                        onRemove={() => handleRemoveSticker(overlay.id)}
+                                        isSelected={selectedStickerOverlay === overlay.id}
+                                        onSelect={() => setSelectedStickerOverlay(overlay.id)}
+                                        containerWidth={previewSize.width}
+                                        containerHeight={previewSize.height}
+                                    />
+                                ))}
+                            {mediaType === 'video' ? (
                                 <TouchableOpacity
                                     style={styles.videoPauseBtn}
                                     onPress={() => setIsVideoPaused((v) => !v)}
                                 >
                                     <Icon name={isVideoPaused ? 'play' : 'pause'} size={18} color="#FFFFFF" />
                                 </TouchableOpacity>
-                            </View>
-                        ) : (
-                            <Image
-                                source={{ uri: selectedMedia }}
-                                style={styles.previewImage}
-                                resizeMode="contain"
-                            />
-                        )}
+                            ) : null}
+                        </View>
                         <TouchableOpacity
                             onPress={() => {
                                 setSelectedMedia(null);
                                 setMediaType(null);
+                                setStickers([]);
+                                setSelectedStickerOverlay(null);
+                                setImageFilterName('None');
                             }}
                             style={styles.removeMediaButton}
                         >
@@ -440,47 +731,64 @@ export default function CreateScreen({ navigation, route }: any) {
                         </TouchableOpacity>
                     </View>
                 )}
-                {mediaType === 'video' && (
-                    <View style={styles.videoMetaCard}>
-                        <Text style={styles.videoMetaText}>
-                            Duration: {videoDurationSec.toFixed(1)}s
-                        </Text>
-                        <Text style={styles.videoMetaText}>
-                            Trim: {Math.max(0, trimStart).toFixed(1)}s - {Math.max(trimEnd, trimStart).toFixed(1)}s
-                        </Text>
-                        <Text style={styles.videoMetaText}>Cover frame: {Math.max(0, videoCoverTime).toFixed(1)}s</Text>
-                        <View style={styles.videoMetaControlsRow}>
-                            <TouchableOpacity style={styles.videoMetaChip} onPress={() => setTrimStart((v) => Math.max(0, Math.min(v - 1, trimEnd - 1)))}>
-                                <Text style={styles.videoMetaChipText}>Start -</Text>
+                {selectedMedia && (
+                    <View style={styles.composerTools}>
+                        {mediaType === 'video' ? (
+                            <TouchableOpacity style={styles.composerToolBtn} onPress={openFilters}>
+                                <Icon name="color-filter" size={18} color="#FBCFE8" />
+                                <Text style={styles.composerToolText}>Filters</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity style={styles.videoMetaChip} onPress={() => setTrimStart((v) => Math.min(trimEnd - 1, v + 1))}>
-                                <Text style={styles.videoMetaChipText}>Start +</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.videoMetaChip} onPress={() => setTrimEnd((v) => Math.max(trimStart + 1, v - 1))}>
-                                <Text style={styles.videoMetaChipText}>End -</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.videoMetaChip} onPress={() => setTrimEnd((v) => Math.min(videoDurationSec, Math.max(trimStart + 1, v + 1)))}>
-                                <Text style={styles.videoMetaChipText}>End +</Text>
-                            </TouchableOpacity>
-                        </View>
-                        <View style={styles.videoMetaControlsRow}>
-                            <TouchableOpacity style={styles.videoMetaChip} onPress={() => setVideoCoverTime((v) => Math.max(0, v - 1))}>
-                                <Text style={styles.videoMetaChipText}>Cover -1s</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.videoMetaChip} onPress={() => setVideoCoverTime((v) => Math.min(videoDurationSec, v + 1))}>
-                                <Text style={styles.videoMetaChipText}>Cover +1s</Text>
-                            </TouchableOpacity>
-                        </View>
-                        <TouchableOpacity
-                            style={styles.videoMetaReset}
-                            onPress={() => {
-                                setTrimStart(0);
-                                setTrimEnd(videoDurationSec);
-                                setVideoCoverTime(0);
-                            }}
-                        >
-                            <Text style={styles.videoMetaResetText}>Reset preview edits</Text>
+                        ) : null}
+                        <TouchableOpacity style={styles.composerToolBtn} onPress={openStickerPicker}>
+                            <Icon name="happy" size={18} color="#FBCFE8" />
+                            <Text style={styles.composerToolText}>
+                                Stickers{stickers.length > 0 ? ` (${stickers.length})` : ''}
+                            </Text>
                         </TouchableOpacity>
+                        {selectedStickerOverlay ? (
+                            <TouchableOpacity
+                                style={styles.composerToolBtn}
+                                onPress={() => setSelectedStickerOverlay(null)}
+                            >
+                                <Icon name="checkmark-circle-outline" size={18} color="#FBCFE8" />
+                                <Text style={styles.composerToolText}>Done</Text>
+                            </TouchableOpacity>
+                        ) : null}
+                    </View>
+                )}
+                {selectedMedia && mediaType === 'image' && (
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.imageFilterRow}
+                    >
+                        {INSTANT_FILTER_NAMES.map((name) => {
+                            const active = imageFilterName === name;
+                            return (
+                                <TouchableOpacity
+                                    key={name}
+                                    onPress={() => setImageFilterName(name)}
+                                    style={[styles.imageFilterChip, active && styles.imageFilterChipActive]}
+                                >
+                                    <Text style={[styles.imageFilterChipText, active && styles.imageFilterChipTextActive]}>
+                                        {name}
+                                    </Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </ScrollView>
+                )}
+                {mediaType === 'video' && (
+                    <View style={styles.videoCoverWrap}>
+                        <VideoCoverControls
+                            durationSec={videoDurationSec}
+                            coverTime={videoCoverTime}
+                            onCoverTimeChange={setVideoCoverTime}
+                            onScrubPreview={(timeSec) => {
+                                videoRef.current?.seek(Math.max(0, timeSec));
+                                setIsVideoPaused(true);
+                            }}
+                        />
                     </View>
                 )}
 
@@ -569,22 +877,35 @@ export default function CreateScreen({ navigation, route }: any) {
                     )}
                 </View>
             </ScrollView>
-        </SafeAreaView>
+
+            <StickerPickerNative
+                visible={showStickerPicker}
+                onClose={() => setShowStickerPicker(false)}
+                onSelectSticker={handleSelectSticker}
+                onAddText={() => {
+                    setShowStickerPicker(false);
+                    setShowTextStickerModal(true);
+                }}
+            />
+            <TextStickerModalNative
+                visible={showTextStickerModal}
+                onClose={() => setShowTextStickerModal(false)}
+                onConfirm={handleAddTextSticker}
+            />
+        </GazetteerScreenShell>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#030712',
-    },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: 16,
         borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+        backgroundColor: 'rgba(0, 0, 0, 0.35)',
+        zIndex: 1,
     },
     headerTitle: {
         fontSize: 18,
@@ -616,6 +937,10 @@ const styles = StyleSheet.create({
     },
     content: {
         flex: 1,
+        zIndex: 1,
+    },
+    contentContainer: {
+        paddingBottom: 32,
     },
     addYoursBanner: {
         flexDirection: 'row',
@@ -643,8 +968,8 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         gap: 12,
         padding: 20,
-        backgroundColor: '#1F2937',
-        borderRadius: 12,
+        borderRadius: 14,
+        ...glassSurface,
     },
     mediaButtonText: {
         color: '#FFFFFF',
@@ -655,10 +980,8 @@ const styles = StyleSheet.create({
         marginHorizontal: 16,
         marginTop: 8,
         marginBottom: 4,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: '#374151',
-        backgroundColor: '#111827',
+        borderRadius: 14,
+        ...glassPanel,
         padding: 12,
         gap: 10,
     },
@@ -674,9 +997,7 @@ const styles = StyleSheet.create({
     },
     storyAudienceChip: {
         borderRadius: 999,
-        borderWidth: 1,
-        borderColor: '#4B5563',
-        backgroundColor: '#1F2937',
+        ...glassSurface,
         paddingHorizontal: 10,
         paddingVertical: 6,
     },
@@ -721,11 +1042,48 @@ const styles = StyleSheet.create({
         width: '100%',
         height: '100%',
         backgroundColor: '#000000',
+        overflow: 'hidden',
+        position: 'relative',
+    },
+    previewCaptureFrame: {
+        width: '100%',
+        height: '100%',
+        backgroundColor: '#000000',
+        overflow: 'hidden',
+        position: 'relative',
+    },
+    stickerDeselectLayer: {
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 1,
+    },
+    filterOverlay: {
+        ...StyleSheet.absoluteFillObject,
+    },
+    filterBadge: {
+        position: 'absolute',
+        top: 12,
+        left: 12,
+        zIndex: 2,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        borderRadius: 999,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        backgroundColor: 'rgba(217, 27, 92, 0.35)',
+        borderWidth: 1,
+        borderColor: 'rgba(244, 114, 182, 0.45)',
+    },
+    filterBadgeText: {
+        color: '#FBCFE8',
+        fontSize: 11,
+        fontWeight: '700',
     },
     videoPauseBtn: {
         position: 'absolute',
         right: 14,
         top: 14,
+        zIndex: 25,
         width: 34,
         height: 34,
         borderRadius: 17,
@@ -737,64 +1095,70 @@ const styles = StyleSheet.create({
         position: 'absolute',
         top: 16,
         right: 16,
+        zIndex: 30,
     },
-    videoMetaCard: {
-        marginHorizontal: 16,
-        marginTop: 10,
-        marginBottom: 4,
+    composerTools: {
+        flexDirection: 'row',
+        gap: 10,
+        paddingHorizontal: 16,
+        paddingTop: 10,
+        paddingBottom: 4,
+    },
+    composerToolBtn: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
         borderRadius: 12,
+        paddingVertical: 10,
+        backgroundColor: 'rgba(244, 114, 182, 0.12)',
         borderWidth: 1,
-        borderColor: '#374151',
-        backgroundColor: '#111827',
-        padding: 11,
-        gap: 5,
+        borderColor: 'rgba(244, 114, 182, 0.28)',
     },
-    videoMetaText: {
+    composerToolText: {
+        color: '#FBCFE8',
+        fontSize: 14,
+        fontWeight: '700',
+    },
+    imageFilterRow: {
+        paddingHorizontal: 16,
+        paddingBottom: 10,
+        gap: 8,
+    },
+    imageFilterChip: {
+        borderRadius: 999,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        backgroundColor: 'rgba(255,255,255,0.06)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.08)',
+    },
+    imageFilterChipActive: {
+        backgroundColor: 'rgba(244, 114, 182, 0.25)',
+        borderColor: 'rgba(244, 114, 182, 0.55)',
+    },
+    imageFilterChipText: {
         color: '#D1D5DB',
         fontSize: 12,
         fontWeight: '600',
     },
-    videoMetaControlsRow: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 6,
-        marginTop: 2,
+    imageFilterChipTextActive: {
+        color: '#FBCFE8',
     },
-    videoMetaChip: {
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: '#4B5563',
-        backgroundColor: '#1F2937',
-        paddingHorizontal: 9,
-        paddingVertical: 5,
-    },
-    videoMetaChipText: {
-        color: '#E5E7EB',
-        fontSize: 10,
-        fontWeight: '700',
-    },
-    videoMetaReset: {
-        marginTop: 4,
-        alignSelf: 'flex-start',
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: '#4B5563',
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-    },
-    videoMetaResetText: {
-        color: '#F9FAFB',
-        fontSize: 12,
-        fontWeight: '700',
+    videoCoverWrap: {
+        marginHorizontal: 16,
+        marginTop: 10,
+        marginBottom: 4,
     },
     inputContainer: {
         padding: 16,
         borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        borderBottomColor: 'rgba(255, 255, 255, 0.06)',
     },
     textInput: {
-        backgroundColor: '#1F2937',
-        borderRadius: 12,
+        ...glassSurface,
+        borderRadius: 14,
         padding: 16,
         color: '#FFFFFF',
         fontSize: 16,
@@ -820,8 +1184,8 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 12,
-        backgroundColor: '#1F2937',
-        borderRadius: 12,
+        ...glassSurface,
+        borderRadius: 14,
         padding: 16,
     },
     locationInput: {

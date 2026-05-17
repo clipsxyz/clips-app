@@ -1,5 +1,6 @@
 import { get, set, del, keys } from 'idb-keyval';
-import type { Post } from '../types';
+import type { StickerOverlay } from '../types';
+import type { InstantFilterName } from '../utils/instantFiltersNative';
 
 export interface Draft {
   id: string;
@@ -11,10 +12,22 @@ export interface Draft {
   caption?: string;
   location?: string;
   tags?: string[];
+  /** @deprecated Legacy trim fields; native no longer trims on upload. */
   trimStart?: number;
+  /** @deprecated Legacy trim fields; native no longer trims on upload. */
   trimEnd?: number;
   /** When saving from gallery: 'image' | 'video'. Omit = treat as video (InstantCreate). */
   mediaType?: 'image' | 'video';
+  /** Feed thumbnail for video drafts (remote or data URL). */
+  videoPosterUrl?: string;
+  /** Cover frame time in seconds when the draft was saved. */
+  videoCoverTime?: number;
+  /** Instant filter name when overlay was not baked into media. */
+  filterActive?: InstantFilterName;
+  /** True when filter was baked into `videoUrl` on save (do not re-apply overlay on resume). */
+  filterBaked?: boolean;
+  /** Sticker overlays from the composer. */
+  stickers?: StickerOverlay[];
   /** Optional full carousel for multi-media drafts. */
   mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>;
   /** True when this draft is text-only (no media). */

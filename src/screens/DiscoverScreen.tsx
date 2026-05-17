@@ -11,13 +11,13 @@ import {
     Platform,
     ScrollView,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
 import { searchLocations, type LocationSuggestion } from '../api/locations';
 import { unifiedSearch, type SearchSections } from '../api/search';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { fetchUserProfile } from '../api/client';
+import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import { glassPanel, glassSearch, glassSurface, greetingLight, greetingSubLight } from '../theme/gazetteerAmbientNative';
 
 const popularCities = [
     'Dublin', 'Cork', 'Galway', 'Limerick', 'London', 'Manchester',
@@ -197,7 +197,7 @@ export default function DiscoverScreen({ navigation }: any) {
     };
 
     return (
-        <SafeAreaView style={styles.container} edges={['top']}>
+        <GazetteerScreenShell edges={['top']}>
             <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                 style={styles.keyboardView}
@@ -244,10 +244,12 @@ export default function DiscoverScreen({ navigation }: any) {
 
                     {/* Greeting */}
                     <View style={styles.greetingContainer}>
-                        <Text style={styles.greetingText}>
-                            {`Hello, ${firstName}`}
-                        </Text>
-                        <Text style={styles.greetingSubtext}>Where to for your news?</Text>
+                        <Text style={styles.greetingText}>{`Hi ${firstName},`}</Text>
+                        <Text style={styles.greetingTextLine2}>let's go social traveling</Text>
+                        <View style={styles.greetingSubRow}>
+                            <Text style={styles.greetingSubtext}>Where to for your news?</Text>
+                            <Icon name="location" size={16} color="rgba(227, 227, 227, 0.72)" />
+                        </View>
                     </View>
 
                     {/* Search input */}
@@ -263,6 +265,7 @@ export default function DiscoverScreen({ navigation }: any) {
                                 placeholder={modePlaceholder[discoverMode]}
                                 placeholderTextColor="#6B7280"
                                 style={styles.searchInput}
+                                selectionColor="#d91b5c"
                                 onSubmitEditing={chooseFromQuery}
                                 returnKeyType="search"
                             />
@@ -304,7 +307,7 @@ export default function DiscoverScreen({ navigation }: any) {
                                                 activeIndex === index && styles.suggestionItemActive
                                             ]}
                                         >
-                                            <Icon name="location" size={16} color="#3B82F6" />
+                                            <Icon name="location" size={16} color="#f472b6" />
                                             <View style={styles.suggestionContent}>
                                                 <Text style={styles.suggestionName}>{item.name}</Text>
                                                 {item.country && (
@@ -393,17 +396,18 @@ export default function DiscoverScreen({ navigation }: any) {
                     )}
                 </View>
             </KeyboardAvoidingView>
-        </SafeAreaView>
+        </GazetteerScreenShell>
     );
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#030712',
+        backgroundColor: 'transparent',
     },
     keyboardView: {
         flex: 1,
+        zIndex: 1,
     },
     content: {
         flex: 1,
@@ -417,24 +421,22 @@ const styles = StyleSheet.create({
     },
     modeChip: {
         borderRadius: 999,
-        borderWidth: 1,
-        borderColor: '#374151',
-        backgroundColor: '#111827',
+        ...glassSurface,
         paddingHorizontal: 12,
         paddingVertical: 6,
         marginRight: 8,
     },
     modeChipActive: {
-        borderColor: '#8B5CF6',
-        backgroundColor: '#2E1065',
+        borderColor: 'rgba(217, 27, 92, 0.55)',
+        backgroundColor: 'rgba(217, 27, 92, 0.2)',
     },
     modeChipText: {
-        color: '#D1D5DB',
+        color: '#E8E8E8',
         fontSize: 12,
-        fontWeight: '700',
+        fontWeight: '600',
     },
     modeChipTextActive: {
-        color: '#DDD6FE',
+        color: '#FBCFE8',
     },
     citiesContainer: {
         marginBottom: 32,
@@ -448,15 +450,15 @@ const styles = StyleSheet.create({
     cityButton: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 20,
+        paddingHorizontal: 16,
         paddingVertical: 8,
-        borderRadius: 20,
-        backgroundColor: '#1F2937',
+        borderRadius: 999,
+        ...glassSurface,
         gap: 8,
     },
     cityButtonText: {
-        color: '#F3F4F6',
-        fontSize: 14,
+        color: '#E8E8E8',
+        fontSize: 13,
         fontWeight: '500',
     },
     greetingContainer: {
@@ -464,16 +466,20 @@ const styles = StyleSheet.create({
         marginBottom: 40,
     },
     greetingText: {
-        fontSize: 36,
-        fontWeight: 'bold',
-        color: '#60A5FA',
-        textAlign: 'center',
+        ...greetingLight,
+    },
+    greetingTextLine2: {
+        ...greetingLight,
+        marginTop: 2,
+    },
+    greetingSubRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginTop: 12,
     },
     greetingSubtext: {
-        color: '#E5E7EB',
-        fontSize: 14,
-        marginTop: 8,
-        textAlign: 'center',
+        ...greetingSubLight,
     },
     searchContainer: {
         position: 'absolute',
@@ -484,23 +490,18 @@ const styles = StyleSheet.create({
     searchInputWrapper: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#FFFFFF',
-        borderRadius: 25,
+        ...glassSearch,
+        borderRadius: 999,
         paddingHorizontal: 16,
-        paddingVertical: 12,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
-        elevation: 4,
+        paddingVertical: 14,
     },
     searchIcon: {
         marginRight: 12,
     },
     searchInput: {
         flex: 1,
-        fontSize: 16,
-        color: '#111827',
+        fontSize: 15,
+        color: '#F3F4F6',
     },
     saveBtn: {
         marginRight: 6,
@@ -510,14 +511,10 @@ const styles = StyleSheet.create({
     },
     suggestionsContainer: {
         marginTop: 8,
-        backgroundColor: '#FFFFFF',
+        ...glassPanel,
         borderRadius: 16,
         maxHeight: 300,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.15,
-        shadowRadius: 12,
-        elevation: 8,
+        overflow: 'hidden',
     },
     suggestionItem: {
         flexDirection: 'row',
@@ -525,31 +522,29 @@ const styles = StyleSheet.create({
         padding: 16,
         gap: 12,
         borderBottomWidth: 1,
-        borderBottomColor: '#E5E7EB',
+        borderBottomColor: 'rgba(255, 255, 255, 0.06)',
     },
     suggestionItemActive: {
-        backgroundColor: '#F3F4F6',
+        backgroundColor: 'rgba(255, 255, 255, 0.08)',
     },
     suggestionContent: {
         flex: 1,
     },
     suggestionName: {
         fontSize: 14,
-        color: '#111827',
+        color: '#F3F4F6',
         fontWeight: '500',
         marginBottom: 2,
     },
     suggestionMeta: {
         fontSize: 11,
-        color: '#6B7280',
+        color: '#9CA3AF',
         textTransform: 'capitalize',
     },
     topResultsCard: {
         marginTop: 12,
         borderRadius: 14,
-        borderWidth: 1,
-        borderColor: '#1F2937',
-        backgroundColor: '#111827',
+        ...glassPanel,
         padding: 12,
     },
     topResultsTitle: {
@@ -575,9 +570,7 @@ const styles = StyleSheet.create({
     },
     historyCard: {
         borderRadius: 12,
-        borderWidth: 1,
-        borderColor: '#1F2937',
-        backgroundColor: '#111827',
+        ...glassPanel,
         padding: 12,
     },
     historyTitle: {

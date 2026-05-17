@@ -37,6 +37,7 @@ class User extends Authenticatable
         'bio',
         'places_traveled',
         'avatar_url',
+        'profile_background_url',
         'social_links', // JSON field for social media links
         'location_local',
         'location_regional',

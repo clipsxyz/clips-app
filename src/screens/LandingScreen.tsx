@@ -1,12 +1,13 @@
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import { greetingLight, greetingSubLight, glassSurface } from '../theme/gazetteerAmbientNative';
 
 export default function LandingScreen({ navigation }: any) {
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <GazetteerScreenShell edges={['top', 'bottom']}>
       <View style={styles.content}>
-        <Text style={styles.title}>Welcome to Clips</Text>
+        <Text style={styles.title}>Gazetteer</Text>
         <Text style={styles.subtitle}>
           Discover local stories, connect with creators, and share moments instantly.
         </Text>
@@ -17,26 +18,24 @@ export default function LandingScreen({ navigation }: any) {
           <Text style={styles.secondaryText}>Continue as guest</Text>
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+    </GazetteerScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#030712',
-  },
   content: {
     flex: 1,
     justifyContent: 'center',
     paddingHorizontal: 24,
   },
   title: {
+    ...greetingLight,
     fontSize: 30,
-    fontWeight: '800',
-    color: '#FFFFFF',
+    textAlign: 'left',
   },
   subtitle: {
+    ...greetingSubLight,
+    textAlign: 'left',
     marginTop: 12,
     color: '#9CA3AF',
     fontSize: 14,
@@ -44,8 +43,8 @@ const styles = StyleSheet.create({
   },
   primary: {
     marginTop: 24,
-    borderRadius: 10,
-    backgroundColor: '#8B5CF6',
+    borderRadius: 999,
+    backgroundColor: '#d91b5c',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 13,
@@ -57,10 +56,8 @@ const styles = StyleSheet.create({
   },
   secondary: {
     marginTop: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#4B5563',
-    backgroundColor: '#111827',
+    borderRadius: 999,
+    ...glassSurface,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 13,

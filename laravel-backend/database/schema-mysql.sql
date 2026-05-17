@@ -20,6 +20,7 @@ CREATE TABLE `users` (
   `handle` varchar(100) NOT NULL,
   `bio` text DEFAULT NULL,
   `avatar_url` varchar(500) DEFAULT NULL,
+  `profile_background_url` text DEFAULT NULL,
   `social_links` json DEFAULT NULL,
   `location_local` varchar(100) DEFAULT NULL,
   `location_regional` varchar(100) DEFAULT NULL,

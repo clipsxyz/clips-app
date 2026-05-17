@@ -15,8 +15,9 @@ import {
     Share,
     Alert,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
+import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import { gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
 import { 
     fetchFollowedUsersStoryGroups, 
@@ -433,9 +434,9 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     if (loading) {
         return (
-            <SafeAreaView style={styles.container}>
-                <ActivityIndicator size="large" color="#8B5CF6" />
-            </SafeAreaView>
+            <GazetteerScreenShell contentStyle={styles.loadingShell}>
+                <ActivityIndicator size="large" color="#f472b6" />
+            </GazetteerScreenShell>
         );
     }
 
@@ -460,7 +461,7 @@ export default function StoriesScreen({ route, navigation }: any) {
     if (!viewingStories) {
         // Story list view
         return (
-            <SafeAreaView style={styles.container} edges={['top']}>
+            <GazetteerScreenShell>
                 <View style={styles.header}>
                     <TouchableOpacity onPress={() => navigation.goBack()}>
                         <Icon name="arrow-back" size={24} color="#FFFFFF" />
@@ -486,7 +487,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                         </TouchableOpacity>
                     ))}
                 </View>
-            </SafeAreaView>
+            </GazetteerScreenShell>
         );
     }
 
@@ -832,17 +833,16 @@ export default function StoriesScreen({ route, navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#030712',
+    loadingShell: {
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        ...gazetteerHeader,
     },
     headerTitle: {
         fontSize: 20,

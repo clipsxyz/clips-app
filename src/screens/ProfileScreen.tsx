@@ -19,6 +19,18 @@ import {
     DeviceEventEmitter,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import ProfileCoverHero from '../components/ProfileCoverHero.native';
+import { navigateMainTab } from '../navigation/mainTabs';
+import {
+    chipActiveMagenta,
+    chipActiveMagentaText,
+    GAZETTEER_ABYSS,
+    glassPanel,
+    glassSearch,
+    glassSurface,
+    gazetteerHeader,
+} from '../theme/gazetteerAmbientNative';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -27,6 +39,7 @@ import { useAuth } from '../context/Auth';
 import { approveHiddenComment, deleteHiddenComment, fetchHiddenCommentsForOwner, fetchPostsByUser, toggleLike, fetchComments, addComment, toggleCommentLike, toggleReplyLike, addReply, type HiddenCommentReviewItem } from '../api/posts';
 import { getCollectionThumbnailUrl, getUserCollections } from '../api/collections';
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
+import { buildFilterInfo, type InstantFilterName } from '../utils/instantFiltersNative';
 import { getUnreadTotal } from '../api/messages';
 import { setProfilePrivacy, getEffectiveProfilePrivate } from '../api/privacy';
 import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCode, linkFacebookAccount, fetchFacebookFriendsMatches, toggleFollow, type FacebookMatchedFriend, matchContactPhones } from '../api/client';
@@ -34,6 +47,7 @@ import type { Post, Collection } from '../types';
 import Avatar from '../components/Avatar';
 import FeedPostMeta from '../components/FeedPostMeta';
 import MyFeedPostCard from '../components/MyFeedPostCard';
+import ProfileGridThumb from '../components/ProfileGridThumb.native';
 import {
     getNotificationPreferences,
     saveNotificationPreferences,
@@ -600,14 +614,14 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
 
     if (loading) {
         return (
-            <SafeAreaView style={styles.container}>
-                <ActivityIndicator size="large" color="#8B5CF6" />
-            </SafeAreaView>
+            <GazetteerScreenShell contentStyle={styles.loadingShell}>
+                <ActivityIndicator size="large" color="#f472b6" />
+            </GazetteerScreenShell>
         );
     }
 
     return (
-        <SafeAreaView style={styles.container} edges={['top']}>
+        <GazetteerScreenShell>
             <View style={styles.header}>
                 <Avatar
                     src={user?.avatarUrl}
@@ -660,7 +674,15 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
 
                 <TouchableOpacity
                     style={styles.tab}
-                    onPress={() => navigation.navigate('Inbox')}
+                    onPress={() => navigation.navigate('ProfileCover')}
+                >
+                    <Icon name="image-outline" size={20} color="#FFFFFF" />
+                    <Text style={styles.tabLabel}>Cover</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={styles.tab}
+                    onPress={() => navigateMainTab(navigation, 'Inbox')}
                 >
                     <Icon name="mail" size={20} color="#FFFFFF" />
                     <Text style={styles.tabLabel}>Messages</Text>
@@ -752,13 +774,16 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                 </View>
             </View>
 
+            <ProfileCoverHero
+                coverUrl={user?.profileBackgroundUrl}
+                avatarUrl={user?.avatarUrl}
+                name={user?.name || user?.handle || 'User'}
+                showChangeCover
+                onPressChangeCover={() => navigation.navigate('ProfileCover')}
+            />
+
             <View style={styles.profileSection}>
                 <View style={styles.profileInfo}>
-                    <Avatar
-                        src={user?.avatarUrl}
-                        name={user?.name || user?.handle || 'User'}
-                        size={80}
-                    />
                     <View style={styles.userInfo}>
                         <Text style={styles.userName}>{user?.name || user?.handle}</Text>
                         <Text style={styles.userHandle}>{user?.handle}</Text>
@@ -802,7 +827,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         <Icon 
                             name="grid" 
                             size={20} 
-                            color={activeTab === 'posts' ? "#8B5CF6" : "#6B7280"} 
+                            color={activeTab === 'posts' ? "#f472b6" : "#6B7280"} 
                         />
                     </TouchableOpacity>
                     <TouchableOpacity
@@ -812,7 +837,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         <Icon 
                             name="bookmark" 
                             size={20} 
-                            color={activeTab === 'collections' ? "#8B5CF6" : "#6B7280"} 
+                            color={activeTab === 'collections' ? "#f472b6" : "#6B7280"} 
                         />
                     </TouchableOpacity>
                 </View>
@@ -827,13 +852,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                 onPress={() => navigation.navigate('PostDetail', { postId: item.id })}
                                 style={styles.postItem}
                             >
-                                {item.mediaUrl ? (
-                                    <Image source={{ uri: item.mediaUrl }} style={styles.postImage} />
-                                ) : (
-                                    <View style={styles.postPlaceholder}>
-                                        <Icon name="text" size={24} color="#6B7280" />
-                                    </View>
-                                )}
+                                <ProfileGridThumb post={item} />
                             </TouchableOpacity>
                         )}
                         ListEmptyComponent={
@@ -862,7 +881,11 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                     collectionName: item.name,
                                 })}
                             >
-                                {thumbSrc && !thumbBroken ? (
+                                {firstPost ? (
+                                    <View style={styles.collectionThumbnailWrap}>
+                                        <ProfileGridThumb post={firstPost} />
+                                    </View>
+                                ) : thumbSrc && !thumbBroken ? (
                                     <Image
                                         source={{ uri: thumbSrc }}
                                         style={styles.collectionThumbnail}
@@ -1082,10 +1105,34 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             {drafts.length > 0 ? (
                                 drafts.map((draft) => (
                                     <View key={draft.id} style={styles.draftItem}>
+                                        {(draft.videoPosterUrl || draft.videoUrl) && !draft.isTextOnly ? (
+                                            <Image
+                                                source={{ uri: draft.videoPosterUrl || draft.videoUrl }}
+                                                style={styles.draftThumb}
+                                            />
+                                        ) : null}
                                         <TouchableOpacity
                                             style={styles.draftInfo}
                                             onPress={() => {
                                                 setDraftsOpen(false);
+                                                if (draft.isTextOnly) {
+                                                    navigation.navigate('TextOnlyPostDetails', {
+                                                        text: draft.textBody || draft.caption || '',
+                                                        fromDraft: true,
+                                                        location: draft.location || '',
+                                                        venue: draft.venue || '',
+                                                        landmark: draft.landmark || '',
+                                                        taggedUsers: draft.taggedUsers || [],
+                                                        textTemplateId: draft.textTemplateId || undefined,
+                                                    });
+                                                    return;
+                                                }
+                                                const resumeFilter =
+                                                    !draft.filterBaked &&
+                                                    draft.filterActive &&
+                                                    draft.filterActive !== 'None'
+                                                        ? buildFilterInfo(draft.filterActive as InstantFilterName)
+                                                        : undefined;
                                                 navigation.navigate('CreateComposer', {
                                                     mediaUrl: draft.videoUrl || undefined,
                                                     mediaType: draft.mediaType || (draft.videoUrl ? 'video' : undefined),
@@ -1095,8 +1142,13 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                                     draftVenue: draft.venue || '',
                                                     draftLandmark: draft.landmark || '',
                                                     draftTaggedUsers: draft.taggedUsers || [],
-                                                    trimStart: draft.trimStart ?? 0,
-                                                    trimEnd: draft.trimEnd ?? 0,
+                                                    videoDuration: draft.videoDuration ?? 0,
+                                                    videoCoverTime: draft.videoCoverTime ?? 0,
+                                                    filterInfo: resumeFilter,
+                                                    filtered: !!resumeFilter,
+                                                    draftFilterActive: draft.filterActive,
+                                                    draftFilterBaked: draft.filterBaked,
+                                                    draftStickers: draft.stickers || [],
                                                 });
                                             }}
                                         >
@@ -1288,7 +1340,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                             <Text style={styles.myFeedTitle}>My feed</Text>
                         </View>
                         <TouchableOpacity onPress={() => setMyFeedOpen(false)} style={styles.myFeedCloseButton}>
-                            <Icon name="close" size={22} color="#111827" />
+                            <Icon name="close" size={22} color="#FFFFFF" />
                         </TouchableOpacity>
                     </View>
 
@@ -1345,7 +1397,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         </View>
                         <View style={styles.myFeedCommentsModalBody}>
                             {myFeedCommentsLoading ? (
-                                <ActivityIndicator size="small" color="#8B5CF6" />
+                                <ActivityIndicator size="small" color="#f472b6" />
                             ) : (
                                 <ScrollView style={styles.myFeedCommentsList}>
                                     {myFeedComments.length === 0 ? (
@@ -1462,6 +1514,22 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                     }}
                                 >
                                     <Text style={styles.smallActionButtonText}>Open preferences</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.safetySection}>
+                                <Text style={styles.safetySectionTitle}>Video playback</Text>
+                                <Text style={styles.toggleDescription}>
+                                    Feed autoplay and default mute for videos
+                                </Text>
+                                <TouchableOpacity
+                                    style={[styles.smallActionButton, { alignSelf: 'flex-start', marginTop: 10 }]}
+                                    onPress={() => {
+                                        setSettingsOpen(false);
+                                        navigation.navigate('VideoPlaybackSettings');
+                                    }}
+                                >
+                                    <Text style={styles.smallActionButtonText}>Playback settings</Text>
                                 </TouchableOpacity>
                             </View>
 
@@ -1731,14 +1799,18 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     </View>
                 </View>
             </Modal>
-        </SafeAreaView>
+        </GazetteerScreenShell>
     );
 };
 
 const styles = StyleSheet.create({
+    loadingShell: {
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
     container: {
         flex: 1,
-        backgroundColor: '#030712',
+        backgroundColor: 'transparent',
     },
     header: {
         flexDirection: 'row',
@@ -1747,7 +1819,8 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
         paddingVertical: 12,
         borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+        backgroundColor: 'rgba(0, 0, 0, 0.3)',
     },
     title: {
         fontSize: 24,
@@ -1759,9 +1832,7 @@ const styles = StyleSheet.create({
         paddingVertical: 16,
     },
     profileInfo: {
-        flexDirection: 'row',
         marginBottom: 16,
-        gap: 14,
     },
     userInfo: {
         flex: 1,
@@ -1831,7 +1902,7 @@ const styles = StyleSheet.create({
     },
     postsTabActive: {
         borderBottomWidth: 2,
-        borderBottomColor: '#8B5CF6',
+        borderBottomColor: '#f472b6',
     },
     postItem: {
         width: '33.33%',
@@ -1879,7 +1950,7 @@ const styles = StyleSheet.create({
         position: 'relative',
         overflow: 'visible',
         borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        borderBottomColor: 'rgba(255, 255, 255, 0.08)',
     },
     /** ScrollView + fixed cue column (Android-safe — no z-order fights with ScrollView) */
     tabsRailShell: {
@@ -1904,7 +1975,7 @@ const styles = StyleSheet.create({
         position: 'relative',
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: '#030712',
+        backgroundColor: 'transparent',
     },
     tab: {
         alignItems: 'center',
@@ -1952,9 +2023,9 @@ const styles = StyleSheet.create({
         width: 36,
         height: 38,
         borderRadius: 19,
-        backgroundColor: 'rgba(139,92,246,0.5)',
+        backgroundColor: 'rgba(217, 27, 92, 0.35)',
         borderWidth: 1.5,
-        borderColor: 'rgba(255,255,255,0.5)',
+        borderColor: 'rgba(244, 114, 182, 0.45)',
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -1989,6 +2060,13 @@ const styles = StyleSheet.create({
         borderRadius: 8,
         backgroundColor: '#111827',
     },
+    collectionThumbnailWrap: {
+        width: 64,
+        height: 64,
+        borderRadius: 8,
+        backgroundColor: '#111827',
+        overflow: 'hidden',
+    },
     collectionThumbnailPlaceholder: {
         width: 64,
         height: 64,
@@ -2014,7 +2092,7 @@ const styles = StyleSheet.create({
     },
     myFeedScreen: {
         flex: 1,
-        backgroundColor: '#020617',
+        backgroundColor: GAZETTEER_ABYSS,
     },
     myFeedHeader: {
         flexDirection: 'row',
@@ -2022,8 +2100,7 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         paddingHorizontal: 14,
         paddingVertical: 10,
-        borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        ...gazetteerHeader,
     },
     myFeedHeaderLeft: {
         flexDirection: 'row',
@@ -2041,9 +2118,9 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
     },
     myFeedCloseButton: {
-        backgroundColor: '#FFFFFF',
         borderRadius: 999,
         padding: 8,
+        ...glassSurface,
     },
     myFeedListContent: {
         padding: 12,
@@ -2051,17 +2128,15 @@ const styles = StyleSheet.create({
         paddingBottom: 28,
     },
     myFeedCard: {
-        backgroundColor: '#111827',
-        borderWidth: 1,
-        borderColor: '#1F2937',
         borderRadius: 16,
         overflow: 'hidden',
+        ...glassPanel,
     },
     myFeedCardHeader: {
         paddingHorizontal: 12,
         paddingVertical: 10,
         borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        borderBottomColor: 'rgba(255, 255, 255, 0.08)',
         rowGap: 8,
     },
     myFeedAuthorRow: {
@@ -2122,7 +2197,7 @@ const styles = StyleSheet.create({
     myFeedTextCard: {
         paddingHorizontal: 14,
         paddingVertical: 16,
-        backgroundColor: '#1F2937',
+        ...glassSurface,
     },
     myFeedTextCardText: {
         color: '#FFFFFF',
@@ -2144,7 +2219,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
         paddingVertical: 10,
         borderTopWidth: 1,
-        borderTopColor: '#1F2937',
+        borderTopColor: 'rgba(255, 255, 255, 0.08)',
         columnGap: 12,
     },
     myFeedStatPill: {
@@ -2159,22 +2234,22 @@ const styles = StyleSheet.create({
     },
     modalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        backgroundColor: 'rgba(11, 7, 17, 0.82)',
         justifyContent: 'flex-end',
     },
     modalContent: {
-        backgroundColor: '#030712',
         borderTopLeftRadius: 20,
         borderTopRightRadius: 20,
         maxHeight: '80%',
+        overflow: 'hidden',
+        ...glassPanel,
     },
     modalHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         padding: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        ...gazetteerHeader,
     },
     modalTitle: {
         fontSize: 20,
@@ -2186,35 +2261,37 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
     },
     myFeedCommentsModalContent: {
-        backgroundColor: '#000000',
         borderTopLeftRadius: 20,
         borderTopRightRadius: 20,
         maxHeight: '80%',
-        borderWidth: 2,
-        borderColor: '#FFFFFF',
+        overflow: 'hidden',
+        ...glassPanel,
     },
     myFeedCommentsModalHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         padding: 16,
-        borderBottomWidth: 2,
-        borderBottomColor: '#FFFFFF',
-        backgroundColor: '#000000',
+        ...gazetteerHeader,
     },
     myFeedCommentsModalBody: {
         paddingHorizontal: 14,
         paddingVertical: 12,
-        backgroundColor: '#000000',
     },
     draftItem: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
         alignItems: 'center',
-        padding: 16,
-        backgroundColor: '#111827',
-        borderRadius: 8,
+        gap: 12,
+        padding: 12,
+        borderRadius: 12,
         marginBottom: 12,
+        ...glassSurface,
+    },
+    draftThumb: {
+        width: 52,
+        height: 52,
+        borderRadius: 8,
+        backgroundColor: '#111827',
     },
     draftInfo: {
         flex: 1,
@@ -2235,9 +2312,9 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         padding: 16,
-        backgroundColor: '#111827',
-        borderRadius: 8,
+        borderRadius: 12,
         marginBottom: 12,
+        ...glassSurface,
     },
     collectionModalThumbnail: {
         width: 64,
@@ -2280,12 +2357,10 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     safetySection: {
-        backgroundColor: '#111827',
         borderRadius: 10,
         padding: 11,
         marginBottom: 10,
-        borderWidth: 1,
-        borderColor: '#1F2937',
+        ...glassSurface,
     },
     safetySectionHeader: {
         flexDirection: 'row',
@@ -2338,7 +2413,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 3,
     },
     toggleTrackActive: {
-        backgroundColor: '#8B5CF6',
+        backgroundColor: '#d91b5c',
     },
     toggleThumb: {
         width: 20,
@@ -2443,28 +2518,24 @@ const styles = StyleSheet.create({
     },
     myFeedCommentInput: {
         flex: 1,
-        backgroundColor: '#030712',
-        borderWidth: 1,
-        borderColor: '#374151',
         borderRadius: 8,
         paddingHorizontal: 10,
         paddingVertical: 8,
         color: '#FFFFFF',
         fontSize: 13,
+        ...glassSearch,
     },
     wordInput: {
         flex: 1,
-        backgroundColor: '#030712',
-        borderWidth: 1,
-        borderColor: '#374151',
         borderRadius: 8,
         paddingHorizontal: 10,
         paddingVertical: 8,
         color: '#FFFFFF',
         fontSize: 13,
+        ...glassSearch,
     },
     addWordButton: {
-        backgroundColor: '#8B5CF6',
+        backgroundColor: '#d91b5c',
         borderRadius: 8,
         paddingHorizontal: 12,
         paddingVertical: 9,
@@ -2488,12 +2559,10 @@ const styles = StyleSheet.create({
         marginTop: 10,
     },
     wordChip: {
-        backgroundColor: '#1F2937',
-        borderWidth: 1,
-        borderColor: '#374151',
         borderRadius: 999,
         paddingHorizontal: 10,
         paddingVertical: 5,
+        ...glassSurface,
     },
     wordChipText: {
         fontSize: 11,
@@ -2510,16 +2579,13 @@ const styles = StyleSheet.create({
         marginBottom: 10,
     },
     filterPill: {
-        borderWidth: 1,
-        borderColor: '#374151',
-        backgroundColor: '#030712',
         borderRadius: 999,
         paddingHorizontal: 10,
         paddingVertical: 5,
+        ...glassSurface,
     },
     filterPillActive: {
-        backgroundColor: '#8B5CF6',
-        borderColor: '#8B5CF6',
+        ...chipActiveMagenta,
     },
     filterPillText: {
         fontSize: 11,
@@ -2527,18 +2593,16 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     filterPillTextActive: {
-        color: '#FFFFFF',
+        ...chipActiveMagentaText,
     },
     queueItem: {
         flexDirection: 'row',
         alignItems: 'center',
         columnGap: 8,
-        backgroundColor: '#030712',
-        borderWidth: 1,
-        borderColor: '#1F2937',
         borderRadius: 8,
         padding: 10,
         marginBottom: 8,
+        ...glassSurface,
     },
     queueItemAuthor: {
         fontSize: 12,
@@ -2555,12 +2619,10 @@ const styles = StyleSheet.create({
         columnGap: 6,
     },
     queueActionBtn: {
-        backgroundColor: '#1F2937',
-        borderWidth: 1,
-        borderColor: '#374151',
         borderRadius: 6,
         paddingHorizontal: 8,
         paddingVertical: 6,
+        ...glassSurface,
     },
     queueActionBtnDanger: {
         borderColor: '#7F1D1D',
@@ -2576,16 +2638,14 @@ const styles = StyleSheet.create({
     },
     securityOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.7)',
+        backgroundColor: 'rgba(11, 7, 17, 0.82)',
         justifyContent: 'center',
         paddingHorizontal: 18,
     },
     securityCard: {
-        backgroundColor: '#111827',
         borderRadius: 16,
-        borderWidth: 1,
-        borderColor: '#1F2937',
         padding: 16,
+        ...glassPanel,
     },
     securityTitle: {
         color: '#FFFFFF',
@@ -2625,28 +2685,21 @@ const styles = StyleSheet.create({
     securityCountryInput: {
         width: 92,
         borderRadius: 10,
-        borderWidth: 1,
-        borderColor: '#374151',
-        backgroundColor: '#1F2937',
         color: '#FFFFFF',
         paddingHorizontal: 10,
         paddingVertical: 10,
+        ...glassSearch,
     },
     securityPhoneInput: {
         flex: 1,
         borderRadius: 10,
-        borderWidth: 1,
-        borderColor: '#374151',
-        backgroundColor: '#1F2937',
         color: '#FFFFFF',
         paddingHorizontal: 10,
         paddingVertical: 10,
+        ...glassSearch,
     },
     securityCodeInput: {
         borderRadius: 10,
-        borderWidth: 1,
-        borderColor: '#374151',
-        backgroundColor: '#1F2937',
         color: '#FFFFFF',
         paddingHorizontal: 12,
         paddingVertical: 12,
@@ -2654,9 +2707,10 @@ const styles = StyleSheet.create({
         letterSpacing: 6,
         textAlign: 'center',
         marginBottom: 12,
+        ...glassSearch,
     },
     securityPrimaryButton: {
-        backgroundColor: '#9F1239',
+        backgroundColor: '#d91b5c',
         borderRadius: 999,
         alignItems: 'center',
         justifyContent: 'center',
@@ -2682,16 +2736,14 @@ const styles = StyleSheet.create({
         borderRadius: 15,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#1F2937',
+        ...glassSurface,
     },
     inviteOption: {
-        borderWidth: 1,
-        borderColor: '#374151',
-        backgroundColor: '#030712',
         borderRadius: 12,
         paddingHorizontal: 12,
         paddingVertical: 12,
         marginBottom: 10,
+        ...glassSurface,
     },
     inviteOptionTitle: {
         color: '#FFFFFF',
@@ -2723,13 +2775,11 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         columnGap: 10,
-        borderWidth: 1,
-        borderColor: '#374151',
-        backgroundColor: '#030712',
         borderRadius: 10,
         paddingHorizontal: 10,
         paddingVertical: 8,
         marginBottom: 8,
+        ...glassSurface,
     },
     inviteMatchTitle: {
         color: '#FFFFFF',
@@ -2742,7 +2792,7 @@ const styles = StyleSheet.create({
         marginTop: 2,
     },
     inviteFollowBtn: {
-        backgroundColor: '#9F1239',
+        backgroundColor: '#d91b5c',
         borderRadius: 999,
         paddingHorizontal: 12,
         paddingVertical: 6,

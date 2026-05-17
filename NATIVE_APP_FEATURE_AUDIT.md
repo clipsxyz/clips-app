@@ -1,13 +1,50 @@
 # Native App Feature Audit
-## Comparison: Web vs Native Features
 
-**Date:** 2024-12-20  
-**React Native Version:** 0.76.9  
-**React Version:** 18.2.0
+> **Status (May 2026):** Core native parity is largely complete. Sections below include **historical** notes from Dec 2024; trust the status summary first.
+
+**React Native:** 0.84.x · **Dual client:** `src/` (web) + `App.native.tsx` / `src/screens/` (native)
+
+## ✅ Native parity — current (May 2026)
+
+| Area | Status |
+|------|--------|
+| Main tabs (Home, Discover, Create, Search, Inbox) | ✅ |
+| Instant create + gallery preview + filters | ✅ |
+| Create composer (stickers, filters, cover frame) | ✅ |
+| Text-only create + details + templates | ✅ |
+| Public post deep links | ✅ |
+| Profile cover + API `profile_background_url` | ✅ |
+| Feed video autoplay + playback settings | ✅ |
+| Instagram-style video compress + filter bake (FFmpeg) | ✅ (after `npm run setup:ffmpeg-native`) |
+| Background post → feed “Posting…” placeholder | ✅ |
+| Payment, splash, landing, stories, boost, etc. | ✅ (see `App.native.tsx`) |
+
+## 🎨 Polish (May 2026)
+
+- Composer: stickers, haptics, keyboard dismiss; filters baked via FFmpeg when binaries installed
+- Feed: text-only cards, posters, autoplay, pending upload row at top
+- Video: cover frame only (no trim); compress before upload
+
+## FFmpeg native setup (required for video compress / filter bake)
+
+Arthenica binaries were retired from Maven/CocoaPods. Use vendored **de-id/ffmpeg-kit** builds:
+
+```bash
+npm run setup:ffmpeg-native   # once per machine / CI
+cd ios && pod install
+npm run dev:android   # or dev:ios
+```
+
+## ⏭️ Intentionally not ported
+
+- Full video editor, Canva editor, template browser/editor
+- Web-only create extras: music picker, multi-clip timeline, green screen, voiceover
+
+## 📜 Historical audit (Dec 2024)
 
 ---
 
-## ✅ Features Ported (Today)
+## ✅ Features Ported (Dec 2024)
 
 1. **ZoomableMedia Component** - Pinch-to-zoom for images/videos
 2. **Profile Tabs** - Messages, Drafts, Collections, Settings
@@ -18,15 +55,13 @@
 
 ---
 
-## ❌ Missing Pages/Screens
+## ❌ Missing Pages/Screens (historical — many since added)
 
-### 1. **SplashPage** → Missing in Native
+### 1. **SplashPage** → was missing; now `SplashScreen` in native
 - **Web:** `/splash` - Animated splash screen with logo
-- **Native:** ❌ No splash screen
-- **Impact:** Users don't see branded splash on app launch
-- **Priority:** Medium
+- **Native (2024):** ❌ No splash screen
 
-### 2. **PaymentPage** → Missing in Native
+### 2. **PaymentPage** → was missing; now `PaymentScreen` in native
 - **Web:** `/payment` - Payment processing page
 - **Native:** ❌ No payment screen
 - **Impact:** Cannot process payments in native app

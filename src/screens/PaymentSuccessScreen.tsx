@@ -1,15 +1,16 @@
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
+import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import { glassPanel } from '../theme/gazetteerAmbientNative';
 
 export default function PaymentSuccessScreen({ navigation, route }: any) {
   const amount = Number(route?.params?.amount || 0);
   const feedType = route?.params?.feedType || 'local';
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.content}>
+    <GazetteerScreenShell contentStyle={styles.content}>
+      <View style={styles.inner}>
         <View style={styles.successIconWrap}>
           <Icon name="checkmark-circle" size={76} color="#22C55E" />
         </View>
@@ -30,20 +31,21 @@ export default function PaymentSuccessScreen({ navigation, route }: any) {
           <Text style={styles.secondaryButtonText}>Back to Boost</Text>
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+    </GazetteerScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#030712',
-  },
   content: {
     flex: 1,
-    alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 24,
+  },
+  inner: {
+    alignItems: 'center',
+    borderRadius: 16,
+    padding: 24,
+    ...glassPanel,
   },
   successIconWrap: {
     marginBottom: 20,
@@ -69,7 +71,7 @@ const styles = StyleSheet.create({
   primaryButton: {
     marginTop: 24,
     width: '100%',
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#d91b5c',
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
@@ -85,11 +87,11 @@ const styles = StyleSheet.create({
     width: '100%',
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#4B5563',
+    borderColor: 'rgba(255, 255, 255, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 13,
-    backgroundColor: '#111827',
+    backgroundColor: 'rgba(24, 24, 28, 0.65)',
   },
   secondaryButtonText: {
     color: '#E5E7EB',

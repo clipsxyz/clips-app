@@ -16,8 +16,10 @@ import {
     Linking,
     PermissionsAndroid,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
+import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import { glassPanel, glassSearch, glassSurface, gazetteerHeader } from '../theme/gazetteerAmbientNative';
+import { navigateMainTab } from '../navigation/mainTabs';
 import { launchImageLibrary } from 'react-native-image-picker';
 import Clipboard from '@react-native-clipboard/clipboard';
 import AudioRecorderPlayer from 'react-native-audio-recorder-player';
@@ -996,14 +998,14 @@ export default function MessagesScreen({ route, navigation }: any) {
 
     if (loading) {
         return (
-            <SafeAreaView style={styles.container}>
-                <ActivityIndicator size="large" color="#8B5CF6" />
-            </SafeAreaView>
+            <GazetteerScreenShell contentStyle={styles.loadingShell}>
+                <ActivityIndicator size="large" color="#f472b6" />
+            </GazetteerScreenShell>
         );
     }
 
     return (
-        <SafeAreaView style={styles.container} edges={['top']}>
+        <GazetteerScreenShell>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()}>
                     <Icon name="arrow-back" size={24} color="#FFFFFF" />
@@ -1018,7 +1020,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                 </View>
                 <View style={styles.headerActions}>
                     <TouchableOpacity
-                        onPress={() => navigation.navigate('Inbox', { initialTab: 'insights' })}
+                        onPress={() => navigateMainTab(navigation, 'Inbox', { initialTab: 'insights' })}
                         style={styles.headerActionButton}
                     >
                         <Icon name="bar-chart-outline" size={20} color="#FFFFFF" />
@@ -1285,22 +1287,21 @@ export default function MessagesScreen({ route, navigation }: any) {
                     </View>
                 </View>
             </View>
-        </SafeAreaView>
+        </GazetteerScreenShell>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#030712',
+    loadingShell: {
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        ...gazetteerHeader,
     },
     headerInfo: {
         flexDirection: 'row',
@@ -1467,7 +1468,8 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
         paddingVertical: 12,
         borderTopWidth: 1,
-        borderTopColor: '#1F2937',
+        borderTopColor: 'rgba(255, 255, 255, 0.08)',
+        backgroundColor: 'rgba(0, 0, 0, 0.35)',
         gap: 10,
     },
     composerContextWrap: {
@@ -1478,8 +1480,8 @@ const styles = StyleSheet.create({
         paddingTop: 8,
         paddingBottom: 6,
         borderTopWidth: 1,
-        borderTopColor: '#1F2937',
-        backgroundColor: '#030712',
+        borderTopColor: 'rgba(255, 255, 255, 0.08)',
+        backgroundColor: 'rgba(0, 0, 0, 0.25)',
     },
     composerContextBar: {
         width: 2,
@@ -1518,10 +1520,8 @@ const styles = StyleSheet.create({
     },
     input: {
         width: '100%',
-        backgroundColor: '#1F2937',
+        ...glassSearch,
         borderRadius: 24,
-        borderWidth: 2,
-        borderColor: '#FFFFFF',
         paddingLeft: 42,
         paddingRight: 42,
         paddingVertical: 10,

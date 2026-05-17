@@ -1,10 +1,20 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
+import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import { glassPanel } from '../theme/gazetteerAmbientNative';
 import * as ImagePicker from 'react-native-image-picker';
 
 const ClipScreen: React.FC = ({ navigation }: any) => {
+    const openCapturedMedia = (uri: string | undefined, mediaType: 'image' | 'video') => {
+        if (!uri) return;
+        if (mediaType === 'video') {
+            navigation.navigate('GalleryPreview', { mediaUrl: uri, mediaType: 'video' });
+            return;
+        }
+        navigation.navigate('CreateComposer', { mediaUrl: uri, mediaType: 'image' });
+    };
+
     const handleTakePhoto = () => {
         ImagePicker.launchCamera(
             {
@@ -12,8 +22,8 @@ const ClipScreen: React.FC = ({ navigation }: any) => {
                 quality: 0.8,
             },
             (response) => {
-                if (response.assets && response.assets[0]) {
-                    navigation.navigate('CreateComposer', { mediaUrl: response.assets[0].uri, mediaType: 'image' });
+                if (response.assets && response.assets[0]?.uri) {
+                    openCapturedMedia(response.assets[0].uri, 'image');
                 }
             }
         );
@@ -26,8 +36,8 @@ const ClipScreen: React.FC = ({ navigation }: any) => {
                 quality: 0.8,
             },
             (response) => {
-                if (response.assets && response.assets[0]) {
-                    navigation.navigate('CreateComposer', { videoUrl: response.assets[0].uri, mediaType: 'video' });
+                if (response.assets && response.assets[0]?.uri) {
+                    openCapturedMedia(response.assets[0].uri, 'video');
                 }
             }
         );
@@ -42,11 +52,8 @@ const ClipScreen: React.FC = ({ navigation }: any) => {
             (response) => {
                 if (response.assets && response.assets[0]) {
                     const asset = response.assets[0];
-                    navigation.navigate('CreateComposer', {
-                        mediaUrl: asset.uri,
-                        videoUrl: asset.type?.startsWith('video') ? asset.uri : undefined,
-                        mediaType: asset.type?.startsWith('video') ? 'video' : 'image',
-                    });
+                    const isVideo = asset.type?.startsWith('video');
+                    openCapturedMedia(asset.uri, isVideo ? 'video' : 'image');
                 }
             }
         );
@@ -61,51 +68,49 @@ const ClipScreen: React.FC = ({ navigation }: any) => {
     };
 
     return (
-        <SafeAreaView style={styles.container} edges={['top']}>
-            <View style={styles.content}>
+        <GazetteerScreenShell contentStyle={styles.content}>
+            <View style={styles.inner}>
                 <Text style={styles.title}>Create Clip</Text>
 
                 <View style={styles.optionsContainer}>
                     <TouchableOpacity onPress={handleTakePhoto} style={styles.optionButton}>
-                        <Icon name="camera" size={32} color="#8B5CF6" />
+                        <Icon name="camera" size={32} color="#f472b6" />
                         <Text style={styles.optionText}>Take Photo</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity onPress={handleRecordVideo} style={styles.optionButton}>
-                        <Icon name="videocam" size={32} color="#8B5CF6" />
+                        <Icon name="videocam" size={32} color="#f472b6" />
                         <Text style={styles.optionText}>Record Video</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity onPress={handleChooseFromGallery} style={styles.optionButton}>
-                        <Icon name="image" size={32} color="#8B5CF6" />
+                        <Icon name="image" size={32} color="#f472b6" />
                         <Text style={styles.optionText}>Choose from Gallery</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity onPress={handleGoLive} style={styles.optionButton}>
-                        <Icon name="radio" size={32} color="#8B5CF6" />
+                        <Icon name="radio" size={32} color="#f472b6" />
                         <Text style={styles.optionText}>Go Live</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity onPress={handleTextStory} style={styles.optionButton}>
-                        <Icon name="text" size={32} color="#8B5CF6" />
+                        <Icon name="text" size={32} color="#f472b6" />
                         <Text style={styles.optionText}>Text Story</Text>
                     </TouchableOpacity>
                 </View>
             </View>
-        </SafeAreaView>
+        </GazetteerScreenShell>
     );
 };
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#030712',
-    },
     content: {
         flex: 1,
         justifyContent: 'center',
-        alignItems: 'center',
         paddingHorizontal: 16,
+    },
+    inner: {
+        alignItems: 'center',
     },
     title: {
         fontSize: 24,
@@ -122,13 +127,11 @@ const styles = StyleSheet.create({
     optionButton: {
         width: 140,
         height: 140,
-        backgroundColor: '#1F2937',
         borderRadius: 16,
         justifyContent: 'center',
         alignItems: 'center',
         margin: 8,
-        borderWidth: 1,
-        borderColor: '#374151',
+        ...glassPanel,
     },
     optionText: {
         fontSize: 14,

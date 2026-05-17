@@ -12,6 +12,7 @@ import CreateGroupModal from '../components/CreateGroupModal';
 import CreateSourceAppsCarousel from '../components/CreateSourceAppsCarousel';
 import { prepareMediaForPost } from '../utils/prepareMediaForPost';
 import { useAuth } from '../context/Auth';
+import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas';
 
 export default function InstantCreatePage() {
     const { user } = useAuth();
@@ -1414,9 +1415,10 @@ export default function InstantCreatePage() {
     );
 
         return (
-        <div className="fixed inset-0 z-50 flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden bg-black">
+        <div className="fixed inset-0 z-50 flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden bg-[#0b0711]">
+            <DiscoverAmbientCanvas />
             {/* Top bar: mode picker (simple) vs camera controls */}
-            <div className="absolute top-0 left-0 right-0 z-50 bg-gradient-to-b from-black/80 to-transparent px-4 py-3">
+            <div className="absolute top-0 left-0 right-0 z-50 bg-gradient-to-b from-black/50 to-transparent px-4 py-3">
                 {showCreateModePicker && !previewUrl ? (
                     <div className="relative flex w-full items-center justify-between">
                         <button
@@ -1538,7 +1540,7 @@ export default function InstantCreatePage() {
             </div>
 
             {/* Video preview / vertical mode picker — picker stays in-flow so flex-1 gets real height */}
-            <div className="relative z-10 flex min-h-0 flex-1 flex-col bg-black">
+            <div className="relative z-10 flex min-h-0 flex-1 flex-col bg-transparent">
                 {!previewUrl ? (
                     <>
                         {!showCreateModePicker && (
@@ -1568,7 +1570,7 @@ export default function InstantCreatePage() {
 
                         {showCreateModePicker && (
                             <div
-                                className="relative flex min-h-0 flex-1 flex-col bg-black"
+                                className="relative flex min-h-0 flex-1 flex-col bg-transparent"
                                 style={{
                                     perspective: '1400px',
                                     perspectiveOrigin: '50% 50%',

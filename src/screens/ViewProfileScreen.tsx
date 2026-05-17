@@ -16,8 +16,16 @@ import {
     RefreshControl,
     Linking,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
+import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import {
+    chipActiveMagenta,
+    chipActiveMagentaText,
+    glassPanel,
+    glassSearch,
+    glassSurface,
+    gazetteerHeader,
+} from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
 import { fetchPostsByUser, toggleFollowForPost, getFollowedUsers } from '../api/posts';
 import { fetchUserProfile, toggleFollow, fetchFollowers, fetchFollowing } from '../api/client';
@@ -26,6 +34,9 @@ import { isProfilePrivate, canViewProfile, hasPendingFollowRequest, canSendMessa
 import { FEED_UI } from '../constants/feedUiTokens';
 import type { Post } from '../types';
 import Avatar from '../components/Avatar';
+import ProfileCoverHero from '../components/ProfileCoverHero.native';
+import ProfileGridThumb from '../components/ProfileGridThumb.native';
+import { isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
 
 export default function ViewProfileScreen({ route, navigation }: any) {
     const { handle } = route.params;
@@ -59,6 +70,12 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     const [connectionActionLoadingMap, setConnectionActionLoadingMap] = useState<Record<string, boolean>>({});
     const [contentTab, setContentTab] = useState<'all' | 'videos' | 'photos' | 'text'>('all');
     const socialLinks = (profileUser?.socialLinks || profileUser?.social_links || {}) as Record<string, string | undefined>;
+    const decodedHandle = decodeURIComponent(handle || '');
+    const isOwnProfile = Boolean(user?.handle && decodedHandle === user.handle);
+    const profileCoverUrl =
+        profileUser?.profileBackgroundUrl ||
+        profileUser?.profile_background_url ||
+        (isOwnProfile ? user?.profileBackgroundUrl : undefined);
 
     useEffect(() => {
         loadProfile();
@@ -106,6 +123,10 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     Array.isArray(pt) ? pt.filter((s: unknown) => typeof s === 'string') : undefined;
                 setProfileUser({
                     ...profileData,
+                    profileBackgroundUrl:
+                        profileData.profileBackgroundUrl ||
+                        profileData.profile_background_url ||
+                        undefined,
                     placesTraveled:
                         placesTraveled && placesTraveled.length > 0 ? placesTraveled : undefined,
                 });
@@ -304,9 +325,9 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     };
 
     const filteredPosts = posts.filter((p) => {
-        if (contentTab === 'videos') return p.mediaType === 'video';
-        if (contentTab === 'photos') return !!p.mediaUrl && p.mediaType !== 'video';
-        if (contentTab === 'text') return !p.mediaUrl;
+        if (contentTab === 'videos') return isVideoPost(p);
+        if (contentTab === 'photos') return !!p.mediaUrl && !isVideoPost(p);
+        if (contentTab === 'text') return isTextOnlyPost(p);
         return true;
     });
 
@@ -376,15 +397,15 @@ export default function ViewProfileScreen({ route, navigation }: any) {
 
     if (loading) {
         return (
-            <SafeAreaView style={styles.container}>
-                <ActivityIndicator size="large" color="#8B5CF6" />
-            </SafeAreaView>
+            <GazetteerScreenShell contentStyle={styles.loadingShell}>
+                <ActivityIndicator size="large" color="#f472b6" />
+            </GazetteerScreenShell>
         );
     }
 
     if (!canView && profileIsPrivate) {
         return (
-            <SafeAreaView style={styles.container} edges={['top']}>
+            <GazetteerScreenShell>
                 <View style={styles.header}>
                     <TouchableOpacity onPress={() => navigation.goBack()}>
                         <Icon name="arrow-back" size={24} color="#FFFFFF" />
@@ -402,12 +423,12 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                         </Text>
                     </TouchableOpacity>
                 </View>
-            </SafeAreaView>
+            </GazetteerScreenShell>
         );
     }
 
     return (
-        <SafeAreaView style={styles.container} edges={['top']}>
+        <GazetteerScreenShell>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()}>
                     <Icon name="arrow-back" size={24} color="#FFFFFF" />
@@ -419,17 +440,18 @@ export default function ViewProfileScreen({ route, navigation }: any) {
             </View>
 
             <ScrollView style={styles.content}>
+                <ProfileCoverHero
+                    coverUrl={profileCoverUrl}
+                    avatarUrl={profileUser?.avatarUrl}
+                    name={profileUser?.name || handle?.split('@')[0] || 'User'}
+                    hasStory={hasStory}
+                    onAvatarPress={() => setShowProfileMenu(true)}
+                    showChangeCover={isOwnProfile}
+                    onPressChangeCover={() => navigation.navigate('ProfileCover')}
+                />
+
                 {/* Profile Header */}
                 <View style={styles.profileHeader}>
-                    <TouchableOpacity onPress={() => setShowProfileMenu(true)}>
-                        <Avatar
-                            src={profileUser?.avatarUrl}
-                            name={handle?.split('@')[0] || 'User'}
-                            size="xl"
-                            hasStory={hasStory}
-                        />
-                    </TouchableOpacity>
-
                     <View style={styles.statsContainer}>
                         <TouchableOpacity
                             style={styles.statItem}
@@ -558,16 +580,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                                 onPress={() => handlePostPress(item.id)}
                                 style={styles.postThumbnail}
                             >
-                                {item.mediaUrl ? (
-                                    <Image
-                                        source={{ uri: item.mediaUrl }}
-                                        style={styles.thumbnailImage}
-                                    />
-                                ) : (
-                                    <View style={styles.thumbnailPlaceholder}>
-                                        <Icon name="text" size={24} color="#6B7280" />
-                                    </View>
-                                )}
+                                <ProfileGridThumb post={item} />
                             </TouchableOpacity>
                         )}
                         scrollEnabled={false}
@@ -598,7 +611,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                                     onRefresh={() => {
                                         void refreshConnections();
                                     }}
-                                    tintColor="#8B5CF6"
+                                    tintColor="#f472b6"
                                 />
                             }
                         >
@@ -768,7 +781,7 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                         </View>
                         <ScrollView style={styles.modalBody}>
                             {connectionsLoading ? (
-                                <ActivityIndicator size="small" color="#8B5CF6" />
+                                <ActivityIndicator size="small" color="#f472b6" />
                             ) : searchedConnections.length > 0 ? (
                                 searchedConnections.map((entry) => (
                                     <View
@@ -856,22 +869,21 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     </View>
                 </View>
             </Modal>
-        </SafeAreaView>
+        </GazetteerScreenShell>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#030712',
+    loadingShell: {
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        ...gazetteerHeader,
     },
     headerTitle: {
         fontSize: 18,
@@ -954,13 +966,11 @@ const styles = StyleSheet.create({
         flex: 1,
         paddingVertical: FEED_UI.spacing.compactV,
         borderRadius: 8,
-        backgroundColor: '#3B82F6',
+        backgroundColor: '#d91b5c',
         alignItems: 'center',
     },
     followingButton: {
-        backgroundColor: '#1F2937',
-        borderWidth: 1,
-        borderColor: '#374151',
+        ...glassSurface,
     },
     followButtonText: {
         color: '#FFFFFF',
@@ -974,10 +984,8 @@ const styles = StyleSheet.create({
         flex: 1,
         paddingVertical: FEED_UI.spacing.compactV,
         borderRadius: 8,
-        backgroundColor: '#1F2937',
-        borderWidth: 1,
-        borderColor: '#374151',
         alignItems: 'center',
+        ...glassSurface,
     },
     messageButtonText: {
         color: '#FFFFFF',
@@ -992,15 +1000,13 @@ const styles = StyleSheet.create({
     },
     contentTabButton: {
         borderRadius: 999,
-        borderWidth: 1,
-        borderColor: '#374151',
-        backgroundColor: '#111827',
         paddingHorizontal: 12,
         paddingVertical: 6,
+        ...glassSurface,
     },
     contentTabButtonActive: {
-        borderColor: '#F8D26A',
-        backgroundColor: '#3F2B07',
+        borderColor: 'rgba(244, 114, 182, 0.55)',
+        backgroundColor: 'rgba(217, 27, 92, 0.25)',
     },
     contentTabText: {
         color: '#D1D5DB',
@@ -1008,7 +1014,7 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     contentTabTextActive: {
-        color: '#F8D26A',
+        color: '#FBCFE8',
     },
     postsContainer: {
         paddingHorizontal: FEED_UI.spacing.inset,
@@ -1053,35 +1059,35 @@ const styles = StyleSheet.create({
     traveledButton: {
         paddingHorizontal: 16,
         paddingVertical: 10,
-        backgroundColor: '#1F2937',
         borderRadius: 8,
         justifyContent: 'center',
         alignItems: 'center',
+        ...glassSurface,
     },
     traveledButtonDisabled: {
         opacity: 0.5,
     },
     modalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.75)',
+        backgroundColor: 'rgba(11, 7, 17, 0.82)',
         justifyContent: 'center',
         alignItems: 'center',
         padding: 16,
     },
     modalContent: {
-        backgroundColor: '#111827',
         borderRadius: 16,
         maxWidth: 400,
         width: '100%',
         maxHeight: '80%',
+        overflow: 'hidden',
+        ...glassPanel,
     },
     modalHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         padding: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        ...gazetteerHeader,
     },
     modalTitle: {
         fontSize: 20,
@@ -1092,11 +1098,12 @@ const styles = StyleSheet.create({
         padding: 16,
     },
     connectionsModalContent: {
-        backgroundColor: '#111827',
         borderRadius: 16,
         maxWidth: 500,
         width: '100%',
         maxHeight: '85%',
+        overflow: 'hidden',
+        ...glassPanel,
     },
     connectionsTabs: {
         flexDirection: 'row',
@@ -1107,15 +1114,12 @@ const styles = StyleSheet.create({
     },
     connectionsTabBtn: {
         borderRadius: 999,
-        borderWidth: 1,
-        borderColor: '#374151',
-        backgroundColor: '#1F2937',
         paddingHorizontal: 10,
         paddingVertical: 6,
+        ...glassSurface,
     },
     connectionsTabBtnActive: {
-        borderColor: '#F8D26A',
-        backgroundColor: '#3F2B07',
+        ...chipActiveMagenta,
     },
     connectionsTabText: {
         color: '#D1D5DB',
@@ -1123,19 +1127,17 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     connectionsTabTextActive: {
-        color: '#F8D26A',
+        ...chipActiveMagentaText,
     },
     connectionsSearchWrap: {
         marginHorizontal: 16,
         marginBottom: 8,
-        borderRadius: 10,
-        borderWidth: 1,
-        borderColor: '#374151',
-        backgroundColor: '#1F2937',
-        paddingHorizontal: 10,
+        borderRadius: 999,
+        paddingHorizontal: 12,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 8,
+        ...glassSearch,
     },
     connectionsSearchInput: {
         flex: 1,
@@ -1146,15 +1148,13 @@ const styles = StyleSheet.create({
     connectionRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#1F2937',
         borderRadius: 10,
-        borderWidth: 1,
-        borderColor: '#374151',
         paddingHorizontal: 10,
         paddingVertical: 8,
         marginBottom: 8,
         justifyContent: 'space-between',
         gap: 10,
+        ...glassSurface,
     },
     connectionLeftTap: {
         flexDirection: 'row',
@@ -1182,11 +1182,9 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         gap: 5,
         borderRadius: 999,
-        borderWidth: 1,
-        borderColor: '#475569',
-        backgroundColor: '#1E293B',
         paddingHorizontal: 8,
         paddingVertical: 3,
+        ...glassSurface,
     },
     connectionMetaBadgeText: {
         color: '#CBD5E1',
@@ -1195,17 +1193,21 @@ const styles = StyleSheet.create({
     },
     connectionFollowBtn: {
         borderRadius: 999,
-        backgroundColor: '#2563EB',
+        backgroundColor: '#d91b5c',
         paddingHorizontal: 12,
         paddingVertical: 7,
         minWidth: 84,
         alignItems: 'center',
     },
     connectionFollowingBtn: {
-        backgroundColor: '#374151',
+        backgroundColor: 'rgba(24, 24, 28, 0.85)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.12)',
     },
     connectionRequestedBtn: {
-        backgroundColor: '#475569',
+        backgroundColor: 'rgba(71, 85, 105, 0.55)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.1)',
     },
     connectionFollowBtnText: {
         color: '#FFFFFF',
@@ -1215,11 +1217,9 @@ const styles = StyleSheet.create({
     loadMoreBtn: {
         marginTop: 6,
         borderRadius: 10,
-        borderWidth: 1,
-        borderColor: '#4B5563',
-        backgroundColor: '#111827',
         alignItems: 'center',
         paddingVertical: 10,
+        ...glassSurface,
     },
     loadMoreBtnText: {
         color: '#E5E7EB',
@@ -1230,15 +1230,15 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         padding: 16,
-        backgroundColor: '#1F2937',
-        borderRadius: 8,
+        borderRadius: 12,
         marginBottom: 12,
+        ...glassSurface,
     },
     placeIcon: {
         width: 40,
         height: 40,
         borderRadius: 20,
-        backgroundColor: '#F97316',
+        backgroundColor: '#d91b5c',
         justifyContent: 'center',
         alignItems: 'center',
         marginRight: 12,
@@ -1257,14 +1257,14 @@ const styles = StyleSheet.create({
     },
     menuOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+        backgroundColor: 'rgba(11, 7, 17, 0.78)',
         justifyContent: 'center',
         alignItems: 'center',
     },
     menuContainer: {
-        backgroundColor: '#262626',
         borderRadius: 24,
         padding: 24,
+        ...glassPanel,
     },
     menuContent: {
         flexDirection: 'row',
@@ -1280,9 +1280,11 @@ const styles = StyleSheet.create({
         width: 64,
         height: 64,
         borderRadius: 32,
-        backgroundColor: '#000000',
         justifyContent: 'center',
         alignItems: 'center',
+        backgroundColor: 'rgba(217, 27, 92, 0.22)',
+        borderWidth: 1,
+        borderColor: 'rgba(244, 114, 182, 0.35)',
     },
     menuButtonText: {
         fontSize: 12,

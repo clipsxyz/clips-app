@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Image, ActivityIndicator, ScrollView } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import { chipActiveMagenta, chipActiveMagentaText, glassPanel, glassSearch, glassSurface } from '../theme/gazetteerAmbientNative';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { unifiedSearch, type SearchSections } from '../api/search';
 import { fetchPostsByUser } from '../api/posts';
@@ -9,6 +10,7 @@ import { toggleFollow } from '../api/client';
 import { useAuth } from '../context/Auth';
 import type { Post } from '../types';
 import Avatar from '../components/Avatar';
+import ProfileGridThumb from '../components/ProfileGridThumb.native';
 
 type SearchMode = 'locations' | 'venues' | 'landmarks' | 'users' | 'posts' | 'nearby';
 type SearchRefinement = 'all' | 'local' | 'regional';
@@ -304,7 +306,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
     };
 
     return (
-        <SafeAreaView style={styles.container} edges={['top']}>
+        <GazetteerScreenShell>
             <View style={styles.header}>
                 <View style={styles.searchContainer}>
                     <Icon name="search" size={20} color="#6B7280" />
@@ -450,15 +452,9 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
 
                     {searchMode === 'posts' && (
                         <View style={styles.postsGrid}>
-                            {filteredPosts.map((post: any) => (
+                            {filteredPosts.map((post: Post) => (
                                 <TouchableOpacity key={post.id} onPress={() => goToPost(post.id)} style={styles.postResultItem}>
-                                    {post.mediaUrl ? (
-                                        <Image source={{ uri: post.mediaUrl }} style={styles.postThumbnail} />
-                                    ) : (
-                                        <View style={styles.postThumbnailPlaceholder}>
-                                            <Icon name="text" size={24} color="#6B7280" />
-                                        </View>
-                                    )}
+                                    <ProfileGridThumb post={post} />
                                 </TouchableOpacity>
                             ))}
                             {!!sections.posts?.nextCursor && (
@@ -611,32 +607,23 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                     <View style={styles.preloadGrid}>
                         {preloadPosts.map((post) => (
                             <TouchableOpacity key={post.id} onPress={() => goToPost(post.id)} style={styles.preloadItem}>
-                                {post.mediaUrl ? (
-                                    <Image source={{ uri: post.mediaUrl }} style={styles.preloadImage} />
-                                ) : (
-                                    <View style={styles.preloadPlaceholder}>
-                                        <Icon name="text" size={20} color="#6B7280" />
-                                    </View>
-                                )}
+                                <ProfileGridThumb post={post} />
                             </TouchableOpacity>
                         ))}
                     </View>
                 </ScrollView>
             )}
-        </SafeAreaView>
+        </GazetteerScreenShell>
     );
 };
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#030712',
-    },
     header: {
         paddingHorizontal: 16,
         paddingVertical: 12,
         borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+        backgroundColor: 'rgba(0, 0, 0, 0.25)',
     },
     modeChipsRow: {
         marginTop: 10,
@@ -644,16 +631,13 @@ const styles = StyleSheet.create({
     },
     modeChip: {
         borderRadius: 999,
-        borderWidth: 1,
-        borderColor: '#374151',
-        backgroundColor: '#111827',
+        ...glassSurface,
         paddingHorizontal: 10,
         paddingVertical: 6,
         marginRight: 8,
     },
     modeChipActive: {
-        borderColor: '#8B5CF6',
-        backgroundColor: '#2E1065',
+        ...chipActiveMagenta,
     },
     modeChipText: {
         color: '#D1D5DB',
@@ -661,7 +645,7 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     modeChipTextActive: {
-        color: '#DDD6FE',
+        ...chipActiveMagentaText,
     },
     refinementRow: {
         marginTop: 10,
@@ -678,9 +662,7 @@ const styles = StyleSheet.create({
     },
     nearbyScopeChip: {
         borderRadius: 999,
-        borderWidth: 1,
-        borderColor: '#374151',
-        backgroundColor: '#111827',
+        ...glassSurface,
         paddingHorizontal: 10,
         paddingVertical: 5,
     },
@@ -702,11 +684,9 @@ const styles = StyleSheet.create({
     },
     refinementChip: {
         borderRadius: 999,
-        borderWidth: 1,
-        borderColor: '#374151',
+        ...glassSurface,
         paddingHorizontal: 10,
         paddingVertical: 5,
-        backgroundColor: '#111827',
     },
     refinementChipActive: {
         borderColor: '#F8D26A',
@@ -727,10 +707,10 @@ const styles = StyleSheet.create({
     searchContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#1F2937',
-        borderRadius: 12,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+        ...glassSearch,
+        borderRadius: 999,
+        paddingHorizontal: 14,
+        paddingVertical: 10,
         gap: 8,
     },
     searchInput: {
@@ -819,9 +799,7 @@ const styles = StyleSheet.create({
     },
     searchHistoryCard: {
         borderRadius: 12,
-        borderWidth: 1,
-        borderColor: '#1F2937',
-        backgroundColor: '#111827',
+        ...glassPanel,
         padding: 12,
         marginBottom: 10,
     },
@@ -883,9 +861,7 @@ const styles = StyleSheet.create({
     loadMoreButton: {
         margin: 12,
         borderRadius: 10,
-        borderWidth: 1,
-        borderColor: '#4B5563',
-        backgroundColor: '#111827',
+        ...glassSurface,
         alignItems: 'center',
         paddingVertical: 10,
     },
@@ -893,9 +869,7 @@ const styles = StyleSheet.create({
         width: '100%',
         marginTop: 8,
         borderRadius: 10,
-        borderWidth: 1,
-        borderColor: '#4B5563',
-        backgroundColor: '#111827',
+        ...glassSurface,
         alignItems: 'center',
         paddingVertical: 10,
     },
@@ -938,9 +912,7 @@ const styles = StyleSheet.create({
     },
     quickPickChip: {
         borderRadius: 999,
-        borderWidth: 1,
-        borderColor: '#4B5563',
-        backgroundColor: '#1F2937',
+        ...glassSurface,
         paddingHorizontal: 10,
         paddingVertical: 6,
     },

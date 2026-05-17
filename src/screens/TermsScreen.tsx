@@ -1,11 +1,12 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
+import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import { gazetteerHeader } from '../theme/gazetteerAmbientNative';
 
 export default function TermsScreen({ navigation }: any) {
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <GazetteerScreenShell>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Icon name="arrow-back" size={22} color="#FFFFFF" />
@@ -27,23 +28,18 @@ export default function TermsScreen({ navigation }: any) {
           You are responsible for content you publish. Report harmful content through in-app moderation options.
         </Text>
       </ScrollView>
-    </SafeAreaView>
+    </GazetteerScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#030712',
-  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderBottomWidth: 1,
-    borderBottomColor: '#1F2937',
     paddingHorizontal: 16,
     paddingVertical: 12,
+    ...gazetteerHeader,
   },
   backBtn: {
     width: 32,

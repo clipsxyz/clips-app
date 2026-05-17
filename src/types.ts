@@ -73,6 +73,11 @@ export type Post = {
   authorFollowsYou?: boolean;
   userLiked: boolean;
   userReclipped?: boolean;
+  /** Client-only: optimistic feed row while compress/upload/create runs in background. */
+  clientUploadStatus?: 'uploading' | 'failed';
+  /** Local file URI for preview while `clientUploadStatus` is set. */
+  clientLocalMediaUri?: string;
+  clientUploadError?: string;
   // Backend stat fields
   likes_count?: number; // Backend field
   views_count?: number; // Backend field

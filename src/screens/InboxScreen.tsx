@@ -11,8 +11,9 @@ import {
     RefreshControl,
     Image,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
+import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import { chipActiveMagenta, chipActiveMagentaText, glassPanel, glassSearch, glassSurface, gazetteerHeader, gazetteerTabActiveBorder } from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
 import {
     getNotifications,
@@ -524,14 +525,14 @@ export default function InboxScreen({ navigation, route }: any) {
 
     if (loading) {
         return (
-            <SafeAreaView style={styles.container}>
-                <ActivityIndicator size="large" color="#8B5CF6" />
-            </SafeAreaView>
+            <GazetteerScreenShell contentStyle={styles.loadingShell}>
+                <ActivityIndicator size="large" color="#f472b6" />
+            </GazetteerScreenShell>
         );
     }
 
     return (
-        <SafeAreaView style={styles.container} edges={['top']}>
+        <GazetteerScreenShell>
             <View style={styles.header}>
                 <Text style={styles.headerTitle}>Inbox</Text>
                 {activeTab === 'notifications' && unreadNotifications > 0 && (
@@ -940,19 +941,18 @@ export default function InboxScreen({ navigation, route }: any) {
                 />
                 </>
             )}
-        </SafeAreaView>
+        </GazetteerScreenShell>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#030712',
+    loadingShell: {
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     header: {
         padding: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        ...gazetteerHeader,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -970,7 +970,8 @@ const styles = StyleSheet.create({
     tabs: {
         flexDirection: 'row',
         borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+        backgroundColor: 'rgba(0, 0, 0, 0.2)',
     },
     tab: {
         flex: 1,
@@ -982,7 +983,7 @@ const styles = StyleSheet.create({
     },
     tabActive: {
         borderBottomWidth: 2,
-        borderBottomColor: '#8B5CF6',
+        borderBottomColor: gazetteerTabActiveBorder,
     },
     tabText: {
         fontSize: 13,
@@ -990,7 +991,7 @@ const styles = StyleSheet.create({
         fontWeight: '500',
     },
     tabTextActive: {
-        color: '#8B5CF6',
+        color: gazetteerTabActiveBorder,
         fontWeight: '600',
     },
     badge: {
@@ -1013,12 +1014,12 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
         paddingVertical: 11,
         borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        borderBottomColor: 'rgba(255, 255, 255, 0.06)',
         gap: 10,
         position: 'relative',
     },
     itemUnread: {
-        backgroundColor: '#1F2937',
+        backgroundColor: 'rgba(255, 255, 255, 0.06)',
     },
     itemIcon: {
         width: 40,
@@ -1053,11 +1054,9 @@ const styles = StyleSheet.create({
         marginHorizontal: 12,
         marginTop: 10,
         marginBottom: 8,
-        borderRadius: 10,
-        borderWidth: 1,
-        borderColor: '#374151',
-        backgroundColor: '#1F2937',
-        paddingHorizontal: 10,
+        borderRadius: 999,
+        ...glassSearch,
+        paddingHorizontal: 12,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 8,
@@ -1074,19 +1073,16 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
         paddingVertical: 10,
         borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        borderBottomColor: 'rgba(255, 255, 255, 0.08)',
     },
     messageFilterChip: {
         borderRadius: 999,
-        borderWidth: 1,
-        borderColor: '#374151',
-        backgroundColor: '#111827',
+        ...glassSurface,
         paddingHorizontal: 10,
         paddingVertical: 5,
     },
     messageFilterChipActive: {
-        borderColor: '#8B5CF6',
-        backgroundColor: '#2E1065',
+        ...chipActiveMagenta,
     },
     messageFilterChipText: {
         color: '#D1D5DB',
@@ -1094,7 +1090,7 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     messageFilterChipTextActive: {
-        color: '#DDD6FE',
+        ...chipActiveMagentaText,
     },
     conversationActionsCol: {
         alignItems: 'flex-end',

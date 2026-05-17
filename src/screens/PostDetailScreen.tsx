@@ -10,8 +10,9 @@ import {
     ActivityIndicator,
     Alert,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
+import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import { gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
 import {
     getPostById,
@@ -33,7 +34,9 @@ import {
 import { timeAgo } from '../utils/timeAgo';
 import { getInstagramImageDimensions } from '../utils/imageDimensions';
 import { FEED_UI } from '../constants/feedUiTokens';
+import FeedPostMedia from '../components/FeedPostMedia.native';
 import type { Post } from '../types';
+import { isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
 import Avatar from '../components/Avatar';
 import FeedShareModal from '../components/FeedShareModal';
 import PostOverflowMenuModal from '../components/PostOverflowMenuModal';
@@ -58,10 +61,16 @@ export default function PostDetailScreen({ route, navigation }: any) {
         loadPost();
     }, [postId]);
 
+    const mediaSizingUrl = React.useMemo(() => {
+        if (!post || isTextOnlyPost(post)) return null;
+        if (isVideoPost(post) && post.videoPosterUrl) return post.videoPosterUrl;
+        return post.mediaUrl || post.mediaItems?.[0]?.url || null;
+    }, [post]);
+
     useEffect(() => {
-        if (!post?.mediaUrl) return;
+        if (!mediaSizingUrl) return;
         Image.getSize(
-            post.mediaUrl,
+            mediaSizingUrl,
             (width, height) => {
                 const dimensions = getInstagramImageDimensions(width, height, screenWidth);
                 const minHeight = screenWidth * FEED_UI.media.minAspect;
@@ -72,7 +81,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                 setMediaHeight(screenWidth * FEED_UI.media.maxAspect);
             }
         );
-    }, [post?.mediaUrl, screenWidth]);
+    }, [mediaSizingUrl, screenWidth]);
 
     useEffect(() => {
         if (!overflowVisible || !post) return;
@@ -186,22 +195,26 @@ export default function PostDetailScreen({ route, navigation }: any) {
 
     if (loading) {
         return (
-            <SafeAreaView style={styles.container}>
-                <ActivityIndicator size="large" color="#8B5CF6" />
-            </SafeAreaView>
+            <GazetteerScreenShell contentStyle={styles.centeredShell}>
+                <ActivityIndicator size="large" color="#f472b6" />
+            </GazetteerScreenShell>
         );
     }
 
     if (!post) {
         return (
-            <SafeAreaView style={styles.container}>
+            <GazetteerScreenShell contentStyle={styles.centeredShell}>
                 <Text style={styles.errorText}>Post not found</Text>
-            </SafeAreaView>
+            </GazetteerScreenShell>
         );
     }
 
+    const textOnlyPost = isTextOnlyPost(post);
+    const hasPostMedia =
+        textOnlyPost || Boolean(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0));
+
     return (
-        <SafeAreaView style={styles.container} edges={['top']}>
+        <GazetteerScreenShell>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()}>
                     <Icon name="arrow-back" size={24} color="#FFFFFF" />
@@ -231,15 +244,22 @@ export default function PostDetailScreen({ route, navigation }: any) {
                     </TouchableOpacity>
                 </View>
 
-                {post.mediaUrl && (
-                    <Image source={{ uri: post.mediaUrl }} style={[styles.media, { height: mediaHeight }]} />
-                )}
+                {hasPostMedia ? (
+                    <View style={styles.mediaWrap}>
+                        <FeedPostMedia
+                            post={post}
+                            width={screenWidth}
+                            height={textOnlyPost ? screenWidth * 0.5 : mediaHeight}
+                            mode="detail"
+                        />
+                    </View>
+                ) : null}
 
-                {post.text && (
+                {!textOnlyPost && post.text?.trim() ? (
                     <View style={styles.textContainer}>
                         <Text style={styles.textContent}>{post.text}</Text>
                     </View>
-                )}
+                ) : null}
 
                 <View style={styles.engagementBar}>
                     <View style={styles.actionButtons}>
@@ -388,22 +408,21 @@ export default function PostDetailScreen({ route, navigation }: any) {
                     })
                 }
             />
-        </SafeAreaView>
+        </GazetteerScreenShell>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#030712',
+    centeredShell: {
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#1F2937',
+        ...gazetteerHeader,
     },
     headerTitle: {
         fontSize: 18,
@@ -432,6 +451,10 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#9CA3AF',
         marginTop: 2,
+    },
+    mediaWrap: {
+        width: '100%',
+        backgroundColor: '#000000',
     },
     media: {
         width: '100%',

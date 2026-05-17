@@ -119,6 +119,7 @@ class AuthController extends Controller
             'location_regional' => 'sometimes|nullable|string|max:100',
             'location_national' => 'sometimes|nullable|string|max:100',
             'social_links' => 'sometimes|nullable|array',
+            'profile_background_url' => 'sometimes|nullable|string|max:65535',
         ]);
 
         if ($validator->fails()) {
@@ -131,6 +132,10 @@ class AuthController extends Controller
             if (array_key_exists($field, $data)) {
                 $user->{$field} = $data[$field];
             }
+        }
+        if (array_key_exists('profile_background_url', $data)) {
+            $raw = $data['profile_background_url'];
+            $user->profile_background_url = ($raw === null || $raw === '') ? null : $raw;
         }
         $user->save();
 

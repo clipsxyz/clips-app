@@ -4,7 +4,9 @@ import { FiChevronLeft, FiImage, FiTrash2 } from 'react-icons/fi';
 import Swal from 'sweetalert2';
 import { useAuth } from '../context/Auth';
 import { bottomSheet } from '../utils/swalBottomSheet';
-import { uploadFile } from '../api/client';
+import { isLaravelApiEnabled } from '../config/runtimeEnv';
+import { mapLaravelUserToAppFields, uploadFile, updateAuthProfile } from '../api/client';
+import type { User } from '../types';
 
 export default function ProfileCoverPage() {
   const navigate = useNavigate();
@@ -23,9 +25,23 @@ export default function ProfileCoverPage() {
     });
   }, []);
 
-  const saveCoverUrl = React.useCallback((nextUrl: string) => {
+  const saveCoverUrl = React.useCallback(async (nextUrl: string) => {
     if (!user) return;
-    login({ ...(user as any), profileBackgroundUrl: nextUrl || undefined });
+    const normalized = nextUrl.trim();
+    if (isLaravelApiEnabled()) {
+      try {
+        const apiUser = await updateAuthProfile({
+          profile_background_url: normalized || null,
+        });
+        const fields = mapLaravelUserToAppFields(apiUser as Record<string, unknown>);
+        login({ ...(user as User), ...fields, profileBackgroundUrl: normalized || undefined });
+        return;
+      } catch (error) {
+        console.error('Failed to persist profile cover:', error);
+        throw error;
+      }
+    }
+    login({ ...(user as User), profileBackgroundUrl: normalized || undefined });
   }, [login, user]);
 
   const handleFileSelected = React.useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -55,7 +71,7 @@ export default function ProfileCoverPage() {
         nextCoverUrl = await fileToDataUrl(file);
       }
 
-      saveCoverUrl(nextCoverUrl);
+      await saveCoverUrl(nextCoverUrl);
       Swal.fire(bottomSheet({ title: 'Cover updated', message: 'Your profile cover image has been updated.', icon: 'success' }));
     } catch (error: any) {
       Swal.fire(bottomSheet({ title: 'Upload failed', message: error?.message || 'Could not update cover image.', icon: 'alert' }));
@@ -65,9 +81,17 @@ export default function ProfileCoverPage() {
     }
   }, [fileToDataUrl, saveCoverUrl]);
 
-  const handleRemove = React.useCallback(() => {
-    saveCoverUrl('');
-    Swal.fire(bottomSheet({ title: 'Cover removed', message: 'Your profile is back to the default map background.', icon: 'success' }));
+  const handleRemove = React.useCallback(async () => {
+    try {
+      await saveCoverUrl('');
+      Swal.fire(bottomSheet({ title: 'Cover removed', message: 'Your profile is back to the default map background.', icon: 'success' }));
+    } catch (error: any) {
+      Swal.fire(bottomSheet({
+        title: 'Update failed',
+        message: error?.message || 'Could not remove cover image.',
+        icon: 'alert',
+      }));
+    }
   }, [saveCoverUrl]);
 
   return (

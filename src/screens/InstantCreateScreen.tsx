@@ -1,8 +1,9 @@
 import React from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import * as ImagePicker from 'react-native-image-picker';
+import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import { glassSurface } from '../theme/gazetteerAmbientNative';
 
 type PickerMode = 'feed' | 'story24';
 
@@ -66,7 +67,7 @@ export default function InstantCreateScreen({ navigation }: any) {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <GazetteerScreenShell edges={['top']}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="close" size={24} color="#FFFFFF" />
@@ -106,12 +107,11 @@ export default function InstantCreateScreen({ navigation }: any) {
           <Text style={styles.cardWideHint}>Quick text story composer</Text>
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+    </GazetteerScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#030712' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -119,7 +119,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#1F2937',
+    borderBottomColor: 'rgba(255,255,255,0.12)',
   },
   title: { color: '#FFFFFF', fontSize: 18, fontWeight: '700' },
   headerSpacer: { width: 24, height: 24 },
@@ -133,9 +133,7 @@ const styles = StyleSheet.create({
   card: {
     width: '48%',
     borderRadius: 14,
-    backgroundColor: '#111827',
-    borderWidth: 1,
-    borderColor: '#374151',
+    ...glassSurface,
     padding: 16,
     marginBottom: 12,
     minHeight: 130,
@@ -146,9 +144,7 @@ const styles = StyleSheet.create({
   cardWide: {
     width: '100%',
     borderRadius: 14,
-    backgroundColor: '#111827',
-    borderWidth: 1,
-    borderColor: '#374151',
+    ...glassSurface,
     padding: 16,
     minHeight: 88,
     justifyContent: 'center',

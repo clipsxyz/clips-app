@@ -198,16 +198,16 @@ export default function TopBar({ activeTab: _activeTab, onLocationChange }: TopB
 
   return (
     <>
-      <div className="sticky top-0 z-40 bg-white/80 dark:bg-gray-950/80 backdrop-blur border-b border-gray-200 dark:border-gray-800">
+      <div className={`sticky top-0 z-40 ${location.pathname.startsWith('/discover') ? 'bg-transparent border-b-0' : 'bg-white/80 dark:bg-gray-950/80 backdrop-blur border-b border-gray-200 dark:border-gray-800'}`}>
         {location.pathname.startsWith('/discover') ? (
           <div className="mx-auto max-w-md px-4 h-11 flex items-center justify-between">
             <button
               onClick={() => navigate('/feed')}
-              className="p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
+              className="p-2 rounded-md hover:bg-white/10"
               aria-label="Back to Feed"
               title="Back to Feed"
             >
-              <FiHome className="w-5 h-5 text-gray-700 dark:text-gray-200" />
+              <FiHome className="w-5 h-5 text-gray-200" />
             </button>
 
 

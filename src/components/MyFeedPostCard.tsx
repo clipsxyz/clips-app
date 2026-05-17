@@ -1,11 +1,13 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post, User } from '../types';
 import Avatar from './Avatar';
 import FeedPostMeta from './FeedPostMeta';
 import FeedEngagementRow from './FeedEngagementRow';
+import FeedPostMedia from './FeedPostMedia.native';
 import { getAvatarForHandle } from '../api/users';
+import { isTextOnlyPost } from '../utils/effectiveTextPostStyleNative';
 
 type MyFeedPostCardProps = {
     post: Post;
@@ -16,13 +18,12 @@ type MyFeedPostCardProps = {
 };
 
 export default function MyFeedPostCard({ post, user, onPress, onLikePress, onCommentPress }: MyFeedPostCardProps) {
-    const firstMedia = post.mediaItems?.[0];
-    const mediaUrl = firstMedia?.url || post.mediaUrl;
-    const mediaType = firstMedia?.type || post.mediaType;
-    const videoPoster = post.videoPosterUrl;
+    const cardWidth = Dimensions.get('window').width - 24;
+    const textOnlyPost = isTextOnlyPost(post);
+    const hasMedia =
+        textOnlyPost || Boolean(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0));
     const displayText = (post.caption || post.text || '').trim();
     const locationText = (post.locationLabel || post.venue || post.landmark || '').trim();
-    const hasVideoPreview = mediaType === 'video' && !!videoPoster;
 
     return (
         <TouchableOpacity activeOpacity={0.95} style={styles.card} onPress={onPress}>
@@ -48,32 +49,11 @@ export default function MyFeedPostCard({ post, user, onPress, onLikePress, onCom
                 ) : null}
             </View>
 
-            {mediaUrl ? (
-                mediaType === 'video' ? (
-                    hasVideoPreview ? (
-                        <View style={styles.videoPreviewWrap}>
-                            <Image source={{ uri: videoPoster }} style={styles.media} />
-                            <View style={styles.videoOverlay}>
-                                <Icon name="play-circle" size={48} color="#F9FAFB" />
-                                <Text style={styles.videoPlaceholderText}>Tap to open video</Text>
-                            </View>
-                        </View>
-                    ) : (
-                        <View style={styles.videoPlaceholder}>
-                            <Icon name="play-circle-outline" size={42} color="#D1D5DB" />
-                            <Text style={styles.videoPlaceholderText}>Tap to open video</Text>
-                        </View>
-                    )
-                ) : (
-                    <Image source={{ uri: mediaUrl }} style={styles.media} />
-                )
-            ) : (
-                <View style={styles.textCard}>
-                    <Text style={styles.textCardText}>{post.text || 'No text'}</Text>
-                </View>
-            )}
+            {hasMedia ? (
+                <FeedPostMedia post={post} width={cardWidth} height={320} mode="feed" />
+            ) : null}
 
-            {displayText ? (
+            {!textOnlyPost && displayText ? (
                 <View style={styles.captionWrap}>
                     <Text style={styles.captionText}>{displayText}</Text>
                 </View>

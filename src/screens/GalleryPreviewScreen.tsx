@@ -1,242 +1,183 @@
-import React from 'react';
-import { Alert, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import Icon from 'react-native-vector-icons/Ionicons';
-import Video from 'react-native-video';
-
-export default function GalleryPreviewScreen({ navigation, route }: any) {
-  const mediaUrl: string | undefined = route.params?.mediaUrl;
-  const mediaType: 'image' | 'video' = route.params?.mediaType === 'video' ? 'video' : 'image';
-  const story24 = !!route.params?.story24;
-  const [trimStart, setTrimStart] = React.useState(0);
-  const [trimEnd, setTrimEnd] = React.useState(15);
-  const [coverTime, setCoverTime] = React.useState(0);
-  const [isVideoPaused, setIsVideoPaused] = React.useState(false);
-  const [videoDurationSec, setVideoDurationSec] = React.useState(15);
-
-  React.useEffect(() => {
-    if (mediaType !== 'video') return;
-    setTrimStart(0);
-    setTrimEnd(Math.max(1, videoDurationSec));
-    setCoverTime(0);
-  }, [mediaType, mediaUrl, videoDurationSec]);
-
-  const handleContinue = () => {
-    navigation.navigate('CreateComposer', {
-      mediaUrl,
-      videoUrl: mediaType === 'video' ? mediaUrl : undefined,
-      mediaType,
-      story24,
-      trimStart,
-      trimEnd,
-      videoCoverTime: coverTime,
-    });
-  };
-
-  return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Icon name="arrow-back" size={24} color="#FFFFFF" />
-        </TouchableOpacity>
-        <Text style={styles.title}>Preview</Text>
-        <TouchableOpacity onPress={handleContinue}>
-          <Text style={styles.nextText}>Use</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.previewWrap}>
-        {mediaType === 'image' && mediaUrl ? (
-          <Image source={{ uri: mediaUrl }} style={styles.preview} resizeMode="contain" />
-        ) : mediaUrl ? (
-          <View style={styles.videoPreviewWrap}>
-            <Video
-              source={{ uri: mediaUrl }}
-              style={styles.videoPreview}
-              resizeMode="contain"
-              paused={isVideoPaused}
-              repeat
-              controls
-              muted
-              onLoad={(event) => {
-                const duration = Number(event?.duration || 0);
-                if (!Number.isFinite(duration) || duration <= 0) return;
-                const rounded = Math.max(1, Math.floor(duration));
-                setVideoDurationSec(rounded);
-                setTrimEnd((prev) => Math.min(Math.max(1, prev), rounded));
-                setTrimStart((prev) => Math.min(Math.max(0, prev), Math.max(0, rounded - 1)));
-                setCoverTime((prev) => Math.min(Math.max(0, prev), rounded));
-              }}
-            />
-            <TouchableOpacity style={styles.videoPauseBtn} onPress={() => setIsVideoPaused((v) => !v)}>
-              <Icon name={isVideoPaused ? 'play' : 'pause'} size={18} color="#FFFFFF" />
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={styles.videoFallback}>
-            <Icon name="warning-outline" size={32} color="#FCA5A5" />
-            <Text style={styles.videoFallbackSubtext}>No video available for preview</Text>
-          </View>
-        )}
-      </View>
-      {mediaType === 'video' && (
-        <View style={styles.videoToolsCard}>
-          <Text style={styles.videoToolsTitle}>Quick edit</Text>
-          <View style={styles.videoToolsRow}>
-            <TouchableOpacity
-              style={styles.toolBtn}
-              onPress={() => setTrimStart((v) => Math.max(0, Math.min(v - 1, trimEnd - 1)))}
-            >
-              <Text style={styles.toolBtnText}>Trim -</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.toolBtn}
-              onPress={() => setTrimStart((v) => Math.min(trimEnd - 1, v + 1))}
-            >
-              <Text style={styles.toolBtnText}>Trim +</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.toolBtn}
-              onPress={() => setTrimEnd((v) => Math.max(trimStart + 1, v - 1))}
-            >
-              <Text style={styles.toolBtnText}>End -</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.toolBtn}
-              onPress={() => setTrimEnd((v) => Math.min(videoDurationSec, Math.max(trimStart + 1, v + 1)))}
-            >
-              <Text style={styles.toolBtnText}>End +</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.toolBtn}
-              onPress={() => setCoverTime((v) => Math.max(0, v - 1))}
-            >
-              <Text style={styles.toolBtnText}>Cover -1s</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.toolBtn} onPress={() => setCoverTime((v) => Math.min(videoDurationSec, Math.max(0, v + 1)))}>
-              <Text style={styles.toolBtnText}>Cover +1s</Text>
-            </TouchableOpacity>
-          </View>
-          <Text style={styles.videoToolsMeta}>
-            Duration: {videoDurationSec}s | Trim: {trimStart}s - {trimEnd}s | Cover: {coverTime}s
-          </Text>
-          <View style={styles.videoToolsRow}>
-            <TouchableOpacity
-              style={styles.toolGhostBtn}
-              onPress={() => Alert.alert('Coming next', 'Advanced trim timeline will be added in the next polish pass.')}
-            >
-              <Text style={styles.toolGhostBtnText}>Advanced Trim</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.toolGhostBtn}
-              onPress={() => Alert.alert('Coming next', 'Frame scrubber/cover picker will be added in the next polish pass.')}
-            >
-              <Text style={styles.toolGhostBtnText}>Cover Picker</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {story24 && (
-        <View style={styles.storyBadge}>
-          <Icon name="location" size={14} color="#111827" />
-          <Text style={styles.storyBadgeText}>Stories 24 mode</Text>
-        </View>
-      )}
-    </SafeAreaView>
-  );
-}
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#030712' },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1F2937',
-  },
-  title: { color: '#FFFFFF', fontSize: 18, fontWeight: '700' },
-  nextText: { color: '#F8D26A', fontSize: 15, fontWeight: '700' },
-  previewWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 16 },
-  preview: { width: '100%', height: '100%' },
-  videoPreviewWrap: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 14,
-    overflow: 'hidden',
-    backgroundColor: '#000000',
-  },
-  videoPreview: {
-    width: '100%',
-    height: '100%',
-  },
-  videoPauseBtn: {
-    position: 'absolute',
-    right: 12,
-    top: 12,
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.45)',
-  },
-  videoFallback: {
-    width: '100%',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#374151',
-    backgroundColor: '#111827',
-    paddingVertical: 44,
-    alignItems: 'center',
-  },
-  videoFallbackText: { color: '#F9FAFB', marginTop: 10, fontSize: 16, fontWeight: '700' },
-  videoFallbackSubtext: { color: '#9CA3AF', marginTop: 6, fontSize: 13 },
-  videoToolsCard: {
-    marginHorizontal: 16,
-    marginBottom: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#374151',
-    backgroundColor: '#111827',
-    padding: 12,
-    gap: 8,
-  },
-  videoToolsTitle: { color: '#F3F4F6', fontSize: 13, fontWeight: '700' },
-  videoToolsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  toolBtn: {
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: '#1F2937',
-    borderWidth: 1,
-    borderColor: '#4B5563',
-  },
-  toolBtnText: { color: '#E5E7EB', fontSize: 12, fontWeight: '700' },
-  videoToolsMeta: { color: '#9CA3AF', fontSize: 12, fontWeight: '600' },
-  toolGhostBtn: {
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: '#0F172A',
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  toolGhostBtnText: { color: '#CBD5E1', fontSize: 12, fontWeight: '700' },
-  storyBadge: {
-    margin: 16,
-    marginTop: 0,
-    alignSelf: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 999,
-    backgroundColor: '#FBBF24',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    gap: 6,
-  },
-  storyBadgeText: { color: '#111827', fontSize: 12, fontWeight: '700' },
-});
+import React, { useRef } from 'react';
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import Icon from 'react-native-vector-icons/Ionicons';
+import Video, { type VideoRef } from 'react-native-video';
+import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import VideoCoverControls from '../components/VideoCoverControls.native';
+import { glassPanel, gazetteerHeader } from '../theme/gazetteerAmbientNative';
+
+export default function GalleryPreviewScreen({ navigation, route }: any) {
+  const mediaUrl: string | undefined = route.params?.mediaUrl;
+  const mediaType: 'image' | 'video' = route.params?.mediaType === 'video' ? 'video' : 'image';
+  const story24 = !!route.params?.story24;
+  const videoRef = useRef<VideoRef>(null);
+  const [coverTime, setCoverTime] = React.useState(0);
+  const [isVideoPaused, setIsVideoPaused] = React.useState(false);
+  const [videoDurationSec, setVideoDurationSec] = React.useState(15);
+
+  React.useEffect(() => {
+    if (mediaType !== 'video') return;
+    setCoverTime(0);
+  }, [mediaType, mediaUrl]);
+
+  const seekPreview = (timeSec: number) => {
+    videoRef.current?.seek(Math.max(0, timeSec));
+    setIsVideoPaused(true);
+  };
+
+  const handleContinue = () => {
+    if (mediaType === 'video' && mediaUrl) {
+      navigation.navigate('InstantFilters', {
+        videoUrl: mediaUrl,
+        mediaUrl,
+        mediaType: 'video',
+        videoDuration: videoDurationSec,
+        videoCoverTime: coverTime,
+        story24,
+      });
+      return;
+    }
+    navigation.navigate('CreateComposer', {
+      mediaUrl,
+      mediaType,
+      story24,
+    });
+  };
+
+  return (
+    <GazetteerScreenShell>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Icon name="arrow-back" size={24} color="#FFFFFF" />
+        </TouchableOpacity>
+        <Text style={styles.title}>Preview</Text>
+        <TouchableOpacity onPress={handleContinue}>
+          <Text style={styles.nextText}>Use</Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+        <View style={styles.previewWrap}>
+          {mediaType === 'image' && mediaUrl ? (
+            <Image source={{ uri: mediaUrl }} style={styles.preview} resizeMode="contain" />
+          ) : mediaUrl ? (
+            <View style={styles.videoPreviewWrap}>
+              <Video
+                ref={videoRef}
+                source={{ uri: mediaUrl }}
+                style={styles.videoPreview}
+                resizeMode="contain"
+                paused={isVideoPaused}
+                repeat
+                controls
+                muted
+                onLoad={(event) => {
+                  const duration = Number(event?.duration || 0);
+                  if (!Number.isFinite(duration) || duration <= 0) return;
+                  const rounded = Math.max(0.1, Math.floor(duration * 10) / 10);
+                  setVideoDurationSec(rounded);
+                  setCoverTime((prev) => Math.min(Math.max(0, prev), rounded));
+                }}
+              />
+              <TouchableOpacity style={styles.videoPauseBtn} onPress={() => setIsVideoPaused((v) => !v)}>
+                <Icon name={isVideoPaused ? 'play' : 'pause'} size={18} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.videoFallback}>
+              <Icon name="warning-outline" size={32} color="#FCA5A5" />
+              <Text style={styles.videoFallbackSubtext}>No video available for preview</Text>
+            </View>
+          )}
+        </View>
+
+        {mediaType === 'video' ? (
+          <View style={styles.coverControlsWrap}>
+            <VideoCoverControls
+              durationSec={videoDurationSec}
+              coverTime={coverTime}
+              onCoverTimeChange={setCoverTime}
+              onScrubPreview={seekPreview}
+            />
+          </View>
+        ) : null}
+
+        {story24 ? (
+          <View style={styles.storyBadge}>
+            <Icon name="location" size={14} color="#111827" />
+            <Text style={styles.storyBadgeText}>Stories 24 mode</Text>
+          </View>
+        ) : null}
+      </ScrollView>
+    </GazetteerScreenShell>
+  );
+}
+
+const styles = StyleSheet.create({
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    ...gazetteerHeader,
+  },
+  title: { color: '#FFFFFF', fontSize: 18, fontWeight: '700' },
+  nextText: { color: '#f472b6', fontSize: 15, fontWeight: '700' },
+  scroll: { flex: 1 },
+  scrollContent: { paddingBottom: 24, gap: 12 },
+  previewWrap: {
+    minHeight: 280,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  preview: { width: '100%', height: 280 },
+  videoPreviewWrap: {
+    width: '100%',
+    height: 280,
+    borderRadius: 14,
+    overflow: 'hidden',
+    backgroundColor: '#000000',
+  },
+  videoPreview: {
+    width: '100%',
+    height: '100%',
+  },
+  videoPauseBtn: {
+    position: 'absolute',
+    right: 12,
+    top: 12,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  videoFallback: {
+    width: '100%',
+    borderRadius: 16,
+    paddingVertical: 44,
+    alignItems: 'center',
+    ...glassPanel,
+  },
+  videoFallbackSubtext: { color: '#9CA3AF', marginTop: 6, fontSize: 13 },
+  coverControlsWrap: {
+    marginHorizontal: 16,
+  },
+  storyBadge: {
+    marginHorizontal: 16,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 999,
+    backgroundColor: '#FBBF24',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    gap: 6,
+  },
+  storyBadgeText: { color: '#111827', fontSize: 12, fontWeight: '700' },
+});
+

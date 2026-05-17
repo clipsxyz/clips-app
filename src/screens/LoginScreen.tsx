@@ -11,8 +11,9 @@ import {
     Image,
     Modal,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
+import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import { glassPanel, glassSearch, glassSurface } from '../theme/gazetteerAmbientNative';
 import { Picker } from '@react-native-picker/picker';
 import * as ImagePicker from 'react-native-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -337,7 +338,7 @@ export default function LoginScreen({ navigation }: any) {
     };
 
     return (
-        <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        <GazetteerScreenShell edges={['top', 'bottom']}>
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 <View style={styles.form}>
                     {/* Header */}
@@ -734,7 +735,7 @@ export default function LoginScreen({ navigation }: any) {
                     </View>
                 </View>
             </Modal>
-        </SafeAreaView>
+        </GazetteerScreenShell>
     );
 }
 
@@ -744,20 +745,14 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0,0,0,0.5)',
         justifyContent: 'center',
     },
-    container: {
-        flex: 1,
-        backgroundColor: '#000000',
-    },
     scrollContent: {
         flexGrow: 1,
         justifyContent: 'center',
         padding: 16,
     },
     form: {
-        backgroundColor: '#000000',
+        ...glassPanel,
         borderRadius: 20,
-        borderWidth: 2,
-        borderColor: '#FFFFFF',
         minHeight: 600,
     },
     header: {

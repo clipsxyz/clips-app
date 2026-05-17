@@ -1937,8 +1937,11 @@ export async function getPostById(postId: string, userId?: string): Promise<Post
 
 export async function getPublicPostByToken(token: string): Promise<Post | null> {
   await delay(0);
+  if (!token) return null;
+
+  const mockMatch = posts.find((p) => p.publicShareToken === token);
   const useLaravelAPI = isLaravelApiEnabled();
-  if (!useLaravelAPI || !token) return null;
+  if (!useLaravelAPI) return mockMatch ?? null;
 
   try {
     const response = await apiClient.fetchPublicPostByToken(token);
@@ -1951,8 +1954,20 @@ export async function getPublicPostByToken(token: string): Promise<Post | null> 
     if (e?.status !== 404 && e?.message && !e.message.includes('404')) {
       console.warn('getPublicPostByToken failed:', token, e);
     }
-    return null;
+    return mockMatch ?? null;
   }
+}
+
+/** Resolve a shared link by public token or post id (used by web + native public post screens). */
+export async function loadSharedPost(options: {
+  token?: string;
+  postId?: string;
+  userId?: string;
+}): Promise<Post | null> {
+  const { token, postId, userId } = options;
+  if (token) return getPublicPostByToken(token);
+  if (postId) return getPostById(postId, userId);
+  return null;
 }
 
 export async function regeneratePublicShareToken(postId: string): Promise<{ token: string; url: string } | null> {

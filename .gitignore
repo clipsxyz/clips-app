@@ -12,3 +12,8 @@ laravel-backend/coverage.xml
 laravel-backend/.env
 laravel-backend/database/database.sqlite
 laravel-backend/storage/
+
+# FFmpeg Kit vendored binaries (npm run setup:ffmpeg-native)
+android/ffmpeg-kit-local-maven/
+ios/FFmpegKitVendor/
+.tmp-ffmpeg-setup/

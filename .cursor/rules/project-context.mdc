@@ -5,6 +5,10 @@ alwaysApply: true
 
 # Project context
 
-- **Web app**: Main app is Vite + React in `src/`. Entry: `src/App.tsx`. Backend: `laravel-backend/`.
-- **Don't load root docs by default**: Root has many `*.md` (LARAVEL_*, STRIPE_*, etc.). Only open a doc when the task clearly needs it (e.g. setup, Stripe, Laravel).
+- **Two clients, one repo**:
+  - **Web**: Vite + React DOM in `src/`. Entry: `src/App.tsx`, routes in `src/pages/`.
+  - **Native (iOS/Android)**: Bare React Native (not Expo). Entry: `App.native.tsx`, screens in `src/screens/`, platform files `*.native.tsx`.
+- **Don't mix stacks**: Web uses HTML/CSS/`react-router-dom`. Native uses `View`/`Text`/`StyleSheet`/`@react-navigation`. Follow `.cursor/rules/react-native-mobile.mdc` for any native path.
+- **Backend**: `laravel-backend/`.
+- **Don't load root docs by default**: Root has many `*.md` (LARAVEL_*, STRIPE_*, etc.). Only open a doc when the task clearly needs it.
 - **Large file**: `src/App.tsx` is very large; use `Read` with offset/limit or `Grep` for specific symbols instead of reading the whole file.
