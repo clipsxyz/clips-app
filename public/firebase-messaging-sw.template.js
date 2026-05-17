@@ -2,28 +2,24 @@
 importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js');
 
-// Firebase configuration - will be replaced at build time or use environment variables
-// For now, using placeholder values that should be replaced
+// Generated from this template at dev/build time — do not put real keys in git.
 const firebaseConfig = {
-  apiKey: "AIzaSyDwXNRlyVWVkR-wYs9015atOaaRyntypQs",
-  authDomain: "gazetter26.firebaseapp.com",
-  projectId: "gazetter26",
-  storageBucket: "gazetter26.firebasestorage.app",
-  messagingSenderId: "257169934666",
-  appId: "1:257169934666:web:852776ad1c87ce4126d9b3",
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_AUTH_DOMAIN",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_STORAGE_BUCKET",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+  appId: "YOUR_APP_ID",
   measurementId: "YOUR_MEASUREMENT_ID"
 };
 
-// Initialize Firebase
 firebase.initializeApp(firebaseConfig);
 
-// Retrieve an instance of Firebase Messaging
 const messaging = firebase.messaging();
 
-// Handle background messages
 messaging.onBackgroundMessage((payload) => {
   console.log('[firebase-messaging-sw.js] Received background message ', payload);
-  
+
   const notificationTitle = payload.notification?.title || 'New Notification';
   const notificationOptions = {
     body: payload.notification?.body || '',
@@ -38,20 +34,15 @@ messaging.onBackgroundMessage((payload) => {
   self.registration.showNotification(notificationTitle, notificationOptions);
 });
 
-// Handle notification clicks
 self.addEventListener('notificationclick', (event) => {
   console.log('[firebase-messaging-sw.js] Notification click received.');
-  
+
   event.notification.close();
 
-  // Handle different notification types
   const data = event.notification.data;
   if (data && data.url) {
-    event.waitUntil(
-      clients.openWindow(data.url)
-    );
+    event.waitUntil(clients.openWindow(data.url));
   } else if (data && data.type) {
-    // Handle different notification types
     let url = '/';
     switch (data.type) {
       case 'dm':
@@ -68,8 +59,6 @@ self.addEventListener('notificationclick', (event) => {
       default:
         url = '/';
     }
-    event.waitUntil(
-      clients.openWindow(url)
-    );
+    event.waitUntil(clients.openWindow(url));
   }
 });

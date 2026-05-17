@@ -4,6 +4,8 @@ src.zip
 .env
 .env.local
 firebase-web.local.json
+# Generated from public/firebase-messaging-sw.template.js (vite-plugin-firebase-sw)
+public/firebase-messaging-sw.js
 dist/
 
 # PHPUnit coverage (Laravel backend)
