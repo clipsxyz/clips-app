@@ -43,6 +43,13 @@ import { getAvatarForHandle } from '../api/users';
 import { unifiedSearch } from '../api/search';
 import { timeAgo } from '../utils/timeAgo';
 import Avatar from '../components/Avatar';
+import IMessageDmBubbleShell from '../components/IMessageDmBubbleShell.native';
+import {
+    DM_RECEIVED,
+    dmSentBubbleColor,
+    getDmSentBubblePreference,
+    type DmSentBubbleStyle,
+} from '../constants/dmImessageTheme.native';
 
 const DEBUG_MESSAGE_PAGING =
     __DEV__ && (globalThis as { __CLIPS_DEBUG_MESSAGE_PAGING__?: boolean }).__CLIPS_DEBUG_MESSAGE_PAGING__ === true;
@@ -78,6 +85,11 @@ export default function MessagesScreen({ route, navigation }: any) {
     const [translatedMessages, setTranslatedMessages] = useState<Record<string, string>>({});
     const [isRecordingVoice, setIsRecordingVoice] = useState(false);
     const [recordingSeconds, setRecordingSeconds] = useState(0);
+    const [dmSentStyle, setDmSentStyle] = useState<DmSentBubbleStyle>('blue');
+
+    useEffect(() => {
+        void getDmSentBubblePreference().then(setDmSentStyle);
+    }, []);
     const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
     const flatListRef = useRef<FlatList>(null);
     const shouldAutoScrollRef = useRef(true);
@@ -868,6 +880,10 @@ export default function MessagesScreen({ route, navigation }: any) {
             );
         }
 
+        const sentBubbleColor = dmSentBubbleColor(dmSentStyle);
+        const plainTextOnly = Boolean(item.text?.trim()) && !item.imageUrl && !item.audioUrl;
+        const bubbleFill = isFromMe ? sentBubbleColor : DM_RECEIVED;
+
         return (
             <View style={[
                 styles.messageContainer,
@@ -892,12 +908,24 @@ export default function MessagesScreen({ route, navigation }: any) {
                 <TouchableOpacity
                     activeOpacity={0.9}
                     onLongPress={() => openMessageActions(item)}
-                    style={[
+                    style={plainTextOnly ? styles.messageBubblePlain : [
                         styles.messageBubble,
-                        isFromMe ? styles.messageBubbleFromMe : styles.messageBubbleFromOther,
+                        isFromMe ? { backgroundColor: sentBubbleColor } : { backgroundColor: DM_RECEIVED },
                     ]}
                 >
-                    {(item as any).replyTo && (
+                    {plainTextOnly ? (
+                        <IMessageDmBubbleShell isFromMe={isFromMe} tailBackgroundColor={bubbleFill}>
+                            <Text
+                                style={[
+                                    styles.messageTextPlain,
+                                    isFromMe ? styles.messageTextFromMe : styles.messageTextFromOther,
+                                ]}
+                            >
+                                {item.text}
+                            </Text>
+                        </IMessageDmBubbleShell>
+                    ) : null}
+                    {!plainTextOnly && (item as any).replyTo && (
                         <View style={styles.replyPreviewWrap}>
                             <View style={styles.replyPreviewBar} />
                             {((item as any).replyTo?.imageUrl as string | undefined) ? (
@@ -923,7 +951,7 @@ export default function MessagesScreen({ route, navigation }: any) {
                             </View>
                         </View>
                     )}
-                    {item.text && (
+                    {!plainTextOnly && item.text && (
                         <Text style={[
                             styles.messageText,
                             isFromMe ? styles.messageTextFromMe : styles.messageTextFromOther,
@@ -1366,13 +1394,16 @@ const styles = StyleSheet.create({
         paddingVertical: 8,
         borderRadius: 15,
     },
-    messageBubbleFromMe: {
-        backgroundColor: '#3B82F6',
-        borderBottomRightRadius: 4,
+    messageBubblePlain: {
+        maxWidth: '75%',
+        paddingHorizontal: 0,
+        paddingVertical: 0,
+        backgroundColor: 'transparent',
     },
-    messageBubbleFromOther: {
-        backgroundColor: '#1F2937',
-        borderBottomLeftRadius: 4,
+    messageTextPlain: {
+        fontSize: 15,
+        lineHeight: 20,
+        color: '#FFFFFF',
     },
     messageText: {
         fontSize: 15,

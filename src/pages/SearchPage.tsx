@@ -151,6 +151,11 @@ export default function SearchPage() {
     const [placeSuggestions, setPlaceSuggestions] = React.useState<LocationSuggestion[]>([]);
     const [placeSuggestionsLoading, setPlaceSuggestionsLoading] = React.useState(false);
     const [scopePicker, setScopePicker] = React.useState<LocationSuggestion | null>(null);
+    const [visibleViewport, setVisibleViewport] = React.useState(() => ({
+        top: 0,
+        height: typeof window !== 'undefined' ? window.innerHeight : 800,
+    }));
+    const searchInputRef = React.useRef<HTMLInputElement>(null);
 
     // High-level search mode chips: location / venue / users / posts / near me
     const [searchMode, setSearchMode] = React.useState<SearchMode>('locations');
@@ -192,6 +197,31 @@ export default function SearchPage() {
             ctrl.abort();
         };
     }, [searchQuery, searchMode, isPlaceSearchMode]);
+
+    React.useEffect(() => {
+        if (!scopePicker) return;
+        searchInputRef.current?.blur();
+    }, [scopePicker]);
+
+    React.useEffect(() => {
+        const vv = window.visualViewport;
+        if (!vv) return;
+
+        const syncViewport = () => {
+            setVisibleViewport({ top: vv.offsetTop, height: vv.height });
+        };
+
+        syncViewport();
+        vv.addEventListener('resize', syncViewport);
+        vv.addEventListener('scroll', syncViewport);
+        window.addEventListener('resize', syncViewport);
+
+        return () => {
+            vv.removeEventListener('resize', syncViewport);
+            vv.removeEventListener('scroll', syncViewport);
+            window.removeEventListener('resize', syncViewport);
+        };
+    }, []);
 
     // Debounced unified search – manual search only returns results
     // for the active high-level tab (locations / venues / users / posts / nearby).
@@ -521,6 +551,14 @@ export default function SearchPage() {
         return rows.slice(0, 8);
     }, [isSearching, filteredLocations, filteredUsers, sections.posts?.items, searchMode, nav]);
 
+    const scopePickerOverlayStyle: React.CSSProperties = {
+        top: visibleViewport.top,
+        left: 0,
+        right: 0,
+        height: visibleViewport.height,
+        bottom: 'auto',
+    };
+
     return (
         <div className="min-h-full bg-black">
             <div className="mx-auto w-full max-w-md px-4 pb-6 space-y-3">
@@ -548,6 +586,7 @@ export default function SearchPage() {
                     <div className="relative rounded-[20px] bg-[#101010] border border-[#272727]">
                         <FiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
                         <input
+                            ref={searchInputRef}
                             type="text"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
@@ -1305,10 +1344,18 @@ export default function SearchPage() {
             {scopePicker && (
                 <motion.div
                     layout
-                    className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60 p-4 sm:items-center"
+                    className="fixed z-[60] flex items-center justify-center overflow-y-auto bg-black/70 p-4"
+                    style={scopePickerOverlayStyle}
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="search-scope-picker-title"
+                    onClick={() => setScopePicker(null)}
                 >
-                    <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#1a1524] p-5 shadow-2xl">
-                        <h2 className="text-lg font-semibold text-white">Which feed?</h2>
+                    <div
+                        className="my-auto w-full max-w-md rounded-2xl border border-white/10 bg-[#1a1524] p-5 shadow-2xl"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <h2 id="search-scope-picker-title" className="text-lg font-semibold text-white">Which feed?</h2>
                         <p className="mt-1 text-sm text-gray-400">{scopePicker.name}</p>
                         <p className="mt-2 text-xs text-gray-500">
                             Country is the whole nation. City is the metro area. Local area is the nearest neighbourhood when available.

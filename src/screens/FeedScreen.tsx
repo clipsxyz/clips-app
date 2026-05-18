@@ -98,7 +98,19 @@ import {
 } from '../utils/pendingFeedUploadNative';
 import { feedHeaderLabelFromSuggestion } from '../utils/placeFeedLevels';
 import type { LocationSuggestion } from '../api/locations';
+import { resolvePlaceFeedSelection, type PlaceFeedSelection } from '../utils/pickPlaceFeedScope';
 import LocationPlaceSummaryModal from '../components/LocationPlaceSummaryModal';
+import FeedTextOnlyFeedLayout from '../components/FeedTextOnlyFeedLayout.native';
+import FeedDmSheet from '../components/FeedDmSheet.native';
+import FeedDmDeliveryFx, { type FeedDmDeliveryFxState } from '../components/FeedDmDeliveryFx.native';
+import { appendMessage } from '../api/messages';
+import {
+    loadLocationNotifyPrefs,
+    locationNotifyKey,
+    saveLocationNotifyPrefs,
+} from '../utils/locationNotifyPrefNative';
+import { useMutualFollow } from '../hooks/useMutualFollow';
+import LocationPlaceSummaryCard from '../components/LocationPlaceSummaryCard';
 
 type Tab = string;
 
@@ -132,10 +144,22 @@ function PillTabs({
     onOpenBoost: () => void;
     onOpenPassport: () => void;
     onOpenDiscover: () => void;
-    onSearchLocation?: (location: string, filterType: 'location' | 'venue' | 'landmark') => void;
+    onSearchLocation?: (
+        location: string,
+        filterType: 'location' | 'venue' | 'landmark',
+        meta?: { label?: string; placeId?: string | null; scope?: string }
+    ) => void;
     onClearCustom?: () => void;
 }) {
-    type HeaderSuggestion = { name: string; type: 'location' | 'venue' | 'landmark'; country?: string };
+    type HeaderSuggestion = {
+        name: string;
+        type: 'location' | 'venue' | 'landmark';
+        country?: string;
+        filter?: string;
+        label?: string;
+        placeId?: string | null;
+        scope?: string;
+    };
     const [menuOpen, setMenuOpen] = useState(false);
     const [showGazetteerTitle, setShowGazetteerTitle] = useState(true);
     const [locationQuery, setLocationQuery] = useState('');
@@ -280,13 +304,22 @@ function PillTabs({
                 if (!cancelled) {
                     const allApiSuggestions = Array.isArray(res) ? res : [];
                     const mappedApi: HeaderSuggestion[] = allApiSuggestions.map((s) => {
+                        const sel = resolvePlaceFeedSelection(s as LocationSuggestion);
                         const t = String((s as any)?.type || '').toLowerCase();
                         const kind: 'location' | 'venue' | 'landmark' = t.includes('venue')
                             ? 'venue'
                             : t.includes('landmark')
                                 ? 'landmark'
                                 : 'location';
-                        return { name: s.name, country: (s as any).country, type: kind };
+                        return {
+                            name: s.name,
+                            country: (s as any).country,
+                            type: kind,
+                            filter: sel.filter,
+                            label: sel.label,
+                            placeId: sel.placeId,
+                            scope: sel.scope,
+                        };
                     });
                     const fallbackCombined: HeaderSuggestion[] = [
                         ...fallbackPlaces.map((name) => ({ name, type: 'location' as const })),
@@ -356,7 +389,7 @@ function PillTabs({
             filterType = 'landmark';
         }
         if (!next) return;
-        onSearchLocation?.(next, filterType);
+        onSearchLocation?.(next, filterType, { label: next, placeId: null });
         setMenuOpen(false);
     };
 
@@ -432,7 +465,12 @@ function PillTabs({
                                                                     ? 'landmark'
                                                                     : 'location');
                                                     setLocationQuery(s.name);
-                                                    onSearchLocation?.(s.name, mode);
+                                                    const filter = s.filter ?? s.name;
+                                                    onSearchLocation?.(filter, mode, {
+                                                        label: s.label ?? s.name,
+                                                        placeId: s.placeId ?? null,
+                                                        scope: s.scope,
+                                                    });
                                                     setMenuOpen(false);
                                                 }}
                                             >
@@ -579,6 +617,7 @@ function PostHeader({
     onProfileMenuPress,
     onHasStoryChange,
     onOverflowPress,
+    onRegisterDmAnchor,
 }: {
     post: Post;
     onFollow?: () => Promise<void>;
@@ -586,6 +625,7 @@ function PostHeader({
     onProfileMenuPress?: () => void;
     onHasStoryChange?: (hasStory: boolean) => void;
     onOverflowPress?: () => void;
+    onRegisterDmAnchor?: (key: string, ref: View | null) => void;
 }) {
     const [hasStory, setHasStory] = useState(false);
     const [showFollowCheck, setShowFollowCheck] = useState(post.isFollowing === true);
@@ -625,9 +665,14 @@ function PostHeader({
     return (
         <View style={styles.postHeader}>
             <View style={styles.postHeaderLeft}>
-                <TouchableOpacity 
+                <TouchableOpacity
                     style={styles.avatarWrapper}
                     onPress={onProfileMenuPress}
+                    ref={(r) => {
+                        onRegisterDmAnchor?.(`post:${post.id}`, r);
+                        onRegisterDmAnchor?.(`handle:${post.userHandle}`, r);
+                    }}
+                    collapsable={false}
                 >
                     <Avatar
                         src={undefined}
@@ -711,6 +756,9 @@ const FeedCard = React.memo(function FeedCard({
     onOverflowPress,
     isVideoActive,
     feedVideoMuted,
+    viewerHandle,
+    onOpenDM,
+    onRegisterDmAnchor,
 }: {
     post: Post;
     onLike: () => Promise<void>;
@@ -732,10 +780,14 @@ const FeedCard = React.memo(function FeedCard({
     onOverflowPress?: () => void;
     isVideoActive?: boolean;
     feedVideoMuted?: boolean;
+    viewerHandle?: string | null;
+    onOpenDM?: (handle: string, postId: string) => void;
+    onRegisterDmAnchor?: (key: string, ref: View | null) => void;
 }) {
     const [imageDimensions, setImageDimensions] = React.useState<{ width: number; height: number } | null>(null);
     const [profileMenuVisible, setProfileMenuVisible] = React.useState(false);
     const [headerHasStory, setHeaderHasStory] = React.useState(false);
+    const isMutualFollow = useMutualFollow(post, isCurrentUser);
     const lastMediaTapRef = React.useRef(0);
     const singleMediaTapTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const screenWidth = Dimensions.get('window').width;
@@ -830,15 +882,6 @@ const FeedCard = React.memo(function FeedCard({
             onPress={onPostPress}
             activeOpacity={0.95}
         >
-            <PostHeader
-                post={post}
-                onFollow={onFollow}
-                isCurrentUser={isCurrentUser}
-                onProfileMenuPress={() => setProfileMenuVisible(true)}
-                onHasStoryChange={setHeaderHasStory}
-                onOverflowPress={onOverflowPress}
-            />
-
             {post.isBoosted && (
                 <View style={styles.sponsoredBadge}>
                     <Text style={styles.sponsoredText}>Sponsored</Text>
@@ -848,35 +891,65 @@ const FeedCard = React.memo(function FeedCard({
                 </View>
             )}
 
-            {(textOnlyPost || hasFeedMedia) && (
-                <View style={styles.mediaWrap}>
-                    <FeedPostMedia
+            {textOnlyPost ? (
+                <FeedTextOnlyFeedLayout
+                    post={post}
+                    viewerHandle={viewerHandle}
+                    cardWidth={cardMediaWidth}
+                    isCurrentUser={isCurrentUser}
+                    onFollow={onFollow}
+                    onOpenDM={onOpenDM}
+                    onProfileMenuPress={() => setProfileMenuVisible(true)}
+                    onOverflowPress={onOverflowPress}
+                    onDoubleLike={() => {
+                        if (!post.userLiked) {
+                            void onLike();
+                        }
+                    }}
+                    onRegisterDmAnchor={onRegisterDmAnchor}
+                />
+            ) : (
+                <>
+                    <PostHeader
                         post={post}
-                        width={cardMediaWidth}
-                        height={typeof imageStyle.height === 'number' ? imageStyle.height : cardMediaWidth}
-                        onPress={isClientUploading || isClientUploadFailed ? undefined : handleMediaPress}
-                        onMediaLoad={isClientUploading ? undefined : onView}
-                        mode="feed"
-                        isActive={isVideoActive && !isClientUploading}
-                        muted={feedVideoMuted}
+                        onFollow={onFollow}
+                        isCurrentUser={isCurrentUser}
+                        onProfileMenuPress={() => setProfileMenuVisible(true)}
+                        onHasStoryChange={setHeaderHasStory}
+                        onOverflowPress={onOverflowPress}
+                        onRegisterDmAnchor={onRegisterDmAnchor}
                     />
-                    {isClientUploading ? (
-                        <View style={styles.uploadingOverlay} pointerEvents="none">
-                            <ActivityIndicator size="large" color="#FFFFFF" />
-                            <Text style={styles.uploadingOverlayTitle}>Posting…</Text>
-                            <Text style={styles.uploadingOverlaySubtitle}>Preparing your post</Text>
+                    {hasFeedMedia ? (
+                        <View style={styles.mediaWrap}>
+                            <FeedPostMedia
+                                post={post}
+                                width={cardMediaWidth}
+                                height={typeof imageStyle.height === 'number' ? imageStyle.height : cardMediaWidth}
+                                onPress={isClientUploading || isClientUploadFailed ? undefined : handleMediaPress}
+                                onMediaLoad={isClientUploading ? undefined : onView}
+                                mode="feed"
+                                isActive={isVideoActive && !isClientUploading}
+                                muted={feedVideoMuted}
+                            />
+                            {isClientUploading ? (
+                                <View style={styles.uploadingOverlay} pointerEvents="none">
+                                    <ActivityIndicator size="large" color="#FFFFFF" />
+                                    <Text style={styles.uploadingOverlayTitle}>Posting…</Text>
+                                    <Text style={styles.uploadingOverlaySubtitle}>Preparing your post</Text>
+                                </View>
+                            ) : null}
+                            {isClientUploadFailed ? (
+                                <View style={styles.uploadingOverlay}>
+                                    <Icon name="alert-circle-outline" size={28} color="#FCA5A5" />
+                                    <Text style={styles.uploadingOverlayTitle}>Post failed</Text>
+                                    <Text style={styles.uploadingOverlaySubtitle} numberOfLines={2}>
+                                        {post.clientUploadError || 'Could not post. Tap to dismiss.'}
+                                    </Text>
+                                </View>
+                            ) : null}
                         </View>
                     ) : null}
-                    {isClientUploadFailed ? (
-                        <View style={styles.uploadingOverlay}>
-                            <Icon name="alert-circle-outline" size={28} color="#FCA5A5" />
-                            <Text style={styles.uploadingOverlayTitle}>Post failed</Text>
-                            <Text style={styles.uploadingOverlaySubtitle} numberOfLines={2}>
-                                {post.clientUploadError || 'Could not post. Tap to dismiss.'}
-                            </Text>
-                        </View>
-                    ) : null}
-                </View>
+                </>
             )}
 
             {!textOnlyPost && post.text?.trim() && hasFeedMedia ? (
@@ -981,6 +1054,18 @@ const FeedCard = React.memo(function FeedCard({
                             <Text style={styles.profileMenuItemText}>View stories</Text>
                         </TouchableOpacity>
                     )}
+                    {!isCurrentUser && isMutualFollow && onOpenDM && (
+                        <TouchableOpacity
+                            style={styles.profileMenuItem}
+                            onPress={() => {
+                                setProfileMenuVisible(false);
+                                onOpenDM(post.userHandle, post.id);
+                            }}
+                        >
+                            <Icon name="chatbubble-outline" size={18} color="#67E8F9" />
+                            <Text style={[styles.profileMenuItemText, { color: '#A5F3FC' }]}>Message</Text>
+                        </TouchableOpacity>
+                    )}
                     {!isCurrentUser && onBlockUser && (
                         <TouchableOpacity
                             style={styles.profileMenuItem}
@@ -1055,6 +1140,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [showFollowingFeed, setShowFollowingFeed] = useState(false);
     const [customLocation, setCustomLocation] = useState<string | null>(null);
     const [customLocationLabel, setCustomLocationLabel] = useState<string | null>(null);
+    const [customLocationPlaceId, setCustomLocationPlaceId] = useState<string | null>(null);
     const [customFilterType, setCustomFilterType] = useState<'location' | 'venue' | 'landmark' | null>(null);
     const [commentsModalOpen, setCommentsModalOpen] = useState(false);
     const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
@@ -1066,6 +1152,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const insets = useSafeAreaInsets();
     const [reloadTick, setReloadTick] = useState(0);
     const [showBoostPrompt, setShowBoostPrompt] = useState(false);
+    const [dmSheetOpen, setDmSheetOpen] = useState(false);
+    const [dmSheetRecipientHandle, setDmSheetRecipientHandle] = useState<string | null>(null);
+    const [dmSheetAnchorPostId, setDmSheetAnchorPostId] = useState<string | null>(null);
+    const [dmSheetMessage, setDmSheetMessage] = useState('');
+    const [feedDmDeliveryFx, setFeedDmDeliveryFx] = useState<FeedDmDeliveryFxState | null>(null);
+    const [notifyLocations, setNotifyLocations] = useState<string[]>([]);
+    const dmAnchorRefs = useRef<Record<string, View>>({});
     /** Local overrides keyed by post id so bookmark rail matches collections without refetching whole feed. */
     const [savedByPostId, setSavedByPostId] = useState<Record<string, boolean>>({});
     const [overflowVisible, setOverflowVisible] = useState(false);
@@ -1331,6 +1424,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     useEffect(() => {
         const requestedLocation = route?.params?.location;
         const requestedLabel = route?.params?.locationLabel;
+        const requestedPlaceId = route?.params?.placeId;
         const requestedFilterType = route?.params?.filterType as 'location' | 'venue' | 'landmark' | undefined;
         if (!requestedLocation || typeof requestedLocation !== 'string') return;
         const next = requestedLocation.trim();
@@ -1347,9 +1441,14 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                 ? 'landmark'
                                 : 'location',
                   } as LocationSuggestion);
+        const placeId =
+            typeof requestedPlaceId === 'string' && requestedPlaceId.trim()
+                ? requestedPlaceId.trim()
+                : null;
         setShowFollowingFeed(false);
         setCustomLocation(next);
         setCustomLocationLabel(label);
+        setCustomLocationPlaceId(placeId);
         setCustomFilterType(
             requestedFilterType === 'venue'
                 ? 'venue'
@@ -1361,7 +1460,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         setCursor(0);
         setEnd(false);
         setError(null);
-    }, [route?.params?.location, route?.params?.locationLabel, route?.params?.filterType]);
+    }, [route?.params?.location, route?.params?.locationLabel, route?.params?.filterType, route?.params?.placeId]);
 
     useEffect(() => {
         setPages([]);
@@ -1535,40 +1634,104 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             setShowFollowingFeed(true);
             setCustomLocation(null);
             setCustomLocationLabel(null);
+            setCustomLocationPlaceId(null);
             setCustomFilterType(null);
             setActive('Following'); // Set active to Following so it's highlighted
         } else {
             setShowFollowingFeed(false);
             setCustomLocation(null);
             setCustomLocationLabel(null);
+            setCustomLocationPlaceId(null);
             setCustomFilterType(null);
             setActive(tab);
         }
+        try {
+            navigation?.setParams?.({
+                location: undefined,
+                locationLabel: undefined,
+                locationScope: undefined,
+                filterType: undefined,
+                placeId: undefined,
+            });
+        } catch {
+            // ignore
+        }
     };
 
-    const handleHeaderLocationSearch = (location: string, filterType: 'location' | 'venue' | 'landmark' = 'location') => {
-        const next = location.trim();
-        if (!next) return;
-        setShowFollowingFeed(false);
-        setCustomLocation(next);
-        setCustomLocationLabel(
-            feedHeaderLabelFromSuggestion({ name: next, type: filterType } as LocationSuggestion)
-        );
-        setCustomFilterType(filterType);
-        setPages([]);
-        setCursor(0);
-        setEnd(false);
-        setError(null);
-    };
+    const applyCustomLocationFeed = useCallback(
+        (selection: PlaceFeedSelection, filterType: 'location' | 'venue' | 'landmark') => {
+            setShowFollowingFeed(false);
+            setCustomLocation(selection.filter);
+            setCustomLocationLabel(selection.label);
+            setCustomLocationPlaceId(selection.placeId?.trim() || null);
+            setCustomFilterType(filterType);
+            setPages([]);
+            setCursor(0);
+            setEnd(false);
+            setError(null);
+            requestTokenRef.current++;
+            try {
+                navigation?.setParams?.({
+                    location: selection.filter,
+                    locationLabel: selection.label,
+                    locationScope: selection.scope,
+                    filterType,
+                    placeId: selection.placeId || undefined,
+                });
+            } catch {
+                // ignore
+            }
+        },
+        [navigation]
+    );
+
+    const handleHeaderLocationSearch = useCallback(
+        (
+            location: string,
+            filterType: 'location' | 'venue' | 'landmark' = 'location',
+            meta?: { label?: string; placeId?: string | null; scope?: string }
+        ) => {
+            const filter = location.trim();
+            if (!filter) return;
+            const label = (meta?.label ?? filter).trim() || filter;
+            const scope =
+                meta?.scope === 'local' || meta?.scope === 'regional' || meta?.scope === 'national'
+                    ? meta.scope
+                    : 'national';
+            applyCustomLocationFeed(
+                {
+                    filter,
+                    label,
+                    fullName: filter,
+                    scope,
+                    placeId: meta?.placeId?.trim() || null,
+                },
+                filterType
+            );
+        },
+        [applyCustomLocationFeed]
+    );
 
     const clearCustomLocation = () => {
         setCustomLocation(null);
         setCustomLocationLabel(null);
+        setCustomLocationPlaceId(null);
         setCustomFilterType(null);
         setPages([]);
         setCursor(0);
         setEnd(false);
         setError(null);
+        try {
+            navigation?.setParams?.({
+                location: undefined,
+                locationLabel: undefined,
+                locationScope: undefined,
+                filterType: undefined,
+                placeId: undefined,
+            });
+        } catch {
+            // ignore
+        }
     };
 
     const pendingPosts = React.useMemo(
@@ -1582,6 +1745,117 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         const loaded = pages.flat().filter((p) => !pendingIds.has(p.id));
         return [...pendingPosts, ...loaded];
     }, [pages, pendingPosts]);
+
+    const customLocationDisplay = customLocationLabel || customLocation;
+
+    useEffect(() => {
+        void loadLocationNotifyPrefs().then(setNotifyLocations);
+    }, []);
+
+    const isNotifyOnForCurrentLocation = useMemo(() => {
+        if (!customLocation) return false;
+        const key = locationNotifyKey(customLocation);
+        return key !== '' && notifyLocations.includes(key);
+    }, [customLocation, notifyLocations]);
+
+    const toggleNotifyForCurrentLocation = useCallback(() => {
+        if (!customLocation) return;
+        const key = locationNotifyKey(customLocation);
+        if (!key) return;
+        setNotifyLocations((prev) => {
+            const exists = prev.includes(key);
+            const next = exists ? prev.filter((k) => k !== key) : [...prev, key];
+            void saveLocationNotifyPrefs(next);
+            return next;
+        });
+    }, [customLocation]);
+
+    const registerDmAnchor = useCallback((key: string, ref: View | null) => {
+        if (ref) {
+            dmAnchorRefs.current[key] = ref;
+        } else {
+            delete dmAnchorRefs.current[key];
+        }
+    }, []);
+
+    const measureDmTarget = useCallback(
+        (toHandle: string, anchorPostId: string | null, cb: (targetX: number, targetY: number) => void) => {
+            const keys: string[] = [];
+            if (anchorPostId) keys.push(`post:${anchorPostId}`);
+            keys.push(`handle:${toHandle}`);
+            const tryKey = (index: number) => {
+                if (index >= keys.length) {
+                    cb(40, 42);
+                    return;
+                }
+                const view = dmAnchorRefs.current[keys[index]];
+                if (!view?.measureInWindow) {
+                    tryKey(index + 1);
+                    return;
+                }
+                view.measureInWindow((x, y, w, h) => {
+                    cb(x + w / 2, y + h / 2);
+                });
+            };
+            tryKey(0);
+        },
+        []
+    );
+
+    const startFeedDmDeliveryFx = useCallback(
+        (toHandle: string, anchorPostId: string | null) => {
+            const { width, height } = Dimensions.get('window');
+            const startX = width / 2;
+            const startY = height - 112;
+            measureDmTarget(toHandle, anchorPostId, (targetX, targetY) => {
+                setFeedDmDeliveryFx({
+                    toHandle,
+                    startX,
+                    startY,
+                    targetX,
+                    targetY,
+                    phase: 'start',
+                });
+                setTimeout(() => {
+                    setFeedDmDeliveryFx((prev) => (prev ? { ...prev, phase: 'fly' } : null));
+                }, 14);
+                setTimeout(() => setFeedDmDeliveryFx(null), 4300);
+            });
+        },
+        [measureDmTarget]
+    );
+
+    const openDmSheet = useCallback((handle: string, postId: string) => {
+        setDmSheetRecipientHandle(handle);
+        setDmSheetAnchorPostId(postId);
+        setDmSheetMessage('');
+        setDmSheetOpen(true);
+    }, []);
+
+    const sendDmFromSheet = useCallback(() => {
+        const text = dmSheetMessage.trim();
+        if (!text || !user?.handle || !dmSheetRecipientHandle) return;
+        const recipient = dmSheetRecipientHandle;
+        const anchorId = dmSheetAnchorPostId;
+        appendMessage(user.handle, recipient, { text, sourcePostId: anchorId ?? undefined })
+            .then(() => {
+                setDmSheetMessage('');
+                setDmSheetOpen(false);
+                setDmSheetRecipientHandle(null);
+                setDmSheetAnchorPostId(null);
+                setTimeout(() => startFeedDmDeliveryFx(recipient, anchorId), 50);
+            })
+            .catch((err) => console.error('Send DM failed:', err));
+    }, [dmSheetMessage, user?.handle, dmSheetRecipientHandle, dmSheetAnchorPostId, startFeedDmDeliveryFx]);
+
+    const isVisitorInCustomLocation = useMemo(() => {
+        if (!customLocation || !user) return false;
+        const loc = customLocation.trim().toLowerCase();
+        const local = (user.local || '').trim().toLowerCase();
+        const regional = (user.regional || '').trim().toLowerCase();
+        const national = (user.national || '').trim().toLowerCase();
+        return loc !== '' && loc !== local && loc !== regional && loc !== national;
+    }, [customLocation, user?.local, user?.regional, user?.national]);
 
     // Memoize renderItem to prevent recreation on every render
     const renderItem = React.useCallback(
@@ -1711,6 +1985,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     unreadCount={unreadCount}
                     hasInbox={hasInbox}
                     isCurrentUser={user?.handle === mergedPost.userHandle}
+                    viewerHandle={user?.handle}
+                    onOpenDM={user?.handle ? openDmSheet : undefined}
+                    onRegisterDmAnchor={registerDmAnchor}
                 />
             );
         },
@@ -1759,6 +2036,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     onChange={handleTabChange}
                     customLocation={customLocation}
                     customLocationLabel={customLocationLabel}
+                    customLocationPlaceId={customLocationPlaceId}
                     customFilterType={customFilterType}
                     userLocal={defaultLocal}
                     userRegional={defaultRegional}
@@ -1811,9 +2089,72 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     ) : null
                 }
                 ListEmptyComponent={
-                    !loading ? (
+                    !loading && end ? (
                         <View style={styles.emptyContainer}>
-                            <Text style={styles.emptyText}>No posts found</Text>
+                            {customLocation ? (
+                                <>
+                                    <View style={styles.emptyFeedCard}>
+                                        <Text style={styles.emptyFeedBadge}>
+                                            {isVisitorInCustomLocation ? "YOU'RE EARLY TO THIS FEED" : 'YOUR HOME FEED'}
+                                        </Text>
+                                        <Text style={styles.emptyFeedTitle}>
+                                            {isVisitorInCustomLocation
+                                                ? `No locals are posting in ${customLocationDisplay} yet`
+                                                : `No posts in your ${customLocationDisplay} feed yet`}
+                                        </Text>
+                                        <Text style={styles.emptyFeedSubtitle}>
+                                            {isVisitorInCustomLocation
+                                                ? `We'll light up this feed once people in ${customLocationDisplay} start sharing.`
+                                                : 'You can be the first to post here. Share what’s happening around you.'}
+                                        </Text>
+                                        {isVisitorInCustomLocation ? (
+                                            <>
+                                                <TouchableOpacity
+                                                    style={[
+                                                        styles.emptyFeedNotifyBtn,
+                                                        isNotifyOnForCurrentLocation && styles.emptyFeedNotifyBtnActive,
+                                                    ]}
+                                                    onPress={toggleNotifyForCurrentLocation}
+                                                >
+                                                    <Text
+                                                        style={[
+                                                            styles.emptyFeedNotifyBtnText,
+                                                            isNotifyOnForCurrentLocation && styles.emptyFeedNotifyBtnTextActive,
+                                                        ]}
+                                                    >
+                                                        {isNotifyOnForCurrentLocation
+                                                            ? "You'll be notified"
+                                                            : `Notify me when ${customLocationDisplay} wakes up`}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                                <TouchableOpacity
+                                                    style={styles.emptyFeedSecondaryBtn}
+                                                    onPress={clearCustomLocation}
+                                                >
+                                                    <Text style={styles.emptyFeedSecondaryBtnText}>Back to your home feed</Text>
+                                                </TouchableOpacity>
+                                                <Text style={styles.emptyFeedNotifyHint}>
+                                                    Feed warming up · we'll only ping you when real clips from{' '}
+                                                    {customLocationDisplay} start to appear.
+                                                </Text>
+                                            </>
+                                        ) : (
+                                            <TouchableOpacity
+                                                style={styles.emptyFeedPrimaryBtn}
+                                                onPress={() => navigation.navigate('CreateComposer')}
+                                            >
+                                                <Text style={styles.emptyFeedPrimaryBtnText}>Create a clip in this feed</Text>
+                                            </TouchableOpacity>
+                                        )}
+                                    </View>
+                                    <LocationPlaceSummaryCard
+                                        locationLabel={customLocationDisplay || customLocation}
+                                        placeId={customLocationPlaceId}
+                                    />
+                                </>
+                            ) : (
+                                <Text style={styles.emptyText}>No posts found</Text>
+                            )}
                         </View>
                     ) : null
                 }
@@ -1857,6 +2198,22 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     setSelectedPostForShare(null);
                 }}
             />
+
+            <FeedDmSheet
+                open={dmSheetOpen}
+                recipientHandle={dmSheetRecipientHandle}
+                message={dmSheetMessage}
+                onChangeMessage={setDmSheetMessage}
+                onClose={() => {
+                    setDmSheetOpen(false);
+                    setDmSheetRecipientHandle(null);
+                    setDmSheetAnchorPostId(null);
+                    setDmSheetMessage('');
+                }}
+                onSend={sendDmFromSheet}
+            />
+
+            <FeedDmDeliveryFx fx={feedDmDeliveryFx} />
 
             <PostOverflowMenuModal
                 visible={overflowVisible}
@@ -2520,12 +2877,95 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     emptyContainer: {
-        padding: 40,
-        alignItems: 'center',
+        padding: 24,
+        alignItems: 'stretch',
     },
     emptyText: {
         color: '#6B7280',
         fontSize: 16,
+        textAlign: 'center',
+    },
+    emptyFeedCard: {
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: 'rgba(55, 65, 81, 0.9)',
+        backgroundColor: 'rgba(0, 0, 0, 0.75)',
+        paddingHorizontal: 20,
+        paddingVertical: 24,
+        alignItems: 'center',
+    },
+    emptyFeedBadge: {
+        fontSize: 12,
+        fontWeight: '600',
+        letterSpacing: 0.5,
+        color: '#9CA3AF',
+        marginBottom: 12,
+        textAlign: 'center',
+    },
+    emptyFeedTitle: {
+        fontSize: 20,
+        fontWeight: '700',
+        color: '#FFFFFF',
+        textAlign: 'center',
+        marginBottom: 8,
+    },
+    emptyFeedSubtitle: {
+        fontSize: 14,
+        lineHeight: 20,
+        color: '#9CA3AF',
+        textAlign: 'center',
+        marginBottom: 16,
+    },
+    emptyFeedPrimaryBtn: {
+        borderRadius: 999,
+        paddingHorizontal: 20,
+        paddingVertical: 12,
+        backgroundColor: '#EF4444',
+    },
+    emptyFeedPrimaryBtnText: {
+        color: '#000000',
+        fontSize: 14,
+        fontWeight: '700',
+    },
+    emptyFeedSecondaryBtn: {
+        borderRadius: 999,
+        paddingHorizontal: 20,
+        paddingVertical: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.35)',
+    },
+    emptyFeedSecondaryBtnText: {
+        color: '#D1D5DB',
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    emptyFeedNotifyBtn: {
+        marginTop: 4,
+        borderRadius: 999,
+        paddingHorizontal: 20,
+        paddingVertical: 12,
+        backgroundColor: '#0EA5E9',
+        width: '100%',
+        alignItems: 'center',
+    },
+    emptyFeedNotifyBtnActive: {
+        backgroundColor: '#16A34A',
+    },
+    emptyFeedNotifyBtnText: {
+        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '700',
+        textAlign: 'center',
+    },
+    emptyFeedNotifyBtnTextActive: {
+        color: '#FFFFFF',
+    },
+    emptyFeedNotifyHint: {
+        marginTop: 12,
+        fontSize: 11,
+        lineHeight: 16,
+        color: '#6B7280',
+        textAlign: 'center',
     },
     modalOverlay: {
         flex: 1,

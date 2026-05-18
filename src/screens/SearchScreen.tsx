@@ -6,6 +6,8 @@ import { chipActiveMagenta, chipActiveMagentaText, glassPanel, glassSearch, glas
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { unifiedSearch, type SearchSections } from '../api/search';
 import { searchLocations, type LocationSuggestion } from '../api/locations';
+import { getPlaceFeedPickerOptions, resolvePlaceFeedSelection, type PlaceFeedSelection } from '../utils/pickPlaceFeedScope';
+import PlaceFeedScopePickerModal from '../components/PlaceFeedScopePickerModal.native';
 import { fetchPostsByUser } from '../api/posts';
 import { toggleFollow } from '../api/client';
 import { useAuth } from '../context/Auth';
@@ -66,6 +68,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
     const [suggestedUsers, setSuggestedUsers] = useState<Array<{ handle: string; display_name?: string; avatar_url?: string }>>([]);
     const [placeSuggestions, setPlaceSuggestions] = useState<LocationSuggestion[]>([]);
     const [placeSuggestionsLoading, setPlaceSuggestionsLoading] = useState(false);
+    const [scopePicker, setScopePicker] = useState<LocationSuggestion | null>(null);
     const modePlaceholder: Record<SearchMode, string> = {
         locations: 'Search by location',
         venues: 'Search by venue',
@@ -239,15 +242,61 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
     const hasQuery = searchQuery.trim().length > 0;
     const isCurrentQuerySaved = savedSearches.some((x) => x.q.toLowerCase() === searchQuery.trim().toLowerCase() && x.mode === searchMode);
 
-    const goToLocation = async (loc: string, kind: 'location' | 'venue' | 'landmark' = 'location') => {
-        addRecentSearch(loc, searchMode);
+    const openFeedSelection = async (
+        selection: PlaceFeedSelection,
+        kind: 'location' | 'venue' | 'landmark' = 'location'
+    ) => {
+        addRecentSearch(selection.label, searchMode);
         try {
-            await AsyncStorage.setItem('pendingLocation', loc);
+            await AsyncStorage.setItem('pendingLocation', selection.filter);
+            await AsyncStorage.setItem('pendingLocationLabel', selection.label);
+            await AsyncStorage.setItem('pendingLocationScope', selection.scope);
             await AsyncStorage.setItem('pendingFilterType', kind);
+            if (selection.placeId) {
+                await AsyncStorage.setItem('pendingLocationPlaceId', selection.placeId);
+            } else {
+                await AsyncStorage.removeItem('pendingLocationPlaceId');
+            }
         } catch {
             // ignore storage errors and still navigate
         }
-        navigation.navigate('Home', { location: loc, filterType: kind });
+        navigation.navigate('Home', {
+            location: selection.filter,
+            locationLabel: selection.label,
+            locationScope: selection.scope,
+            filterType: kind,
+            placeId: selection.placeId || undefined,
+        });
+    };
+
+    const goToLocation = (loc: string, kind: 'location' | 'venue' | 'landmark' = 'location') => {
+        const suggestion: LocationSuggestion = {
+            name: loc,
+            type: kind,
+            country: loc,
+            national: loc,
+            local: loc,
+            regional: loc,
+        };
+        if (kind === 'location' && getPlaceFeedPickerOptions(suggestion)) {
+            setScopePicker(suggestion);
+            return;
+        }
+        void openFeedSelection(resolvePlaceFeedSelection(suggestion), kind);
+    };
+
+    const onPlaceSuggestionPress = (suggestion: LocationSuggestion) => {
+        const kind =
+            searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
+        if (kind !== 'location') {
+            void openFeedSelection(resolvePlaceFeedSelection(suggestion), kind);
+            return;
+        }
+        if (getPlaceFeedPickerOptions(suggestion)) {
+            setScopePicker(suggestion);
+            return;
+        }
+        void openFeedSelection(resolvePlaceFeedSelection(suggestion), 'location');
     };
 
     const goToUser = (handle: string) => {
@@ -262,16 +311,14 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
     const handleSubmitSearch = () => {
         const q = searchQuery.trim();
         if (!q) return;
-        if (searchMode === 'locations') {
-            void goToLocation(q, 'location');
-            return;
-        }
-        if (searchMode === 'venues') {
-            void goToLocation(q, 'venue');
-            return;
-        }
-        if (searchMode === 'landmarks') {
-            void goToLocation(q, 'landmark');
+        if (searchMode === 'locations' || searchMode === 'venues' || searchMode === 'landmarks') {
+            const kind =
+                searchMode === 'venues' ? 'venue' : searchMode === 'landmarks' ? 'landmark' : 'location';
+            if (placeSuggestions.length > 0) {
+                onPlaceSuggestionPress(placeSuggestions[0]);
+                return;
+            }
+            void goToLocation(q, kind);
             return;
         }
         if (searchMode === 'users' || searchMode === 'nearby') {
@@ -340,6 +387,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
     };
 
     return (
+        <>
         <GazetteerScreenShell>
             <View style={styles.header}>
                 <View style={styles.searchContainer}>
@@ -374,7 +422,7 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                                 <TouchableOpacity
                                     key={`${s.type}-${s.name}-${idx}`}
                                     style={styles.placeSuggestionRow}
-                                    onPress={() => void goToLocation(s.name, kind)}
+                                    onPress={() => onPlaceSuggestionPress(s)}
                                 >
                                     <Icon name={iconName} size={18} color="#8B5CF6" />
                                     <View style={styles.placeSuggestionTextWrap}>
@@ -675,6 +723,17 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
                 </ScrollView>
             )}
         </GazetteerScreenShell>
+        <PlaceFeedScopePickerModal
+            visible={!!scopePicker}
+            suggestion={scopePicker}
+            onClose={() => setScopePicker(null)}
+            onSelectScope={(scope) => {
+                if (!scopePicker) return;
+                void openFeedSelection(resolvePlaceFeedSelection(scopePicker, scope), 'location');
+                setScopePicker(null);
+            }}
+        />
+        </>
     );
 };
 

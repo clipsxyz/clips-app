@@ -14,8 +14,8 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
 import { searchLocations, type LocationSuggestion } from '../api/locations';
-import { pickPlaceFeedScopeNative } from '../utils/pickPlaceFeedScope.native';
-import { resolvePlaceFeedSelection } from '../utils/pickPlaceFeedScope';
+import { getPlaceFeedPickerOptions, resolvePlaceFeedSelection } from '../utils/pickPlaceFeedScope';
+import PlaceFeedScopePickerModal from '../components/PlaceFeedScopePickerModal.native';
 import { unifiedSearch, type SearchSections } from '../api/search';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
@@ -67,6 +67,7 @@ export default function DiscoverScreen({ navigation }: any) {
     const [recentSearches, setRecentSearches] = useState<DiscoverHistoryItem[]>([]);
     const [savedSearches, setSavedSearches] = useState<DiscoverHistoryItem[]>([]);
     const [topSections, setTopSections] = useState<SearchSections>({});
+    const [scopePicker, setScopePicker] = useState<LocationSuggestion | null>(null);
     const modePlaceholder: Record<'city' | 'landmark' | 'venue', string> = {
         city: 'Discover other locations...',
         landmark: 'Discover landmarks...',
@@ -177,11 +178,17 @@ export default function DiscoverScreen({ navigation }: any) {
             await AsyncStorage.setItem('pendingLocationLabel', selection.label);
             await AsyncStorage.setItem('pendingLocationScope', selection.scope);
             await AsyncStorage.setItem('pendingFilterType', type);
+            if (selection.placeId) {
+                await AsyncStorage.setItem('pendingLocationPlaceId', selection.placeId);
+            } else {
+                await AsyncStorage.removeItem('pendingLocationPlaceId');
+            }
             navigation.navigate('Home', {
                 location: selection.filter,
                 locationLabel: selection.label,
                 locationScope: selection.scope,
                 filterType: type,
+                placeId: selection.placeId || undefined,
             });
         } catch (err) {
             console.error('Error saving location:', err);
@@ -195,23 +202,29 @@ export default function DiscoverScreen({ navigation }: any) {
             void openFeedSelection(resolvePlaceFeedSelection(suggestion), kind);
             return;
         }
-        pickPlaceFeedScopeNative(suggestion, (selection) => {
-            void openFeedSelection(selection, 'location');
-        });
+        if (getPlaceFeedPickerOptions(suggestion)) {
+            setScopePicker(suggestion);
+            return;
+        }
+        void openFeedSelection(resolvePlaceFeedSelection(suggestion), 'location');
     };
 
     const selectPopularCity = (name: string) => {
-        void openFeedSelection(
-            resolvePlaceFeedSelection({
-                name,
-                type: 'location',
-                country: name,
-                national: name,
-                local: name,
-                regional: name,
-            }),
-            discoverMode === 'venue' ? 'venue' : discoverMode === 'landmark' ? 'landmark' : 'location'
-        );
+        const suggestion: LocationSuggestion = {
+            name,
+            type: 'location',
+            country: name,
+            national: name,
+            local: name,
+            regional: name,
+        };
+        const kind =
+            discoverMode === 'venue' ? 'venue' : discoverMode === 'landmark' ? 'landmark' : 'location';
+        if (kind === 'location' && getPlaceFeedPickerOptions(suggestion)) {
+            setScopePicker(suggestion);
+            return;
+        }
+        void openFeedSelection(resolvePlaceFeedSelection(suggestion), kind);
     };
 
     const rawName = user?.name || 'Friend';
@@ -241,6 +254,7 @@ export default function DiscoverScreen({ navigation }: any) {
     };
 
     return (
+        <>
         <GazetteerScreenShell edges={['top']}>
             <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -460,6 +474,17 @@ export default function DiscoverScreen({ navigation }: any) {
                 </View>
             </KeyboardAvoidingView>
         </GazetteerScreenShell>
+        <PlaceFeedScopePickerModal
+            visible={!!scopePicker}
+            suggestion={scopePicker}
+            onClose={() => setScopePicker(null)}
+            onSelectScope={(scope) => {
+                if (!scopePicker) return;
+                void openFeedSelection(resolvePlaceFeedSelection(scopePicker, scope), 'location');
+                setScopePicker(null);
+            }}
+        />
+        </>
     );
 }
 
