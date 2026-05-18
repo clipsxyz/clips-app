@@ -1,0 +1,4 @@
+# Laravel scheduler — required for inactive digest emails (daily 09:00).
+# Install: crontab -e  (paste one line; adjust path to your laravel-backend directory)
+#
+# * * * * * cd /var/www/clips-app/laravel-backend && php artisan schedule:run >> /dev/null 2>&1
