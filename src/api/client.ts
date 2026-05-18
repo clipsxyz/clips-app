@@ -196,6 +196,7 @@ export function mapLaravelUserToAppFields(apiUser: Record<string, unknown>): Rec
         profileBackgroundUrl: (apiUser.profile_background_url ?? apiUser.profileBackgroundUrl) as string | undefined,
         socialLinks: (apiUser.social_links ?? apiUser.socialLinks) as Record<string, string> | undefined,
         is_private: apiUser.is_private as boolean | undefined,
+        emailDigestEnabled: (apiUser.email_digest_enabled ?? apiUser.emailDigestEnabled) as boolean | undefined,
         is_verified: apiUser.is_verified as boolean | undefined,
         facebook_id: apiUser.facebook_id as string | undefined,
         accountType,
@@ -214,6 +215,7 @@ export async function updateAuthProfile(data: {
     account_type?: 'personal' | 'business';
     is_business?: boolean;
     is_private?: boolean;
+    email_digest_enabled?: boolean;
 }) {
     return apiRequest('/auth/profile', {
         method: 'PUT',

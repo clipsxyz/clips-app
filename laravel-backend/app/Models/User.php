@@ -47,6 +47,8 @@ class User extends Authenticatable
         'followers_count',
         'following_count',
         'posts_count',
+        'last_active_at',
+        'email_digest_enabled',
     ];
 
     protected $hidden = [
@@ -56,11 +58,13 @@ class User extends Authenticatable
 
     protected $casts = [
         'email_verified_at' => 'datetime',
+        'last_active_at' => 'datetime',
         'phone_verified_at' => 'datetime',
         'deleted_at' => 'datetime',
         'password' => 'hashed',
         'is_verified' => 'boolean',
         'is_private' => 'boolean',
+        'email_digest_enabled' => 'boolean',
         'followers_count' => 'integer',
         'following_count' => 'integer',
         'posts_count' => 'integer',

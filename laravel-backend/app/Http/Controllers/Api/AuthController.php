@@ -81,6 +81,8 @@ class AuthController extends Controller
             return response()->json(['error' => 'Invalid credentials'], 401);
         }
 
+        $user->forceFill(['last_active_at' => now()])->saveQuietly();
+
         // Generate token
         $token = $user->createToken('auth-token')->plainTextToken;
 
@@ -120,6 +122,7 @@ class AuthController extends Controller
             'location_national' => 'sometimes|nullable|string|max:100',
             'social_links' => 'sometimes|nullable|array',
             'profile_background_url' => 'sometimes|nullable|string|max:65535',
+            'email_digest_enabled' => 'sometimes|boolean',
         ]);
 
         if ($validator->fails()) {
@@ -127,7 +130,7 @@ class AuthController extends Controller
         }
 
         $data = $validator->validated();
-        $fillable = ['display_name', 'bio', 'places_traveled', 'location_local', 'location_regional', 'location_national', 'social_links'];
+        $fillable = ['display_name', 'bio', 'places_traveled', 'location_local', 'location_regional', 'location_national', 'social_links', 'email_digest_enabled'];
         foreach ($fillable as $field) {
             if (array_key_exists($field, $data)) {
                 $user->{$field} = $data[$field];

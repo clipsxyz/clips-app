@@ -210,7 +210,7 @@ Route::get('/public/posts/{token}', [PostController::class, 'showPublicByToken']
     ->middleware('throttle:30,1');
 
 // Protected routes
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])->group(function () {
     Route::get('/boost/analytics/{postId}', [BoostController::class, 'analytics']);
 
     // Auth routes

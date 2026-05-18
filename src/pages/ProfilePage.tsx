@@ -28,7 +28,7 @@ import {
   initializeNotifications,
   resetNotificationPreferences
 } from '../services/notifications';
-import { testBrowserNotification, testNotificationTypes, testImageNotification } from '../utils/testNotifications';
+import { testBrowserNotification, testNotificationTypes, seedInboxTestNotifications, testFirebasePushConnection } from '../utils/testNotifications';
 import { runEndpointHealthCheck } from '../utils/endpointHealth';
 import { getRuntimeEnv } from '../config/runtimeEnv';
 import {
@@ -167,6 +167,9 @@ export default function ProfilePage() {
   const [accountType, setAccountType] = React.useState<'personal' | 'business'>(user?.accountType === 'business' ? 'business' : 'personal');
   const [showProfilePictureModal, setShowProfilePictureModal] = React.useState(false);
   const [notificationPrefs, setNotificationPrefs] = React.useState<NotificationPreferences>(getNotificationPreferences());
+  const [emailDigestEnabled, setEmailDigestEnabled] = React.useState(true);
+  const [emailDigestSaving, setEmailDigestSaving] = React.useState(false);
+  const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
   const [commentModerationPrefs, setCommentModerationPrefs] = React.useState<CommentModerationPreferences>(getCommentModerationPreferences());
   const [commentWordDraft, setCommentWordDraft] = React.useState('');
   const [hiddenCommentQueue, setHiddenCommentQueue] = React.useState<HiddenCommentReviewItem[]>([]);
@@ -495,7 +498,8 @@ export default function ProfilePage() {
 
   React.useEffect(() => {
     setIsPrivate(getEffectiveProfilePrivate(user?.handle, user?.is_private));
-  }, [user?.handle, user?.is_private]);
+    setEmailDigestEnabled(user?.emailDigestEnabled !== false);
+  }, [user?.handle, user?.is_private, user?.emailDigestEnabled]);
 
   // Initialize location state from user
   React.useEffect(() => {
@@ -2965,6 +2969,43 @@ export default function ProfilePage() {
                   </button>
                 </div>
 
+                {useLaravelApi && (
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-3">Email</h3>
+                    <NotificationToggle
+                      label="Missed activity emails"
+                      description="Get a summary when you've been away and posts pile up in your area"
+                      enabled={emailDigestEnabled}
+                      onChange={async (enabled) => {
+                        if (emailDigestSaving) return;
+                        const previous = emailDigestEnabled;
+                        setEmailDigestEnabled(enabled);
+                        setEmailDigestSaving(true);
+                        try {
+                          const ok = await persistLaravelProfile({ email_digest_enabled: enabled });
+                          if (!ok) {
+                            setEmailDigestEnabled(previous);
+                            Swal.fire(bottomSheet({
+                              title: 'Could not update',
+                              message: 'Sign in with the server API enabled to change this setting.',
+                              icon: 'alert',
+                            }));
+                          }
+                        } catch {
+                          setEmailDigestEnabled(previous);
+                          Swal.fire(bottomSheet({
+                            title: 'Error',
+                            message: 'Failed to update email preference.',
+                            icon: 'alert',
+                          }));
+                        } finally {
+                          setEmailDigestSaving(false);
+                        }
+                      }}
+                    />
+                  </div>
+                )}
+
                 {/* Notification Settings Section */}
                 <div>
                   <div className="flex items-center justify-between mb-4">
@@ -2990,14 +3031,54 @@ export default function ProfilePage() {
                           testNotificationTypes();
                           Swal.fire(bottomSheet({
                             title: 'Test Sequence Started',
-                            message: 'You will receive 4 different notification types (DM, Like, Comment, Follow). Watch your notifications!',
+                            message: 'Desktop popups only. Use “Test Inbox” for the Notifications tab.',
                             icon: 'alert',
                           }));
                         }}
                         className="px-3 py-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
-                        title="Test multiple notification types"
+                        title="Test multiple desktop popups"
                       >
-                        📋 Test All
+                        📋 Popups
+                      </button>
+                      <button
+                        onClick={async () => {
+                          try {
+                            const count = await seedInboxTestNotifications();
+                            Swal.fire(bottomSheet({
+                              title: 'Inbox test added',
+                              message: `${count} items added. Open Inbox → Notifications tab.`,
+                              icon: 'success',
+                            }));
+                          } catch (e) {
+                            Swal.fire(bottomSheet({
+                              title: 'Could not seed inbox',
+                              message: e instanceof Error ? e.message : 'Sign in and try again.',
+                              icon: 'error',
+                            }));
+                          }
+                        }}
+                        className="px-3 py-1.5 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors"
+                        title="Add test items to Inbox notifications list"
+                      >
+                        📥 Test Inbox
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const result = await testFirebasePushConnection();
+                          const stepLines = result.steps
+                            .map((s) => `${s.pass ? '✓' : '✗'} ${s.label}${s.detail ? ` — ${s.detail}` : ''}`)
+                            .join('\n');
+                          Swal.fire(bottomSheet({
+                            title: result.ok ? 'Firebase push OK' : 'Firebase push not ready',
+                            message: `${result.message}\n\n${stepLines}`,
+                            icon: result.ok ? 'success' : 'error',
+                          }));
+                        }}
+                        className="px-3 py-1.5 text-xs font-medium bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition-colors"
+                        title="Verify Firebase Cloud Messaging (needs VAPID key)"
+                      >
+                        🔥 Firebase
                       </button>
                       <button
                         onClick={() => {

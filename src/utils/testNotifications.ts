@@ -1,5 +1,5 @@
 // Test utility for notifications (mock testing without Firebase)
-// Note: This uses the browser's native Notification API, not Firebase
+// Note: Browser popups use the native Notification API; Inbox uses createNotification().
 
 /**
  * Test browser notification (works without Firebase)
@@ -167,6 +167,84 @@ export function testImageNotification(): void {
   };
 
   setTimeout(() => notification.close(), 5000);
+}
+
+/** Run full Firebase FCM check; saves token to backend when successful. */
+export async function testFirebasePushConnection(): Promise<{
+  ok: boolean;
+  message: string;
+  steps: { label: string; pass: boolean; detail?: string }[];
+}> {
+  const { verifyFirebasePushSetup } = await import('../services/firebase');
+  const diag = await verifyFirebasePushSetup();
+
+  if (diag.ok && diag.tokenPreview) {
+    try {
+      const { getFCMToken } = await import('../services/notifications');
+      await getFCMToken();
+    } catch {
+      /* token already obtained in verify */
+    }
+    return {
+      ok: true,
+      message: `Firebase push is working. Token: ${diag.tokenPreview}`,
+      steps: diag.steps,
+    };
+  }
+
+  const failed = diag.steps.find((s) => !s.pass);
+  return {
+    ok: false,
+    message: diag.error || failed?.detail || failed?.label || 'Firebase push setup incomplete',
+    steps: diag.steps,
+  };
+}
+
+/** Add sample rows to Inbox → Notifications (and optional desktop popups). */
+export async function seedInboxTestNotifications(): Promise<number> {
+  const userStr = localStorage.getItem('user');
+  if (!userStr) {
+    throw new Error('Sign in first.');
+  }
+  const user = JSON.parse(userStr);
+  const toHandle = user?.handle;
+  if (!toHandle) {
+    throw new Error('No user handle found.');
+  }
+
+  const { createNotification } = await import('../api/notifications');
+  const samples: Array<{
+    type: 'like' | 'comment' | 'follow' | 'dm';
+    fromHandle: string;
+    message?: string;
+    postId?: string;
+  }> = [
+    { type: 'like', fromHandle: 'Alice@Cork', message: 'liked your post', postId: 'test-post-1' },
+    { type: 'comment', fromHandle: 'Charlie@Galway', message: 'Nice shot!', postId: 'test-post-1' },
+    { type: 'follow', fromHandle: 'Diana@Limerick', message: 'started following you' },
+    { type: 'dm', fromHandle: 'Bob@Dublin', message: 'Hey, saw your post!' },
+  ];
+
+  let created = 0;
+  for (const sample of samples) {
+    await createNotification({
+      type: sample.type,
+      fromHandle: sample.fromHandle,
+      toHandle,
+      message: sample.message,
+      postId: sample.postId,
+    });
+    created += 1;
+  }
+
+  if (Notification.permission === 'granted') {
+    new Notification('Inbox test ready', {
+      body: `${created} notifications added. Open Inbox → Notifications.`,
+      icon: '/icon-192x192.png',
+    });
+  }
+
+  return created;
 }
 
 /**

@@ -140,7 +140,11 @@ export async function getNotifications(forHandle: string): Promise<Notification[
                 timestamp: n.created_at ? new Date(n.created_at).getTime() : Date.now(),
                 read: !!n.read,
             }));
-            return filterNotificationsByPreferences(forHandle, normalized);
+            const local = notifications.get(forHandle) || [];
+            const merged = [...local, ...normalized].sort((a, b) => b.timestamp - a.timestamp);
+            const byId = new Map<string, Notification>();
+            for (const n of merged) byId.set(n.id, n);
+            return filterNotificationsByPreferences(forHandle, Array.from(byId.values()));
         } catch (error) {
             console.warn('Failed to fetch notifications from API, falling back to local store:', error);
         }

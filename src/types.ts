@@ -24,6 +24,7 @@ export type User = {
   placesTraveled?: string[]; // Places the user has traveled to
   is_verified?: boolean; // Backend field
   is_private?: boolean; // Backend field - profile privacy setting
+  emailDigestEnabled?: boolean; // Inactive "what you missed" digest emails
   // Compliance / consent tracking (client-side; ideally also stored on backend)
   termsAcceptedAt?: string; // ISO timestamp when user agreed to Terms & Conditions
   guidelinesAcceptedAt?: string; // ISO timestamp when user agreed to Community Guidelines
