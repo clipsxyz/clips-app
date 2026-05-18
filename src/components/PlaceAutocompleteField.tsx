@@ -2,18 +2,13 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { FiMapPin } from 'react-icons/fi';
 import { searchLocations, type LocationSuggestion, type SignupLocationLevel } from '../api/locations';
-import { feedHeaderLabelFromSuggestion, parsedPlaceFeedFromSuggestion } from '../utils/placeFeedLevels';
+import {
+    feedHeaderLabelFromSuggestion,
+    formatFeedLevelsLine,
+    parsedPlaceFeedFromSuggestion,
+} from '../utils/placeFeedLevels';
 
 export type PlaceFieldMode = 'location' | 'venue' | 'landmark';
-
-function feedLevelsLine(s: LocationSuggestion): string {
-    const parsed = parsedPlaceFeedFromSuggestion(s);
-    const parts: string[] = [];
-    if (parsed.local) parts.push(`Local: ${parsed.local}`);
-    if (parsed.regional) parts.push(`Regional: ${parsed.regional}`);
-    if (parsed.national) parts.push(`National: ${parsed.national}`);
-    return parts.join(' · ');
-}
 
 function labelForPostField(s: LocationSuggestion, mode: PlaceFieldMode): string {
     const parsed = parsedPlaceFeedFromSuggestion(s);
@@ -205,7 +200,7 @@ export default function PlaceAutocompleteField({
                         </span>
                         {showFeedLevels ? (
                             <span className="mt-0.5 text-[11px] leading-snug text-gray-500">
-                                {feedLevelsLine(s)}
+                                {formatFeedLevelsLine(s)}
                             </span>
                         ) : (
                             <span className="truncate text-[11px] text-gray-500">{s.name}</span>

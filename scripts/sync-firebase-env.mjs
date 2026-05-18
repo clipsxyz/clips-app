@@ -263,9 +263,12 @@ async function main() {
     const laravelEnv = readEnvFile('laravel-backend/.env');
     const mapsKey = getMapsKeyFromLaravelEnv(laravelEnv) || webOverride?.mapsApiKey || '';
 
-    const webApiKey = webOverride?.apiKey || '';
+    const existingEnv = readEnvFile('.env');
+    const existingWebApiKey =
+        existingEnv.match(/^VITE_FIREBASE_API_KEY=(.+)$/m)?.[1]?.trim() || '';
+    const webApiKey = webOverride?.apiKey || existingWebApiKey || '';
     const webAppId = webOverride?.appId || '';
-    const vapidKey = webOverride?.vapidKey || '';
+    const vapidKey = webOverride?.vapidKey || existingEnv.match(/^VITE_FIREBASE_VAPID_KEY=(.+)$/m)?.[1]?.trim() || '';
     const measurementId = webOverride?.measurementId || '';
 
     const viteUpdates = {
@@ -286,7 +289,7 @@ async function main() {
         FIREBASE_CREDENTIALS: 'storage/app/firebase-auth.json',
     };
 
-    writeEnvFile('.env', upsertEnvLines(readEnvFile('.env'), viteUpdates));
+    writeEnvFile('.env', upsertEnvLines(existingEnv, viteUpdates));
     writeEnvFile('laravel-backend/.env', upsertEnvLines(readEnvFile('laravel-backend/.env'), laravelUpdates));
 
     console.log('Synced .env and laravel-backend/.env from native Firebase config.');

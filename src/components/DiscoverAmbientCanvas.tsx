@@ -37,7 +37,13 @@ function drawWave(
     ctx.globalCompositeOperation = 'source-over';
 }
 
-function getViewportSize() {
+function getViewportSize(lockLayoutViewport: boolean) {
+    if (lockLayoutViewport) {
+        return {
+            width: Math.max(1, Math.round(window.innerWidth)),
+            height: Math.max(1, Math.round(window.innerHeight)),
+        };
+    }
     const vv = typeof window !== 'undefined' ? window.visualViewport : null;
     return {
         width: Math.max(1, Math.round(vv?.width ?? window.innerWidth)),
@@ -48,9 +54,11 @@ function getViewportSize() {
 type DiscoverAmbientCanvasProps = {
     /** Pin to the visual viewport (recommended for full-screen mobile pages). */
     fixed?: boolean;
+    /** Keep full-screen gradient when the mobile keyboard opens (do not shrink to visualViewport). */
+    lockViewport?: boolean;
 };
 
-export default function DiscoverAmbientCanvas({ fixed = true }: DiscoverAmbientCanvasProps) {
+export default function DiscoverAmbientCanvas({ fixed = true, lockViewport = false }: DiscoverAmbientCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const frameRef = useRef<number | undefined>(undefined);
     const timeRef = useRef(0);
@@ -69,7 +77,7 @@ export default function DiscoverAmbientCanvas({ fixed = true }: DiscoverAmbientC
 
         const resize = () => {
             const size = fixed
-                ? getViewportSize()
+                ? getViewportSize(lockViewport)
                 : (() => {
                     const parent = canvas.parentElement;
                     return {
@@ -93,8 +101,10 @@ export default function DiscoverAmbientCanvas({ fixed = true }: DiscoverAmbientC
 
         resize();
         window.addEventListener('resize', resize);
-        window.visualViewport?.addEventListener('resize', resize);
-        window.visualViewport?.addEventListener('scroll', resize);
+        if (!lockViewport) {
+            window.visualViewport?.addEventListener('resize', resize);
+            window.visualViewport?.addEventListener('scroll', resize);
+        }
 
         const onVisibility = () => {
             paused = document.hidden;
@@ -107,8 +117,10 @@ export default function DiscoverAmbientCanvas({ fixed = true }: DiscoverAmbientC
             drawWave(ctx, width, height, 0);
             return () => {
                 window.removeEventListener('resize', resize);
-                window.visualViewport?.removeEventListener('resize', resize);
-                window.visualViewport?.removeEventListener('scroll', resize);
+                if (!lockViewport) {
+                    window.visualViewport?.removeEventListener('resize', resize);
+                    window.visualViewport?.removeEventListener('scroll', resize);
+                }
                 document.removeEventListener('visibilitychange', onVisibility);
             };
         }
@@ -125,15 +137,19 @@ export default function DiscoverAmbientCanvas({ fixed = true }: DiscoverAmbientC
 
         return () => {
             window.removeEventListener('resize', resize);
-            window.visualViewport?.removeEventListener('resize', resize);
-            window.visualViewport?.removeEventListener('scroll', resize);
+            if (!lockViewport) {
+                window.visualViewport?.removeEventListener('resize', resize);
+                window.visualViewport?.removeEventListener('scroll', resize);
+            }
             document.removeEventListener('visibilitychange', onVisibility);
             if (frameRef.current) cancelAnimationFrame(frameRef.current);
         };
-    }, [fixed]);
+    }, [fixed, lockViewport]);
 
     const positionClass = fixed
-        ? 'fixed inset-0 z-0'
+        ? lockViewport
+            ? 'fixed inset-0 z-0 h-[100svh] min-h-[100svh]'
+            : 'fixed inset-0 z-0'
         : 'absolute inset-0 z-0';
 
     return (

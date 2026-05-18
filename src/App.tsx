@@ -2,7 +2,7 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { FiHome, FiUser, FiUserPlus, FiUserX, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiHeart, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiX, FiClock, FiSend, FiChevronDown, FiCompass, FiGlobe, FiNavigation } from 'react-icons/fi';
+import { FiHome, FiUser, FiUserPlus, FiUserX, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiHeart, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiInfo, FiX, FiClock, FiSend, FiChevronDown, FiCompass, FiGlobe, FiNavigation } from 'react-icons/fi';
 import { GiGreekTemple } from 'react-icons/gi';
 import { LuFlame, LuPlus } from 'react-icons/lu';
 import { VscLiveShare } from 'react-icons/vsc';
@@ -24,7 +24,8 @@ import { useOnline } from './hooks/useOnline';
 import { getUnreadTotal, appendMessage, blockUser } from './api/messages';
 import { getUnreadNotificationCount } from './api/notifications';
 import { getStoryInsightsForUser } from './api/stories';
-import { searchLocations } from './api/locations';
+import { searchLocations, type LocationSuggestion } from './api/locations';
+import { resolvePlaceFeedSelection } from './utils/pickPlaceFeedScope';
 import { fetchPostsPage, fetchPostsByUser, toggleFollowForPost, toggleLike, addComment, incrementViews, incrementShares, reclipPost, decorateForUser, getState, setFollowState, setReclipState, getFollowState, deletePost, getAvaNormalPost, postMatchesLocationTab, posts as postsStore, consumePendingCreatedPost } from './api/posts';
 import { updatePost, checkFollowsMe } from './api/client';
 import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle, wasEverAStory, fetchFollowedUsersStoryGroups } from './api/stories';
@@ -40,6 +41,8 @@ import {
   type PlaceMatchedPost,
 } from './utils/suggestedPlaces';
 import SuggestedPlacesFeedSection from './components/SuggestedPlacesFeedSection';
+import LocationPlaceSummaryCard from './components/LocationPlaceSummaryCard';
+import LocationPlaceSummaryModal from './components/LocationPlaceSummaryModal';
 import LocalBusinessSuggestionCard from './components/LocalBusinessSuggestionCard';
 import { getActiveAds, trackAdImpression, trackAdClick } from './api/ads';
 import { getActiveBoost, getBoostTimeRemaining, getBoostAnalytics } from './api/boost';
@@ -453,16 +456,29 @@ function PillTabs(props: {
   active: Tab;
   onChange: (t: Tab) => void;
   onClearCustom?: () => void;
-  onSearchLocation?: (location: string, filterType: 'location' | 'venue' | 'landmark') => void;
+  onSearchLocation?: (
+    location: string,
+    filterType: 'location' | 'venue' | 'landmark',
+    meta?: { label?: string; placeId?: string | null; scope?: string }
+  ) => void;
   customLocation?: string | null;
   customLocationLabel?: string | null;
+  customLocationPlaceId?: string | null;
   customFilterType?: 'location' | 'venue' | 'landmark' | null;
   userLocal?: string;
   userRegional?: string;
   userNational?: string;
   clipsCount?: number;
 }) {
-  type HeaderSuggestion = { name: string; type: 'location' | 'venue' | 'landmark'; country?: string };
+  type HeaderSuggestion = {
+    name: string;
+    type: 'location' | 'venue' | 'landmark';
+    country?: string;
+    filter?: string;
+    label?: string;
+    placeId?: string | null;
+    scope?: string;
+  };
   const navigate = useNavigate();
   const { user } = useAuth();
   const isMountedRef = React.useRef(false);
@@ -479,7 +495,12 @@ function PillTabs(props: {
   const [searchInputFocused, setSearchInputFocused] = React.useState(false);
   const [isInFullscreen, setIsInFullscreen] = React.useState(false);
   const [showGazetteerTitle, setShowGazetteerTitle] = React.useState(true);
+  const [placeInfoOpen, setPlaceInfoOpen] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!props.customLocation) setPlaceInfoOpen(false);
+  }, [props.customLocation]);
   const searchHints = React.useMemo(
     () => ['Search any city', 'Search any country', 'Search any region'],
     []
@@ -648,13 +669,22 @@ function PillTabs(props: {
         if (!cancelled) {
           const allApiSuggestions = Array.isArray(res) ? res : [];
           const mappedApi: HeaderSuggestion[] = allApiSuggestions.map((s) => {
+            const sel = resolvePlaceFeedSelection(s as LocationSuggestion);
             const t = String((s as any)?.type || '').toLowerCase();
             const kind: 'location' | 'venue' | 'landmark' = t.includes('venue')
               ? 'venue'
               : t.includes('landmark')
                 ? 'landmark'
                 : 'location';
-            return { name: s.name, country: (s as any).country, type: kind };
+            return {
+              name: s.name,
+              country: (s as any).country,
+              type: kind,
+              filter: sel.filter,
+              label: sel.label,
+              placeId: sel.placeId,
+              scope: sel.scope,
+            };
           });
           const fallbackCombined: HeaderSuggestion[] = [
             ...fallbackPlaces.map((name) => ({ name, type: 'location' as const })),
@@ -812,7 +842,7 @@ function PillTabs(props: {
       filterType = 'landmark';
     }
     if (!next) return;
-    props.onSearchLocation?.(next, filterType);
+    props.onSearchLocation?.(next, filterType, { label: next, placeId: null });
     setMenuOpen(false);
   };
 
@@ -820,7 +850,7 @@ function PillTabs(props: {
     <div role="tablist" aria-label="Locations" className="z-[140] bg-black py-1 relative isolate">
       {/* Not sticky: /feed uses an inner scroll container so this chrome stays pinned */}
       <div className="relative px-3 z-10">
-        <div className="relative grid grid-cols-[40px_1fr_40px] items-center gap-2">
+        <div className="relative grid grid-cols-[40px_1fr_auto] items-center gap-2">
           <button
             type="button"
             aria-label="Boost"
@@ -920,7 +950,12 @@ function PillTabs(props: {
                                         ? 'landmark'
                                         : 'location');
                                 setLocationQuery(s.name);
-                                props.onSearchLocation?.(s.name, mode);
+                                const filter = s.filter ?? s.name;
+                                props.onSearchLocation?.(filter, mode, {
+                                  label: s.label ?? s.name,
+                                  placeId: s.placeId ?? null,
+                                  scope: s.scope,
+                                });
                                 setMenuOpen(false);
                               }}
                               className="w-full px-3 py-2 text-left hover:bg-white/10 transition-colors"
@@ -976,26 +1011,47 @@ function PillTabs(props: {
             )}
           </div>
 
-          <button
-            type="button"
-            aria-label="My Passport"
-            title="My Passport"
-            onClick={() => navigate('/profile')}
-            className="relative inline-flex flex-col items-center justify-center gap-1 text-white focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
-          >
-            <span className="w-8 h-8 rounded-lg overflow-hidden bg-gray-700 flex items-center justify-center border-2 border-white">
-              {user?.avatarUrl ? (
-                <img
-                  src={user.avatarUrl}
-                  alt="My Passport"
-                  className="w-full h-full object-cover"
+          <div className="flex items-center justify-end gap-0.5">
+            {props.customLocation ? (
+              <>
+                <button
+                  type="button"
+                  aria-label={`About ${activeLabel}`}
+                  title={`About ${activeLabel}`}
+                  onClick={() => setPlaceInfoOpen(true)}
+                  className="h-10 w-10 inline-flex flex-col items-center justify-center gap-0.5 text-white focus:outline-none"
+                >
+                  <FiInfo className="h-5 w-5 text-white" aria-hidden />
+                </button>
+                <LocationPlaceSummaryModal
+                  open={placeInfoOpen}
+                  onClose={() => setPlaceInfoOpen(false)}
+                  locationLabel={props.customLocationLabel || props.customLocation}
+                  placeId={props.customLocationPlaceId}
                 />
-              ) : (
-                <span className="text-[10px] font-semibold text-white">{passportInitials}</span>
-              )}
-            </span>
-            <span className="text-[10px] leading-none font-medium text-white">Passport</span>
-          </button>
+              </>
+            ) : null}
+            <button
+              type="button"
+              aria-label="My Passport"
+              title="My Passport"
+              onClick={() => navigate('/profile')}
+              className="relative inline-flex flex-col items-center justify-center gap-1 text-white focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+            >
+              <span className="w-8 h-8 rounded-lg overflow-hidden bg-gray-700 flex items-center justify-center border-2 border-white">
+                {user?.avatarUrl ? (
+                  <img
+                    src={user.avatarUrl}
+                    alt="My Passport"
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <span className="text-[10px] font-semibold text-white">{passportInitials}</span>
+                )}
+              </span>
+              <span className="text-[10px] leading-none font-medium text-white">Passport</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -6003,28 +6059,70 @@ function FeedPageWrapper() {
   // Initialize active tab based on user's national location, with fallback
   const defaultNational = user?.national || 'Ireland';
   const [active, setActive] = React.useState<Tab>(defaultNational);
-  const applyCustomLocationFromHeader = React.useCallback((location: string, filterType: 'location' | 'venue' | 'landmark' = 'location') => {
-    const next = location.trim();
-    if (!next) return;
+  const applyCustomLocationFromHeader = React.useCallback((
+    location: string,
+    filterType: 'location' | 'venue' | 'landmark' = 'location',
+    meta?: { label?: string; placeId?: string | null; scope?: string }
+  ) => {
+    const filter = location.trim();
+    if (!filter) return;
+    const label = (meta?.label ?? filter).trim() || filter;
+    const placeId = meta?.placeId?.trim() || null;
+    const scope = meta?.scope?.trim() || '';
+
     setShowFollowingFeed(false);
     // Leaving `active === 'Following'` used to force discover via currentFilter; exit Following tab for UX + consistency.
     setActive((prev) => (prev === 'Following' ? (user?.national || defaultNational) : prev));
-    setCustomLocation(next);
+    setCustomLocation(filter);
+    setCustomLocationLabel(label);
+    setCustomLocationPlaceId(placeId);
     setCustomFilterType(filterType);
     setPages([]);
     setCursor(0);
     setEnd(false);
     setError(null);
-  }, [user?.national, defaultNational]);
+    pagesLoadedForFilterRef.current = null;
+    requestTokenRef.current++;
+
+    try {
+      sessionStorage.removeItem('pendingLocation');
+      sessionStorage.removeItem('pendingLocationLabel');
+      sessionStorage.removeItem('pendingLocationScope');
+      sessionStorage.removeItem('pendingLocationPlaceId');
+      sessionStorage.removeItem('pendingFilterType');
+      window.dispatchEvent(
+        new CustomEvent('locationChange', {
+          detail: {
+            location: filter,
+            locationLabel: label,
+            locationScope: scope || undefined,
+            placeId,
+            filterType,
+          },
+        })
+      );
+    } catch {
+      /* ignore */
+    }
+
+    const params = new URLSearchParams({ location: filter, label });
+    if (scope) params.set('scope', scope);
+    if (filterType === 'venue' || filterType === 'landmark') {
+      params.set('type', filterType);
+    }
+    if (placeId) params.set('place_id', placeId);
+    navigate(`/feed?${params.toString()}`, { replace: true });
+  }, [user?.national, defaultNational, navigate]);
 
   const clearCustomLocationFromHeader = React.useCallback(() => {
     try {
       const params = new URLSearchParams(routerLocation.search);
-      if (params.has('location') || params.has('type') || params.has('label') || params.has('scope')) {
+      if (params.has('location') || params.has('type') || params.has('label') || params.has('scope') || params.has('place_id')) {
         params.delete('location');
         params.delete('label');
         params.delete('scope');
         params.delete('type');
+        params.delete('place_id');
         const nextSearch = params.toString();
         navigate(nextSearch ? `/feed?${nextSearch}` : '/feed', { replace: true });
       }
@@ -6033,6 +6131,7 @@ function FeedPageWrapper() {
     }
     setCustomLocation(null);
     setCustomLocationLabel(null);
+    setCustomLocationPlaceId(null);
     setCustomFilterType(null);
     setPages([]);
     setCursor(0);
@@ -6046,6 +6145,7 @@ function FeedPageWrapper() {
     setActive(user?.national || defaultNational);
     setCustomLocation(null);
     setCustomLocationLabel(null);
+    setCustomLocationPlaceId(null);
     setCustomFilterType(null);
     setPages([]);
     setCursor(0);
@@ -6058,15 +6158,17 @@ function FeedPageWrapper() {
       sessionStorage.removeItem('pendingLocation');
       sessionStorage.removeItem('pendingLocationLabel');
       sessionStorage.removeItem('pendingLocationScope');
+      sessionStorage.removeItem('pendingLocationPlaceId');
       sessionStorage.removeItem('pendingFilterType');
     } catch {
       /* ignore */
     }
     try {
       const params = new URLSearchParams(routerLocation.search);
-      if (params.has('location') || params.has('type') || params.has('label') || params.has('scope')) {
+      if (params.has('location') || params.has('type') || params.has('label') || params.has('scope') || params.has('place_id')) {
         params.delete('location');
         params.delete('label');
+        params.delete('place_id');
         params.delete('scope');
         params.delete('type');
         const nextSearch = params.toString();
@@ -6104,6 +6206,7 @@ function FeedPageWrapper() {
   }, [active]);
   const [customLocation, setCustomLocation] = React.useState<string | null>(null);
   const [customLocationLabel, setCustomLocationLabel] = React.useState<string | null>(null);
+  const [customLocationPlaceId, setCustomLocationPlaceId] = React.useState<string | null>(null);
   const [customFilterType, setCustomFilterType] = React.useState<'location' | 'venue' | 'landmark' | null>(null);
   const [pages, setPages] = React.useState<Post[][]>([]);
   const [ads, setAds] = React.useState<Ad[]>([]);
@@ -6731,6 +6834,7 @@ function FeedPageWrapper() {
         console.log('Not on feed page, clearing customLocation...');
         setCustomLocation(null);
         setCustomLocationLabel(null);
+        setCustomLocationPlaceId(null);
         setCustomFilterType(null);
         setPages([]);
         setCursor(0);
@@ -6741,12 +6845,14 @@ function FeedPageWrapper() {
     }
 
     if (q) {
+      const placeIdParam = params.get('place_id');
       console.log('URL provided location:', q, 'setting customLocation...');
       console.log('About to call setCustomLocation, will update from:', customLocation, 'to:', q);
       setShowFollowingFeed(false);
       setActive((prev) => (prev === 'Following' ? (user?.national || defaultNational) : prev));
       setCustomLocation(q);
       setCustomLocationLabel(label?.trim() || q);
+      setCustomLocationPlaceId(placeIdParam?.trim() || null);
       setCustomFilterType(
         type === 'venue' ? 'venue' : type === 'landmark' ? 'landmark' : 'location'
       );
@@ -6761,6 +6867,7 @@ function FeedPageWrapper() {
       console.log('URL param cleared on feed page, clearing customLocation...');
       setCustomLocation(null);
       setCustomLocationLabel(null);
+      setCustomLocationPlaceId(null);
       setCustomFilterType(null);
       setPages([]);
       setCursor(0);
@@ -6820,11 +6927,13 @@ function FeedPageWrapper() {
       const location = event.detail.location;
       const locationLabel = event.detail.locationLabel || location;
       const filterType = event.detail.filterType as 'location' | 'venue' | 'landmark' | undefined;
+      const placeId = typeof event.detail.placeId === 'string' ? event.detail.placeId : null;
       console.log('Feed received location change:', location);
       setShowFollowingFeed(false);
       setActive((prev) => (prev === 'Following' ? (user?.national || defaultNational) : prev));
       setCustomLocation(location);
       setCustomLocationLabel(locationLabel);
+      setCustomLocationPlaceId(placeId?.trim() || null);
       setCustomFilterType(filterType || 'location');
       setPages([]);
       setCursor(0);
@@ -6844,6 +6953,7 @@ function FeedPageWrapper() {
     // Check for pending location from Discover page
     const pendingLocation = sessionStorage.getItem('pendingLocation');
     const pendingLocationLabel = sessionStorage.getItem('pendingLocationLabel');
+    const pendingLocationPlaceId = sessionStorage.getItem('pendingLocationPlaceId');
     const pendingFilterType = sessionStorage.getItem('pendingFilterType') as 'location' | 'venue' | 'landmark' | null;
     console.log('Checking for pending location, found:', pendingLocation);
     if (pendingLocation) {
@@ -6851,6 +6961,7 @@ function FeedPageWrapper() {
       sessionStorage.removeItem('pendingLocation');
       sessionStorage.removeItem('pendingLocationLabel');
       sessionStorage.removeItem('pendingLocationScope');
+      sessionStorage.removeItem('pendingLocationPlaceId');
       sessionStorage.removeItem('pendingFilterType');
       pendingTimer = window.setTimeout(() => {
         console.log('Actually setting customLocation to:', pendingLocation);
@@ -6858,6 +6969,7 @@ function FeedPageWrapper() {
         setActive((prev) => (prev === 'Following' ? (user?.national || defaultNational) : prev));
         setCustomLocation(pendingLocation);
         setCustomLocationLabel(pendingLocationLabel || pendingLocation);
+        setCustomLocationPlaceId(pendingLocationPlaceId?.trim() || null);
         setCustomFilterType(pendingFilterType || 'location');
         setPages([]);
         setCursor(0);
@@ -8172,6 +8284,7 @@ function FeedPageWrapper() {
         onSearchLocation={applyCustomLocationFromHeader}
         customLocation={customLocation}
         customLocationLabel={customLocationLabel}
+        customLocationPlaceId={customLocationPlaceId}
         customFilterType={customFilterType}
         userLocal={user?.local}
         userRegional={user?.regional}
@@ -8499,7 +8612,8 @@ function FeedPageWrapper() {
               <div className="text-gray-600 text-sm">This feed only populates with the accounts you follow. Start tapping Follow to personalize your stream</div>
             </>
           ) : customLocation ? (
-            isVisitorInCustomLocation ? (
+            <>
+            {isVisitorInCustomLocation ? (
               <div className="max-w-md mx-auto rounded-2xl border border-gray-800 bg-gradient-to-b from-black/80 via-black/70 to-black/90 px-5 py-6 shadow-lg">
                 <div className="mb-3 text-sm font-medium uppercase tracking-wide text-gray-400">
                   You’re early to this feed
@@ -8555,7 +8669,12 @@ function FeedPageWrapper() {
                   </button>
                 </div>
               </div>
-            )
+            )}
+            <LocationPlaceSummaryCard
+              locationLabel={customLocationDisplay || customLocation || ''}
+              placeId={customLocationPlaceId}
+            />
+            </>
           ) : (
             <div className="max-w-md mx-auto rounded-2xl border border-gray-800 bg-gradient-to-b from-black/80 via-black/70 to-black/90 px-5 py-6 shadow-lg">
               <div className="mb-3 text-sm font-medium uppercase tracking-wide text-gray-400">

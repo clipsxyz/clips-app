@@ -1311,7 +1311,7 @@ export default function SearchPage() {
                         <h2 className="text-lg font-semibold text-white">Which feed?</h2>
                         <p className="mt-1 text-sm text-gray-400">{scopePicker.name}</p>
                         <p className="mt-2 text-xs text-gray-500">
-                            Pick local, regional, or national — same as your home feed tabs.
+                            Country is the whole nation. City is the metro area. Local area is the nearest neighbourhood when available.
                         </p>
                         <div className="mt-4 flex flex-col gap-2">
                             {parsedPlaceFeedFromSuggestion(scopePicker).options.map((opt) => (

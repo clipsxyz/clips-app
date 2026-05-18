@@ -1119,6 +1119,11 @@ video {
   pointer-events: none;
 }
 
+.discover-greeting-compact {
+  font-size: clamp(1.25rem, 5vw, 1.5rem);
+  line-height: 1.2;
+}
+
 .discover-greeting {
   font-family: "Roboto", "Inter", system-ui, -apple-system, sans-serif;
   font-size: clamp(1.75rem, 8vw, 2rem);
@@ -1145,6 +1150,48 @@ video {
   border: 1px solid rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+}
+
+.discover-placeholder-carousel {
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 15px;
+  line-height: 1.35rem;
+}
+
+.discover-placeholder-carousel__prefix {
+  flex-shrink: 0;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+  letter-spacing: 0.01em;
+}
+
+.discover-placeholder-carousel__dot {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.35);
+  user-select: none;
+}
+
+.discover-placeholder-carousel__city {
+  position: relative;
+  overflow: hidden;
+  height: 1.35rem;
+  min-width: 6.75rem;
+}
+
+.discover-placeholder-carousel__city-inner {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+  white-space: nowrap;
+  font-weight: 600;
+  color: #ffffff;
+  letter-spacing: -0.02em;
+  text-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
 }
 
 .discover-city-pill {

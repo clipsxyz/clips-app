@@ -98,6 +98,7 @@ import {
 } from '../utils/pendingFeedUploadNative';
 import { feedHeaderLabelFromSuggestion } from '../utils/placeFeedLevels';
 import type { LocationSuggestion } from '../api/locations';
+import LocationPlaceSummaryModal from '../components/LocationPlaceSummaryModal';
 
 type Tab = string;
 
@@ -106,6 +107,7 @@ function PillTabs({
     onChange,
     customLocation = null,
     customLocationLabel = null,
+    customLocationPlaceId = null,
     customFilterType = null,
     userLocal = 'Finglas',
     userRegional = 'Dublin',
@@ -121,6 +123,7 @@ function PillTabs({
     onChange: (t: Tab) => void;
     customLocation?: string | null;
     customLocationLabel?: string | null;
+    customLocationPlaceId?: string | null;
     customFilterType?: 'location' | 'venue' | 'landmark' | null;
     userLocal?: string;
     userRegional?: string;
@@ -141,7 +144,12 @@ function PillTabs({
     const [loadingSuggestions, setLoadingSuggestions] = useState(false);
     const [searchHintIndex, setSearchHintIndex] = useState(0);
     const [searchInputFocused, setSearchInputFocused] = useState(false);
+    const [placeInfoOpen, setPlaceInfoOpen] = useState(false);
     const searchHints = useMemo(() => ['Search any city', 'Search any country', 'Search any region'], []);
+
+    useEffect(() => {
+        if (!customLocation) setPlaceInfoOpen(false);
+    }, [customLocation]);
     const fallbackPlaces = useMemo(
         () => [
             'Brazil', 'France', 'Germany', 'Italy', 'Spain', 'Portugal', 'Ireland', 'United Kingdom', 'USA',
@@ -472,12 +480,31 @@ function PillTabs({
                     )}
                 </View>
 
-                <TouchableOpacity onPress={onOpenPassport} style={styles.feedHeaderIconButton}>
-                    <View style={styles.feedHeaderNotifWrap}>
-                        <Icon name="person-circle-outline" size={22} color="#FFFFFF" />
-                        <Text style={styles.feedHeaderPassportLabel}>Passport</Text>
-                    </View>
-                </TouchableOpacity>
+                <View style={styles.feedHeaderRightActions}>
+                    {customLocation ? (
+                        <>
+                            <TouchableOpacity
+                                onPress={() => setPlaceInfoOpen(true)}
+                                style={styles.feedHeaderIconButton}
+                                accessibilityLabel={`About ${activeLabel}`}
+                            >
+                                <Icon name="information-circle-outline" size={22} color="#FFFFFF" />
+                            </TouchableOpacity>
+                            <LocationPlaceSummaryModal
+                                open={placeInfoOpen}
+                                onClose={() => setPlaceInfoOpen(false)}
+                                locationLabel={customLocationLabel || customLocation}
+                                placeId={customLocationPlaceId}
+                            />
+                        </>
+                    ) : null}
+                    <TouchableOpacity onPress={onOpenPassport} style={styles.feedHeaderIconButton}>
+                        <View style={styles.feedHeaderNotifWrap}>
+                            <Icon name="person-circle-outline" size={22} color="#FFFFFF" />
+                            <Text style={styles.feedHeaderPassportLabel}>Passport</Text>
+                        </View>
+                    </TouchableOpacity>
+                </View>
             </View>
         </View>
     );
@@ -2101,6 +2128,10 @@ const styles = StyleSheet.create({
         borderRadius: 20,
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    feedHeaderRightActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
     },
     feedHeaderCenter: {
         flex: 1,

@@ -4,6 +4,10 @@ src.zip
 .env
 .env.local
 firebase-web.local.json
+# Native Firebase config (API keys) — use sync-firebase-env.mjs from local copies
+android/app/google-services.json
+ios/GoogleService-Info.plist
+ios/**/GoogleService-Info.plist
 # Generated from public/firebase-messaging-sw.template.js (vite-plugin-firebase-sw)
 public/firebase-messaging-sw.js
 dist/

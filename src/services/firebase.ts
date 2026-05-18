@@ -69,8 +69,10 @@ export async function initializeFirebase(): Promise<FirebaseApp | null> {
   }
 }
 
-// Initialize Firebase Messaging
-export async function initializeMessaging(): Promise<Messaging | null> {
+// Initialize Firebase Messaging (must use the same service worker registration as getToken)
+export async function initializeMessaging(
+  serviceWorkerRegistration?: ServiceWorkerRegistration | null
+): Promise<Messaging | null> {
   const { firebaseMessagingModule } = await loadFirebaseModules();
   if (!firebaseMessagingModule) {
     return null;
@@ -78,14 +80,12 @@ export async function initializeMessaging(): Promise<Messaging | null> {
 
   const { getMessaging, isSupported } = firebaseMessagingModule;
 
-  // Check if messaging is supported
   const supported = await isSupported();
   if (!supported) {
     console.warn('Firebase Messaging is not supported in this browser');
     return null;
   }
 
-  // Initialize Firebase app first
   if (!app) {
     await initializeFirebase();
   }
@@ -94,14 +94,159 @@ export async function initializeMessaging(): Promise<Messaging | null> {
     return null;
   }
 
+  const swReg =
+    serviceWorkerRegistration ?? (await getMessagingServiceWorkerRegistration());
+  if (!swReg) {
+    console.warn('Service worker required before Firebase Messaging can start');
+    return null;
+  }
+
   try {
-    messaging = getMessaging(app);
+    messaging = getMessaging(app, swReg);
     console.log('Firebase Messaging initialized successfully');
     return messaging;
   } catch (error) {
     console.error('Error initializing Firebase Messaging:', error);
     return null;
   }
+}
+
+async function getMessagingServiceWorkerRegistration(): Promise<ServiceWorkerRegistration | null> {
+  if (!('serviceWorker' in navigator)) return null;
+  try {
+    let registration =
+      (await navigator.serviceWorker.getRegistration()) ??
+      (await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' }));
+    await navigator.serviceWorker.ready;
+    return registration;
+  } catch (error) {
+    console.error('Service worker registration failed:', error);
+    return null;
+  }
+}
+
+export type FirebasePushDiagnostics = {
+  ok: boolean;
+  steps: { label: string; pass: boolean; detail?: string }[];
+  tokenPreview?: string;
+  error?: string;
+};
+
+export async function verifyFirebasePushSetup(): Promise<FirebasePushDiagnostics> {
+  const steps: FirebasePushDiagnostics['steps'] = [];
+
+  const hasApiKey = Boolean(firebaseConfig.apiKey?.trim());
+  const hasProject = Boolean(firebaseConfig.projectId?.trim());
+  const hasAppId = Boolean(firebaseConfig.appId?.trim());
+  const hasVapid = Boolean(vapidKey?.trim());
+
+  steps.push({
+    label: 'Firebase API key',
+    pass: hasApiKey,
+    detail: hasApiKey ? 'Set in .env' : 'Add VITE_FIREBASE_API_KEY',
+  });
+  steps.push({
+    label: 'Firebase project & app id',
+    pass: hasProject && hasAppId,
+    detail: hasProject && hasAppId ? firebaseConfig.projectId : 'Add VITE_FIREBASE_PROJECT_ID and VITE_FIREBASE_APP_ID',
+  });
+  steps.push({
+    label: 'Web Push VAPID key',
+    pass: hasVapid,
+    detail: hasVapid
+      ? 'Set in .env'
+      : 'Firebase Console → Cloud Messaging → Web Push → add to firebase-web.local.json → npm run sync:env',
+  });
+
+  if (!('Notification' in window)) {
+    steps.push({ label: 'Browser notifications', pass: false, detail: 'Not supported' });
+    return { ok: false, steps, error: 'Browser does not support notifications' };
+  }
+
+  const permission =
+    Notification.permission === 'granted'
+      ? 'granted'
+      : Notification.permission === 'denied'
+        ? 'denied'
+        : await Notification.requestPermission();
+
+  steps.push({
+    label: 'Notification permission',
+    pass: permission === 'granted',
+    detail: permission,
+  });
+
+  if (permission !== 'granted') {
+    return { ok: false, steps, error: 'Allow notifications in the browser' };
+  }
+
+  const { firebaseMessagingModule } = await loadFirebaseModules();
+  if (!firebaseMessagingModule) {
+    steps.push({ label: 'Firebase SDK', pass: false, detail: 'Run npm install' });
+    return { ok: false, steps, error: 'Firebase package not loaded' };
+  }
+
+  const { isSupported } = firebaseMessagingModule;
+  const supported = await isSupported();
+  steps.push({
+    label: 'FCM supported in this browser',
+    pass: supported,
+    detail: supported ? 'Yes' : 'Try Chrome or Edge on desktop',
+  });
+
+  if (!supported) {
+    return { ok: false, steps, error: 'Firebase Messaging not supported here' };
+  }
+
+  const swReg = await getMessagingServiceWorkerRegistration();
+  steps.push({
+    label: 'Service worker',
+    pass: !!swReg,
+    detail: swReg ? '/firebase-messaging-sw.js' : 'Registration failed',
+  });
+
+  if (!hasVapid) {
+    return {
+      ok: false,
+      steps,
+      error: 'VAPID key not loaded — restart npm run dev after editing .env',
+    };
+  }
+  if (!swReg) {
+    return {
+      ok: false,
+      steps,
+      error: 'Service worker failed — hard refresh (Ctrl+Shift+R) or clear site data for localhost',
+    };
+  }
+
+  const appInstance = await initializeFirebase();
+  if (!appInstance) {
+    steps.push({ label: 'Firebase app init', pass: false });
+    return { ok: false, steps, error: 'Firebase failed to initialize' };
+  }
+
+  let token: string | null = null;
+  let tokenError = '';
+  try {
+    token = await getFCMToken();
+  } catch (err) {
+    tokenError = err instanceof Error ? err.message : String(err);
+  }
+  steps.push({
+    label: 'FCM device token',
+    pass: !!token,
+    detail: token
+      ? `${token.slice(0, 12)}…`
+      : tokenError || 'Could not get token — see browser Console (F12)',
+  });
+
+  return {
+    ok: !!token,
+    steps,
+    tokenPreview: token ? `${token.slice(0, 16)}…` : undefined,
+    error: token ? undefined : tokenError || 'No FCM token',
+  };
 }
 
 // Get FCM token
@@ -113,27 +258,39 @@ export async function getFCMToken(): Promise<string | null> {
 
   const { getToken } = firebaseMessagingModule;
 
-  if (!messaging) {
-    await initializeMessaging();
+  if (!vapidKey) {
+    console.warn('VAPID key missing — add VITE_FIREBASE_VAPID_KEY to .env and restart npm run dev');
+    return null;
   }
 
-  if (!messaging || !vapidKey) {
-    console.warn('Firebase Messaging not initialized or VAPID key missing');
+  const serviceWorkerRegistration = await getMessagingServiceWorkerRegistration();
+  if (!serviceWorkerRegistration) {
+    console.warn('No service worker registration for FCM');
+    return null;
+  }
+
+  if (!messaging) {
+    await initializeMessaging(serviceWorkerRegistration);
+  }
+
+  if (!messaging) {
     return null;
   }
 
   try {
-    const token = await getToken(messaging, { vapidKey });
+    const token = await getToken(messaging, {
+      vapidKey,
+      serviceWorkerRegistration,
+    });
     if (token) {
       console.log('FCM token generated:', token.substring(0, 20) + '...');
       return token;
-    } else {
-      console.warn('No FCM token available');
-      return null;
     }
+    console.warn('No FCM token available');
+    return null;
   } catch (error) {
     console.error('Error getting FCM token:', error);
-    return null;
+    throw error;
   }
 }
 

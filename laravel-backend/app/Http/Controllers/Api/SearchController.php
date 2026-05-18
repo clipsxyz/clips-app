@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Post;
+use App\Services\PlaceFeedLevelParser;
+use App\Services\PlaceSummaryService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Http;
@@ -15,6 +17,29 @@ class SearchController extends Controller
      * Place search endpoint for header/discover search.
      * Uses Google Places when configured, falls back to local gazetteer ranking.
      */
+    /**
+     * Short text blurb for a place (Google editorial_summary when available).
+     */
+    public function placeSummary(Request $request): JsonResponse
+    {
+        $request->validate([
+            'label' => 'required_without:q|string|max:200',
+            'q' => 'required_without:label|string|max:200',
+            'place_id' => 'nullable|string|max:255',
+        ]);
+
+        $label = trim((string) ($request->query('label') ?: $request->query('q', '')));
+        $placeId = trim((string) $request->query('place_id', ''));
+        $placeId = $placeId !== '' ? $placeId : null;
+
+        $payload = (new PlaceSummaryService)->summarize($placeId, $label);
+        if ($payload === null || trim((string) ($payload['summary'] ?? '')) === '') {
+            return response()->json(['summary' => null]);
+        }
+
+        return response()->json($payload);
+    }
+
     public function places(Request $request): JsonResponse
     {
         $request->validate([
@@ -59,7 +84,7 @@ class SearchController extends Controller
                             $lowerTypes = array_map(fn($t) => strtolower((string) $t), $types);
                             $kind = $this->classifyPlaceKind($lowerTypes);
 
-                            $levels = $this->parsePlaceFeedLevels(
+                            $levels = (new PlaceFeedLevelParser)->parse(
                                 is_array($item['terms'] ?? null) ? $item['terms'] : [],
                                 $description
                             );
@@ -337,56 +362,6 @@ class SearchController extends Controller
      *
      * @return array<string, mixed>|null
      */
-    /**
-     * @param  array<int, array{value?: string}>  $terms
-     * @return array{local: string, regional: string, national: string, display_name: string, feed_level: string}
-     */
-    private function parsePlaceFeedLevels(array $terms, string $description): array
-    {
-        $values = [];
-        foreach ($terms as $term) {
-            if (!is_array($term)) {
-                continue;
-            }
-            $value = trim((string) ($term['value'] ?? ''));
-            if ($value !== '') {
-                $values[] = $value;
-            }
-        }
-
-        $parts = array_values(array_filter(array_map('trim', explode(',', $description))));
-        if (count($values) === 0 && count($parts) > 0) {
-            $values = $parts;
-        }
-
-        $national = $values !== [] ? (string) $values[count($values) - 1] : '';
-        $local = $values[0] ?? ($parts[0] ?? $description);
-        $regional = count($values) >= 3
-            ? (string) $values[count($values) - 2]
-            : (count($values) === 2 ? (string) $values[1] : $local);
-
-        $feedLevel = 'local';
-        $displayName = $local;
-        if (count($values) <= 1) {
-            $feedLevel = 'national';
-            $displayName = $national !== '' ? $national : $local;
-            $local = $displayName;
-            $regional = $displayName;
-            $national = $displayName;
-        } elseif (count($values) === 2) {
-            $feedLevel = 'regional';
-            $displayName = $local;
-        }
-
-        return [
-            'local' => $local,
-            'regional' => $regional,
-            'national' => $national !== '' ? $national : $local,
-            'display_name' => $displayName,
-            'feed_level' => $feedLevel,
-        ];
-    }
-
     /**
      * Map app search tab → Google Places Autocomplete types restriction.
      * @see https://developers.google.com/maps/documentation/places/web-service/autocomplete

@@ -5,7 +5,7 @@ import { FiMapPin, FiUser, FiGlobe, FiX, FiEye, FiEyeOff, FiFileText, FiShield, 
 import { loginUser, registerUser } from '../api/client';
 import PlaceAutocompleteField from '../components/PlaceAutocompleteField';
 import type { LocationSuggestion } from '../api/locations';
-import { parsedPlaceFeedFromSuggestion } from '../utils/placeFeedLevels';
+import { parsedPlaceFeedFromSuggestion, signupFeedTierRows } from '../utils/placeFeedLevels';
 import { normalizeCountryFlagInput } from '../utils/countryFlag';
 import Flag from '../components/Flag';
 import { consumePublicShareReturnPath } from '../utils/publicShare';
@@ -955,15 +955,17 @@ export default function LoginPage() {
                 <div className="mt-2 rounded-xl border border-[#8ab4ff]/25 bg-[#8ab4ff]/8 px-3 py-2.5 space-y-1.5">
                   <p className="text-[11px] text-[#dce9ff] flex items-center gap-1.5">
                     <FiCheck className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                    Home area saved — your Local, Regional, and National feeds
+                    Home area saved — country, city, and local news feeds
                   </p>
-                  <p className="text-xs text-gray-200"><span className="text-gray-400">Local:</span> {local}</p>
-                  <p className="text-xs text-gray-200"><span className="text-gray-400">Regional:</span> {regional}</p>
-                  <p className="text-xs text-gray-200 flex items-center gap-1.5 flex-wrap">
-                    <span className="text-gray-400">National:</span>
-                    {previewCountryFlag ? <Flag value={previewCountryFlag} national={national} size={14} /> : null}
-                    <span>{national}</span>
-                  </p>
+                  {signupFeedTierRows(local, regional, national).map((row) => (
+                    <p key={row.label} className="text-xs text-gray-200 flex items-center gap-1.5 flex-wrap">
+                      <span className="text-gray-400">{row.label}:</span>
+                      {row.label === 'Country' && previewCountryFlag ? (
+                        <Flag value={previewCountryFlag} national={national} size={14} />
+                      ) : null}
+                      <span>{row.value}</span>
+                    </p>
+                  ))}
                   <button type="button" onClick={clearHomeLocation} className="mt-1 text-[11px] text-[#7A8AF0] hover:underline">Change location</button>
                 </div>
               )}

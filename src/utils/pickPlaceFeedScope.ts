@@ -12,6 +12,7 @@ export type PlaceFeedSelection = {
     scope: FeedScope;
     label: string;
     fullName: string;
+    placeId?: string | null;
 };
 
 export function resolvePlaceFeedSelection(
@@ -20,12 +21,14 @@ export function resolvePlaceFeedSelection(
 ): PlaceFeedSelection {
     const parsed = parsedPlaceFeedFromSuggestion(suggestion);
     const headerLabel = feedHeaderLabelFromSuggestion(suggestion, parsed);
+    const placeId = suggestion.place_id ?? null;
     if (suggestion.type === 'venue' || suggestion.type === 'landmark') {
         return {
             filter: parsed.fullName,
             scope: 'local',
             label: headerLabel,
             fullName: parsed.fullName,
+            placeId,
         };
     }
     const chosenScope = scope || parsed.defaultScope;
@@ -35,6 +38,7 @@ export function resolvePlaceFeedSelection(
         scope: chosenScope,
         label: headerLabel,
         fullName: parsed.fullName,
+        placeId,
     };
 }
 
