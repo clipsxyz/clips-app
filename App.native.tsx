@@ -45,6 +45,7 @@ import TermsScreen from './src/screens/TermsScreen';
 import PublicPostScreen from './src/screens/PublicPostScreen';
 import ClipScreen from './src/screens/ClipScreen';
 import { initializeNotifications, teardownNotifications } from './src/services/notifications';
+import { hydrateAuthTokenFromStorage } from './src/utils/authTokenBridge';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -160,6 +161,10 @@ function App(): React.JSX.Element {
     }
 
     navigateMainTab(nav, 'Inbox', { initialTab: 'notifications' });
+  }, []);
+
+  React.useEffect(() => {
+    void hydrateAuthTokenFromStorage();
   }, []);
 
   React.useEffect(() => {

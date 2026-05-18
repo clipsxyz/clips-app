@@ -98,7 +98,14 @@ import {
 } from '../utils/pendingFeedUploadNative';
 import { feedHeaderLabelFromSuggestion } from '../utils/placeFeedLevels';
 import type { LocationSuggestion } from '../api/locations';
-import { resolvePlaceFeedSelection, type PlaceFeedSelection } from '../utils/pickPlaceFeedScope';
+import {
+    getPlaceFeedPickerOptions,
+    resolvePlaceFeedSelection,
+    type PlaceFeedSelection,
+} from '../utils/pickPlaceFeedScope';
+import PlaceFeedScopePickerModal from '../components/PlaceFeedScopePickerModal.native';
+import { clearPendingLocationFeed, readPendingLocationFeed } from '../utils/pendingLocationNative';
+import type { FeedScope } from '../utils/placeFeedLevels';
 import LocationPlaceSummaryModal from '../components/LocationPlaceSummaryModal';
 import FeedTextOnlyFeedLayout from '../components/FeedTextOnlyFeedLayout.native';
 import FeedDmSheet from '../components/FeedDmSheet.native';
@@ -149,6 +156,10 @@ function PillTabs({
         filterType: 'location' | 'venue' | 'landmark',
         meta?: { label?: string; placeId?: string | null; scope?: string }
     ) => void;
+    onHeaderPlacePick?: (
+        suggestion: LocationSuggestion,
+        filterType: 'location' | 'venue' | 'landmark'
+    ) => void;
     onClearCustom?: () => void;
 }) {
     type HeaderSuggestion = {
@@ -159,6 +170,38 @@ function PillTabs({
         label?: string;
         placeId?: string | null;
         scope?: string;
+        source?: LocationSuggestion;
+    };
+
+    const headerSuggestionToLocation = (
+        s: HeaderSuggestion,
+        fallbackName: string
+    ): LocationSuggestion => {
+        if (s.source) return s.source;
+        const name = s.name || fallbackName;
+        const country = s.country || name;
+        return {
+            name,
+            type: s.type === 'venue' ? 'venue' : s.type === 'landmark' ? 'landmark' : 'location',
+            country,
+            national: country,
+            local: name,
+            regional: name,
+        };
+    };
+
+    const commitHeaderPlace = (
+        suggestion: LocationSuggestion,
+        filterType: 'location' | 'venue' | 'landmark'
+    ) => {
+        if (onHeaderPlacePick) {
+            onHeaderPlacePick(suggestion, filterType);
+            return;
+        }
+        onSearchLocation?.(suggestion.name, filterType, {
+            label: suggestion.name,
+            placeId: suggestion.place_id ?? null,
+        });
     };
     const [menuOpen, setMenuOpen] = useState(false);
     const [showGazetteerTitle, setShowGazetteerTitle] = useState(true);
@@ -319,6 +362,7 @@ function PillTabs({
                             label: sel.label,
                             placeId: sel.placeId,
                             scope: sel.scope,
+                            source: s as LocationSuggestion,
                         };
                     });
                     const fallbackCombined: HeaderSuggestion[] = [
@@ -389,7 +433,17 @@ function PillTabs({
             filterType = 'landmark';
         }
         if (!next) return;
-        onSearchLocation?.(next, filterType, { label: next, placeId: null });
+        commitHeaderPlace(
+            {
+                name: next,
+                type: filterType === 'venue' ? 'venue' : filterType === 'landmark' ? 'landmark' : 'location',
+                country: next,
+                national: next,
+                local: next,
+                regional: next,
+            },
+            filterType
+        );
         setMenuOpen(false);
     };
 
@@ -465,12 +519,10 @@ function PillTabs({
                                                                     ? 'landmark'
                                                                     : 'location');
                                                     setLocationQuery(s.name);
-                                                    const filter = s.filter ?? s.name;
-                                                    onSearchLocation?.(filter, mode, {
-                                                        label: s.label ?? s.name,
-                                                        placeId: s.placeId ?? null,
-                                                        scope: s.scope,
-                                                    });
+                                                    commitHeaderPlace(
+                                                        headerSuggestionToLocation(s, s.name),
+                                                        mode
+                                                    );
                                                     setMenuOpen(false);
                                                 }}
                                             >
@@ -1158,6 +1210,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [dmSheetMessage, setDmSheetMessage] = useState('');
     const [feedDmDeliveryFx, setFeedDmDeliveryFx] = useState<FeedDmDeliveryFxState | null>(null);
     const [notifyLocations, setNotifyLocations] = useState<string[]>([]);
+    const [headerScopePicker, setHeaderScopePicker] = useState<LocationSuggestion | null>(null);
+    const [headerScopePickerKind, setHeaderScopePickerKind] = useState<'location' | 'venue' | 'landmark'>(
+        'location'
+    );
     const dmAnchorRefs = useRef<Record<string, View>>({});
     /** Local overrides keyed by post id so bookmark rail matches collections without refetching whole feed. */
     const [savedByPostId, setSavedByPostId] = useState<Record<string, boolean>>({});
@@ -1712,6 +1768,48 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         [applyCustomLocationFeed]
     );
 
+    const handleHeaderPlacePick = useCallback(
+        (suggestion: LocationSuggestion, filterType: 'location' | 'venue' | 'landmark') => {
+            if (filterType === 'location' && getPlaceFeedPickerOptions(suggestion)) {
+                setHeaderScopePicker(suggestion);
+                setHeaderScopePickerKind(filterType);
+                return;
+            }
+            applyCustomLocationFeed(resolvePlaceFeedSelection(suggestion), filterType);
+        },
+        [applyCustomLocationFeed]
+    );
+
+    useFocusEffect(
+        React.useCallback(() => {
+            let cancelled = false;
+            void (async () => {
+                const pending = await readPendingLocationFeed();
+                if (!pending || cancelled) return;
+                await clearPendingLocationFeed();
+                const scope: FeedScope =
+                    pending.scope === 'local' || pending.scope === 'regional' || pending.scope === 'national'
+                        ? pending.scope
+                        : 'national';
+                setShowFollowingFeed(false);
+                setActive((prev) => (prev === 'Following' ? defaultNational : prev));
+                applyCustomLocationFeed(
+                    {
+                        filter: pending.filter,
+                        label: pending.label,
+                        fullName: pending.filter,
+                        scope,
+                        placeId: pending.placeId ?? null,
+                    },
+                    pending.filterType
+                );
+            })();
+            return () => {
+                cancelled = true;
+            };
+        }, [applyCustomLocationFeed, defaultNational])
+    );
+
     const clearCustomLocation = () => {
         setCustomLocation(null);
         setCustomLocationLabel(null);
@@ -2046,6 +2144,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     onOpenPassport={() => navigation.navigate('Profile')}
                     onOpenDiscover={() => navigateMainTab(navigation, 'Discover')}
                     onSearchLocation={handleHeaderLocationSearch}
+                    onHeaderPlacePick={handleHeaderPlacePick}
                     onClearCustom={clearCustomLocation}
                 />
             </View>
@@ -2214,6 +2313,20 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             />
 
             <FeedDmDeliveryFx fx={feedDmDeliveryFx} />
+
+            <PlaceFeedScopePickerModal
+                visible={!!headerScopePicker}
+                suggestion={headerScopePicker}
+                onClose={() => setHeaderScopePicker(null)}
+                onSelectScope={(scope) => {
+                    if (!headerScopePicker) return;
+                    applyCustomLocationFeed(
+                        resolvePlaceFeedSelection(headerScopePicker, scope),
+                        headerScopePickerKind
+                    );
+                    setHeaderScopePicker(null);
+                }}
+            />
 
             <PostOverflowMenuModal
                 visible={overflowVisible}

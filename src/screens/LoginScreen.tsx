@@ -17,6 +17,7 @@ import { glassPanel, glassSearch, glassSurface } from '../theme/gazetteerAmbient
 import { Picker } from '@react-native-picker/picker';
 import * as ImagePicker from 'react-native-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { persistAuthToken } from '../utils/authTokenBridge';
 import { useAuth } from '../context/Auth';
 import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMaps';
 import { loginUser, registerUser, mapLaravelUserToAppFields } from '../api/client';
@@ -156,11 +157,7 @@ export default function LoginScreen({ navigation }: any) {
         try {
             const response = await loginUser(loginEmail.trim(), loginPassword);
             if (response?.token) {
-                try {
-                    await AsyncStorage.setItem('authToken', response.token);
-                } catch {
-                    // ignore
-                }
+                await persistAuthToken(response.token);
             }
             const apiUser = response?.user || {};
             const mapped = mapLaravelUserToAppFields(apiUser);
@@ -299,11 +296,7 @@ export default function LoginScreen({ navigation }: any) {
                 isBusiness: accountType === 'business',
             });
             if (apiResponse?.token) {
-                try {
-                    await AsyncStorage.setItem('authToken', apiResponse.token);
-                } catch {
-                    // ignore
-                }
+                await persistAuthToken(apiResponse.token);
             }
         } catch {
             // keep local registration fallback

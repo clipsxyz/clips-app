@@ -6,6 +6,7 @@ import { setProfilePrivacy, initializePrivateMockUser, isProfilePrivate } from '
 import { connectSocket, disconnectSocket } from '../services/socketio';
 import { db } from '../utils/db';
 import { normalizeCountryFlagInput } from '../utils/countryFlag';
+import { clearAuthToken, hydrateAuthTokenFromStorage } from '../utils/authTokenBridge';
 
 const AVATAR_KEY = (id: string) => `clips_app_avatar_${id}`;
 type AuthCtx = { user: User | null; login: (userData: any) => void; logout: () => void };
@@ -13,6 +14,10 @@ const Ctx = React.createContext<AuthCtx | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<User | null>(null);
+
+  React.useEffect(() => {
+    void hydrateAuthTokenFromStorage();
+  }, []);
 
   React.useEffect(() => {
     try {
@@ -238,6 +243,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .catch(() => {});
     setUser(null);
     localStorage.removeItem('user');
+    void clearAuthToken();
     try {
       localStorage.removeItem('clips_app_stable_uid');
     } catch (_) {}

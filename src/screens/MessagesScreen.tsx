@@ -881,8 +881,120 @@ export default function MessagesScreen({ route, navigation }: any) {
         }
 
         const sentBubbleColor = dmSentBubbleColor(dmSentStyle);
-        const plainTextOnly = Boolean(item.text?.trim()) && !item.imageUrl && !item.audioUrl;
+        const isMediaOnlyMessage = Boolean(
+            item.imageUrl && !item.text?.trim() && !item.audioUrl && !(item as any).replyTo
+        );
         const bubbleFill = isFromMe ? sentBubbleColor : DM_RECEIVED;
+
+        const bubbleBody = (
+            <>
+                {(item as any).replyTo ? (
+                    <View style={styles.replyPreviewWrap}>
+                        <View style={styles.replyPreviewBar} />
+                        {((item as any).replyTo?.imageUrl as string | undefined) ? (
+                            <View style={styles.replyPreviewThumb}>
+                                {isLikelyVideoUrl((item as any).replyTo.imageUrl) ? (
+                                    <View style={styles.replyPreviewVideoBadge}>
+                                        <Icon name="videocam" size={12} color="#FFFFFF" />
+                                    </View>
+                                ) : (
+                                    <Image
+                                        source={{ uri: (item as any).replyTo.imageUrl }}
+                                        style={styles.replyPreviewImage}
+                                    />
+                                )}
+                            </View>
+                        ) : null}
+                        <View style={styles.replyPreviewTextWrap}>
+                            <Text style={styles.replyPreviewSender} numberOfLines={1}>
+                                {(item as any).replyTo?.senderHandle || 'Reply'}
+                            </Text>
+                            <Text style={styles.replyPreviewText} numberOfLines={1}>
+                                {(item as any).replyTo?.imageUrl
+                                    ? isLikelyVideoUrl((item as any).replyTo.imageUrl)
+                                        ? 'Video'
+                                        : 'Photo'
+                                    : (item as any).replyTo?.text || 'Message'}
+                            </Text>
+                        </View>
+                    </View>
+                ) : null}
+                {item.text ? (
+                    <Text
+                        style={[
+                            styles.messageText,
+                            isMediaOnlyMessage ? styles.messageTextPlain : null,
+                            isFromMe ? styles.messageTextFromMe : styles.messageTextFromOther,
+                        ]}
+                    >
+                        {item.text}
+                    </Text>
+                ) : null}
+                {!!translatedMessages[item.id] && (
+                    <Text style={styles.translatedText}>{translatedMessages[item.id]}</Text>
+                )}
+                {item.imageUrl ? (
+                    isLikelyVideoUrl(item.imageUrl) ? (
+                        <View style={styles.messageVideoFallback}>
+                            <Icon name="videocam" size={18} color="#FFFFFF" />
+                            <Text style={styles.messageVideoFallbackText}>Video</Text>
+                        </View>
+                    ) : (
+                        <Image source={{ uri: item.imageUrl }} style={styles.messageImage} />
+                    )
+                ) : null}
+                {item.audioUrl ? (
+                    <TouchableOpacity
+                        style={styles.audioMessagePill}
+                        onPress={() => {
+                            void handlePlayAudioMessage(item.audioUrl);
+                        }}
+                    >
+                        <Icon
+                            name={playingAudioId === item.audioUrl ? 'pause' : 'play'}
+                            size={16}
+                            color="#FFFFFF"
+                        />
+                        <Text style={styles.audioMessageText}>
+                            {playingAudioId === item.audioUrl ? 'Playing...' : 'Voice message'}
+                        </Text>
+                    </TouchableOpacity>
+                ) : null}
+                {!!messageReactions[item.id]?.length && (
+                    <View style={styles.reactionsRow}>
+                        {messageReactions[item.id].map((reaction) => (
+                            <TouchableOpacity
+                                key={`${item.id}-${reaction.emoji}`}
+                                style={styles.reactionPill}
+                                onPress={() => handleToggleReaction(item.id, reaction.emoji)}
+                            >
+                                <Text style={styles.reactionEmoji}>{reaction.emoji}</Text>
+                                {reaction.users.length > 1 && (
+                                    <Text style={styles.reactionCount}>{reaction.users.length}</Text>
+                                )}
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                )}
+                <Text
+                    style={[
+                        styles.messageTime,
+                        isFromMe ? styles.messageTimeFromMe : styles.messageTimeFromOther,
+                    ]}
+                >
+                    {timeAgo(item.timestamp)}
+                </Text>
+                {isFromMe && !isGroupThread && (
+                    <View style={styles.readReceiptWrap}>
+                        <Icon
+                            name="checkmark-done"
+                            size={13}
+                            color={(item as any).read ? '#0A84FF' : '#8E8E93'}
+                        />
+                    </View>
+                )}
+            </>
+        );
 
         return (
             <View style={[
@@ -908,116 +1020,26 @@ export default function MessagesScreen({ route, navigation }: any) {
                 <TouchableOpacity
                     activeOpacity={0.9}
                     onLongPress={() => openMessageActions(item)}
-                    style={plainTextOnly ? styles.messageBubblePlain : [
-                        styles.messageBubble,
-                        isFromMe ? { backgroundColor: sentBubbleColor } : { backgroundColor: DM_RECEIVED },
-                    ]}
+                    style={styles.messageBubblePlain}
                 >
-                    {plainTextOnly ? (
-                        <IMessageDmBubbleShell isFromMe={isFromMe} tailBackgroundColor={bubbleFill}>
-                            <Text
-                                style={[
-                                    styles.messageTextPlain,
-                                    isFromMe ? styles.messageTextFromMe : styles.messageTextFromOther,
-                                ]}
-                            >
-                                {item.text}
-                            </Text>
-                        </IMessageDmBubbleShell>
-                    ) : null}
-                    {!plainTextOnly && (item as any).replyTo && (
-                        <View style={styles.replyPreviewWrap}>
-                            <View style={styles.replyPreviewBar} />
-                            {((item as any).replyTo?.imageUrl as string | undefined) ? (
-                                <View style={styles.replyPreviewThumb}>
-                                    {isLikelyVideoUrl((item as any).replyTo.imageUrl) ? (
-                                        <View style={styles.replyPreviewVideoBadge}>
-                                            <Icon name="videocam" size={12} color="#FFFFFF" />
-                                        </View>
-                                    ) : (
-                                        <Image source={{ uri: (item as any).replyTo.imageUrl }} style={styles.replyPreviewImage} />
-                                    )}
-                                </View>
-                            ) : null}
-                            <View style={styles.replyPreviewTextWrap}>
-                                <Text style={styles.replyPreviewSender} numberOfLines={1}>
-                                    {(item as any).replyTo?.senderHandle || 'Reply'}
-                                </Text>
-                                <Text style={styles.replyPreviewText} numberOfLines={1}>
-                                    {(item as any).replyTo?.imageUrl
-                                        ? (isLikelyVideoUrl((item as any).replyTo.imageUrl) ? 'Video' : 'Photo')
-                                        : ((item as any).replyTo?.text || 'Message')}
-                                </Text>
-                            </View>
-                        </View>
-                    )}
-                    {!plainTextOnly && item.text && (
-                        <Text style={[
-                            styles.messageText,
-                            isFromMe ? styles.messageTextFromMe : styles.messageTextFromOther,
-                        ]}>
-                            {item.text}
-                        </Text>
-                    )}
-                    {!!translatedMessages[item.id] && (
-                        <Text style={styles.translatedText}>
-                            {translatedMessages[item.id]}
-                        </Text>
-                    )}
-                    {item.imageUrl && (
-                        isLikelyVideoUrl(item.imageUrl) ? (
-                            <View style={styles.messageVideoFallback}>
-                                <Icon name="videocam" size={18} color="#FFFFFF" />
-                                <Text style={styles.messageVideoFallbackText}>Video</Text>
-                            </View>
-                        ) : (
-                            <Image source={{ uri: item.imageUrl }} style={styles.messageImage} />
-                        )
-                    )}
-                    {item.audioUrl && (
-                        <TouchableOpacity
-                            style={styles.audioMessagePill}
-                            onPress={() => {
-                                void handlePlayAudioMessage(item.audioUrl);
-                            }}
-                        >
-                            <Icon name={playingAudioId === item.audioUrl ? 'pause' : 'play'} size={16} color="#FFFFFF" />
-                            <Text style={styles.audioMessageText}>
-                                {playingAudioId === item.audioUrl ? 'Playing...' : 'Voice message'}
-                            </Text>
-                        </TouchableOpacity>
-                    )}
-                    {!!messageReactions[item.id]?.length && (
-                        <View style={styles.reactionsRow}>
-                            {messageReactions[item.id].map((reaction) => (
-                                <TouchableOpacity
-                                    key={`${item.id}-${reaction.emoji}`}
-                                    style={styles.reactionPill}
-                                    onPress={() => handleToggleReaction(item.id, reaction.emoji)}
-                                >
-                                    <Text style={styles.reactionEmoji}>{reaction.emoji}</Text>
-                                    {reaction.users.length > 1 && (
-                                        <Text style={styles.reactionCount}>{reaction.users.length}</Text>
-                                    )}
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-                    )}
-                    <Text style={[
-                        styles.messageTime,
-                        isFromMe ? styles.messageTimeFromMe : styles.messageTimeFromOther,
-                    ]}>
-                        {timeAgo(item.timestamp)}
-                    </Text>
-                    {isFromMe && !isGroupThread && (
-                        <View style={styles.readReceiptWrap}>
-                            <Icon
-                                name="checkmark-done"
-                                size={13}
-                                color={(item as any).read ? '#0A84FF' : '#8E8E93'}
-                            />
-                        </View>
-                    )}
+                    <IMessageDmBubbleShell
+                        isFromMe={isFromMe}
+                        tailBackgroundColor={bubbleFill}
+                        showTail={!isMediaOnlyMessage}
+                        bubbleStyle={
+                            isMediaOnlyMessage
+                                ? {
+                                      backgroundColor: 'transparent',
+                                      paddingHorizontal: 0,
+                                      paddingVertical: 0,
+                                      shadowOpacity: 0,
+                                      elevation: 0,
+                                  }
+                                : undefined
+                        }
+                    >
+                        {bubbleBody}
+                    </IMessageDmBubbleShell>
                 </TouchableOpacity>
                 </Animated.View>
             </View>
