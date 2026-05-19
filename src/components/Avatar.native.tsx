@@ -29,14 +29,14 @@ export default function Avatar({
             {showImage ? (
                 <Image
                     source={{ uri: src }}
-                    style={StyleSheet.absoluteFillObject}
+                    style={StyleSheet.absoluteFill}
                     resizeMode="cover"
                     onError={() => setImageFailed(true)}
                 />
             ) : null}
             <View
                 style={[
-                    StyleSheet.absoluteFillObject,
+                    StyleSheet.absoluteFill,
                     styles.initialsWrap,
                     showImage ? styles.initialsHidden : null,
                 ]}

@@ -2,7 +2,7 @@
 
 > **Status (May 2026):** Core native parity is largely complete. Sections below include **historical** notes from Dec 2024; trust the status summary first.
 
-**React Native:** 0.84.x · **Dual client:** `src/` (web) + `App.native.tsx` / `src/screens/` (native)
+**React Native:** 0.85.x · **Dual client:** `src/` (web) + `App.native.tsx` / `src/screens/` (native)
 
 ## ✅ Native parity — current (May 2026)
 

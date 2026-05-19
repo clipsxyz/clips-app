@@ -44,6 +44,7 @@ import LandingScreen from './src/screens/LandingScreen';
 import TermsScreen from './src/screens/TermsScreen';
 import PublicPostScreen from './src/screens/PublicPostScreen';
 import ClipScreen from './src/screens/ClipScreen';
+import ScenesScreen from './src/screens/ScenesScreen';
 import { initializeNotifications, teardownNotifications } from './src/services/notifications';
 import { hydrateAuthTokenFromStorage } from './src/utils/authTokenBridge';
 
@@ -203,6 +204,11 @@ function App(): React.JSX.Element {
           <Stack.Screen
             name="Stories"
             component={StoriesScreen}
+            options={{ presentation: 'fullScreenModal' }}
+          />
+          <Stack.Screen
+            name="Scenes"
+            component={ScenesScreen}
             options={{ presentation: 'fullScreenModal' }}
           />
           <Stack.Screen name="ViewProfile" component={ViewProfileScreen} />

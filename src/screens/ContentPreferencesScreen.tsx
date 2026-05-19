@@ -1,35 +1,46 @@
 import React from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
-import { chipActiveMagenta, chipActiveMagentaText, glassPanel, glassSearch, glassSurface, gazetteerHeader } from '../theme/gazetteerAmbientNative';
+import { chipActiveMagenta, glassPanel, glassSurface, gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
 import { updateAuthProfile } from '../api/client';
+import PlaceAutocompleteField from '../components/PlaceAutocompleteField.native';
+import type { LocationSuggestion } from '../api/locations';
 
 const HIDDEN_PLACES_KEY = 'clips:suggestedPlacesDislikedPlaces';
 const HIDDEN_BUSINESS_KEY = 'clips:hiddenBusinessSuggestions';
 const LIKED_BUSINESS_KEY = 'clips:likedBusinessSuggestions';
-
-function parseCommaList(input: string): string[] {
-  return input
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .slice(0, 12);
-}
+const MAX_PREFERRED_LOCATIONS = 12;
 
 export default function ContentPreferencesScreen({ navigation }: any) {
   const { user, login } = useAuth();
-  const [locationsInput, setLocationsInput] = React.useState(user?.placesTraveled?.join(', ') || '');
+  const [preferredLocations, setPreferredLocations] = React.useState<string[]>(user?.placesTraveled ?? []);
+  const [preferredLocationQuery, setPreferredLocationQuery] = React.useState('');
   const [hiddenPlaces, setHiddenPlaces] = React.useState<string[]>([]);
   const [hiddenBusinesses, setHiddenBusinesses] = React.useState<string[]>([]);
   const [likedBusinesses, setLikedBusinesses] = React.useState<string[]>([]);
   const [saving, setSaving] = React.useState(false);
 
   React.useEffect(() => {
-    setLocationsInput(user?.placesTraveled?.join(', ') || '');
+    setPreferredLocations(user?.placesTraveled ?? []);
   }, [user?.placesTraveled]);
+
+  const addPreferredLocation = (suggestion: LocationSuggestion) => {
+    const label = (suggestion.name || suggestion.fullName || '').trim();
+    if (!label) return;
+    setPreferredLocations((prev) => {
+      if (prev.some((p) => p.toLowerCase() === label.toLowerCase())) return prev;
+      if (prev.length >= MAX_PREFERRED_LOCATIONS) return prev;
+      return [...prev, label];
+    });
+    setPreferredLocationQuery('');
+  };
+
+  const removePreferredLocation = (place: string) => {
+    setPreferredLocations((prev) => prev.filter((p) => p !== place));
+  };
 
   React.useEffect(() => {
     (async () => {
@@ -50,15 +61,14 @@ export default function ContentPreferencesScreen({ navigation }: any) {
     })();
   }, []);
 
-  const parsedLocations = React.useMemo(() => parseCommaList(locationsInput), [locationsInput]);
-
   const handleSave = async () => {
     if (!user) return;
     setSaving(true);
-    const nextPlaces = parsedLocations.length > 0 ? parsedLocations : undefined;
+    const places = preferredLocations.slice(0, MAX_PREFERRED_LOCATIONS);
+    const nextPlaces = places.length > 0 ? places : undefined;
     login({ ...user, placesTraveled: nextPlaces });
     try {
-      await updateAuthProfile({ places_traveled: parsedLocations } as any);
+      await updateAuthProfile({ places_traveled: places } as any);
       Alert.alert('Saved', 'Content preferences updated.');
     } catch {
       Alert.alert('Saved locally', 'Could not sync to server right now.');
@@ -201,15 +211,7 @@ const styles = StyleSheet.create({
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   sectionTitle: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
   sectionSubtext: { marginTop: 6, color: '#9CA3AF', fontSize: 12 },
-  textArea: {
-    marginTop: 10,
-    minHeight: 90,
-    borderRadius: 8,
-    color: '#FFFFFF',
-    padding: 10,
-    textAlignVertical: 'top',
-    ...glassSearch,
-  },
+  countHint: { marginTop: 8, color: '#6B7280', fontSize: 11 },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
   chip: {
     borderRadius: 999,

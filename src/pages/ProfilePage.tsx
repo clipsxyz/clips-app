@@ -4,6 +4,9 @@ import { useAuth } from '../context/Auth';
 import Avatar from '../components/Avatar';
 import CreateGroupModal from '../components/CreateGroupModal';
 import { FiCamera, FiBookmark, FiMessageCircle, FiLock, FiUnlock, FiX, FiUser, FiMapPin, FiThumbsUp, FiGlobe, FiEdit3, FiLink2, FiUsers, FiUserCheck, FiPlus, FiSettings, FiFileText, FiLayers, FiType, FiImage, FiGrid, FiVideo } from 'react-icons/fi';
+import PlaceAutocompleteField from '../components/PlaceAutocompleteField';
+import type { LocationSuggestion } from '../api/locations';
+import { parsedPlaceFeedFromSuggestion } from '../utils/placeFeedLevels';
 import { FaFacebook } from 'react-icons/fa';
 import QRCode from 'qrcode';
 import Flag from '../components/Flag';
@@ -163,7 +166,8 @@ export default function ProfilePage() {
   const [loadingFollowing, setLoadingFollowing] = React.useState(false);
   const [unreadCount, setUnreadCount] = React.useState(0);
   const [createGroupOpen, setCreateGroupOpen] = React.useState(false);
-  const [placesTraveled, setPlacesTraveled] = React.useState<string>(user?.placesTraveled?.join(', ') || '');
+  const [preferredLocations, setPreferredLocations] = React.useState<string[]>(user?.placesTraveled ?? []);
+  const [preferredLocationQuery, setPreferredLocationQuery] = React.useState('');
   const [accountType, setAccountType] = React.useState<'personal' | 'business'>(user?.accountType === 'business' ? 'business' : 'personal');
   const [showProfilePictureModal, setShowProfilePictureModal] = React.useState(false);
   const [notificationPrefs, setNotificationPrefs] = React.useState<NotificationPreferences>(getNotificationPreferences());
@@ -456,12 +460,24 @@ export default function ProfilePage() {
   }, [user?.bio]);
 
   React.useEffect(() => {
-    if (user?.placesTraveled) {
-      setPlacesTraveled(user.placesTraveled.join(', '));
-    } else {
-      setPlacesTraveled('');
-    }
+    setPreferredLocations(user?.placesTraveled ?? []);
   }, [user?.placesTraveled]);
+
+  function addPreferredLocation(suggestion: LocationSuggestion) {
+    const parsed = parsedPlaceFeedFromSuggestion(suggestion);
+    const label = parsed.displayName || parsed.local || suggestion.name.split(',')[0].trim();
+    if (!label) return;
+    setPreferredLocations((prev) => {
+      if (prev.some((p) => p.toLowerCase() === label.toLowerCase())) return prev;
+      if (prev.length >= 12) return prev;
+      return [...prev, label];
+    });
+    setPreferredLocationQuery('');
+  }
+
+  function removePreferredLocation(label: string) {
+    setPreferredLocations((prev) => prev.filter((p) => p !== label));
+  }
 
   React.useEffect(() => {
     setAccountType(user?.accountType === 'business' ? 'business' : 'personal');
@@ -1672,7 +1688,7 @@ export default function ProfilePage() {
                     icon={<FiUser className="w-6 h-6 text-gray-600" />}
                   />
                   <div className="text-center w-full">
-                    <div className="font-semibold text-sm text-gray-100">Travel Info</div>
+                    <div className="font-semibold text-sm text-gray-100">Preferences</div>
                     <div className="text-xs text-gray-400 mt-0.5">{accountType === 'business' ? 'Business account' : 'Personal account'}</div>
                   </div>
                 </div>
@@ -1722,7 +1738,7 @@ export default function ProfilePage() {
                 <h2 className="text-xl font-bold text-gray-900 flex-1 min-w-0">
                   {selectedCard === 'bio' && 'Edit Bio'}
                   {selectedCard === 'social' && 'Social Links'}
-                  {selectedCard === 'personal' && 'Travel Information'}
+                  {selectedCard === 'personal' && 'Account & preferred locations'}
                   {selectedCard === 'location' && 'Location Settings'}
                   {selectedCard === 'interests' && 'Interests'}
                   {selectedCard === 'flag' && 'Country Flag'}
@@ -2020,39 +2036,47 @@ export default function ProfilePage() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Places You've Traveled To
+                        Preferred locations for suggestions
                       </label>
-                      <input
-                        type="text"
-                        value={placesTraveled}
-                        onChange={(e) => setPlacesTraveled(e.target.value)}
-                        placeholder="e.g., Paris, London, Tokyo, New York"
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                      />
-                      <p className="text-xs text-gray-500 mt-2">
-                        Separate multiple places with commas
+                      <p className="text-xs text-gray-500 mb-2">
+                        Optional — places you like or have visited. Your main feed still follows your home location.
                       </p>
-                    </div>
-                    {user.placesTraveled && user.placesTraveled.length > 0 && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Current Places
-                        </label>
-                        <div className="flex flex-wrap gap-2">
-                          {user.placesTraveled.map((place, index) => (
+                      <PlaceAutocompleteField
+                        value={preferredLocationQuery}
+                        onChange={setPreferredLocationQuery}
+                        onSelectSuggestion={addPreferredLocation}
+                        mode="location"
+                        showIcon
+                        placeholder="Search city or neighborhood"
+                        inputClassName="w-full rounded-xl border border-gray-200 bg-gray-50 pl-10 pr-3 py-3 text-sm text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                      />
+                      {preferredLocations.length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {preferredLocations.map((place) => (
                             <span
-                              key={index}
-                              className="px-3 py-1.5 bg-gradient-to-r from-orange-500 to-orange-600 text-white text-sm font-medium rounded-full"
+                              key={place}
+                              className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm text-gray-800"
                             >
                               {place}
+                              <button
+                                type="button"
+                                onClick={() => removePreferredLocation(place)}
+                                className="text-gray-400 hover:text-gray-700"
+                                aria-label={`Remove ${place}`}
+                              >
+                                <FiX className="h-3.5 w-3.5" />
+                              </button>
                             </span>
                           ))}
                         </div>
-                      </div>
-                    )}
+                      )}
+                      <p className="text-xs text-gray-500 mt-2">
+                        {preferredLocations.length}/12 added. Pick from search suggestions.
+                      </p>
+                    </div>
                     <button
                       onClick={async () => {
-                        const places = placesTraveled.split(',').map(p => p.trim()).filter(p => p);
+                        const places = preferredLocations.slice(0, 12);
                         try {
                           const ok = await persistLaravelProfile({
                             places_traveled: places,
@@ -2064,7 +2088,7 @@ export default function ProfilePage() {
                           Swal.fire(
                             bottomSheet({
                               title: 'Could not save',
-                              message: 'Travel list was saved on this device only.',
+                              message: 'Preferences were saved on this device only.',
                               icon: 'alert',
                             })
                           );
@@ -2074,7 +2098,7 @@ export default function ProfilePage() {
                       }}
                       className="w-full py-3 bg-gradient-to-r from-brand-500 to-brand-600 text-white font-semibold rounded-xl shadow-lg hover:from-brand-600 hover:to-brand-700 transition-all duration-200"
                     >
-                      Save Travel Info
+                      Save preferences
                     </button>
                   </div>
                 )}

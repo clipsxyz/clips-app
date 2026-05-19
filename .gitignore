@@ -20,6 +20,14 @@ laravel-backend/.env
 laravel-backend/database/database.sqlite
 laravel-backend/storage/
 
+# Android Studio local SDK path (machine-specific)
+android/local.properties
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/app/.cxx/
+
 # FFmpeg Kit vendored binaries (npm run setup:ffmpeg-native)
 android/ffmpeg-kit-local-maven/
 ios/FFmpegKitVendor/

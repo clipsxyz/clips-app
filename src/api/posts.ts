@@ -198,6 +198,35 @@ function resolveAuthorLocations(input: {
 const POSTS_STORAGE_KEY = 'clips_app_posts';
 const PENDING_CREATED_POST_KEY = 'clips_pending_created_post';
 
+/** True when comments/likes should use in-memory mock APIs (not Laravel UUID routes). */
+export function isFrontendOnlyPostId(id: string): boolean {
+  return isMockPostId(id) || id.startsWith('mock-scenes-');
+}
+
+/** One comment bucket per Ava demo post (feed may use ava-normal-* or ava-normal-ireland-demo). */
+function resolveCommentsPostId(postId: string): string {
+  const id = String(postId);
+  if (id === 'ava-normal-ireland-demo' || id.startsWith('ava-normal-')) {
+    return 'ava-normal-ireland-demo';
+  }
+  if (id === 'ava-boosted-discover-demo' || id.startsWith('ava-boosted-demo-')) {
+    return 'ava-boosted-discover-demo';
+  }
+  return id;
+}
+
+function listTopLevelCommentsForPost(postId: string): Comment[] {
+  const resolved = resolveCommentsPostId(postId);
+  return comments.filter((c) => {
+    if (c.parentId) return false;
+    const pid = String(c.postId);
+    if (pid === resolved) return true;
+    if (resolved === 'ava-normal-ireland-demo' && pid.startsWith('ava-normal-')) return true;
+    if (resolved === 'ava-boosted-discover-demo' && pid.startsWith('ava-boosted-demo-')) return true;
+    return false;
+  });
+}
+
 /** Returns true if this id is from mock/seed data (JSON, Artane, Bob, Ava). Only these should be excluded when saving to localStorage. */
 function isMockPostId(id: string): boolean {
   if (!id || typeof id !== 'string') return true;
@@ -607,7 +636,40 @@ let comments: Comment[] = [
       }
     ],
     replyCount: 1,
-  }
+  },
+  {
+    id: 'ava-demo-comment-1',
+    postId: 'ava-normal-ireland-demo',
+    userHandle: 'Bob@Finglas',
+    text: 'Galway looks gorgeous — need to visit again!',
+    createdAt: Date.now() - 5400000,
+    likes: 4,
+    userLiked: false,
+    replies: [],
+    replyCount: 0,
+  },
+  {
+    id: 'ava-demo-comment-2',
+    postId: 'ava-normal-ireland-demo',
+    userHandle: 'Charlie@Ireland',
+    text: 'That café on Quay Street is unreal ☕️',
+    createdAt: Date.now() - 4200000,
+    likes: 2,
+    userLiked: false,
+    replies: [],
+    replyCount: 0,
+  },
+  {
+    id: 'ava-demo-comment-3',
+    postId: 'ava-normal-ireland-demo',
+    userHandle: 'Alice@Dublin',
+    text: 'Love this shot Ava!',
+    createdAt: Date.now() - 3000000,
+    likes: 1,
+    userLiked: false,
+    replies: [],
+    replyCount: 0,
+  },
 ];
 
 type UserState = {
@@ -1821,10 +1883,36 @@ export async function reclipPost(userId: string, originalPostId: string, userHan
   if (useLaravelAPI) {
     try {
       const response = await apiClient.reclipPost(originalPostId);
-      const transformed = transformLaravelPost(response);
       const s = getState(userId);
       s.reclips[originalPostId] = true;
-      return { originalPost: decorateForUser(userId, transformed), reclippedPost: null };
+      const reclippedPost = transformLaravelPost(response);
+
+      // Laravel returns the new reclipped row; the feed card is the *original* post.
+      const originalRaw = response?.original_post ?? response?.originalPost;
+      let originalPost: Post;
+      if (originalRaw && String(originalRaw.id) === String(originalPostId)) {
+        originalPost = transformLaravelPost(originalRaw);
+      } else {
+        const cached = posts.find((x) => x.id === originalPostId);
+        const nextReclips = (cached?.stats?.reclips ?? 0) + 1;
+        originalPost = cached
+          ? { ...cached, stats: { ...cached.stats, reclips: nextReclips } }
+          : {
+              ...reclippedPost,
+              id: originalPostId,
+              stats: { ...reclippedPost.stats, reclips: (reclippedPost.stats?.reclips ?? 0) + 1 },
+            };
+      }
+
+      const idx = posts.findIndex((x) => x.id === originalPostId);
+      if (idx >= 0) {
+        posts[idx] = {
+          ...posts[idx],
+          stats: { ...posts[idx].stats, reclips: originalPost.stats.reclips },
+        };
+      }
+
+      return { originalPost: decorateForUser(userId, originalPost), reclippedPost };
     } catch (error: any) {
       if (error?.name === 'ConnectionRefused' || error?.message?.includes('CONNECTION_REFUSED') || error?.message?.includes('Failed to fetch')) {
         // Fall through to mock
@@ -1892,9 +1980,9 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 export async function getPostById(postId: string, userId?: string): Promise<Post | null> {
   await delay(0);
   const local = posts.find(p => p.id === postId);
-  if (local) return local;
+  if (local) return userId ? decorateForUser(userId, local) : local;
 
-  // Frontend-only mock posts (mock-scenes-*, etc.) – resolve locally, never call Laravel (API expects UUID)
+  // Frontend-only mock posts (mock-scenes-*, Ava demo, etc.) – resolve locally, never call Laravel (API expects UUID)
   if (postId.startsWith('mock-scenes-')) {
     const mockPosts = getMockScenesVideoPosts();
     const mock = mockPosts.find(p => p.id === postId);
@@ -1902,13 +1990,22 @@ export async function getPostById(postId: string, userId?: string): Promise<Post
     return null;
   }
 
-  // Demo post Ava (injected in feed but not in Laravel) – resolve so DM shared post and getPostById work
-  if (postId === 'ava-normal-ireland-demo') {
-    const avaPost = getAvaNormalPost();
-    if (!posts.find(p => p.id === avaPost.id)) {
-      posts.push(avaPost);
+  if (isMockPostId(postId)) {
+    if (postId === 'ava-normal-ireland-demo' || postId.startsWith('ava-normal-')) {
+      const avaPost = getAvaNormalPost();
+      if (!posts.find((p) => p.id === avaPost.id)) {
+        posts.push(avaPost);
+      }
+      return userId ? decorateForUser(userId, avaPost) : avaPost;
     }
-    return userId ? decorateForUser(userId, avaPost) : avaPost;
+    if (postId === 'ava-boosted-discover-demo' || postId.startsWith('ava-boosted-demo-')) {
+      const boosted = getAvaBoostedPost();
+      if (!posts.find((p) => p.id === boosted.id)) {
+        posts.push(boosted);
+      }
+      return userId ? decorateForUser(userId, boosted) : boosted;
+    }
+    return null;
   }
 
   // Laravel post ID must be a UUID – don't call API for non-UUID IDs (avoids 400 Bad Request)
@@ -1993,8 +2090,7 @@ export async function regeneratePublicShareToken(postId: string): Promise<{ toke
 
 export async function fetchComments(postId: string): Promise<Comment[]> {
   await delay(200);
-  // Only return top-level comments (replies live in comment.replies, not as top-level items)
-  return comments.filter(c => c.postId === postId && !c.parentId);
+  return listTopLevelCommentsForPost(postId);
 }
 
 export type CommentsPage = {
@@ -2056,6 +2152,22 @@ export async function fetchCommentsPage(
   repliesLimit: number = 5,
   userId?: string,
 ): Promise<CommentsPage> {
+  const resolvedPostId = resolveCommentsPostId(postId);
+  // Demo / seed posts (e.g. Ava@galway) are not in Laravel — always use in-memory comments.
+  if (isFrontendOnlyPostId(resolvedPostId)) {
+    const all = await fetchComments(resolvedPostId);
+    if (!cursor) {
+      const slice = all.slice(0, limit);
+      const hasMore = all.length > limit;
+      return {
+        items: slice,
+        nextCursor: hasMore ? 'mock:1' : null,
+        hasMore,
+      };
+    }
+    return { items: [], nextCursor: null, hasMore: false };
+  }
+
   const useLaravelAPI = isLaravelApiEnabled();
   if (useLaravelAPI) {
     try {
@@ -2113,10 +2225,10 @@ export async function fetchPostsByUser(userHandle: string, limit = 30): Promise<
 }
 
 export async function addComment(postId: string, userHandle: string, text: string): Promise<Comment> {
-  // Try Laravel API first, fallback to mock if it fails
+  const resolvedPostId = resolveCommentsPostId(postId);
   const useLaravelAPI = isLaravelApiEnabled();
 
-  if (useLaravelAPI) {
+  if (!isFrontendOnlyPostId(resolvedPostId) && useLaravelAPI) {
     try {
       const response = await apiClient.addComment(postId, text);
       const moderation = evaluateCommentModeration(response.text || response.text_content || text);
@@ -2148,7 +2260,7 @@ export async function addComment(postId: string, userHandle: string, text: strin
 
   const comment: Comment = {
     id: randomUUID(),
-    postId,
+    postId: resolvedPostId,
     userHandle,
     text,
     createdAt: Date.now(),
@@ -2160,7 +2272,18 @@ export async function addComment(postId: string, userHandle: string, text: strin
   comments.push(comment);
 
   // Update post comment count
-  const post = posts.find(p => p.id === postId);
+  let post =
+    posts.find((p) => p.id === postId) ||
+    posts.find((p) => p.id === resolvedPostId);
+  if (!post && (resolvedPostId === 'ava-normal-ireland-demo' || resolvedPostId.startsWith('ava-normal-'))) {
+    const avaPost = getAvaNormalPost();
+    if (!posts.find((p) => p.id === avaPost.id)) posts.push(avaPost);
+    post = avaPost;
+  } else if (!post && (resolvedPostId === 'ava-boosted-discover-demo' || resolvedPostId.startsWith('ava-boosted-demo-'))) {
+    const boostedPost = getAvaBoostedPost();
+    if (!posts.find((p) => p.id === boostedPost.id)) posts.push(boostedPost);
+    post = boostedPost;
+  }
   console.log('Post lookup result:', {
     postId,
     found: !!post,
@@ -2170,10 +2293,25 @@ export async function addComment(postId: string, userHandle: string, text: strin
   });
 
   if (post) {
-    post.stats.comments += 1;
+    if (resolvedPostId === 'ava-normal-ireland-demo') {
+      for (const p of posts) {
+        if (p.id === resolvedPostId || String(p.id).startsWith('ava-normal-')) {
+          p.stats.comments += 1;
+        }
+      }
+    } else if (resolvedPostId === 'ava-boosted-discover-demo') {
+      for (const p of posts) {
+        if (p.id === resolvedPostId || String(p.id).startsWith('ava-boosted-demo-')) {
+          p.stats.comments += 1;
+        }
+      }
+    } else {
+      post.stats.comments += 1;
+    }
 
-    // Send DM to post owner with comment notification (only if not commenting on own post)
-    if (post.userHandle !== userHandle) {
+    // Send DM to post owner with comment notification (only if not commenting on own post).
+    // Skip for frontend-only demo posts — Laravel has no Ava mock user / post to message.
+    if (post.userHandle !== userHandle && !isFrontendOnlyPostId(resolvedPostId)) {
       // Dynamically import to avoid circular dependency
       const { appendMessage } = await import('./messages');
       console.log('Sending comment notification DM:', {

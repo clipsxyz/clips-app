@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { FiX, FiSend, FiMessageSquare, FiThumbsUp, FiChevronDown, FiChevronUp, FiSmile } from 'react-icons/fi';
 import { useAuth } from '../context/Auth';
@@ -11,6 +12,7 @@ import {
     toggleCommentLike,
     toggleReplyLike,
     getPostById,
+    isFrontendOnlyPostId,
     setCommentModerationState,
     toggleFollowForPost,
     setFollowState,
@@ -62,14 +64,16 @@ function renderTextWithMentions(
     text: string,
     onHandleClick: (handle: string) => void
 ): React.ReactNode[] {
+    const safeText = text || '';
     const nodes: React.ReactNode[] = [];
     let cursor = 0;
     let key = 0;
     let match: RegExpExecArray | null;
-    while ((match = HANDLE_REGEX.exec(text)) !== null) {
+    HANDLE_REGEX.lastIndex = 0;
+    while ((match = HANDLE_REGEX.exec(safeText)) !== null) {
         const start = match.index;
         const end = start + match[0].length;
-        if (start > cursor) nodes.push(<React.Fragment key={`t-${key++}`}>{text.slice(cursor, start)}</React.Fragment>);
+        if (start > cursor) nodes.push(<React.Fragment key={`t-${key++}`}>{safeText.slice(cursor, start)}</React.Fragment>);
         const handle = match[0];
         nodes.push(
             <button
@@ -87,7 +91,7 @@ function renderTextWithMentions(
         );
         cursor = end;
     }
-    if (cursor < text.length) nodes.push(<React.Fragment key={`t-${key++}`}>{text.slice(cursor)}</React.Fragment>);
+    if (cursor < safeText.length) nodes.push(<React.Fragment key={`t-${key++}`}>{safeText.slice(cursor)}</React.Fragment>);
     return nodes;
 }
 
@@ -175,7 +179,7 @@ function CommentItem({
                 <p className="text-sm text-gray-900 mb-2">
                     {isHiddenForViewer
                         ? 'Comment hidden for safety.'
-                        : renderTextWithMentions(comment.text, (handle) => navigate(`/user/${encodeURIComponent(handle)}`))}
+                        : renderTextWithMentions(comment.text || '', (handle) => navigate(`/user/${encodeURIComponent(handle)}`))}
                 </p>
                 {comment.moderationState === 'hidden_by_filter' && String(comment.userHandle || '').trim().toLowerCase() === String(user?.handle || '').trim().toLowerCase() && (
                     <p className="mb-2 text-[11px] text-amber-700">Hidden from others by safety filter</p>
@@ -419,13 +423,18 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
         return ordered;
     }, [comments, sortMode]);
 
+    const postIdStr = String(postId || '');
+    const isDemoPost = isFrontendOnlyPostId(postIdStr);
+    const canLoadComments = isDemoPost || Boolean(user?.id);
+
     // Load post (author, caption) + comments when modal opens
     React.useEffect(() => {
-        if (!isOpen || !postId) return;
+        if (!isOpen || !postId || !canLoadComments) return;
         let cancelled = false;
         (async () => {
             setLoading(true);
             setPost(null);
+            setComments([]);
             setCommentsCursor(null);
             setCommentsHasMore(false);
             setCommentsLoadingMore(false);
@@ -439,6 +448,9 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                 setComments(fetchedCommentsPage.items);
                 setCommentsCursor(fetchedCommentsPage.nextCursor);
                 setCommentsHasMore(fetchedCommentsPage.hasMore);
+                requestAnimationFrame(() => {
+                    commentsScrollRef.current?.scrollTo({ top: 0, behavior: 'instant' });
+                });
             } catch (error) {
                 console.error('Failed to load comments sheet:', error);
                 if (!cancelled) {
@@ -452,7 +464,7 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
         return () => {
             cancelled = true;
         };
-    }, [isOpen, postId, user?.id]);
+    }, [isOpen, postId, canLoadComments]);
 
     const handleLoadMoreComments = React.useCallback(async () => {
         if (commentsLoadingMore || !commentsHasMore || !commentsCursor) return;
@@ -789,8 +801,8 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
     const showFollow =
         Boolean(user?.handle && authorHandle && user.handle !== authorHandle);
 
-    return (
-        <div className="fixed inset-0 z-[150] flex items-end md:items-center justify-center">
+    return createPortal(
+        <div className="fixed inset-0 z-[230] flex items-end md:items-center justify-center">
             {/* Backdrop */}
             <div
                 className="absolute inset-0 bg-black bg-opacity-50"
@@ -798,17 +810,15 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
             />
 
             {/* Modal - always light theme (no dark mode) */}
-            <div className="relative bg-white w-full h-[58vh] md:max-w-md md:h-[80vh] rounded-t-2xl md:rounded-2xl shadow-xl flex flex-col text-gray-900">
+            <div className="relative bg-white w-full h-[min(58dvh,520px)] md:max-w-md md:h-[80vh] rounded-t-2xl md:rounded-2xl shadow-xl flex flex-col min-h-0 overflow-hidden text-gray-900">
                 {post?.mediaUrl ? (
-                    <div className="px-4 pt-3 pb-1">
-                        <div className="mx-auto w-[min(56vw,240px)] aspect-[4/5] rounded-xl overflow-hidden bg-gray-900">
+                    <div className="flex items-center gap-3 px-4 pt-3 pb-2 flex-shrink-0 border-b border-gray-100">
+                        <div className="w-14 h-14 rounded-lg overflow-hidden bg-gray-900 flex-shrink-0">
                             {post.mediaType === 'video' ? (
                                 <video
                                     src={post.mediaUrl}
                                     className="w-full h-full object-cover"
                                     muted
-                                    autoPlay
-                                    loop
                                     playsInline
                                 />
                             ) : (
@@ -819,6 +829,9 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                                 />
                             )}
                         </div>
+                        {authorHandle ? (
+                            <p className="text-sm font-semibold text-gray-900 truncate">{authorHandle}</p>
+                        ) : null}
                     </div>
                 ) : null}
                 {/* Mobile drag affordance */}
@@ -827,7 +840,7 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                 </div>
 
                 {/* Header: comment count + close */}
-                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 flex-shrink-0">
                     <h2 className="text-base font-semibold text-gray-900">
                         {comments.length} {comments.length === 1 ? 'comment' : 'comments'}
                     </h2>
@@ -956,11 +969,13 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                 </div>
 
                 {/* Comment Input */}
-                <CommentInput
-                    placeholder="Join the conversation..."
-                    onSubmit={handleAddComment}
-                    isLoading={submitting}
-                />
+                <div className="flex-shrink-0 border-t border-gray-200 bg-white">
+                    <CommentInput
+                        placeholder="Join the conversation..."
+                        onSubmit={handleAddComment}
+                        isLoading={submitting}
+                    />
+                </div>
 
                 {/* Offline indicator */}
                 {!online && (
@@ -969,6 +984,7 @@ export default function CommentsModal({ postId, isOpen, onClose }: CommentsModal
                     </div>
                 )}
             </div>
-        </div>
+        </div>,
+        document.body
     );
 }

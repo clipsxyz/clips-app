@@ -752,7 +752,7 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                 colors={['rgba(3,7,18,0)', '#030712']}
                                 start={{ x: 0, y: 0 }}
                                 end={{ x: 1, y: 0 }}
-                                style={StyleSheet.absoluteFillObject}
+                                style={StyleSheet.absoluteFill}
                             />
 
                             {showTabsHint ? (

@@ -1,8 +1,8 @@
-import React from 'react';
+﻿import React from 'react';
 import { createPortal } from 'react-dom';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { FiHome, FiUser, FiUserPlus, FiUserX, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiMaximize, FiBookmark, FiEye, FiHeart, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiInfo, FiX, FiClock, FiSend, FiChevronDown, FiCompass, FiGlobe, FiNavigation } from 'react-icons/fi';
+import { FiHome, FiUser, FiUserPlus, FiUserX, FiPlayCircle, FiPlusSquare, FiSearch, FiZap, FiThumbsUp, FiMessageSquare, FiShare2, FiMapPin, FiRepeat, FiBookmark, FiEye, FiHeart, FiTrendingUp, FiBarChart2, FiMoreHorizontal, FiVolume2, FiVolumeX, FiPlus, FiCheck, FiCamera, FiBell, FiBarChart, FiHelpCircle, FiInfo, FiX, FiClock, FiSend, FiChevronDown, FiCompass, FiGlobe, FiNavigation } from 'react-icons/fi';
 import { GiGreekTemple } from 'react-icons/gi';
 import { LuFlame, LuPlus } from 'react-icons/lu';
 import { VscLiveShare } from 'react-icons/vsc';
@@ -14,6 +14,8 @@ import ShareModal from './components/ShareModal';
 import ScenesModal from './components/ScenesModal';
 import CreateModal from './components/CreateModal';
 import AboutProfileModal from './components/AboutProfileModal';
+import InterestsFeedCard from './components/InterestsFeedCard';
+import { INTERESTS_ONBOARDING_DISMISSED_KEY, MAX_INTEREST_SELECTIONS } from './constants/interestOptions';
 import TaggedUsersBottomSheet from './components/TaggedUsersBottomSheet';
 import TaggedAvatars from './components/TaggedAvatars';
 import Avatar from './components/Avatar';
@@ -60,6 +62,8 @@ import EffectWrapper from './components/EffectWrapper';
 import type { EffectConfig } from './utils/effects';
 import ProgressiveImage from './components/ProgressiveImage';
 import ZoomableMedia from './components/ZoomableMedia';
+import ImageFullscreenViewer from './components/ImageFullscreenViewer';
+import VideoCTAOverlay from './components/VideoCTAOverlay';
 import { getInstagramImageDimensions, getImageSize } from './utils/imageDimensions';
 import Swal from 'sweetalert2';
 import { bottomSheet } from './utils/swalBottomSheet';
@@ -75,6 +79,7 @@ import {
   resolveTextCardTailFill,
 } from './utils/feedTextBubble';
 import { GLOBAL_VIDEO_MUTED_EVENT, getGlobalVideoMuted, setGlobalVideoMuted } from './utils/globalVideoMute';
+import { postHasVideoMedia } from './utils/postMedia';
 
 // Global map to store video playback times per post ID for seamless transitions
 const videoTimesMap = new Map<string, number>();
@@ -163,7 +168,7 @@ function BottomNav({ onCreateClick, onInboxClick }: { onCreateClick: () => void;
 
   const handleHomeClick = () => {
     // Reset feed state while FeedPageWrapper is still mounted (same-route tap). When navigating
-    // from another route, listener may not exist yet — mount uses fresh state; this still helps /feed→/feed.
+    // from another route, listener may not exist yet â€” mount uses fresh state; this still helps /feedâ†’/feed.
     window.dispatchEvent(new CustomEvent('resetFeed'));
     nav('/feed');
   };
@@ -330,7 +335,7 @@ export default function App() {
     loc.pathname === '/create/instant' || loc.pathname === '/create/gallery-preview';
   const isFullViewportPage = isLoginPage || isClipPage || isCreateFullscreen; // No scroll, no bottom nav
 
-  // Feed uses an inner scroll area; lock document scroll so iOS rubber-band doesn’t shift fixed chrome
+  // Feed uses an inner scroll area; lock document scroll so iOS rubber-band doesnâ€™t shift fixed chrome
   React.useEffect(() => {
     if (!isFeedPage) return;
     const html = document.documentElement;
@@ -349,7 +354,11 @@ export default function App() {
     <>
       <main
         id="main"
-        className={`mx-auto max-w-md md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800 ${
+        className={`mx-auto ${
+          isLoginPage
+            ? 'w-full max-w-none border-0 shadow-none rounded-none'
+            : 'max-w-md md:shadow-card md:rounded-2xl md:border md:border-gray-200 md:dark:border-gray-800'
+        } ${
           isFullViewportPage
             ? 'h-screen min-h-[100dvh] overflow-hidden flex flex-col'
             : isFeedPage
@@ -414,7 +423,7 @@ export default function App() {
   );
 }
 
-/** Promote-style badge (flame + bottom-center plus) — tab size or hero for modals */
+/** Promote-style badge (flame + bottom-center plus) â€” tab size or hero for modals */
 function BoostPromoteBadge({ size = 'sm', active }: { size?: 'sm' | 'lg'; active?: boolean }) {
   const isLg = size === 'lg';
   return (
@@ -962,13 +971,13 @@ function PillTabs(props: {
                             >
                               <span className="text-sm text-white/90">{s.name}</span>
                               {s.type === 'venue' ? (
-                                <span className="ml-1 text-xs text-emerald-300/80">· venue</span>
+                                <span className="ml-1 text-xs text-emerald-300/80">Â· venue</span>
                               ) : s.type === 'landmark' ? (
-                                <span className="ml-1 text-xs text-amber-300/80">· landmark</span>
+                                <span className="ml-1 text-xs text-amber-300/80">Â· landmark</span>
                               ) : usingFallbackSuggestions ? (
-                                <span className="ml-1 text-xs text-white/45">· quick suggestion</span>
+                                <span className="ml-1 text-xs text-white/45">Â· quick suggestion</span>
                               ) : s.country ? (
-                                <span className="ml-1 text-xs text-white/55">· {s.country}</span>
+                                <span className="ml-1 text-xs text-white/55">Â· {s.country}</span>
                               ) : null}
                             </button>
                           ))}
@@ -1318,7 +1327,7 @@ function PostHeader({
     post.userReclipped === true;
   const profileTargetHandle = isReclippedPost ? post.originalUserHandle! : post.userHandle;
 
-  // Metadata carousel: location → venue → landmark → timestamp, one at a time
+  // Metadata carousel: location â†’ venue â†’ landmark â†’ timestamp, one at a time
   const metadataItems = React.useMemo(() => {
     const out: Array<{ label: string; type: 'location' | 'venue' | 'landmark' | 'timestamp' }> = [];
     if (post.locationLabel && post.locationLabel !== 'Unknown Location') out.push({ label: post.locationLabel, type: 'location' });
@@ -1457,7 +1466,7 @@ function PostHeader({
     setProfileMenuOpen(false);
     await Swal.fire(bottomSheet({
       title: 'Report submitted',
-      message: `Thanks — we will review reports about ${post.userHandle}.`,
+      message: `Thanks â€” we will review reports about ${post.userHandle}.`,
       icon: 'success',
     }));
   };
@@ -1484,7 +1493,7 @@ function PostHeader({
     }
   }, [userId, post.userHandle, post.isFollowing]);
 
-  // Mutual follow = both follow each other → show DM icon (use feed data or check-follows-me API)
+  // Mutual follow = both follow each other â†’ show DM icon (use feed data or check-follows-me API)
   const authorFollowsYou = post.authorFollowsYou === true;
   const [followsMeFromApi, setFollowsMeFromApi] = React.useState<boolean | null>(null);
   React.useEffect(() => {
@@ -1605,7 +1614,7 @@ function PostHeader({
         onMouseDown={(e) => e.stopPropagation()}
       >
         {/* Top row: @handle + flag (left), same metadata carousel as media cards + menu (right). Byline stays inside the bubble below. */}
-        {/* z-40 so the quick-actions sheet (absolute below header) paints above the bubble row — a following sibling would otherwise cover it. */}
+        {/* z-40 so the quick-actions sheet (absolute below header) paints above the bubble row â€” a following sibling would otherwise cover it. */}
         <div className="relative z-40">
           <div className="flex items-start justify-between gap-3 pt-1">
             <div className="min-w-0 flex-1 flex flex-col gap-1 pr-2">
@@ -1664,7 +1673,7 @@ function PostHeader({
                 return (
                   <div
                     className="flex items-center gap-0.5 min-w-0 max-w-[140px] justify-end min-h-[0.9rem] overflow-visible"
-                    title={metadataItems.map((m) => m.label).join(' · ')}
+                    title={metadataItems.map((m) => m.label).join(' Â· ')}
                   >
                     <div
                       key={metadataIndex}
@@ -1951,7 +1960,7 @@ function PostHeader({
           </div>
         </div>
         <div className="relative z-10 flex flex-col items-end gap-0.5 flex-shrink-0">
-          {/* Metadata pill on top: location → venue → landmark → timestamp (Instagram-style: clean, minimal, no shimmer) */}
+          {/* Metadata pill on top: location â†’ venue â†’ landmark â†’ timestamp (Instagram-style: clean, minimal, no shimmer) */}
           {metadataItems.length > 0 && (() => {
             const current = metadataItems[metadataIndex];
             const Icon =
@@ -1962,7 +1971,7 @@ function PostHeader({
             return (
               <div
                 className="flex items-center gap-0.5 min-w-0 max-w-[140px] justify-end min-h-[0.9rem] overflow-visible"
-                title={metadataItems.map((m) => m.label).join(' · ')}
+                title={metadataItems.map((m) => m.label).join(' Â· ')}
               >
                 <div
                   key={metadataIndex}
@@ -2153,9 +2162,9 @@ function TextCard({
   onHeartAnimation?: (clientX: number, clientY: number) => void;
   textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string; fontFamily?: string };
   stickers?: StickerOverlay[];
-  /** Your post: iMessage “sent” bubble (blue/green) on the right; others: gray bubble on the left. */
+  /** Your post: iMessage â€œsentâ€ bubble (blue/green) on the right; others: gray bubble on the left. */
   isFromViewer?: boolean;
-  /** Byline inside the card (feed “news card” layout). */
+  /** Byline inside the card (feed â€œnews cardâ€ layout). */
   feedHeadlineByline?: string;
   /** Set on the byline for `aria-labelledby` on the feed article. */
   feedCardTitleId?: string;
@@ -2224,7 +2233,7 @@ function TextCard({
     ? 'rgba(15, 23, 42, 0.92)'
     : 'rgba(30, 41, 55, 0.9)';
 
-  /** Inline tail color — match template / gradient first color; else DM sent/received fallback. */
+  /** Inline tail color â€” match template / gradient first color; else DM sent/received fallback. */
   const tailBgColor = resolveTextCardTailFill(selectedBackground, isFromViewer);
 
   function getTapPosition(e: React.MouseEvent | React.TouchEvent): { x: number; y: number } | null {
@@ -2674,7 +2683,7 @@ function ShortsLikeBurstLines() {
   );
 }
 
-function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onCarouselIndexChange, activeCarouselIndex, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled: _videoCaptionsEnabled, videoCaptionText: _videoCaptionText, subtitlesEnabled, subtitleText: _subtitleText, postUserHandle, postLocationLabel: _postLocationLabel, postCreatedAt, postId, videoPosterUrl, priority = false, tileMode = false }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onCarouselIndexChange?: (index: number) => void; activeCarouselIndex?: number; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string; postId?: string; videoPosterUrl?: string; priority?: boolean; tileMode?: boolean }) {
+function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDoubleLike, onOpenScenes, onOpenImageFullscreen, onCarouselIndexChange, activeCarouselIndex, onHeartAnimation, taggedUsers, onShowTaggedUsers, templateId: _templateId, videoCaptionsEnabled: _videoCaptionsEnabled, videoCaptionText: _videoCaptionText, subtitlesEnabled, subtitleText: _subtitleText, postUserHandle, postLocationLabel: _postLocationLabel, postCreatedAt, postId, videoPosterUrl, priority = false, tileMode = false }: { url?: string; mediaType?: 'image' | 'video'; text?: string; imageText?: string; stickers?: StickerOverlay[]; mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<any>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>; onDoubleLike: () => Promise<void>; onOpenScenes?: () => void; onOpenImageFullscreen?: (rect: DOMRect) => void; onCarouselIndexChange?: (index: number) => void; activeCarouselIndex?: number; onHeartAnimation?: (tapX: number, tapY: number) => void; taggedUsers?: string[]; onShowTaggedUsers?: () => void; templateId?: string; videoCaptionsEnabled?: boolean; videoCaptionText?: string; subtitlesEnabled?: boolean; subtitleText?: string; postUserHandle?: string; postLocationLabel?: string; postCreatedAt?: string; postId?: string; videoPosterUrl?: string; priority?: boolean; tileMode?: boolean }) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [burst, setBurst] = React.useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -2731,6 +2740,19 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
   const [currentIndex, setCurrentIndex] = React.useState(0);
   const hasMultipleItems = items.length > 1;
   const currentItem = items[currentIndex];
+  const imageOnlyItems = React.useMemo(
+    () => items.filter((it) => it.type === 'image' && it.url),
+    [items]
+  );
+  const openImageFullscreen = React.useCallback(() => {
+    if (imageOnlyItems.length === 0 || !onOpenImageFullscreen) return;
+    const el = mediaContainerRef.current;
+    if (el) {
+      onOpenImageFullscreen(el.getBoundingClientRect());
+    } else {
+      onOpenImageFullscreen(new DOMRect(0, 0, window.innerWidth, window.innerHeight));
+    }
+  }, [imageOnlyItems.length, onOpenImageFullscreen]);
   const [lowBandwidthMode, setLowBandwidthMode] = React.useState(false);
   const [autoplayPref, setAutoplayPref] = React.useState<'always' | 'wifi' | 'never'>(() => {
     try {
@@ -3000,7 +3022,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     };
   }, [postId, currentItem?.type]);
 
-  // Intersection Observer for auto-play (wrapped in try/catch for mobile – avoids "Something went wrong" on phone)
+  // Intersection Observer for auto-play (wrapped in try/catch for mobile â€“ avoids "Something went wrong" on phone)
   React.useEffect(() => {
     if (currentItem?.type !== 'video' || !videoRef.current) return;
     const videoEl = videoRef.current;
@@ -3244,8 +3266,11 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
       singleTapTimer.current = setTimeout(() => {
         // Only process single tap if no second tap came within threshold
         if (!isProcessingDoubleTap.current) {
-          // For feed videos: single tap shows the mute button again (then it hides after 2s)
-          if (currentItem?.type === 'video') {
+          // Still images: Threads-style fullscreen (not Scenes)
+          if (currentItem?.type === 'image') {
+            openImageFullscreen();
+          } else if (currentItem?.type === 'video') {
+            // Feed videos: single tap shows the mute button again (then it hides after 2s)
             setShowMuteButton(true);
             if (muteButtonHideTimerRef.current) clearTimeout(muteButtonHideTimerRef.current);
             muteButtonHideTimerRef.current = setTimeout(() => {
@@ -3272,7 +3297,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     try {
       e.preventDefault(); // Can throw on mobile if listener is passive
     } catch (_) {
-      // Ignore – some mobile browsers don't allow preventDefault in passive touch
+      // Ignore â€“ some mobile browsers don't allow preventDefault in passive touch
     }
     touchHandled.current = true;
     try {
@@ -3428,7 +3453,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     }
 
     // Feed images: force Instagram-style 4:5 frame so cards are consistently tall.
-    // (Fullscreen/Scenes behavior is separate and remains unchanged.)
+    // Still images open in Threads-style fullscreen; only videos open Scenes.
     if (currentItem?.type === 'image') {
       return {
         width: '100%',
@@ -3476,13 +3501,33 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
     };
   }, [aspectRatio, carouselFrameAspectRatio, hasMultipleItems, currentItem?.type]);
 
+  const handleOpenScenesPress = React.useCallback(() => {
+    const now = Date.now();
+    if (now - openScenesCooldownRef.current < 450) return;
+    openScenesCooldownRef.current = now;
+    if (singleTapTimer.current) {
+      clearTimeout(singleTapTimer.current);
+      singleTapTimer.current = null;
+    }
+    if (videoRef.current && postId) {
+      const currentTime = videoRef.current.currentTime;
+      videoTimesMap.set(postId, currentTime);
+      window.dispatchEvent(new CustomEvent(`storeVideoTime-${postId}`, {
+        detail: { time: currentTime },
+      }));
+    }
+    onOpenScenes?.();
+  }, [onOpenScenes, postId]);
+
   return (
     <div className={tileMode ? 'mx-0 my-0 select-none w-full h-full' : 'mx-0 my-0 select-none'}>
       <div
         ref={mediaContainerRef}
+        data-feed-post-media={postId || undefined}
         role="button"
         tabIndex={0}
         aria-label="Open media. Double tap or press to like"
+        onContextMenu={(e) => e.preventDefault()}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
@@ -3526,8 +3571,8 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
         }}
         className={
           tileMode
-            ? 'relative w-full h-full max-h-none rounded-xl overflow-hidden bg-gray-900 shadow-none'
-            : 'relative w-full overflow-hidden bg-gray-900'
+            ? 'feed-post-media-surface relative w-full h-full max-h-none rounded-xl overflow-hidden bg-gray-900 shadow-none'
+            : 'feed-post-media-surface relative w-full overflow-hidden bg-gray-900'
         }
         style={containerStyle}
       >
@@ -3612,6 +3657,9 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
               playsInline
               muted={isMuted}
               loop
+              draggable={false}
+              onContextMenu={(e) => e.preventDefault()}
+              controlsList="nodownload noremoteplayback"
               onLoadedData={handleVideoLoad}
               onError={handleVideoError}
               onPlay={handleVideoPlay}
@@ -3676,7 +3724,7 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
               {hasError && (
                 <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-75 z-50">
                   <div className="text-center text-white px-4">
-                    <div className="text-2xl mb-2">⚠️</div>
+                    <div className="text-2xl mb-2">âš ï¸</div>
                     <div className="text-sm">Failed to load {currentItem.type}</div>
                     <div className="text-xs text-gray-400 mt-1">Check your connection</div>
                   </div>
@@ -3710,61 +3758,9 @@ function Media({ url, mediaType, text, imageText, stickers, mediaItems, onDouble
                 </div>
               )}
 
-              {/* Scenes: icon — touchend must stopPropagation: outer media div's touchend+preventDefault blocks synthetic click on phones */}
-              {!isLoading && !hasError && (currentItem.type === 'video' || currentItem.type === 'image') && onOpenScenes && (
-                <div className="absolute bottom-4 right-4 z-30 pointer-events-auto" style={{ touchAction: 'manipulation' }}>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const now = Date.now();
-                      if (now - openScenesCooldownRef.current < 450) return;
-                      openScenesCooldownRef.current = now;
-                      if (singleTapTimer.current) {
-                        clearTimeout(singleTapTimer.current);
-                        singleTapTimer.current = null;
-                      }
-                      if (videoRef.current && postId) {
-                        const currentTime = videoRef.current.currentTime;
-                        videoTimesMap.set(postId, currentTime);
-                        window.dispatchEvent(new CustomEvent(`storeVideoTime-${postId}`, {
-                          detail: { time: currentTime }
-                        }));
-                      }
-                      onOpenScenes();
-                    }}
-                    onTouchEnd={(e) => {
-                      e.stopPropagation();
-                      try {
-                        e.preventDefault();
-                      } catch (_) {
-                        /* passive listener edge cases */
-                      }
-                      const now = Date.now();
-                      if (now - openScenesCooldownRef.current < 450) return;
-                      openScenesCooldownRef.current = now;
-                      if (singleTapTimer.current) {
-                        clearTimeout(singleTapTimer.current);
-                        singleTapTimer.current = null;
-                      }
-                      if (videoRef.current && postId) {
-                        const currentTime = videoRef.current.currentTime;
-                        videoTimesMap.set(postId, currentTime);
-                        window.dispatchEvent(new CustomEvent(`storeVideoTime-${postId}`, {
-                          detail: { time: currentTime }
-                        }));
-                      }
-                      onOpenScenes();
-                    }}
-                    className="p-2 rounded-full bg-black/55 hover:bg-black/70 active:bg-black/80 text-white shadow-lg pointer-events-auto transition-colors"
-                    aria-label="Open in Scenes"
-                    title="Open in Scenes"
-                  >
-                    <FiMaximize className="w-4 h-4" strokeWidth={2.25} />
-                  </button>
-                </div>
+              {!isLoading && !hasError && currentItem.type === 'video' && onOpenScenes && (
+                <VideoCTAOverlay onPress={handleOpenScenesPress} userHandle={postUserHandle} />
               )}
-
               {/* Paused Overlay - Mute Button Only (no play/pause control); same show/hide as center mute */}
               {isPaused && currentItem.type === 'video' && showMuteButton && (
                 <div className="absolute inset-0 flex items-center justify-center z-40 pointer-events-none">
@@ -4391,8 +4387,10 @@ function EngagementBar({
       setShares(prev => prev + 1);
     };
 
-    const handleReclipAdded = () => {
-      setReclips(prev => prev + 1);
+    const handleReclipAdded = (event: Event) => {
+      const d = (event as CustomEvent).detail;
+      if (typeof d?.reclips === 'number') setReclips(d.reclips);
+      else setReclips((prev) => prev + 1);
       setUserReclipped(true); // so the reclip icon turns green
     };
 
@@ -4408,7 +4406,7 @@ function EngagementBar({
     // Listen for all engagement events
     window.addEventListener(`commentAdded-${post.id}`, handleCommentAdded);
     window.addEventListener(`shareAdded-${post.id}`, handleShareAdded);
-    window.addEventListener(`reclipAdded-${post.id}`, handleReclipAdded);
+    window.addEventListener(`reclipAdded-${post.id}`, handleReclipAdded as EventListener);
     window.addEventListener(`viewAdded-${post.id}`, handleViewAdded);
     window.addEventListener(`likeToggled-${post.id}`, handleLikeToggled as EventListener);
 
@@ -4424,7 +4422,7 @@ function EngagementBar({
     return () => {
       window.removeEventListener(`commentAdded-${post.id}`, handleCommentAdded);
       window.removeEventListener(`shareAdded-${post.id}`, handleShareAdded);
-      window.removeEventListener(`reclipAdded-${post.id}`, handleReclipAdded);
+      window.removeEventListener(`reclipAdded-${post.id}`, handleReclipAdded as EventListener);
       window.removeEventListener(`viewAdded-${post.id}`, handleViewAdded);
       window.removeEventListener(`likeToggled-${post.id}`, handleLikeToggled as EventListener);
       window.removeEventListener(`postUpdated-${post.id}`, handlePostUpdated);
@@ -4465,8 +4463,8 @@ function EngagementBar({
     setShowShareToStoriesModal(true);
   }
 
-  // Instagram-style: 24px icons (Instagram uses ~24–28px for feed actions), white on dark bar
-  const iconSize = 'w-6 h-6'; // 24px – Instagram feed action size
+  // Instagram-style: 24px icons (Instagram uses ~24â€“28px for feed actions), white on dark bar
+  const iconSize = 'w-6 h-6'; // 24px â€“ Instagram feed action size
   const iconGap = 'gap-1'; // denser Instagram-like spacing
   const rowGap = 'gap-4';
 
@@ -4544,7 +4542,7 @@ function EngagementBar({
             <span className="text-xs text-white tabular-nums">{comments}</span>
           </button>
 
-          {/* Share to stories — Instagram-style dashed ring + plus */}
+          {/* Share to stories â€” Instagram-style dashed ring + plus */}
           <button
             className={`flex items-center ${iconGap} min-h-[40px] px-1 -mx-1 transition-opacity hover:opacity-70 active:opacity-50 flex-shrink-0`}
             onClick={shareClick}
@@ -4596,9 +4594,9 @@ function EngagementBar({
 
         </div>
 
-        {/* Right group: Share/DM (paper plane), Metrics – kept inset from edge (Instagram: bookmark on right) */}
+        {/* Right group: Share/DM (paper plane), Metrics â€“ kept inset from edge (Instagram: bookmark on right) */}
         <div className={`flex items-center flex-shrink-0 ${rowGap}`}>
-          {/* Share – VS Code Live Share style icon (VscLiveShare) */}
+          {/* Share â€“ VS Code Live Share style icon (VscLiveShare) */}
           <button
             className={`flex items-center justify-center w-11 h-11 rounded-full transition-opacity hover:opacity-70 active:opacity-50`}
             onClick={() => _onShare?.()}
@@ -4933,6 +4931,13 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
   const [hasPostNotifications, setHasPostNotifications] = React.useState(false);
   const [isQuickSaving, setIsQuickSaving] = React.useState(false);
   const [carouselIndex, setCarouselIndex] = React.useState(0);
+  const [imageFullscreenOpen, setImageFullscreenOpen] = React.useState(false);
+  const [imageFullscreenOrigin, setImageFullscreenOrigin] = React.useState<{
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+  } | null>(null);
   const [showTaggedUsersModal, setShowTaggedUsersModal] = React.useState(false);
   const [heartAnimation, setHeartAnimation] = React.useState<{ startX: number; startY: number } | null>(null);
   const carouselThumbRailRef = React.useRef<HTMLDivElement | null>(null);
@@ -4954,6 +4959,62 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
       })),
     [post.mediaItems, rewriteMediaUrlForThumbs]
   );
+  const imageFullscreenSlides = React.useMemo(() => {
+    const raw =
+      post.mediaItems && post.mediaItems.length > 0
+        ? post.mediaItems
+        : post.mediaUrl
+          ? [{ url: post.mediaUrl, type: (post.mediaType || 'image') as 'image' | 'video' }]
+          : [];
+    return raw
+      .filter((it) => it.type === 'image' && it.url)
+      .map((it) => ({ url: rewriteMediaUrlForThumbs(it.url) }));
+  }, [post.mediaItems, post.mediaUrl, post.mediaType, rewriteMediaUrlForThumbs]);
+  const imageFullscreenStartIndex = React.useMemo(() => {
+    const raw =
+      post.mediaItems && post.mediaItems.length > 0
+        ? post.mediaItems
+        : post.mediaUrl
+          ? [{ url: post.mediaUrl, type: (post.mediaType || 'image') as 'image' | 'video' }]
+          : [];
+    const active = raw[carouselIndex];
+    if (!active || active.type !== 'image' || !active.url) return 0;
+    const activeUrl = rewriteMediaUrlForThumbs(active.url);
+    const idx = imageFullscreenSlides.findIndex((s) => s.url === activeUrl);
+    return idx >= 0 ? idx : 0;
+  }, [post.mediaItems, post.mediaUrl, post.mediaType, carouselIndex, imageFullscreenSlides, rewriteMediaUrlForThumbs]);
+
+  const handleOpenImageFullscreen = React.useCallback((rect: DOMRect) => {
+    setImageFullscreenOrigin({
+      top: rect.top,
+      left: rect.left,
+      width: rect.width,
+      height: rect.height,
+    });
+    setImageFullscreenOpen(true);
+  }, []);
+
+  const handleCloseImageFullscreen = React.useCallback(() => {
+    setImageFullscreenOpen(false);
+    setImageFullscreenOrigin(null);
+  }, []);
+
+  const handleImageFullscreenComment = React.useCallback(() => {
+    onOpenComments();
+  }, [onOpenComments]);
+
+  const handleImageFullscreenReclip = React.useCallback(async () => {
+    if (post.userHandle === user?.handle || post.userReclipped) return;
+    const result = await Swal.fire(bottomSheet({
+      title: 'Reshare this to followers?',
+      message: 'This post will be shared to your followers in their Following feed.',
+      showCancelButton: true,
+      confirmButtonText: 'OK',
+      cancelButtonText: 'Cancel',
+    }));
+    if (!result.isConfirmed) return;
+    await onReclip();
+  }, [post.userHandle, post.userReclipped, user?.handle, onReclip]);
 
   React.useEffect(() => {
     if (!carouselThumbRailRef.current || carouselThumbItems.length <= 1) return;
@@ -5174,7 +5235,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             Sponsored
           </span>
           {post.boostFeedType && (
-            <span className="text-xs text-gray-500 dark:text-gray-400 capitalize">· {post.boostFeedType} boost</span>
+            <span className="text-xs text-gray-500 dark:text-gray-400 capitalize">Â· {post.boostFeedType} boost</span>
           )}
         </div>
       )}
@@ -5264,6 +5325,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             mediaItems={post.mediaItems}
             onDoubleLike={onLike}
             onOpenScenes={isTileBoostMode ? undefined : onOpenScenes}
+            onOpenImageFullscreen={isTileBoostMode ? undefined : handleOpenImageFullscreen}
             postId={post.id}
             onCarouselIndexChange={setCarouselIndex}
             onHeartAnimation={(clientX, clientY) => {
@@ -5309,6 +5371,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
                     e.stopPropagation();
                     setCarouselIndex(index);
                   }}
+                  onContextMenu={(e) => e.preventDefault()}
                   className={`relative w-14 h-14 shrink-0 overflow-hidden rounded-lg border transition-all ${
                     isActive ? 'border-white shadow-[0_0_0_1px_rgba(255,255,255,0.55)]' : 'border-white/25'
                   }`}
@@ -5387,7 +5450,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
         <div className="h-7 bg-black dark:bg-black overflow-hidden border-t border-gray-700 dark:border-gray-700">
           <div className="news-ticker-container h-full flex items-center">
             <div className="news-ticker-text text-white dark:text-white font-semibold text-xs whitespace-nowrap">
-              {post.bannerText} • {post.bannerText} • {post.bannerText} • {post.bannerText}
+              {post.bannerText} â€¢ {post.bannerText} â€¢ {post.bannerText} â€¢ {post.bannerText}
             </div>
           </div>
         </div>
@@ -5440,7 +5503,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
               const viewerId = getStableUserId(user);
               setPostNotificationsPref(viewerId, post.id, true);
               setHasPostNotifications(true);
-              showToast('You’ll get notifications about this post');
+              showToast('Youâ€™ll get notifications about this post');
             }}
             onTurnOffNotifications={() => {
               const viewerId = getStableUserId(user);
@@ -5480,7 +5543,7 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
             onCreated={(g) => {
               setCreateGroupOpen(false);
               navigate(`/messages/group/${encodeURIComponent(g.id)}`);
-              showToast(`You're in “${g.name}”. Tap + in the header to invite people, or use their profile → Invite to group.`);
+              showToast(`You're in â€œ${g.name}â€. Tap + in the header to invite people, or use their profile â†’ Invite to group.`);
             }}
           />
           <SavePostModal
@@ -5533,6 +5596,31 @@ export const FeedCard = React.memo(function FeedCard({ post, onLike, onFollow, o
           taggedUserHandles={post.taggedUsers}
         />
       )}
+      {imageFullscreenSlides.length > 0 && (
+        <ImageFullscreenViewer
+          images={imageFullscreenSlides}
+          initialIndex={imageFullscreenStartIndex}
+          isOpen={imageFullscreenOpen}
+          originRect={imageFullscreenOrigin}
+          onClose={handleCloseImageFullscreen}
+          onMenu={() => setMenuOpen(true)}
+          engagement={{
+            postId: post.id,
+            likes: post.stats.likes,
+            comments: post.stats.comments,
+            shares: post.stats.shares,
+            reclips: post.stats.reclips,
+            userLiked: post.userLiked,
+            userReclipped: !!post.userReclipped,
+            userHandle: post.userHandle,
+            currentUserHandle: user?.handle,
+            onLike,
+            onComment: handleImageFullscreenComment,
+            onReclip: handleImageFullscreenReclip,
+            onShare,
+          }}
+        />
+      )}
     </article>
   );
 });
@@ -5583,7 +5671,7 @@ const AdCard = React.memo(function AdCard({ ad, onImpression, onClick }: {
       <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Sponsored</span>
-          <span className="text-xs text-gray-400">·</span>
+          <span className="text-xs text-gray-400">Â·</span>
           <span className="text-xs text-gray-600 dark:text-gray-300">{ad.advertiserHandle}</span>
         </div>
         {ad.createdAt && (
@@ -5628,11 +5716,11 @@ type Stories24RailItem = {
 };
 
 const STORIES24_RAIL_RETURN_KEY = 'clips:stories24RailReturn';
-/** Persisted handle when opening /stories from feed rail — survives `location.state` loss on some mobile browsers. Keep in sync with StoriesPage. */
+/** Persisted handle when opening /stories from feed rail â€” survives `location.state` loss on some mobile browsers. Keep in sync with StoriesPage. */
 const STORIES24_FROM_RAIL_HANDLE_KEY = 'clips:stories24OpenedFromRailHandle';
 const STORIES24_FEED_SCROLL_Y_KEY = 'clips:stories24FeedScrollY';
 const STORIES24_RESTORE_FEED_SCROLL_FLAG = 'clips:stories24RestoreFeedScroll';
-/** Expand: confident ease-out (streaming-style). Collapse: slight overshoot so the card “drops” back. */
+/** Expand: confident ease-out (streaming-style). Collapse: slight overshoot so the card â€œdropsâ€ back. */
 const STORIES24_EXPAND_MS = 560;
 const STORIES24_COLLAPSE_MS = 720;
 const STORIES24_COLLAPSE_EASING = 'cubic-bezier(0.34, 1.28, 0.32, 1)';
@@ -5760,7 +5848,7 @@ function Stories24RailCollapseOverlay() {
         'position:absolute;inset:0;pointer-events:none;background:linear-gradient(135deg,rgba(100,116,139,0.25),rgba(56,189,248,0.2),rgba(99,102,241,0.25))';
       shell.appendChild(tint);
 
-      // Static image only during shrink — video inside a transform-animated shell often no-ops the animation on Android/WebKit.
+      // Static image only during shrink â€” video inside a transform-animated shell often no-ops the animation on Android/WebKit.
       if (previewThumb) {
         const img = document.createElement('img');
         img.src = previewThumb;
@@ -5834,7 +5922,7 @@ function Stories24RailCollapseOverlay() {
   return null;
 }
 
-/** Horizontal Stories 24 strip (map pin + title + cards). Colours match `Avatar` story ring (teal → sky → fuchsia). */
+/** Horizontal Stories 24 strip (map pin + title + cards). Colours match `Avatar` story ring (teal â†’ sky â†’ fuchsia). */
 function Stories24FeedRail({
   stories24Items,
   navigate,
@@ -6022,7 +6110,7 @@ function Stories24FeedRail({
               }}
             >
               <div className="absolute inset-0 bg-gradient-to-tr from-teal-500/20 via-sky-500/20 to-fuchsia-500/20" />
-              {/* Do not use a video element here — mobile compositors break parent expand animation. */}
+              {/* Do not use a video element here â€” mobile compositors break parent expand animation. */}
               {expandingStory.item.thumb ? (
                 <img
                   src={expandingStory.item.thumb}
@@ -6047,7 +6135,7 @@ function Stories24FeedRail({
 }
 
 function FeedPageWrapper() {
-  const { user } = useAuth();
+  const { user, login } = useAuth();
   const userId = getStableUserId(user);
   const online = useOnline();
   const routerLocation = useLocation();
@@ -6229,6 +6317,9 @@ function FeedPageWrapper() {
   const [selectedPostForBoost, setSelectedPostForBoost] = React.useState<Post | null>(null);
   const [unreadCount, setUnreadCount] = React.useState(0);
   const [hasInbox, setHasInbox] = React.useState(false);
+  const [interestsDraft, setInterestsDraft] = React.useState<string[]>([]);
+  const [interestsSaving, setInterestsSaving] = React.useState(false);
+  const [interestsCardDismissed, setInterestsCardDismissed] = React.useState(false);
   // In-feed DM sheet (TikTok-style: compose without leaving feed)
   const [dmSheetOpen, setDmSheetOpen] = React.useState(false);
   const [dmSheetRecipientHandle, setDmSheetRecipientHandle] = React.useState<string | null>(null);
@@ -6639,7 +6730,7 @@ function FeedPageWrapper() {
 
   /**
    * PillTabs tab selection: keep `active`, `showFollowingFeed`, pagination, and URL in sync in one gesture.
-   * If `showFollowingFeed` only flipped in useEffect, one render still had Following=true + active=Ireland → currentFilter stayed discover.
+   * If `showFollowingFeed` only flipped in useEffect, one render still had Following=true + active=Ireland â†’ currentFilter stayed discover.
    */
   const handleFeedTabChange = React.useCallback(
     (t: Tab) => {
@@ -6785,7 +6876,7 @@ function FeedPageWrapper() {
   }, [user?.handle]);
 
   // Custom Gazetteer / URL location must win over Following: `active` can stay `'Following'` after a header
-  // search while `showFollowingFeed` was cleared — old logic kept `currentFilter` on `discover` forever.
+  // search while `showFollowingFeed` was cleared â€” old logic kept `currentFilter` on `discover` forever.
   const currentFilter =
     customLocation != null && String(customLocation).trim() !== ''
       ? customFilterType === 'venue'
@@ -7406,7 +7497,7 @@ function FeedPageWrapper() {
     if (pagesLoadedForFilterRef.current !== currentFilter) return [];
     const flattened = pages.flat();
 
-    // Dev / explicit flag: optional layout QA tile — only for feeds where Ava's author location matches (e.g. Ireland/Galway), never London/Paris/Following.
+    // Dev / explicit flag: optional layout QA tile â€” only for feeds where Ava's author location matches (e.g. Ireland/Galway), never London/Paris/Following.
     const showAvaFeedDemo =
       import.meta.env.DEV || import.meta.env.VITE_FEED_DEMO_AVA === 'true';
     const avaDemoId = 'ava-normal-ireland-demo';
@@ -7449,7 +7540,7 @@ function FeedPageWrapper() {
     return feedItems;
   }, [pages, ads, userId, currentFilter]);
 
-  /** Insert “Suggested for your places” strips between posts (skipped on custom venue/location feeds). */
+  /** Insert â€œSuggested for your placesâ€ strips between posts (skipped on custom venue/location feeds). */
   const flatWithSuggested = React.useMemo(() => {
     if (!suggestedCardsV2Enabled) return flat;
     if (customLocation) return flat;
@@ -7616,7 +7707,7 @@ function FeedPageWrapper() {
     const out: StreamRow[] = [];
     let bundleIdx = 0;
     let postCount = 0;
-    /** First strip after 3rd post, then every 5 posts (8, 13, …) so suggestions surface without long scroll. */
+    /** First strip after 3rd post, then every 5 posts (8, 13, â€¦) so suggestions surface without long scroll. */
     const shouldInsertSuggestedStrip = (count: number, bundleIndex: number) =>
       bundleIndex < bundles.length && count === 3 + bundleIndex * 5;
 
@@ -7650,6 +7741,53 @@ function FeedPageWrapper() {
     }
     return out;
   }, [flat, user, customLocation, suggestedPlacesPrefs, serverPlaceSuggestions, previewSuggestedCards, userId, businessStripEligible, suggestedCardsV2Enabled]);
+
+  React.useEffect(() => {
+    setInterestsDraft(user?.interests ?? []);
+    setInterestsCardDismissed(false);
+  }, [user?.id]);
+
+  const showInterestsFeedCard = React.useMemo(() => {
+    if (!user || interestsCardDismissed) return false;
+    if ((user.interests?.length ?? 0) >= MAX_INTEREST_SELECTIONS) return false;
+    try {
+      if (localStorage.getItem(INTERESTS_ONBOARDING_DISMISSED_KEY) === '1') return false;
+    } catch {
+      /* ignore */
+    }
+    return true;
+  }, [user, interestsCardDismissed]);
+
+  const flatForRender = React.useMemo(() => {
+    if (!showInterestsFeedCard) return flatWithSuggested;
+    const out: typeof flatWithSuggested = [];
+    let postCount = 0;
+    let inserted = false;
+    for (const item of flatWithSuggested) {
+      out.push(item);
+      if (!inserted && item.type === 'post') {
+        postCount += 1;
+        if (postCount === 4) {
+          out.push({ type: 'interests_onboarding' as const, item: null, createdAt: 0 });
+          inserted = true;
+        }
+      }
+    }
+    return out;
+  }, [flatWithSuggested, showInterestsFeedCard]);
+
+  const saveInterests = React.useCallback(
+    (next: string[]) => {
+      if (!user) return;
+      login({ ...user, interests: next });
+      try {
+        localStorage.removeItem(INTERESTS_ONBOARDING_DISMISSED_KEY);
+      } catch {
+        /* ignore */
+      }
+    },
+    [login, user],
+  );
 
   const previewLocalBusinessPosts = React.useMemo(() => {
     const posts = flat
@@ -7698,25 +7836,15 @@ function FeedPageWrapper() {
     }));
   }, [flat, user, suggestedPlacesPrefs.includePosterLocale]);
 
-  // Posts only (no ads) - for Scenes carousel (only posts that have media: image or video; exclude text-only)
+  // Video posts only â€” Scenes carousel must not include still images
   const postsOnly = React.useMemo(() => {
-    const hasMedia = (p: Post) => {
-      // If there is a mediaItems array, allow when at least one item is image or video
-      if (p.mediaItems && p.mediaItems.length > 0) {
-        return p.mediaItems.some((m) => m.type === 'video' || m.type === 'image');
-      }
-      // Fallback to single mediaUrl/mediaType
-      if (p.mediaType === 'video' || p.mediaType === 'image') return true;
-      // If there's no mediaType but there is a mediaUrl, treat it as media
-      return !!p.mediaUrl;
-    };
     return flat
       .filter((f) => f.type === 'post')
       .map((f) => f.item as Post)
-      .filter((p) => hasMedia(p));
+      .filter((p) => postHasVideoMedia(p));
   }, [flat]);
 
-  /** Canvas thumb for text-only stories — matches the ~112×156 rail card aspect so object-cover doesn’t crop badly. */
+  /** Canvas thumb for text-only stories â€” matches the ~112Ã—156 rail card aspect so object-cover doesnâ€™t crop badly. */
   const generateTextStoryPreview = React.useCallback(
     async (
       text: string,
@@ -7767,7 +7895,7 @@ function FeedPageWrapper() {
           ctx.textBaseline = 'top';
           ctx.font = 'bold 11px system-ui, -apple-system, "Segoe UI", sans-serif';
           const upper = bylineStr.toUpperCase();
-          const short = upper.length > 40 ? `${upper.slice(0, 38)}…` : upper;
+          const short = upper.length > 40 ? `${upper.slice(0, 38)}â€¦` : upper;
           ctx.fillText(short, W / 2, contentTop);
           contentTop += 20;
         }
@@ -7852,7 +7980,7 @@ function FeedPageWrapper() {
           const title = text.length > 34 ? `${text.slice(0, 34)}...` : text;
           const subtitle = formatTextOnlyFeedByline(group.userHandle, latest.location);
 
-          // Dedicated visual fallback for text-only stories — template background + byline + body (rail aspect).
+          // Dedicated visual fallback for text-only stories â€” template background + byline + body (rail aspect).
           if (!thumb && latestMediaType !== 'video') {
             thumb = await generateTextStoryPreview(text, {
               textStyle: {
@@ -7908,7 +8036,7 @@ function FeedPageWrapper() {
   }, [user?.id, routerLocation.pathname, generateTextStoryPreview]);
 
   const stories24Items = React.useMemo(() => {
-    // Only real 24h stories belong here. Do NOT derive cards from feed posts — a newsfeed
+    // Only real 24h stories belong here. Do NOT derive cards from feed posts â€” a newsfeed
     // post is not a story; showing it made the rail preview match the feed but /stories had nothing.
     const mergedByHandle = new Map<string, Stories24RailItem>();
     for (const item of storiesRailItems) mergedByHandle.set(item.handle.trim().toLowerCase(), item);
@@ -7938,7 +8066,7 @@ function FeedPageWrapper() {
     return currentFilter ? String(currentFilter).charAt(0).toUpperCase() + String(currentFilter).slice(1) : '';
   }, [currentFilter]);
 
-  // Route /feed → /stories unmounts this page; on return, restore inner scroll so the shrink-back lands on the same place (not scroll 0).
+  // Route /feed â†’ /stories unmounts this page; on return, restore inner scroll so the shrink-back lands on the same place (not scroll 0).
   React.useLayoutEffect(() => {
     if (!user || routerLocation.pathname !== '/feed') return;
     let pending = false;
@@ -8206,7 +8334,7 @@ function FeedPageWrapper() {
                   }
                 }
               } else {
-                // Public profile – follow via API then update UI
+                // Public profile â€“ follow via API then update UI
                 try {
                   const result = await toggleFollow(p.userHandle);
                   const newFollowingState =
@@ -8331,7 +8459,43 @@ function FeedPageWrapper() {
         // Stories 24: show once after the first post card (not above the feed). Custom/search feeds omit entirely.
         let postCounter = 0;
 
-        return flatWithSuggested.map((feedItem, index) => {
+        return flatForRender.map((feedItem, index) => {
+          if (feedItem.type === 'interests_onboarding') {
+            return (
+              <InterestsFeedCard
+                key="interests-onboarding-feed-card"
+                selected={interestsDraft}
+                saving={interestsSaving}
+                onToggle={(interest) => {
+                  setInterestsDraft((prev) => {
+                    const next = prev.includes(interest)
+                      ? prev.filter((i) => i !== interest)
+                      : prev.length < MAX_INTEREST_SELECTIONS
+                        ? [...prev, interest]
+                        : prev;
+                    if (next.length === MAX_INTEREST_SELECTIONS) {
+                      void saveInterests(next);
+                    }
+                    return next;
+                  });
+                }}
+                onSave={() => {
+                  if (!interestsDraft.length) return;
+                  setInterestsSaving(true);
+                  saveInterests(interestsDraft);
+                  setInterestsSaving(false);
+                }}
+                onSkip={() => {
+                  try {
+                    localStorage.setItem(INTERESTS_ONBOARDING_DISMISSED_KEY, '1');
+                  } catch {
+                    /* ignore */
+                  }
+                  setInterestsCardDismissed(true);
+                }}
+              />
+            );
+          }
           if (feedItem.type === 'suggested') {
             const sug = feedItem.item.suggestions;
             const bKey = suggestedPlacesBundleKey(sug);
@@ -8468,7 +8632,7 @@ function FeedPageWrapper() {
             onOpenComments={() => handleOpenComments(p.id)}
             onView={async () => {
               if (!p?.id) return;
-              // Skip view tracking for frontend-only mock posts (mock-scenes-*) – they don't exist in the API
+              // Skip view tracking for frontend-only mock posts (mock-scenes-*) â€“ they don't exist in the API
               if (p.id.startsWith('mock-scenes-')) return;
               if (!online) {
                 await enqueue({ type: 'view', postId: p.id, userId });
@@ -8491,7 +8655,7 @@ function FeedPageWrapper() {
             }}
             onReclip={async () => {
               if (p.userHandle === user?.handle || p.userReclipped) return;
-              const newReclipsCount = p.stats.reclips + 1;
+              const newReclipsCount = (p.stats.reclips ?? 0) + 1;
               const optimisticPost = { ...p, userReclipped: true, stats: { ...p.stats, reclips: newReclipsCount } };
               setReclipState(userId, p.id, true);
               updateOne(p.id, () => optimisticPost);
@@ -8502,15 +8666,22 @@ function FeedPageWrapper() {
               }
               try {
                 const { originalPost: updatedOriginalPost } = await reclipPost(userId, p.id, user?.handle || 'Unknown@Unknown');
-                updateOne(p.id, () => ({ ...p, userReclipped: updatedOriginalPost.userReclipped, stats: updatedOriginalPost.stats }));
-                if (updatedOriginalPost.stats.reclips !== newReclipsCount) {
-                  window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`, { detail: { reclips: updatedOriginalPost.stats.reclips } }));
-                }
+                const finalReclips = Math.max(
+                  newReclipsCount,
+                  updatedOriginalPost.stats?.reclips ?? 0
+                );
+                updateOne(p.id, (prev) => ({
+                  ...prev,
+                  userReclipped: true,
+                  stats: { ...prev.stats, reclips: finalReclips },
+                }));
+                window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`, { detail: { reclips: finalReclips } }));
               } catch (err) {
                 console.warn('Reclip failed (UI already updated):', err);
               }
             }}
             onOpenScenes={() => {
+              if (!postHasVideoMedia(p)) return;
               // Get current video time from the videoTimesMap for seamless transition
               const currentTime = videoTimesMap.get(p.id);
               setInitialVideoTime(currentTime !== undefined ? currentTime : null);
@@ -8616,13 +8787,13 @@ function FeedPageWrapper() {
             {isVisitorInCustomLocation ? (
               <div className="max-w-md mx-auto rounded-2xl border border-gray-800 bg-gradient-to-b from-black/80 via-black/70 to-black/90 px-5 py-6 shadow-lg">
                 <div className="mb-3 text-sm font-medium uppercase tracking-wide text-gray-400">
-                  You’re early to this feed
+                  Youâ€™re early to this feed
                 </div>
                 <div className="text-xl font-semibold mb-2 text-white">
                   {`No locals are posting in ${customLocationDisplay} yet`}
                 </div>
                 <div className="text-sm text-gray-400 mb-5">
-                  {`We’ll light up this feed once people in ${customLocationDisplay} start sharing.`}
+                  {`Weâ€™ll light up this feed once people in ${customLocationDisplay} start sharing.`}
                 </div>
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 justify-center">
                   <button
@@ -8634,7 +8805,7 @@ function FeedPageWrapper() {
                         : 'bg-gradient-to-r from-sky-500 via-indigo-500 to-purple-500 text-white hover:brightness-110'
                     }`}
                   >
-                    {isNotifyOnForCurrentLocation ? 'You’ll be notified' : `Notify me when ${customLocationDisplay} wakes up`}
+                    {isNotifyOnForCurrentLocation ? 'Youâ€™ll be notified' : `Notify me when ${customLocationDisplay} wakes up`}
                   </button>
                   <button
                     type="button"
@@ -8645,7 +8816,7 @@ function FeedPageWrapper() {
                   </button>
                 </div>
                 <div className="mt-4 text-[11px] text-gray-500">
-                  Feed warming up · we’ll only ping you when real clips from {customLocationDisplay} start to appear.
+                  Feed warming up Â· weâ€™ll only ping you when real clips from {customLocationDisplay} start to appear.
                 </div>
               </div>
             ) : (
@@ -8657,7 +8828,7 @@ function FeedPageWrapper() {
                   {`No posts in your ${customLocationDisplay} feed yet`}
                 </div>
                 <div className="text-sm text-gray-400 mb-4">
-                  You can be the first to post here. Share what’s happening around you to start this feed.
+                  You can be the first to post here. Share whatâ€™s happening around you to start this feed.
                 </div>
                 <div className="flex items-center justify-center">
                   <button
@@ -8684,7 +8855,7 @@ function FeedPageWrapper() {
                 {currentFilter ? `No posts in your ${currentFilter} feed yet` : 'No posts yet'}
               </div>
               <div className="text-sm text-gray-400 mb-4">
-                You can be the first to post here. Share what’s happening around you to start this feed.
+                You can be the first to post here. Share whatâ€™s happening around you to start this feed.
               </div>
               <div className="flex items-center justify-center">
                 <button
@@ -8771,7 +8942,7 @@ function FeedPageWrapper() {
                     setDmSheetMessage(e.target.value);
                     requestAnimationFrame(() => adjustDmSheetTextareaHeight());
                   }}
-                  placeholder="Message…"
+                  placeholder="Messageâ€¦"
                   rows={1}
                   className="flex-1 min-h-[44px] max-h-40 rounded-2xl bg-neutral-950 border border-white px-4 py-2.5 text-[15px] leading-snug text-white placeholder:text-neutral-500 resize-none overflow-y-auto focus:outline-none focus:ring-0 focus:border-white"
                   style={{ height: `${DM_SHEET_TEXTAREA_MIN_PX}px` }}
@@ -8793,7 +8964,7 @@ function FeedPageWrapper() {
                 </button>
               </div>
               <p className="text-[11px] text-neutral-500 px-1">
-                <span className="text-neutral-400">Enter</span> to send · <span className="text-neutral-400">Shift+Enter</span> new line
+                <span className="text-neutral-400">Enter</span> to send Â· <span className="text-neutral-400">Shift+Enter</span> new line
               </p>
             </div>
           </div>
@@ -8989,7 +9160,7 @@ function FeedPageWrapper() {
                     message: `You have already sent a follow request to ${p.userHandle}. You will be notified when they respond.`,
                     icon: 'alert',
                   }));
-                  return false; // not following yet – request pending
+                  return false; // not following yet â€“ request pending
                 }
 
                 // Create new follow request (local + optional notification)
@@ -9014,10 +9185,10 @@ function FeedPageWrapper() {
                 } catch {
                   // ensure we still return false if Swal fails
                 }
-                return false; // not following yet – request sent, awaiting acceptance
+                return false; // not following yet â€“ request sent, awaiting acceptance
               }
 
-              // PUBLIC PROFILES – in mock-only mode skip API and use local follow state
+              // PUBLIC PROFILES â€“ in mock-only mode skip API and use local follow state
               const useLaravelApi = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
               if (!useLaravelApi) {
                 const updated = await toggleFollowForPost(userId, p.id, p.userHandle);
@@ -9062,7 +9233,7 @@ function FeedPageWrapper() {
                   apiError?.message?.includes('Failed to fetch');
 
                 if (isConnectionError) {
-                  // Backend not available – fall back to mock follow toggling
+                  // Backend not available â€“ fall back to mock follow toggling
                   const updated = await toggleFollowForPost(userId, p.id, p.userHandle);
                   updateOne(p.id, post => ({ ...post, isFollowing: updated.isFollowing }));
                   setSelectedPostForScenes(prev => (prev && prev.id === p.id) ? { ...prev, isFollowing: updated.isFollowing } : prev);
@@ -9098,7 +9269,7 @@ function FeedPageWrapper() {
               if (p.userHandle === user?.handle) return;
               if (p.userReclipped) return;
 
-              const newReclipsCount = p.stats.reclips + 1;
+              const newReclipsCount = (p.stats.reclips ?? 0) + 1;
               const optimisticPost = { ...p, userReclipped: true, stats: { ...p.stats, reclips: newReclipsCount } };
 
               // Optimistic update first so the button goes green immediately (no delay)
@@ -9113,11 +9284,11 @@ function FeedPageWrapper() {
               }
               try {
                 const { originalPost: updatedOriginalPost, reclippedPost } = await reclipPost(userId, p.id, user?.handle || 'Unknown@Unknown');
-                updateOne(p.id, () => ({ ...p, userReclipped: updatedOriginalPost.userReclipped, stats: updatedOriginalPost.stats }));
-                setSelectedPostForScenes(prev => (prev && prev.id === p.id) ? { ...prev, ...updatedOriginalPost } : prev);
-                if (updatedOriginalPost.stats.reclips !== newReclipsCount) {
-                  window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`, { detail: { reclips: updatedOriginalPost.stats.reclips } }));
-                }
+                const finalReclips = Math.max(newReclipsCount, updatedOriginalPost.stats?.reclips ?? 0);
+                const merged = { ...optimisticPost, stats: { ...optimisticPost.stats, reclips: finalReclips } };
+                updateOne(p.id, () => merged);
+                setSelectedPostForScenes(prev => (prev && prev.id === p.id) ? merged : prev);
+                window.dispatchEvent(new CustomEvent(`reclipAdded-${p.id}`, { detail: { reclips: finalReclips } }));
               } catch (err) {
                 console.warn('Reclip API failed (UI already updated):', err);
               }
@@ -9365,8 +9536,8 @@ function BoostPageWrapper() {
   }, []);
 
   const sparklineBars = React.useCallback((values: number[]): string => {
-    if (!values.length) return '—';
-    const bars = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    if (!values.length) return 'â€”';
+    const bars = ['â–', 'â–‚', 'â–ƒ', 'â–„', 'â–…', 'â–†', 'â–‡', 'â–ˆ'];
     const max = Math.max(...values, 1);
     return values.map((v) => {
       const idx = Math.min(bars.length - 1, Math.floor((v / max) * (bars.length - 1)));
@@ -9416,7 +9587,7 @@ function BoostPageWrapper() {
         profileVisits: 0,
         messageStarts: 0,
       };
-      const spend = typeof data?.spendEur === 'number' ? `€${data.spendEur.toFixed(2)}` : '€0.00';
+      const spend = typeof data?.spendEur === 'number' ? `â‚¬${data.spendEur.toFixed(2)}` : 'â‚¬0.00';
       const trendValues = (metrics as any)?.trend?.impressions?.map((t: any) => Number(t.value) || 0) ?? [];
       const trendSpark = sparklineBars(trendValues);
       const statusClass = data?.isActive
@@ -9427,7 +9598,7 @@ function BoostPageWrapper() {
         title: 'Boost insights',
         html: `
           <div class="mt-2 text-left space-y-2.5">
-            ${loading ? '<div class="rounded-xl border border-sky-400/30 bg-sky-500/10 px-3 py-2 text-xs text-sky-100">Updating with latest analytics…</div>' : ''}
+            ${loading ? '<div class="rounded-xl border border-sky-400/30 bg-sky-500/10 px-3 py-2 text-xs text-sky-100">Updating with latest analyticsâ€¦</div>' : ''}
             <div class="rounded-xl border border-white/10 bg-white/[0.03] p-2.5">
               <div class="flex items-center gap-2.5">
                 <div class="w-12 h-12 rounded-lg overflow-hidden border border-white/15 bg-black/30 shrink-0">
@@ -9557,7 +9728,7 @@ function BoostPageWrapper() {
 
   return (
     <div className="flex flex-col min-h-0 flex-1 pb-2">
-      {/* Pinned header – posts scroll underneath (z-30 above card overlays) */}
+      {/* Pinned header â€“ posts scroll underneath (z-30 above card overlays) */}
       <div className="sticky top-0 z-30 isolate shrink-0 px-3 py-3 bg-[#030712] border-b border-gray-800/50 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.3)]">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Your Posts</h2>
         <p className="text-sm text-gray-600 dark:text-gray-400">Boost your posts to reach more people.</p>
@@ -9672,7 +9843,7 @@ function BoostPageWrapper() {
                   </span>
                 </div>
                 <p className="mt-1 text-[11px] text-gray-500">{qualityReason}</p>
-                <p className="mt-1 text-xs text-gray-400">{estimateReachTeaser(p)} from base €4.99</p>
+                <p className="mt-1 text-xs text-gray-400">{estimateReachTeaser(p)} from base â‚¬4.99</p>
               </div>
               <button
                 type="button"
@@ -9765,6 +9936,7 @@ function BoostPageWrapper() {
                   console.log('Cannot reclip your own post');
                 }}
                 onOpenScenes={() => {
+                  if (!postHasVideoMedia(p)) return;
                   setSelectedPostForScenes(p);
                   setScenesOpen(true);
                 }}

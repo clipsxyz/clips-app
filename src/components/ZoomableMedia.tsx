@@ -335,6 +335,7 @@ export default function ZoomableMedia({
     <div
       ref={containerRef}
       className={`relative w-full h-full overflow-hidden ${className}`}
+      onContextMenu={(e) => e.preventDefault()}
       onDoubleClick={handleDoubleClick}
       style={{
         touchAction: isPinching || scale > 1 ? 'none' : 'pan-y', // Allow vertical scrolling when not zooming

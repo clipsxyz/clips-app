@@ -27,6 +27,7 @@ import { enqueue } from '../utils/mutationQueue';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
 import { timeAgo } from '../utils/timeAgo';
 import type { Post } from '../types';
+import { postHasVideoMedia } from '../utils/postMedia';
 import { DOUBLE_TAP_THRESHOLD, ANIMATION_DURATIONS } from '../constants';
 import { showToast } from '../utils/toast';
 import { TEXT_STORY_TEMPLATES } from '../textStoryTemplates';
@@ -305,7 +306,10 @@ export default function ScenesModal({
     const holdPausedRef = React.useRef(false);
     const wasPlayingBeforeHoldRef = React.useRef(false);
 
-    const effectivePosts = React.useMemo(() => (posts && posts.length > 0 ? posts : (post ? [post] : [])), [posts, post]);
+    const effectivePosts = React.useMemo(() => {
+        const list = posts && posts.length > 0 ? posts : post ? [post] : [];
+        return list.filter((p) => postHasVideoMedia(p));
+    }, [posts, post]);
     const isCarousel = Boolean(effectivePosts.length > 1);
     const carouselTouchStart = React.useRef<number>(0);
     const carouselTouchHandled = React.useRef(false);

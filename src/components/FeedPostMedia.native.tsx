@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useImperativeHandle, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Image,
@@ -21,6 +21,12 @@ import {
     isTextOnlyPost,
     isVideoPost,
 } from '../utils/effectiveTextPostStyleNative';
+import { postHasVideoMedia } from '../utils/postMedia';
+import VideoCTAOverlay from './VideoCTAOverlay.native';
+
+export type FeedPostMediaHandle = {
+    toggleVideoMute: () => void;
+};
 
 type Props = {
     post: Post;
@@ -34,23 +40,30 @@ type Props = {
     /** Feed autoplay is muted by default (global mute pref). */
     muted?: boolean;
     style?: StyleProp<ViewStyle>;
+    /** Feed video: opens vertical Scenes viewer. */
+    onOpenScenes?: () => void;
 };
 
-export default function FeedPostMedia({
-    post,
-    width,
-    height,
-    onPress,
-    onMediaLoad,
-    mode = 'feed',
-    isActive = false,
-    muted = true,
-    style,
-}: Props) {
+const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function FeedPostMedia(
+    {
+        post,
+        width,
+        height,
+        onPress,
+        onMediaLoad,
+        mode = 'feed',
+        isActive = false,
+        muted = true,
+        style,
+        onOpenScenes,
+    },
+    ref,
+) {
     const [loading, setLoading] = useState(true);
     const [paused, setPaused] = useState(mode === 'feed');
     const [playFailed, setPlayFailed] = useState(false);
     const [soundOn, setSoundOn] = useState(!muted);
+    const [muteFlash, setMuteFlash] = useState(false);
 
     const firstMedia = post.mediaItems?.[0];
     const mediaUrl = firstMedia?.url || post.mediaUrl;
@@ -58,7 +71,21 @@ export default function FeedPostMedia({
 
     const textOnly = isTextOnlyPost(post);
     const video = !textOnly && isVideoPost(post) && !!mediaUrl;
+    const showScenesCta = mode === 'feed' && video && postHasVideoMedia(post) && Boolean(onOpenScenes);
     const feedShouldPlay = mode === 'feed' && video && isActive && !playFailed;
+
+    useImperativeHandle(
+        ref,
+        () => ({
+            toggleVideoMute: () => {
+                if (!video || mode !== 'feed') return;
+                setSoundOn((v) => !v);
+                setMuteFlash(true);
+                setTimeout(() => setMuteFlash(false), 1100);
+            },
+        }),
+        [mode, video],
+    );
 
     useEffect(() => {
         if (mode !== 'feed' || !video) return;
@@ -87,6 +114,10 @@ export default function FeedPostMedia({
             fontSize: getTextOnlyFontSize(post),
         };
     }, [post, textOnly]);
+
+    const suppressContextMenu = () => {
+        /* Best-effort: consume long-press on feed media (no web context menu on RN). */
+    };
 
     if (textOnly) {
         return (
@@ -172,27 +203,30 @@ export default function FeedPostMedia({
         />
     );
 
-    const showPlayBadge = video && mode === 'feed' && !feedShouldPlay;
-
     return (
-        <Pressable onPress={onPress} style={[styles.wrap, { width, height }, style]}>
+        <Pressable
+            onPress={onPress}
+            onLongPress={suppressContextMenu}
+            delayLongPress={400}
+            style={[styles.wrap, { width, height }, style]}
+        >
             {inner}
             {loading && !video ? (
-                <View style={styles.loadingOverlay}>
+                <View style={styles.loadingOverlay} pointerEvents="none">
                     <ActivityIndicator color="#f472b6" />
                 </View>
             ) : null}
-            {showPlayBadge ? (
-                <View style={styles.playBadge} pointerEvents="none">
-                    <Icon name="play-circle" size={52} color="rgba(255,255,255,0.92)" />
-                </View>
+            {showScenesCta ? (
+                <VideoCTAOverlay onPress={() => onOpenScenes?.()} userHandle={post.userHandle} />
             ) : null}
-            {feedShouldPlay ? (
+            {feedShouldPlay || muteFlash ? (
                 <Pressable
                     style={styles.muteButton}
                     onPress={(e) => {
                         e.stopPropagation?.();
                         setSoundOn((v) => !v);
+                        setMuteFlash(true);
+                        setTimeout(() => setMuteFlash(false), 1100);
                     }}
                     hitSlop={8}
                 >
@@ -206,7 +240,9 @@ export default function FeedPostMedia({
             ) : null}
         </Pressable>
     );
-}
+});
+
+export default FeedPostMedia;
 
 const styles = StyleSheet.create({
     wrap: {
@@ -215,13 +251,13 @@ const styles = StyleSheet.create({
         position: 'relative',
     },
     loadingOverlay: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'rgba(0,0,0,0.35)',
     },
     playBadge: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         alignItems: 'center',
         justifyContent: 'center',
     },

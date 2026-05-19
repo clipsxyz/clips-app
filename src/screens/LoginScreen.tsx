@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
     View,
     Text,
@@ -19,21 +19,19 @@ import * as ImagePicker from 'react-native-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { persistAuthToken } from '../utils/authTokenBridge';
 import { useAuth } from '../context/Auth';
-import { fetchRegionsForCountry, fetchCitiesForRegion } from '../utils/googleMaps';
 import { loginUser, registerUser, mapLaravelUserToAppFields } from '../api/client';
 import Avatar from '../components/Avatar';
+import PlaceAutocompleteField from '../components/PlaceAutocompleteField.native';
+import type { LocationSuggestion } from '../api/locations';
+import { parsedPlaceFeedFromSuggestion, signupFeedTierRows } from '../utils/placeFeedLevels';
+import { normalizeCountryFlagInput } from '../utils/countryFlag';
 
-const nationalOptions = [
-    'Ireland', 'UK', 'USA', 'Canada', 'Germany', 'France', 'Spain', 'Italy',
-    'Netherlands', 'Belgium', 'Switzerland', 'Austria', 'Poland', 'Portugal',
-    'Australia', 'New Zealand', 'Japan', 'South Korea', 'China', 'India',
+const MONTHS = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-const interestOptions = [
-    'Food & Dining', 'Sports', 'Music', 'Art & Culture', 'Technology',
-    'Travel', 'Fashion', 'Photography', 'Fitness', 'Gaming',
-    'Books', 'Movies', 'Nature', 'Cooking', 'Dancing'
-];
+const MIN_AGE = 13;
 
 export default function LoginScreen({ navigation }: any) {
     const { login } = useAuth();
@@ -52,76 +50,66 @@ export default function LoginScreen({ navigation }: any) {
     const [forgotOpen, setForgotOpen] = useState(false);
     const [forgotEmail, setForgotEmail] = useState('');
 
-    // Step 1: Location
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [accountType, setAccountType] = useState<'personal' | 'business' | ''>('');
+
     const [name, setName] = useState('');
     const [local, setLocal] = useState('');
     const [regional, setRegional] = useState('');
     const [national, setNational] = useState('');
-    const [countryFlag, setCountryFlag] = useState('');
-
-    const [regionalOptions, setRegionalOptions] = useState<string[]>([]);
-    const [localOptions, setLocalOptions] = useState<string[]>([]);
-    const [loadingRegions, setLoadingRegions] = useState(false);
-    const [loadingCities, setLoadingCities] = useState(false);
-
-    // Step 2: Account
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [confirmPassword, setConfirmPassword] = useState('');
+    const [homeLocationQuery, setHomeLocationQuery] = useState('');
     const [birthMonth, setBirthMonth] = useState('');
     const [birthDay, setBirthDay] = useState('');
     const [birthYear, setBirthYear] = useState('');
-    const [preferredLocationsInput, setPreferredLocationsInput] = useState('');
-    const [accountType, setAccountType] = useState<'personal' | 'business' | ''>('');
-    const [interests, setInterests] = useState<string[]>([]);
 
-    // Step 3: Profile picture
     const [profilePicture, setProfilePicture] = useState<string | null>(null);
 
     const getFieldError = (key: string) => fieldErrors[key] || '';
 
-    useEffect(() => {
-        if (national) {
-            setLoadingRegions(true);
-            setRegionalOptions([]);
-            setRegional('');
-            setLocal('');
-            setLocalOptions([]);
-            
-            fetchRegionsForCountry(national)
-                .then(regions => {
-                    setRegionalOptions(regions.map(r => r.name));
-                    setLoadingRegions(false);
-                })
-                .catch(error => {
-                    console.error('Error loading regions:', error);
-                    setLoadingRegions(false);
-                });
-        } else {
-            setRegionalOptions([]);
-            setLocalOptions([]);
-        }
-    }, [national]);
+    const signupStepTitle =
+        step === 1 ? 'Create your account' : step === 2 ? 'About you' : 'Add a photo';
 
-    useEffect(() => {
-        if (regional && national) {
-            setLoadingCities(true);
-            setLocalOptions([]);
-            setLocal('');
-            
-            fetchCitiesForRegion(regional, national)
-                .then(localAreas => {
-                    setLocalOptions(localAreas.map(c => c.name));
-                    setLoadingCities(false);
-                })
-                .catch(error => {
-                    console.error('Error loading local areas:', error);
-                    setLoadingCities(false);
-                });
-        } else {
-            setLocalOptions([]);
-        }
-    }, [regional, national]);
+    function getAgeFromBirthday(): number | null {
+        const m = parseInt(birthMonth, 10);
+        const d = parseInt(birthDay, 10);
+        const y = parseInt(birthYear, 10);
+        if (!m || !d || !y || m < 1 || m > 12 || d < 1 || d > 31 || y < 1900 || y > new Date().getFullYear()) return null;
+        const today = new Date();
+        const birth = new Date(y, m - 1, d);
+        if (birth > today) return null;
+        let age = today.getFullYear() - birth.getFullYear();
+        const mDiff = today.getMonth() - birth.getMonth();
+        if (mDiff < 0 || (mDiff === 0 && today.getDate() < birth.getDate())) age--;
+        return age;
+    }
+
+    const homeLocationComplete = Boolean(local && regional && national);
+    const birthdateComplete = (() => {
+        const age = getAgeFromBirthday();
+        return age !== null && age >= MIN_AGE;
+    })();
+    const step1CanContinue = Boolean(
+        accountType && email.trim() && password.length >= 8 && password === confirmPassword && acceptedTerms && acceptedGuidelines
+    );
+    const step2CanContinue = Boolean(name.trim() && homeLocationComplete && birthdateComplete);
+    const handlePreview = regional ? `${name.trim().split(/\s+/)[0] || 'you'}@${regional}` : `${name.trim().split(/\s+/)[0] || 'you'}@yourregion`;
+
+    function applyHomeLocation(suggestion: LocationSuggestion) {
+        const parsed = parsedPlaceFeedFromSuggestion(suggestion);
+        setLocal(parsed.local);
+        setRegional(parsed.regional);
+        setNational(parsed.national);
+        setHomeLocationQuery(parsed.fullName || suggestion.name);
+    }
+
+    function clearHomeLocation() {
+        setLocal('');
+        setRegional('');
+        setNational('');
+        setHomeLocationQuery('');
+    }
 
     const LOCAL_REGISTRATIONS_KEY = 'gazetteer_local_registrations_rn';
 
@@ -202,16 +190,18 @@ export default function LoginScreen({ navigation }: any) {
         }
     };
 
-    const handleLocationSubmit = () => {
+    const handleStep1Submit = () => {
         setErrorText('');
         setFieldErrors({});
         const nextErrors: Record<string, string> = {};
-        if (!name || !local || !regional || !national) {
-            if (!name) nextErrors.name = 'Full name is required.';
-            if (!national) nextErrors.national = 'National area is required.';
-            if (!regional) nextErrors.regional = 'Regional area is required.';
-            if (!local) nextErrors.local = 'Local area is required.';
-        }
+        if (!email) nextErrors.email = 'Email is required.';
+        if (!password) nextErrors.password = 'Password is required.';
+        if (!confirmPassword) nextErrors.confirmPassword = 'Please confirm password.';
+        if (password && password.length < 8) nextErrors.password = 'Password must be at least 8 characters.';
+        if (password && confirmPassword && password !== confirmPassword) nextErrors.confirmPassword = 'Passwords do not match.';
+        if (!accountType) nextErrors.accountType = 'Choose personal or business.';
+        if (!acceptedTerms) nextErrors.terms = 'You must accept Terms.';
+        if (!acceptedGuidelines) nextErrors.guidelines = 'You must accept Community Guidelines.';
         if (Object.keys(nextErrors).length > 0) {
             setFieldErrors(nextErrors);
             setErrorText('Please fix the highlighted fields.');
@@ -220,36 +210,26 @@ export default function LoginScreen({ navigation }: any) {
         setStep(2);
     };
 
-    const handleAccountSubmit = () => {
+    const handleStep2Submit = () => {
         setErrorText('');
         setFieldErrors({});
         const nextErrors: Record<string, string> = {};
-        if (!email) nextErrors.email = 'Email is required.';
-        if (!password) nextErrors.password = 'Password is required.';
-        if (!confirmPassword) nextErrors.confirmPassword = 'Please confirm password.';
-        if (password && confirmPassword && password !== confirmPassword) nextErrors.confirmPassword = 'Passwords do not match.';
-        if (!accountType) nextErrors.accountType = 'Choose personal or business.';
-        const m = parseInt(birthMonth, 10);
-        const d = parseInt(birthDay, 10);
-        const y = parseInt(birthYear, 10);
-        if (!m || !d || !y) {
-            nextErrors.birthdate = 'Date of birth is required.';
+        if (!name.trim()) nextErrors.name = 'Full name is required.';
+        if (!local || !regional || !national) {
+            nextErrors.homeLocation = 'Search and pick a place from the list.';
         }
-        const dob = new Date(y, m - 1, d);
-        if (!Number.isNaN(dob.getTime())) {
-            const now = new Date();
-            let computedAge = now.getFullYear() - dob.getFullYear();
-            const monthDelta = now.getMonth() - dob.getMonth();
-            if (monthDelta < 0 || (monthDelta === 0 && now.getDate() < dob.getDate())) computedAge--;
-            if (computedAge < 13) {
-                nextErrors.birthdate = 'You must be at least 13 years old.';
-            }
+        if (!birthMonth || !birthDay || !birthYear) {
+            nextErrors.birthdate = 'Please enter your date of birth.';
         }
-        if (!acceptedTerms) nextErrors.terms = 'You must accept Terms.';
-        if (!acceptedGuidelines) nextErrors.guidelines = 'You must accept Community Guidelines.';
+        const age = getAgeFromBirthday();
+        if (age === null && birthMonth && birthDay && birthYear) {
+            nextErrors.birthdate = 'Please enter a valid date of birth.';
+        } else if (age !== null && age < MIN_AGE) {
+            nextErrors.birthdate = `You must be at least ${MIN_AGE} years old.`;
+        }
         if (Object.keys(nextErrors).length > 0) {
             setFieldErrors(nextErrors);
-            setErrorText('Please fix the highlighted fields.');
+            setErrorText('Please complete all required profile fields.');
             return;
         }
         setStep(3);
@@ -258,28 +238,24 @@ export default function LoginScreen({ navigation }: any) {
     const handleProfilePictureSubmit = async () => {
         setBusy(true);
         setErrorText('');
-        const preferredLocations = preferredLocationsInput
-            .split(',')
-            .map((entry) => entry.trim())
-            .filter(Boolean)
-            .slice(0, 12);
+        const age = getAgeFromBirthday();
+        const consentTimestamp = new Date().toISOString();
         const handle = `${name.trim().split(/\s+/)[0] || name.trim()}@${regional}`;
         const userData = {
             name: name.trim(),
             email: email.trim(),
             password: password,
-            age: undefined,
-            interests: interests,
+            age: age ?? undefined,
+            interests: [],
             local: local,
             regional: regional,
             national: national,
             handle,
-            countryFlag: countryFlag.trim(),
-            avatarUrl: profilePicture,
-            placesTraveled: preferredLocations.length > 0 ? preferredLocations : undefined,
-            accountType,
-            termsAcceptedAt: new Date().toISOString(),
-            guidelinesAcceptedAt: new Date().toISOString(),
+            countryFlag: normalizeCountryFlagInput('', national),
+            avatarUrl: profilePicture || undefined,
+            accountType: accountType || 'personal',
+            termsAcceptedAt: consentTimestamp,
+            guidelinesAcceptedAt: consentTimestamp,
         };
 
         try {
@@ -322,29 +298,23 @@ export default function LoginScreen({ navigation }: any) {
         );
     };
 
-    const toggleInterest = (interest: string) => {
-        setInterests(prev =>
-            prev.includes(interest)
-                ? prev.filter(i => i !== interest)
-                : [...prev, interest]
-        );
-    };
-
     return (
         <GazetteerScreenShell edges={['top', 'bottom']}>
-            <ScrollView contentContainerStyle={styles.scrollContent}>
+            <View style={styles.screen}>
+                <ScrollView
+                    style={styles.scroll}
+                    contentContainerStyle={styles.scrollContent}
+                    keyboardShouldPersistTaps="handled"
+                >
                 <View style={styles.form}>
                     {/* Header */}
                     <View style={styles.header}>
                         <Text style={styles.title}>Gazetteer</Text>
+                        {mode === 'signup' && step === 1 ? (
+                            <Text style={styles.tagline}>No algorithms just places</Text>
+                        ) : null}
                         <Text style={styles.subtitle}>
-                            {mode === 'login'
-                                ? 'Sign in to continue'
-                                : step === 1
-                                    ? 'GPS-focused news feeds powered by location'
-                                    : step === 2
-                                        ? 'Complete your account details'
-                                        : 'Add a profile picture'}
+                            {mode === 'login' ? 'Sign in to continue' : signupStepTitle}
                         </Text>
 
                         <View style={styles.modeRow}>
@@ -362,13 +332,11 @@ export default function LoginScreen({ navigation }: any) {
                             </TouchableOpacity>
                         </View>
 
-                        {mode === 'signup' && (
-                            <View style={styles.stepIndicators}>
-                                <View style={[styles.stepIndicator, step >= 1 && styles.stepIndicatorActive, { width: step >= 1 ? 80 : 40 }]} />
-                                <View style={[styles.stepIndicator, step >= 2 && styles.stepIndicatorActive, { width: step >= 2 ? 80 : 40 }]} />
-                                <View style={[styles.stepIndicator, step >= 3 && styles.stepIndicatorActive, { width: step >= 3 ? 80 : 40 }]} />
+                        {mode === 'signup' ? (
+                            <View style={styles.progressTrack}>
+                                <View style={[styles.progressFill, { width: `${(step / 3) * 100}%` }]} />
                             </View>
-                        )}
+                        ) : null}
                     </View>
 
                     {!!errorText && <Text style={styles.errorText}>{errorText}</Text>}
@@ -412,154 +380,9 @@ export default function LoginScreen({ navigation }: any) {
                         </View>
                     )}
 
-                    {/* Step 1: Location */}
                     {mode === 'signup' && step === 1 && (
                         <View style={styles.stepContent}>
-                            <TextInput
-                                value={name}
-                                onChangeText={setName}
-                                placeholder="Full Name"
-                                placeholderTextColor="#9CA3AF"
-                                style={styles.input}
-                            />
-                            {!!getFieldError('name') && <Text style={styles.fieldErrorText}>{getFieldError('name')}</Text>}
-
-                            <View style={styles.pickerContainer}>
-                                <Picker
-                                    selectedValue={national}
-                                    onValueChange={setNational}
-                                    style={styles.picker}
-                                >
-                                    <Picker.Item label="National Area" value="" />
-                                    {nationalOptions.map(option => (
-                                        <Picker.Item key={option} label={option} value={option} />
-                                    ))}
-                                </Picker>
-                            </View>
-                            {!!getFieldError('national') && <Text style={styles.fieldErrorText}>{getFieldError('national')}</Text>}
-
-                            <View style={styles.pickerContainer}>
-                                <Picker
-                                    selectedValue={regional}
-                                    onValueChange={setRegional}
-                                    enabled={!!national && !loadingRegions}
-                                    style={styles.picker}
-                                >
-                                    <Picker.Item 
-                                        label={loadingRegions ? 'Loading regions...' : national ? 'Regional Area' : 'Select national area first'} 
-                                        value="" 
-                                    />
-                                    {regionalOptions.map(option => (
-                                        <Picker.Item key={option} label={option} value={option} />
-                                    ))}
-                                </Picker>
-                            </View>
-                            {!!getFieldError('regional') && <Text style={styles.fieldErrorText}>{getFieldError('regional')}</Text>}
-
-                            <View style={styles.pickerContainer}>
-                                <Picker
-                                    selectedValue={local}
-                                    onValueChange={setLocal}
-                                    enabled={!!regional && !loadingCities}
-                                    style={styles.picker}
-                                >
-                                    <Picker.Item 
-                                        label={loadingCities ? 'Loading local areas...' : !regional ? 'Select regional area first' : localOptions.length === 0 ? 'No local areas found' : 'Local Area'} 
-                                        value="" 
-                                    />
-                                    {localOptions.map(option => (
-                                        <Picker.Item key={option} label={option} value={option} />
-                                    ))}
-                                </Picker>
-                            </View>
-                            {!!getFieldError('local') && <Text style={styles.fieldErrorText}>{getFieldError('local')}</Text>}
-
-                            <TextInput
-                                value={countryFlag}
-                                onChangeText={setCountryFlag}
-                                placeholder="Country Flag (emoji)"
-                                placeholderTextColor="#9CA3AF"
-                                style={styles.input}
-                                maxLength={8}
-                            />
-                        </View>
-                    )}
-
-                    {/* Step 2: Account */}
-                    {mode === 'signup' && step === 2 && (
-                        <View style={styles.stepContent}>
-                            <TextInput
-                                value={email}
-                                onChangeText={setEmail}
-                                placeholder="Email"
-                                placeholderTextColor="#9CA3AF"
-                                style={styles.input}
-                                keyboardType="email-address"
-                                autoCapitalize="none"
-                            />
-                            {!!getFieldError('email') && <Text style={styles.fieldErrorText}>{getFieldError('email')}</Text>}
-
-                            <View style={styles.passwordRow}>
-                                <TextInput
-                                    value={password}
-                                    onChangeText={setPassword}
-                                    placeholder="Password"
-                                    placeholderTextColor="#9CA3AF"
-                                    style={[styles.input, { flex: 1 }]}
-                                    secureTextEntry={!showSignupPassword}
-                                />
-                                <TouchableOpacity style={styles.eyeButton} onPress={() => setShowSignupPassword((v) => !v)}>
-                                    <Icon name={showSignupPassword ? 'eye-off' : 'eye'} size={18} color="#9CA3AF" />
-                                </TouchableOpacity>
-                            </View>
-                            {!!getFieldError('password') && <Text style={styles.fieldErrorText}>{getFieldError('password')}</Text>}
-
-                            <View style={styles.passwordRow}>
-                                <TextInput
-                                    value={confirmPassword}
-                                    onChangeText={setConfirmPassword}
-                                    placeholder="Confirm Password"
-                                    placeholderTextColor="#9CA3AF"
-                                    style={[styles.input, { flex: 1 }]}
-                                    secureTextEntry={!showSignupConfirmPassword}
-                                />
-                                <TouchableOpacity style={styles.eyeButton} onPress={() => setShowSignupConfirmPassword((v) => !v)}>
-                                    <Icon name={showSignupConfirmPassword ? 'eye-off' : 'eye'} size={18} color="#9CA3AF" />
-                                </TouchableOpacity>
-                            </View>
-                            {!!getFieldError('confirmPassword') && <Text style={styles.fieldErrorText}>{getFieldError('confirmPassword')}</Text>}
-
-                            <View style={styles.birthdateRow}>
-                                <TextInput
-                                    value={birthMonth}
-                                    onChangeText={setBirthMonth}
-                                    placeholder="MM"
-                                    placeholderTextColor="#9CA3AF"
-                                    style={[styles.input, styles.birthInput]}
-                                    keyboardType="numeric"
-                                    maxLength={2}
-                                />
-                                <TextInput
-                                    value={birthDay}
-                                    onChangeText={setBirthDay}
-                                    placeholder="DD"
-                                    placeholderTextColor="#9CA3AF"
-                                    style={[styles.input, styles.birthInput]}
-                                    keyboardType="numeric"
-                                    maxLength={2}
-                                />
-                                <TextInput
-                                    value={birthYear}
-                                    onChangeText={setBirthYear}
-                                    placeholder="YYYY"
-                                    placeholderTextColor="#9CA3AF"
-                                    style={[styles.input, styles.birthInputLarge]}
-                                    keyboardType="numeric"
-                                    maxLength={4}
-                                />
-                            </View>
-                            {!!getFieldError('birthdate') && <Text style={styles.fieldErrorText}>{getFieldError('birthdate')}</Text>}
-
+                            <Text style={styles.fieldLabel}>Account type</Text>
                             <View style={styles.accountTypeRow}>
                                 <TouchableOpacity
                                     onPress={() => setAccountType('personal')}
@@ -574,130 +397,216 @@ export default function LoginScreen({ navigation }: any) {
                                     <Text style={[styles.accountTypeText, accountType === 'business' && styles.accountTypeTextActive]}>Business</Text>
                                 </TouchableOpacity>
                             </View>
+                            {accountType === 'business' ? (
+                                <Text style={styles.hintText}>Eligible for local business suggestion cards.</Text>
+                            ) : null}
                             {!!getFieldError('accountType') && <Text style={styles.fieldErrorText}>{getFieldError('accountType')}</Text>}
 
                             <TextInput
-                                value={preferredLocationsInput}
-                                onChangeText={setPreferredLocationsInput}
-                                placeholder="Preferred locations (comma separated)"
-                                placeholderTextColor="#9CA3AF"
+                                value={email}
+                                onChangeText={setEmail}
+                                placeholder="Email"
+                                placeholderTextColor="#6B7280"
                                 style={styles.input}
+                                keyboardType="email-address"
+                                autoCapitalize="none"
                             />
+                            {!!getFieldError('email') && <Text style={styles.fieldErrorText}>{getFieldError('email')}</Text>}
 
-                            <View style={styles.interestsContainer}>
-                                <Text style={styles.interestsLabel}>Select up to 5 interests</Text>
-                                <View style={styles.pickerContainer}>
+                            <View style={styles.passwordRow}>
+                                <TextInput
+                                    value={password}
+                                    onChangeText={setPassword}
+                                    placeholder="Password (8+ characters)"
+                                    placeholderTextColor="#6B7280"
+                                    style={[styles.input, { flex: 1 }]}
+                                    secureTextEntry={!showSignupPassword}
+                                />
+                                <TouchableOpacity style={styles.eyeButton} onPress={() => setShowSignupPassword((v) => !v)}>
+                                    <Icon name={showSignupPassword ? 'eye-off' : 'eye'} size={18} color="#9CA3AF" />
+                                </TouchableOpacity>
+                            </View>
+                            {!!getFieldError('password') && <Text style={styles.fieldErrorText}>{getFieldError('password')}</Text>}
+
+                            <View style={styles.passwordRow}>
+                                <TextInput
+                                    value={confirmPassword}
+                                    onChangeText={setConfirmPassword}
+                                    placeholder="Confirm Password"
+                                    placeholderTextColor="#6B7280"
+                                    style={[styles.input, { flex: 1 }]}
+                                    secureTextEntry={!showSignupConfirmPassword}
+                                />
+                                <TouchableOpacity style={styles.eyeButton} onPress={() => setShowSignupConfirmPassword((v) => !v)}>
+                                    <Icon name={showSignupConfirmPassword ? 'eye-off' : 'eye'} size={18} color="#9CA3AF" />
+                                </TouchableOpacity>
+                            </View>
+                            {!!getFieldError('confirmPassword') && <Text style={styles.fieldErrorText}>{getFieldError('confirmPassword')}</Text>}
+                        </View>
+                    )}
+
+                    {mode === 'signup' && step === 2 && (
+                        <View style={styles.stepContent}>
+                            <TextInput
+                                value={name}
+                                onChangeText={setName}
+                                placeholder="Full Name"
+                                placeholderTextColor="#6B7280"
+                                style={styles.input}
+                                autoComplete="name"
+                            />
+                            {!!getFieldError('name') && <Text style={styles.fieldErrorText}>{getFieldError('name')}</Text>}
+
+                            <Text style={styles.fieldLabel}>Date of birth</Text>
+                            <View style={styles.birthdateRow}>
+                                <View style={[styles.pickerContainer, { flex: 1.2 }]}>
                                     <Picker
-                                        selectedValue=""
-                                        onValueChange={(value) => {
-                                            if (value && !interests.includes(value) && interests.length < 5) {
-                                                toggleInterest(value);
-                                            }
-                                        }}
-                                        enabled={interests.length < 5}
+                                        selectedValue={birthMonth}
+                                        onValueChange={setBirthMonth}
                                         style={styles.picker}
+                                        dropdownIconColor="#9CA3AF"
                                     >
-                                        <Picker.Item label="Select an interest" value="" />
-                                        {interestOptions
-                                            .filter(interest => !interests.includes(interest))
-                                            .map(interest => (
-                                                <Picker.Item key={interest} label={interest} value={interest} />
-                                            ))}
+                                        <Picker.Item label="Month" value="" color="#9CA3AF" />
+                                        {MONTHS.map((m, i) => (
+                                            <Picker.Item key={m} label={m} value={String(i + 1)} color="#F9FAFB" />
+                                        ))}
                                     </Picker>
                                 </View>
-
-                                {interests.length > 0 && (
-                                    <View style={styles.interestsChips}>
-                                        {interests.map(interest => (
-                                            <TouchableOpacity
-                                                key={interest}
-                                                onPress={() => toggleInterest(interest)}
-                                                style={styles.interestChip}
-                                            >
-                                                <Text style={styles.interestChipText}>{interest}</Text>
-                                                <Icon name="close" size={12} color="#FFFFFF" />
-                                            </TouchableOpacity>
-                                        ))}
-                                    </View>
-                                )}
-                            </View>
-                            <TouchableOpacity style={styles.checkRow} onPress={() => setAcceptedTerms((v) => !v)}>
-                                <Icon name={acceptedTerms ? 'checkbox' : 'square-outline'} size={18} color={acceptedTerms ? '#22C55E' : '#9CA3AF'} />
-                                <Text style={styles.checkLabel}>I accept Terms & Conditions</Text>
-                            </TouchableOpacity>
-                            {!!getFieldError('terms') && <Text style={styles.fieldErrorText}>{getFieldError('terms')}</Text>}
-                            <TouchableOpacity style={styles.checkRow} onPress={() => setAcceptedGuidelines((v) => !v)}>
-                                <Icon name={acceptedGuidelines ? 'checkbox' : 'square-outline'} size={18} color={acceptedGuidelines ? '#22C55E' : '#9CA3AF'} />
-                                <Text style={styles.checkLabel}>I accept Community Guidelines</Text>
-                            </TouchableOpacity>
-                            {!!getFieldError('guidelines') && <Text style={styles.fieldErrorText}>{getFieldError('guidelines')}</Text>}
-                        </View>
-                    )}
-
-                    {/* Step 3: Profile Picture */}
-                    {mode === 'signup' && step === 3 && (
-                        <View style={styles.stepContent}>
-                            <View style={styles.avatarContainer}>
-                                <Avatar
-                                    src={profilePicture || undefined}
-                                    name={name || 'User'}
-                                    size="xl"
+                                <TextInput
+                                    value={birthDay}
+                                    onChangeText={(v) => setBirthDay(v.replace(/\D/g, '').slice(0, 2))}
+                                    placeholder="Day"
+                                    placeholderTextColor="#6B7280"
+                                    style={[styles.input, styles.birthInput]}
+                                    keyboardType="numeric"
+                                    maxLength={2}
+                                />
+                                <TextInput
+                                    value={birthYear}
+                                    onChangeText={(v) => setBirthYear(v.replace(/\D/g, '').slice(0, 4))}
+                                    placeholder="Year"
+                                    placeholderTextColor="#6B7280"
+                                    style={[styles.input, styles.birthInputLarge]}
+                                    keyboardType="numeric"
+                                    maxLength={4}
                                 />
                             </View>
+                            {!!getFieldError('birthdate') && <Text style={styles.fieldErrorText}>{getFieldError('birthdate')}</Text>}
 
-                            <TouchableOpacity
-                                onPress={handleProfilePictureSelect}
-                                style={styles.photoButton}
-                            >
-                                <Icon name="camera" size={20} color="#FFFFFF" />
-                                <Text style={styles.photoButtonText}>Choose Photo</Text>
-                            </TouchableOpacity>
-
-                            {profilePicture && (
-                                <TouchableOpacity
-                                    onPress={() => setProfilePicture(null)}
-                                    style={styles.removeButton}
-                                >
-                                    <Icon name="close" size={20} color="#111827" />
-                                    <Text style={styles.removeButtonText}>Remove Photo</Text>
-                                </TouchableOpacity>
-                            )}
-
-                            <Text style={styles.photoHint}>
-                                Your initials will be used if no photo is selected
-                            </Text>
+                            <Text style={styles.fieldLabel}>Home location — local, regional, and national feeds.</Text>
+                            <PlaceAutocompleteField
+                                value={homeLocationQuery}
+                                onChange={(v) => {
+                                    setHomeLocationQuery(v);
+                                    if (local || regional || national) {
+                                        setLocal('');
+                                        setRegional('');
+                                        setNational('');
+                                    }
+                                }}
+                                onSelectSuggestion={applyHomeLocation}
+                                showFeedLevels
+                                placeholder="Search city or neighborhood"
+                            />
+                            {!homeLocationComplete && homeLocationQuery.trim().length >= 2 ? (
+                                <Text style={styles.warnText}>Select a suggestion from the list.</Text>
+                            ) : null}
+                            {!!getFieldError('homeLocation') && <Text style={styles.fieldErrorText}>{getFieldError('homeLocation')}</Text>}
+                            {homeLocationComplete ? (
+                                <View style={styles.locationOk}>
+                                    <Icon name="checkmark-circle" size={18} color="#7A8AF0" />
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.locationOkTitle}>Home area set</Text>
+                                        <Text style={styles.locationOkSub}>
+                                            {signupFeedTierRows(local, regional, national).map((r) => r.value).join(' · ')}
+                                        </Text>
+                                        <TouchableOpacity onPress={clearHomeLocation}>
+                                            <Text style={styles.linkText}>Change location</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                </View>
+                            ) : null}
                         </View>
                     )}
 
-                    {/* Footer */}
-                    {mode === 'signup' && (
-                        <View style={styles.footer}>
-                            <TouchableOpacity
-                                onPress={step === 1 ? handleLocationSubmit : step === 2 ? handleAccountSubmit : handleProfilePictureSubmit}
-                                style={styles.submitButton}
-                                disabled={busy}
-                            >
-                                <Text style={styles.submitButtonText}>
-                                    {busy ? 'Please wait...' : step === 1 ? 'Next' : step === 2 ? 'Next' : 'Create account'}
-                                </Text>
-                            </TouchableOpacity>
-
-                            {(step === 2 || step === 3) && (
-                                <TouchableOpacity
-                                    onPress={() => setStep(step - 1)}
-                                    style={styles.backButton}
-                                >
-                                    <Text style={styles.backButtonText}>Back</Text>
-                                </TouchableOpacity>
-                            )}
-
-                            <Text style={styles.termsText}>
-                                By signing up, you agree to terms and community guidelines.
+                    {mode === 'signup' && step === 3 && (
+                        <View style={[styles.stepContent, styles.step3Content]}>
+                            <Text style={styles.step3Handle}>@{handlePreview}</Text>
+                            <Text style={styles.step3Location} numberOfLines={2}>
+                                {[local, regional, national].filter(Boolean).join(' · ')}
                             </Text>
+                            <View style={styles.avatarContainer}>
+                                <Avatar src={profilePicture || undefined} name={name || 'User'} size="xl" />
+                            </View>
+                            <View style={styles.photoActions}>
+                                <TouchableOpacity onPress={handleProfilePictureSelect} style={styles.photoButton}>
+                                    <Icon name="camera" size={20} color="#FFFFFF" />
+                                    <Text style={styles.photoButtonText}>Choose photo</Text>
+                                </TouchableOpacity>
+                                {profilePicture ? (
+                                    <TouchableOpacity onPress={() => setProfilePicture(null)} style={styles.removePhotoBtn}>
+                                        <Text style={styles.removePhotoText}>Remove</Text>
+                                    </TouchableOpacity>
+                                ) : null}
+                            </View>
+                            <Text style={styles.photoHint}>Optional — initials are used if you skip.</Text>
                         </View>
                     )}
                 </View>
             </ScrollView>
+
+            {mode === 'signup' ? (
+                <View style={styles.footer}>
+                    {step === 1 ? (
+                        <View style={styles.consentBox}>
+                            <Text style={styles.consentTitle}>Required to continue</Text>
+                            <TouchableOpacity style={styles.checkRow} onPress={() => setAcceptedTerms((v) => !v)}>
+                                <Icon name={acceptedTerms ? 'checkbox' : 'square-outline'} size={20} color={acceptedTerms ? '#7A8AF0' : '#9CA3AF'} />
+                                <Text style={styles.checkLabel}>
+                                    I accept{' '}
+                                    <Text style={styles.linkText} onPress={() => navigation.navigate('Terms')}>
+                                        Terms & Conditions
+                                    </Text>
+                                </Text>
+                            </TouchableOpacity>
+                            {!!getFieldError('terms') && <Text style={styles.fieldErrorText}>{getFieldError('terms')}</Text>}
+                            <TouchableOpacity style={styles.checkRow} onPress={() => setAcceptedGuidelines((v) => !v)}>
+                                <Icon name={acceptedGuidelines ? 'checkbox' : 'square-outline'} size={20} color={acceptedGuidelines ? '#7A8AF0' : '#9CA3AF'} />
+                                <Text style={styles.checkLabel}>
+                                    I accept{' '}
+                                    <Text style={styles.linkText} onPress={() => navigation.navigate('Terms')}>
+                                        Community Guidelines
+                                    </Text>
+                                </Text>
+                            </TouchableOpacity>
+                            {!!getFieldError('guidelines') && <Text style={styles.fieldErrorText}>{getFieldError('guidelines')}</Text>}
+                            {!step1CanContinue && (email || password) && (!acceptedTerms || !acceptedGuidelines) ? (
+                                <Text style={styles.warnText}>Accept both above to enable Continue.</Text>
+                            ) : null}
+                        </View>
+                    ) : null}
+                    {step > 1 ? (
+                        <TouchableOpacity onPress={() => setStep(step - 1)} style={styles.backLink} disabled={busy}>
+                            <Text style={styles.backLinkText}>Back</Text>
+                        </TouchableOpacity>
+                    ) : null}
+                    <TouchableOpacity
+                        onPress={step === 1 ? handleStep1Submit : step === 2 ? handleStep2Submit : handleProfilePictureSubmit}
+                        style={[styles.submitButton, (busy || (step === 1 && !step1CanContinue) || (step === 2 && !step2CanContinue)) && styles.submitButtonDisabled]}
+                        disabled={busy || (step === 1 && !step1CanContinue) || (step === 2 && !step2CanContinue)}
+                    >
+                        <Text style={styles.submitButtonText}>
+                            {busy ? 'Please wait...' : step < 3 ? 'Continue' : 'Create account'}
+                        </Text>
+                    </TouchableOpacity>
+                    {step === 1 ? (
+                        <Text style={styles.termsText}>You must be at least 13 years old.</Text>
+                    ) : (
+                        <Text style={styles.termsText}>By signing up, you agree to our terms and community guidelines.</Text>
+                    )}
+                </View>
+            ) : null}
+            </View>
             <Modal visible={forgotOpen} transparent animationType="fade" onRequestClose={() => setForgotOpen(false)}>
                 <View style={styles.modalOverlay}>
                     <View style={styles.forgotModalCard}>
@@ -738,15 +647,44 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0,0,0,0.5)',
         justifyContent: 'center',
     },
+    screen: {
+        flex: 1,
+    },
+    scroll: {
+        flex: 1,
+    },
     scrollContent: {
         flexGrow: 1,
-        justifyContent: 'center',
         padding: 16,
+        paddingBottom: 8,
     },
     form: {
         ...glassPanel,
         borderRadius: 20,
-        minHeight: 600,
+        maxWidth: 400,
+        width: '100%',
+        alignSelf: 'center',
+    },
+    tagline: {
+        fontSize: 12,
+        color: '#6B7280',
+        marginBottom: 8,
+        textAlign: 'center',
+    },
+    progressTrack: {
+        marginTop: 16,
+        height: 2,
+        width: 200,
+        maxWidth: '80%',
+        borderRadius: 999,
+        backgroundColor: 'rgba(255,255,255,0.1)',
+        overflow: 'hidden',
+        alignSelf: 'center',
+    },
+    progressFill: {
+        height: '100%',
+        backgroundColor: '#7A8AF0',
+        borderRadius: 999,
     },
     header: {
         padding: 40,
@@ -824,41 +762,73 @@ const styles = StyleSheet.create({
         textAlign: 'right',
         marginBottom: 8,
     },
-    stepIndicators: {
-        flexDirection: 'row',
-        gap: 8,
+    stepContent: {
+        paddingHorizontal: 20,
+        paddingBottom: 16,
+        gap: 12,
+    },
+    step3Content: {
         alignItems: 'center',
     },
-    stepIndicator: {
-        height: 4,
-        borderRadius: 2,
-        backgroundColor: '#374151',
+    step3Handle: {
+        color: '#FFFFFF',
+        fontSize: 15,
+        fontWeight: '600',
     },
-    stepIndicatorActive: {
-        backgroundColor: '#3B82F6',
+    step3Location: {
+        color: '#6B7280',
+        fontSize: 12,
+        textAlign: 'center',
+        marginBottom: 8,
     },
-    stepContent: {
-        flex: 1,
-        padding: 40,
-        gap: 12,
+    fieldLabel: {
+        fontSize: 12,
+        color: '#9CA3AF',
+        marginBottom: 4,
+    },
+    hintText: {
+        fontSize: 12,
+        color: '#6B7280',
+    },
+    warnText: {
+        fontSize: 12,
+        color: '#FCD34D',
+    },
+    linkText: {
+        color: '#7A8AF0',
+        fontSize: 12,
+    },
+    locationOk: {
+        flexDirection: 'row',
+        gap: 8,
+        marginTop: 4,
+    },
+    locationOkTitle: {
+        color: '#FFFFFF',
+        fontSize: 14,
+    },
+    locationOkSub: {
+        color: '#9CA3AF',
+        fontSize: 12,
+        marginTop: 2,
     },
     input: {
         width: '100%',
-        borderRadius: 16,
-        borderWidth: 2,
-        borderColor: '#FFFFFF',
-        backgroundColor: '#111827',
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.15)',
+        backgroundColor: 'rgba(255,255,255,0.05)',
         paddingHorizontal: 12,
-        paddingVertical: 10,
+        paddingVertical: 12,
         fontSize: 14,
         color: '#F9FAFB',
     },
     pickerContainer: {
         width: '100%',
-        borderRadius: 16,
-        borderWidth: 2,
-        borderColor: '#FFFFFF',
-        backgroundColor: '#111827',
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.15)',
+        backgroundColor: 'rgba(255,255,255,0.05)',
         overflow: 'hidden',
     },
     picker: {
@@ -893,8 +863,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     accountTypePillActive: {
-        borderColor: '#FFFFFF',
-        backgroundColor: '#1F2937',
+        backgroundColor: 'rgba(122,138,240,0.2)',
     },
     accountTypeText: {
         color: '#D1D5DB',
@@ -980,18 +949,53 @@ const styles = StyleSheet.create({
         marginTop: 8,
     },
     footer: {
-        padding: 40,
-        paddingTop: 24,
+        paddingHorizontal: 20,
+        paddingTop: 12,
+        paddingBottom: 16,
         borderTopWidth: 1,
-        borderTopColor: '#FFFFFF',
-        gap: 12,
+        borderTopColor: 'rgba(255,255,255,0.1)',
+        gap: 10,
+        maxWidth: 400,
+        width: '100%',
+        alignSelf: 'center',
+        backgroundColor: '#000',
+    },
+    consentBox: {
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.15)',
+        backgroundColor: 'rgba(255,255,255,0.05)',
+        padding: 12,
+        gap: 10,
+    },
+    consentTitle: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#D1D5DB',
+    },
+    photoActions: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'center',
+        gap: 8,
+    },
+    removePhotoBtn: {
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+    },
+    removePhotoText: {
+        color: '#9CA3AF',
+        fontSize: 14,
     },
     submitButton: {
         width: '100%',
-        paddingVertical: 10,
+        paddingVertical: 12,
         backgroundColor: '#FFFFFF',
-        borderRadius: 16,
+        borderRadius: 12,
         alignItems: 'center',
+    },
+    submitButtonDisabled: {
+        opacity: 0.45,
     },
     submitButtonText: {
         color: '#111827',
@@ -999,18 +1003,24 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     backButton: {
-        width: '100%',
+        flex: 1,
         paddingVertical: 10,
         backgroundColor: '#FFFFFF',
-        borderRadius: 16,
+        borderRadius: 12,
         alignItems: 'center',
-        borderWidth: 2,
-        borderColor: '#FFFFFF',
     },
     backButtonText: {
         color: '#111827',
         fontSize: 14,
         fontWeight: '600',
+    },
+    backLink: {
+        alignItems: 'center',
+        paddingVertical: 4,
+    },
+    backLinkText: {
+        color: '#9CA3AF',
+        fontSize: 14,
     },
     termsText: {
         fontSize: 12,

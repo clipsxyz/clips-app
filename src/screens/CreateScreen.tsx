@@ -1053,11 +1053,11 @@ const styles = StyleSheet.create({
         position: 'relative',
     },
     stickerDeselectLayer: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 1,
     },
     filterOverlay: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
     },
     filterBadge: {
         position: 'absolute',

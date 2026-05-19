@@ -10,10 +10,10 @@ import {
     ActivityIndicator,
     TextInput,
     Alert,
-    Dimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Avatar from './Avatar';
+import { getAvatarForHandle } from '../api/users';
 import { timeAgo } from '../utils/timeAgo';
 import {
     addComment,
@@ -60,6 +60,7 @@ export default function PostCommentsSheet({
 
     useEffect(() => {
         if (isOpen && postId) {
+            setComments([]);
             loadComments();
         }
     }, [isOpen, postId]);
@@ -226,16 +227,30 @@ export default function PostCommentsSheet({
     return (
         <Modal visible={isOpen} animationType="slide" transparent onRequestClose={handleClose}>
             <View style={styles.modalOverlay}>
-                {post?.mediaUrl ? (
-                    <View style={styles.commentsMiniPreviewWrap}>
-                        <Image
-                            source={{ uri: post.mediaUrl }}
-                            style={styles.commentsMiniPreviewImage}
-                            resizeMode="cover"
-                        />
-                    </View>
-                ) : null}
                 <View style={styles.modalContent}>
+                    {post ? (
+                        <View style={styles.commentsAuthorRow}>
+                            {post.mediaUrl ? (
+                                <Image
+                                    source={{ uri: post.mediaUrl }}
+                                    style={styles.commentsThumb}
+                                    resizeMode="cover"
+                                />
+                            ) : (
+                                <View style={[styles.commentsThumb, styles.commentsThumbPlaceholder]} />
+                            )}
+                            <View style={styles.commentsAuthorTextCol}>
+                                <Text style={styles.commentsAuthorHandle} numberOfLines={1}>
+                                    {post.userHandle}
+                                </Text>
+                                {post.text?.trim() ? (
+                                    <Text style={styles.commentsAuthorCaption} numberOfLines={2}>
+                                        {post.text}
+                                    </Text>
+                                ) : null}
+                            </View>
+                        </View>
+                    ) : null}
                     <View style={styles.modalHeader}>
                         <Text style={styles.modalTitle}>
                             {comments.length} {comments.length === 1 ? 'comment' : 'comments'}
@@ -287,7 +302,11 @@ export default function PostCommentsSheet({
                             style={styles.commentsList}
                             renderItem={({ item }) => (
                                 <View style={styles.commentItem}>
-                                    <Avatar src={undefined} name={item.userHandle.split('@')[0]} size={32} />
+                                    <Avatar
+                                        src={getAvatarForHandle(item.userHandle)}
+                                        name={item.userHandle.split('@')[0]}
+                                        size={32}
+                                    />
                                     <View style={styles.commentContent}>
                                         <View style={styles.commentHeaderRow}>
                                             <Text style={styles.commentUser}>{item.userHandle}</Text>
@@ -494,25 +513,46 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0, 0, 0, 0.5)',
         justifyContent: 'flex-end',
     },
-    commentsMiniPreviewWrap: {
-        alignSelf: 'center',
-        width: Math.min(Dimensions.get('window').width * 0.56, 260),
-        aspectRatio: 4 / 5,
-        borderRadius: 14,
-        overflow: 'hidden',
-        backgroundColor: '#111827',
-        marginBottom: 10,
-    },
-    commentsMiniPreviewImage: {
-        width: '100%',
-        height: '100%',
-    },
     modalContent: {
+        flex: 1,
         backgroundColor: '#030712',
         borderTopLeftRadius: 20,
         borderTopRightRadius: 20,
-        maxHeight: '58%',
+        maxHeight: '72%',
         paddingBottom: 20,
+        minHeight: 280,
+    },
+    commentsAuthorRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        columnGap: 10,
+        paddingHorizontal: 16,
+        paddingTop: 14,
+        paddingBottom: 8,
+    },
+    commentsThumb: {
+        width: 44,
+        height: 44,
+        borderRadius: 8,
+        backgroundColor: '#111827',
+    },
+    commentsThumbPlaceholder: {
+        backgroundColor: '#1F2937',
+    },
+    commentsAuthorTextCol: {
+        flex: 1,
+        minWidth: 0,
+    },
+    commentsAuthorHandle: {
+        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '700',
+    },
+    commentsAuthorCaption: {
+        color: '#9CA3AF',
+        fontSize: 12,
+        marginTop: 2,
+        lineHeight: 16,
     },
     modalHeader: {
         flexDirection: 'row',

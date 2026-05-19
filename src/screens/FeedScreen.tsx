@@ -54,8 +54,10 @@ import { enqueue, drain } from '../utils/mutationQueue';
 import type { Post } from '../types';
 import { getInstagramImageDimensions } from '../utils/imageDimensions';
 import { FEED_UI } from '../constants/feedUiTokens';
-import FeedPostMedia from '../components/FeedPostMedia.native';
+import FeedPostMedia, { type FeedPostMediaHandle } from '../components/FeedPostMedia.native';
+import ImageFullscreenModal from '../components/ImageFullscreenModal.native';
 import { isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
+import { postHasVideoMedia } from '../utils/postMedia';
 import NetInfo from '@react-native-community/netinfo';
 import {
     getFeedAutoplayPref,
@@ -76,6 +78,9 @@ import { Dimensions } from 'react-native';
 import FeedPostMeta from '../components/FeedPostMeta';
 import FeedEngagementRow from '../components/FeedEngagementRow';
 import FeedShareModal from '../components/FeedShareModal';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import InterestsFeedCard from '../components/InterestsFeedCard.native';
+import { INTERESTS_ONBOARDING_DISMISSED_KEY, MAX_INTEREST_SELECTIONS } from '../constants/interestOptions';
 import PostOverflowMenuModal from '../components/PostOverflowMenuModal';
 import PostCommentsSheet from '../components/PostCommentsSheet';
 import {
@@ -811,6 +816,8 @@ const FeedCard = React.memo(function FeedCard({
     viewerHandle,
     onOpenDM,
     onRegisterDmAnchor,
+    onOpenImageFullscreen,
+    onOpenScenes,
 }: {
     post: Post;
     onLike: () => Promise<void>;
@@ -821,6 +828,8 @@ const FeedCard = React.memo(function FeedCard({
     onReclip: () => Promise<void>;
     onBookmark: () => Promise<void>;
     onPostPress?: () => void;
+    onOpenImageFullscreen?: () => void;
+    onOpenScenes?: () => void;
     onVisitProfile?: () => void;
     onViewStories?: () => void;
     onBlockUser?: () => Promise<void>;
@@ -842,6 +851,7 @@ const FeedCard = React.memo(function FeedCard({
     const isMutualFollow = useMutualFollow(post, isCurrentUser);
     const lastMediaTapRef = React.useRef(0);
     const singleMediaTapTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const videoMediaRef = React.useRef<FeedPostMediaHandle>(null);
     const screenWidth = Dimensions.get('window').width;
     const cardMediaWidth = screenWidth - 20;
     const DOUBLE_TAP_DELAY_MS = 260;
@@ -915,10 +925,14 @@ const FeedCard = React.memo(function FeedCard({
         }
         lastMediaTapRef.current = now;
         singleMediaTapTimerRef.current = setTimeout(() => {
-            onPostPress?.();
+            if (postHasVideoMedia(post)) {
+                videoMediaRef.current?.toggleVideoMute();
+            } else {
+                onOpenImageFullscreen?.();
+            }
             singleMediaTapTimerRef.current = null;
         }, DOUBLE_TAP_DELAY_MS + 20);
-    }, [DOUBLE_TAP_DELAY_MS, onLike, onPostPress, post.userLiked]);
+    }, [DOUBLE_TAP_DELAY_MS, onLike, onOpenImageFullscreen, post]);
 
     React.useEffect(() => {
         return () => {
@@ -974,6 +988,7 @@ const FeedCard = React.memo(function FeedCard({
                     {hasFeedMedia ? (
                         <View style={styles.mediaWrap}>
                             <FeedPostMedia
+                                ref={videoMediaRef}
                                 post={post}
                                 width={cardMediaWidth}
                                 height={typeof imageStyle.height === 'number' ? imageStyle.height : cardMediaWidth}
@@ -982,6 +997,9 @@ const FeedCard = React.memo(function FeedCard({
                                 mode="feed"
                                 isActive={isVideoActive && !isClientUploading}
                                 muted={feedVideoMuted}
+                                onOpenScenes={
+                                    isClientUploading || isClientUploadFailed ? undefined : onOpenScenes
+                                }
                             />
                             {isClientUploading ? (
                                 <View style={styles.uploadingOverlay} pointerEvents="none">
@@ -1175,8 +1193,10 @@ const FeedCard = React.memo(function FeedCard({
     );
 });
 
+type FeedListRow = { kind: 'post'; post: Post } | { kind: 'interests'; id: string };
+
 function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
-    const { user } = useAuth();
+    const { user, login } = useAuth();
     const userId = user?.id ?? 'anon';
     const defaultLocal = user?.local || 'Finglas';
     const defaultNational = user?.national || 'Ireland';
@@ -1197,6 +1217,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [commentsModalOpen, setCommentsModalOpen] = useState(false);
     const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
     const [selectedPostForComments, setSelectedPostForComments] = useState<Post | null>(null);
+    const [imageFullscreenPost, setImageFullscreenPost] = useState<Post | null>(null);
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [selectedPostForShare, setSelectedPostForShare] = useState<Post | null>(null);
     const [unreadCount, setUnreadCount] = useState(0);
@@ -1309,7 +1330,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             for (const token of viewableItems) {
                 if (!token.isViewable || !token.item) continue;
                 const candidate = token.item as Post;
-                if (!isVideoPost(candidate)) continue;
+                if (!postHasVideoMedia(candidate)) continue;
                 const idx = token.index ?? 0;
                 if (idx < bestIndex) {
                     best = candidate;
@@ -1844,6 +1865,62 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         return [...pendingPosts, ...loaded];
     }, [pages, pendingPosts]);
 
+    const [interestsDraft, setInterestsDraft] = React.useState<string[]>([]);
+    const [interestsSaving, setInterestsSaving] = React.useState(false);
+    const [interestsCardDismissed, setInterestsCardDismissed] = React.useState(false);
+    const [onboardingDismissed, setOnboardingDismissed] = React.useState<boolean | null>(null);
+
+    React.useEffect(() => {
+        setInterestsDraft(user?.interests ?? []);
+        setInterestsCardDismissed(false);
+    }, [user?.id]);
+
+    React.useEffect(() => {
+        if (!user?.id) {
+            setOnboardingDismissed(null);
+            return;
+        }
+        void AsyncStorage.getItem(INTERESTS_ONBOARDING_DISMISSED_KEY).then((v) => {
+            setOnboardingDismissed(v === '1');
+        });
+    }, [user?.id]);
+
+    const showInterestsFeedCard = React.useMemo(() => {
+        if (!user || interestsCardDismissed) return false;
+        if ((user.interests?.length ?? 0) >= MAX_INTEREST_SELECTIONS) return false;
+        if (onboardingDismissed === null || onboardingDismissed) return false;
+        return true;
+    }, [user, interestsCardDismissed, onboardingDismissed]);
+
+    const saveInterests = React.useCallback(
+        (next: string[]) => {
+            if (!user) return;
+            login({ ...user, interests: next });
+            void AsyncStorage.removeItem(INTERESTS_ONBOARDING_DISMISSED_KEY);
+        },
+        [login, user],
+    );
+
+    const flatForRender = React.useMemo((): FeedListRow[] => {
+        if (!showInterestsFeedCard) {
+            return flat.map((post) => ({ kind: 'post', post }));
+        }
+        const out: FeedListRow[] = [];
+        let postCount = 0;
+        let inserted = false;
+        for (const post of flat) {
+            out.push({ kind: 'post', post });
+            postCount += 1;
+            if (!inserted && postCount === 4) {
+                out.push({ kind: 'interests', id: 'interests-onboarding-feed-card' });
+                inserted = true;
+            }
+        }
+        return out;
+    }, [flat, showInterestsFeedCard]);
+
+    const videoPostsForScenes = React.useMemo(() => flat.filter(postHasVideoMedia), [flat]);
+
     const customLocationDisplay = customLocationLabel || customLocation;
 
     useEffect(() => {
@@ -1957,7 +2034,39 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     // Memoize renderItem to prevent recreation on every render
     const renderItem = React.useCallback(
-        ({ item: post }: { item: Post }) => {
+        ({ item }: { item: FeedListRow }) => {
+            if (item.kind === 'interests') {
+                return (
+                    <InterestsFeedCard
+                        selected={interestsDraft}
+                        saving={interestsSaving}
+                        onToggle={(interest) => {
+                            setInterestsDraft((prev) => {
+                                const next = prev.includes(interest)
+                                    ? prev.filter((i) => i !== interest)
+                                    : prev.length < MAX_INTEREST_SELECTIONS
+                                      ? [...prev, interest]
+                                      : prev;
+                                if (next.length === MAX_INTEREST_SELECTIONS) {
+                                    saveInterests(next);
+                                }
+                                return next;
+                            });
+                        }}
+                        onSave={() => {
+                            if (!interestsDraft.length) return;
+                            setInterestsSaving(true);
+                            saveInterests(interestsDraft);
+                            setInterestsSaving(false);
+                        }}
+                        onSkip={() => {
+                            void AsyncStorage.setItem(INTERESTS_ONBOARDING_DISMISSED_KEY, '1');
+                            setInterestsCardDismissed(true);
+                        }}
+                    />
+                );
+            }
+            const post = item.post;
             const mergedPost: Post = {
                 ...post,
                 isBookmarked: savedByPostId[post.id] ?? post.isBookmarked,
@@ -2043,6 +2152,17 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         setOverflowPost(mergedPost);
                         setOverflowVisible(true);
                     }}
+                    onOpenImageFullscreen={() => {
+                        if (isPendingUpload) return;
+                        setImageFullscreenPost(mergedPost);
+                    }}
+                    onOpenScenes={() => {
+                        if (isPendingUpload) return;
+                        navigation.navigate('Scenes', {
+                            initialPostId: mergedPost.id,
+                            posts: videoPostsForScenes,
+                        });
+                    }}
                     onPostPress={() => {
                         if (isPendingUpload) {
                             if (mergedPost.clientUploadStatus === 'failed') {
@@ -2107,7 +2227,18 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             activeVideoPostId,
             feedVideoMuted,
             pendingUploadTick,
+            videoPostsForScenes,
+            interestsDraft,
+            interestsSaving,
+            saveInterests,
         ]
+    );
+
+    const syncFullscreenPost = React.useCallback(
+        (updated: Post) => {
+            setImageFullscreenPost((prev) => (prev?.id === updated.id ? updated : prev));
+        },
+        [],
     );
 
     return (
@@ -2156,9 +2287,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             )}
 
             <FlatList
-                data={flat}
+                data={flatForRender}
                 renderItem={renderItem}
-                keyExtractor={(item) => item.id}
+                keyExtractor={(item) => (item.kind === 'interests' ? item.id : item.post.id)}
                 extraData={`${activeVideoPostId}-${pendingUploadTick}`}
                 onViewableItemsChanged={onViewableItemsChanged}
                 viewabilityConfig={viewabilityConfigRef.current}
@@ -2262,6 +2393,50 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     styles.feedContent,
                     { paddingBottom: Math.max(insets.bottom, 8) + 12 },
                 ]}
+            />
+
+            <ImageFullscreenModal
+                post={imageFullscreenPost}
+                visible={Boolean(imageFullscreenPost)}
+                onClose={() => setImageFullscreenPost(null)}
+                onLike={
+                    imageFullscreenPost
+                        ? async () => {
+                              const updated = await toggleLike(userId, imageFullscreenPost.id, imageFullscreenPost);
+                              setPages((prev) =>
+                                  prev.map((page) =>
+                                      page.map((p) => (p.id === updated.id ? updated : p)),
+                                  ),
+                              );
+                              syncFullscreenPost(updated);
+                          }
+                        : undefined
+                }
+                onComment={
+                    imageFullscreenPost
+                        ? () => {
+                              setSelectedPostId(imageFullscreenPost.id);
+                              setSelectedPostForComments(imageFullscreenPost);
+                              setCommentsModalOpen(true);
+                          }
+                        : undefined
+                }
+                onReclip={
+                    imageFullscreenPost
+                        ? async () => {
+                              await tryReclipPost(imageFullscreenPost);
+                              const refreshed = flat.find((p) => p.id === imageFullscreenPost.id);
+                              if (refreshed) syncFullscreenPost(refreshed);
+                          }
+                        : undefined
+                }
+                onShare={
+                    imageFullscreenPost
+                        ? () => {
+                              void openShareForPost(imageFullscreenPost);
+                          }
+                        : undefined
+                }
             />
 
             <PostCommentsSheet
@@ -2744,7 +2919,7 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
     },
     uploadingOverlay: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: 'rgba(0,0,0,0.55)',
         alignItems: 'center',
         justifyContent: 'center',

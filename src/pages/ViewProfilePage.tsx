@@ -17,6 +17,7 @@ import { getEffectiveTextStyleForPost, getTextOnlyFallbackBackground, getTextOnl
 import { userHasStoriesByHandle, userHasUnviewedStoriesByHandle } from '../api/stories';
 import { fetchFollowers, fetchFollowing, fetchUserProfile, toggleFollow } from '../api/client';
 import type { Post } from '../types';
+import { postHasVideoMedia } from '../utils/postMedia';
 import { 
   isProfilePrivate, 
   canViewProfile, 
@@ -356,7 +357,7 @@ export default function ViewProfilePage() {
     }, [posts, contentTab]);
 
     const profileScenesFeedPosts = React.useMemo(
-        () => filteredPosts.filter((p) => !!(p.mediaUrl || (p.mediaItems && p.mediaItems.length > 0))),
+        () => filteredPosts.filter((p) => postHasVideoMedia(p)),
         [filteredPosts],
     );
 

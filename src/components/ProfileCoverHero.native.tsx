@@ -83,7 +83,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#111827',
     },
     coverImage: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         width: '100%',
         height: '100%',
     },

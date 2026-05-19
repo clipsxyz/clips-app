@@ -191,7 +191,7 @@ const styles = StyleSheet.create({
         height: '100%',
     },
     filterOverlay: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
     },
     pauseBtn: {
         position: 'absolute',

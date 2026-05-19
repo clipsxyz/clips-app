@@ -12,6 +12,38 @@ video {
   max-height: 100%;
 }
 
+/* Feed video → Scenes CTA: subtle pulse (transform only, scroll-safe) */
+@keyframes feed-scenes-cta-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.04);
+  }
+}
+
+.feed-scenes-cta-pulse {
+  animation: feed-scenes-cta-pulse 2.8s ease-in-out infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .feed-scenes-cta-pulse {
+    animation: none;
+  }
+}
+
+/* News feed: block long-press / right-click save & copy on post media */
+.feed-post-media-surface img,
+.feed-post-media-surface video {
+  -webkit-touch-callout: none !important;
+  -webkit-user-drag: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  pointer-events: none;
+}
+
 /* Edge aspect ratio fallback */
 @supports not (aspect-ratio: 9/16) {
   .aspect-9-16 {

@@ -179,6 +179,8 @@ export default function ProgressiveImage({
                 <img
                     src={lowResSrc}
                     alt=""
+                    draggable={false}
+                    onContextMenu={(e) => e.preventDefault()}
                     className="absolute inset-0 w-full h-full object-cover"
                     style={{
                         objectFit: fit,
@@ -198,6 +200,8 @@ export default function ProgressiveImage({
                     ref={imgRef}
                     src={imageSrc}
                     alt={alt}
+                    draggable={false}
+                    onContextMenu={(e) => e.preventDefault()}
                     className="absolute inset-0 w-full h-full object-cover"
                     style={{
                         objectFit: fit,
