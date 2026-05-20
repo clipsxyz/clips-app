@@ -2648,6 +2648,10 @@ export async function createPost(
       console.warn('Failed to cache created post locally:', e);
     }
 
+    void import('../utils/profilePostNotifyPrefs').then(({ notifySubscribersOfCreatorPost }) =>
+      notifySubscribersOfCreatorPost(userHandle, transformed.id),
+    );
+
     return transformed;
   } catch (error: any) {
     console.error('Error creating post via API:', error);
@@ -2919,6 +2923,9 @@ export async function createPost(
     savePostsToStorage(posts);
 
     markPendingCreatedPost(newPost);
+    void import('../utils/profilePostNotifyPrefs').then(({ notifySubscribersOfCreatorPost }) =>
+        notifySubscribersOfCreatorPost(userHandle, newPost.id),
+    );
     return decorateForUser(userId, newPost);
   }
 }

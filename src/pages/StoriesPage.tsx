@@ -21,6 +21,11 @@ import { toggleFollow } from '../api/client';
 import { FiUserPlus, FiUserCheck } from 'react-icons/fi';
 import type { Story, StoryGroup, Post } from '../types';
 import { GLOBAL_VIDEO_MUTED_EVENT, getGlobalVideoMuted, setGlobalVideoMuted } from '../utils/globalVideoMute';
+import StoriesPopIcon from '../components/StoriesPopIcon';
+import DiscoverAmbientCanvas from '../components/DiscoverAmbientCanvas';
+
+/** Min time the Stories pop icon shows when opening from feed Stories 24 rail. */
+const STORIES24_LOADING_HOLD_MS = 2600;
 
 /** Must match App.tsx `STORIES24_FROM_RAIL_HANDLE_KEY` — rail return + /feed navigation if `location.state` is dropped. */
 const STORIES24_FROM_RAIL_HANDLE_KEY = 'clips:stories24OpenedFromRailHandle';
@@ -263,6 +268,24 @@ export default function StoriesPage() {
     }, [currentStoryIndex]);
     const [loading, setLoading] = React.useState(true);
     const [viewingStories, setViewingStories] = React.useState(false);
+    const [stories24HoldMinReady, setStories24HoldMinReady] = React.useState(false);
+
+    React.useEffect(() => {
+        if (!stories24OpenFromFeedRail || !openUserHandle) {
+            setStories24HoldMinReady(false);
+            return;
+        }
+        setStories24HoldMinReady(false);
+        const t = window.setTimeout(() => setStories24HoldMinReady(true), STORIES24_LOADING_HOLD_MS);
+        return () => window.clearTimeout(t);
+    }, [stories24OpenFromFeedRail, openUserHandle, location.key]);
+
+    const stories24ContentReady = !loading && viewingStories;
+    const showStories24HoldScreen =
+        stories24OpenFromFeedRail &&
+        openUserHandle &&
+        (!stories24ContentReady || !stories24HoldMinReady);
+
     const [autoOpeningStory, setAutoOpeningStory] = React.useState<boolean>(!!openUserHandle);
     const [progress, setProgress] = React.useState(0);
     const [paused, setPaused] = React.useState(false);
@@ -1731,21 +1754,20 @@ export default function StoriesPage() {
         );
     }
 
-    // Feed rail → Stories: branded hold screen while data/viewer spin up (matches expanding card on feed).
-    if (stories24OpenFromFeedRail && openUserHandle && (loading || !viewingStories)) {
+    // Feed rail → Stories: popping Stories icon (share-sheet style) while stories load (~2.6s min).
+    if (showStories24HoldScreen) {
         return (
             <div
-                className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center px-6"
+                className="fixed inset-0 z-50 flex flex-col items-center justify-center px-6 overflow-hidden"
                 role="status"
                 aria-live="polite"
+                aria-label="Opening stories"
             >
-                <div className="text-center max-w-sm">
-                    <p className="text-3xl sm:text-4xl font-bold tracking-tight [text-shadow:0_2px_32px_rgba(0,0,0,0.45)]">
-                        <span className="bg-gradient-to-r from-cyan-300 via-white to-sky-400 bg-clip-text text-transparent">Gazetter</span>
-                        <span className="text-white"> 24</span>
-                    </p>
-                    <p className="mt-5 text-sm text-white/45 font-medium">Opening stories…</p>
-                    <div className="mt-8 mx-auto h-0.5 w-24 rounded-full bg-gradient-to-r from-transparent via-cyan-400/50 to-transparent animate-pulse" />
+                <DiscoverAmbientCanvas variant="goldChrome" />
+                <div className="relative z-[2] flex flex-col items-center text-center max-w-sm">
+                    <StoriesPopIcon size={80} />
+                    <p className="mt-6 text-sm font-medium text-white/70">Opening stories…</p>
+                    <p className="mt-1 text-[11px] text-white/35">Stories 24</p>
                 </div>
             </div>
         );

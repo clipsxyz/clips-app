@@ -1,6 +1,7 @@
 import React from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { FiChevronLeft, FiBell, FiShare2, FiMessageSquare, FiMoreHorizontal, FiX, FiLock, FiMapPin, FiEye, FiUserPlus, FiMaximize, FiPlay, FiSearch, FiUsers, FiHeart, FiRepeat, FiVolume2, FiVolumeX, FiAlertCircle, FiMic } from 'react-icons/fi';
+import { FiChevronLeft, FiShare2, FiMessageSquare, FiMoreHorizontal, FiX, FiLock, FiMapPin, FiEye, FiUserPlus, FiMaximize, FiPlay, FiSearch, FiUsers, FiHeart, FiRepeat, FiVolume2, FiVolumeX, FiAlertCircle, FiMic } from 'react-icons/fi';
+import ProfilePostNotifyBell from '../components/ProfilePostNotifyBell';
 import Avatar from '../components/Avatar';
 import { getAvatarForHandle, getFlagForHandle } from '../api/users';
 import { MOCK_FOLLOWING_GRAPH } from '../api/mockFollowGraph';
@@ -31,8 +32,19 @@ import Swal from 'sweetalert2';
 import ShareProfileModal from '../components/ShareProfileModal';
 import InviteToGroupModal from '../components/InviteToGroupModal';
 import { getStableUserId } from '../utils/userId';
-import { followRequestSentBottomSheet, accountIsPrivateBottomSheet, bottomSheet } from '../utils/swalBottomSheet';
+import {
+    followRequestSentBottomSheet,
+    accountIsPrivateBottomSheet,
+    bottomSheet,
+    postNotifyEnabledBottomSheet,
+} from '../utils/swalBottomSheet';
 import { parsePlacesFromBio } from '../utils/suggestedPlaces';
+import {
+    clearProfilePostNotifyForCreator,
+    getProfilePostNotifyLevel,
+    setProfilePostNotifyLevel,
+    type ProfilePostNotifyLevel,
+} from '../utils/profilePostNotifyPrefs';
 
 const DEBUG_PROFILE_GRID_PAGING =
     import.meta.env.DEV && import.meta.env.VITE_DEBUG_PROFILE_GRID_PAGING === 'true';
@@ -274,6 +286,14 @@ export default function ViewProfilePage() {
     const [dismissUndo, setDismissUndo] = React.useState<{ handleNoAt: string; expiresAt: number } | null>(null);
     /** Suggested tab: optional horizontal cards; default is vertical list (same as other connection tabs). */
     const [suggestedConnectionsLayout, setSuggestedConnectionsLayout] = React.useState<'carousel' | 'list'>('list');
+    const [postNotifyLevel, setPostNotifyLevel] = React.useState<ProfilePostNotifyLevel>('off');
+    const [postNotifyMenuOpen, setPostNotifyMenuOpen] = React.useState(false);
+    const postNotifyMenuRef = React.useRef<HTMLDivElement | null>(null);
+
+    const decodedProfileHandle = React.useMemo(
+        () => (handle ? decodeURIComponent(handle) : ''),
+        [handle],
+    );
 
     const loadMoreProfilePosts = React.useCallback(async () => {
         if (!handle || !profilePostsHasMore || !profilePostsCursor || profilePostsLoadingMore) return;
@@ -348,6 +368,50 @@ export default function ViewProfilePage() {
         if (!handle || !user?.handle) return false;
         return decodeURIComponent(handle) === user.handle;
     }, [handle, user?.handle]);
+
+    const profileNotifyDisplayName = React.useMemo(() => {
+        const name = typeof profileUser?.name === 'string' ? profileUser.name.trim() : '';
+        if (name) return name;
+        const h = String(profileUser?.handle || decodedProfileHandle || '')
+            .replace(/^@/, '')
+            .trim();
+        const short = h.split('@')[0];
+        return short || h || 'this user';
+    }, [profileUser?.name, profileUser?.handle, decodedProfileHandle]);
+
+    const applyPostNotifyLevel = React.useCallback(
+        (level: ProfilePostNotifyLevel) => {
+            if (!user?.id || !user?.handle || !decodedProfileHandle) return;
+            const viewerId = user.id != null ? String(user.id) : getStableUserId(user);
+            setProfilePostNotifyLevel(viewerId, user.handle, decodedProfileHandle, level);
+            setPostNotifyLevel(level);
+            setPostNotifyMenuOpen(false);
+            if (level === 'all') {
+                void Swal.fire(postNotifyEnabledBottomSheet(profileNotifyDisplayName));
+            }
+        },
+        [user?.id, user?.handle, decodedProfileHandle, profileNotifyDisplayName],
+    );
+
+    React.useEffect(() => {
+        if (!user?.id || !decodedProfileHandle || isOwnProfile) {
+            setPostNotifyLevel('off');
+            return;
+        }
+        const viewerId = user.id != null ? String(user.id) : getStableUserId(user);
+        setPostNotifyLevel(getProfilePostNotifyLevel(viewerId, decodedProfileHandle));
+    }, [user?.id, decodedProfileHandle, isOwnProfile]);
+
+    React.useEffect(() => {
+        if (!postNotifyMenuOpen) return;
+        const onDoc = (e: MouseEvent) => {
+            if (postNotifyMenuRef.current && !postNotifyMenuRef.current.contains(e.target as Node)) {
+                setPostNotifyMenuOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', onDoc);
+        return () => document.removeEventListener('mousedown', onDoc);
+    }, [postNotifyMenuOpen]);
 
     const filteredPosts = React.useMemo(() => {
         if (contentTab === 'videos') return posts.filter((p) => p.mediaType === 'video');
@@ -1263,6 +1327,11 @@ export default function ViewProfilePage() {
                 setIsFollowing(newFollowing);
                 setHasPendingRequest(false);
                 if (!newFollowing) {
+                    if (user?.handle) {
+                        clearProfilePostNotifyForCreator(followUserId, user.handle, handleToUse);
+                        setPostNotifyLevel('off');
+                        setPostNotifyMenuOpen(false);
+                    }
                     setStats(prev => ({ ...prev, followers: Math.max(0, prev.followers - 1) }));
                     if (profileUser) setProfileUser((prev: any) => ({ ...prev, stats: { ...prev.stats, followers: Math.max(0, (prev.stats?.followers || 0) - 1) } }));
                 } else {
@@ -1384,6 +1453,11 @@ export default function ViewProfilePage() {
                             }));
                         }
                     } else {
+                        if (user?.handle) {
+                            clearProfilePostNotifyForCreator(followUserId, user.handle, handleToUse);
+                            setPostNotifyLevel('off');
+                            setPostNotifyMenuOpen(false);
+                        }
                         // User just unfollowed - decrement Bob's follower count
                         setStats(prev => ({
                             ...prev,
@@ -1422,6 +1496,11 @@ export default function ViewProfilePage() {
                 setFollowState(followUserId, handleToUse, false);
                 setHasPendingRequest(false);
                 removeFollowRequest(user.handle, canonicalHandle);
+                if (user?.handle) {
+                    clearProfilePostNotifyForCreator(followUserId, user.handle, handleToUse);
+                    setPostNotifyLevel('off');
+                    setPostNotifyMenuOpen(false);
+                }
                 
                 // If profile was private, user can no longer view
                 if (profilePrivate) {
@@ -2069,6 +2148,54 @@ export default function ViewProfilePage() {
                         {hasPendingRequest ? 'Requested' : isFollowing ? 'Following' : 'Follow'}
                     </button>
                     )}
+                    {handle && (!user?.handle || decodeURIComponent(handle) !== user.handle) && isFollowing && !hasPendingRequest && (
+                    <div className="relative shrink-0" ref={postNotifyMenuRef}>
+                        <button
+                            type="button"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                if (!user?.id) return;
+                                setPostNotifyMenuOpen((v) => !v);
+                            }}
+                            className={`h-[42px] w-11 rounded-xl border font-semibold transition-colors flex items-center justify-center ${
+                                postNotifyLevel === 'all'
+                                    ? 'border-[#d91b5c]/50 bg-[#d91b5c]/15 text-[#f9a8d4]'
+                                    : 'border-white/30 bg-black text-gray-300 hover:bg-white/10'
+                            }`}
+                            aria-label={
+                                postNotifyLevel === 'all'
+                                    ? 'Post notifications on — tap to change'
+                                    : 'Post notifications off — tap to change'
+                            }
+                            title="Notify when they post"
+                        >
+                            <ProfilePostNotifyBell active={postNotifyLevel === 'all'} />
+                        </button>
+                        {postNotifyMenuOpen ? (
+                            <div className="absolute right-0 top-full z-30 mt-1 min-w-[168px] overflow-hidden rounded-xl border border-white/15 bg-[#1a1524] py-1 shadow-xl">
+                                <button
+                                    type="button"
+                                    className={`w-full px-3 py-2.5 text-left text-sm hover:bg-white/10 ${
+                                        postNotifyLevel === 'all' ? 'text-white font-semibold' : 'text-gray-300'
+                                    }`}
+                                    onClick={() => applyPostNotifyLevel('all')}
+                                >
+                                    All posts
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`w-full px-3 py-2.5 text-left text-sm hover:bg-white/10 ${
+                                        postNotifyLevel === 'off' ? 'text-white font-semibold' : 'text-gray-300'
+                                    }`}
+                                    onClick={() => applyPostNotifyLevel('off')}
+                                >
+                                    None
+                                </button>
+                            </div>
+                        ) : null}
+                    </div>
+                    )}
                     {handle && (!user?.handle || decodeURIComponent(handle) !== user.handle) && (
                     <button
                         onClick={async (e) => {
@@ -2147,12 +2274,12 @@ export default function ViewProfilePage() {
                                 href={profileUser.socialLinks.website.startsWith('http') ? profileUser.socialLinks.website : `https://${profileUser.socialLinks.website}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="px-4 py-2 bg-black text-white rounded-xl border border-white/20 hover:bg-white/10 transition-colors flex items-center gap-2 text-sm"
+                                className="w-11 h-11 bg-black text-white rounded-xl border border-white/20 hover:bg-white/10 transition-colors active:scale-95 flex items-center justify-center"
+                                title="Website"
                             >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l3-3a4 4 0 00-5.656-5.656l-1.1 1.1" />
                                 </svg>
-                                Website
                             </a>
                         )}
                         {profileUser.socialLinks.x && (
@@ -2199,11 +2326,10 @@ export default function ViewProfilePage() {
                                 href={profileUser.socialLinks.podcast.startsWith('http') ? profileUser.socialLinks.podcast : `https://${profileUser.socialLinks.podcast}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="px-4 py-2 bg-black text-white rounded-xl border border-white/20 hover:bg-white/10 transition-colors flex items-center gap-2 text-sm"
-                                title={profileUser.socialLinks.podcast}
+                                className="w-11 h-11 bg-black text-white rounded-xl border border-white/20 hover:bg-white/10 transition-colors active:scale-95 flex items-center justify-center"
+                                title="Podcast"
                             >
-                                <FiMic className="w-4 h-4" />
-                                Podcast
+                                <FiMic className="w-5 h-5" aria-hidden />
                             </a>
                         )}
                     </div>

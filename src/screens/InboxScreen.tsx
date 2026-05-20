@@ -287,6 +287,13 @@ export default function InboxScreen({ navigation, route }: any) {
             navigation.navigate('Stories', { openUserHandle: notif.fromHandle, openStoryId: notif.storyId });
             return;
         }
+        if (notif.type === 'new_post') {
+            navigation.navigate('ViewProfile', {
+                handle: notif.fromHandle,
+                sourcePostId: notif.postId,
+            });
+            return;
+        }
         if (notif.type === 'sticker' || notif.type === 'reply' || notif.type === 'dm') {
             navigation.navigate('Messages', { handle: notif.fromHandle });
         }
@@ -429,6 +436,8 @@ export default function InboxScreen({ navigation, route }: any) {
                 return notif.message || 'Sent you a message';
             case 'follow_request':
                 return `wants to follow you`;
+            case 'new_post':
+                return notif.message || 'posted a new clip';
             default:
                 return notif.message || '';
         }

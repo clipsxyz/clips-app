@@ -10,7 +10,6 @@ import {
     ActivityIndicator,
     Alert,
     Modal,
-    Share,
     Clipboard,
     TextInput,
     RefreshControl,
@@ -34,9 +33,21 @@ import { isProfilePrivate, canViewProfile, hasPendingFollowRequest, canSendMessa
 import { FEED_UI } from '../constants/feedUiTokens';
 import type { Post } from '../types';
 import Avatar from '../components/Avatar';
+import ProfilePostNotifyBell from '../components/ProfilePostNotifyBell.native';
+import ProfilePostNotifySheet, {
+    type ProfilePostNotifySheetMode,
+} from '../components/ProfilePostNotifySheet.native';
+import ShareProfileSheet from '../components/ShareProfileSheet.native';
 import ProfileCoverHero from '../components/ProfileCoverHero.native';
 import ProfileGridThumb from '../components/ProfileGridThumb.native';
 import { isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
+import { getStableUserId } from '../utils/userId';
+import type { ProfilePostNotifyLevel } from '../utils/profilePostNotifyPrefs';
+import {
+    clearProfilePostNotifyForCreatorMobile,
+    getProfilePostNotifyLevelMobile,
+    setProfilePostNotifyLevelMobile,
+} from '../utils/profilePostNotifyPrefsMobile';
 
 export default function ViewProfileScreen({ route, navigation }: any) {
     const { handle } = route.params;
@@ -69,9 +80,44 @@ export default function ViewProfileScreen({ route, navigation }: any) {
     const [connectionRequestMap, setConnectionRequestMap] = useState<Record<string, boolean>>({});
     const [connectionActionLoadingMap, setConnectionActionLoadingMap] = useState<Record<string, boolean>>({});
     const [contentTab, setContentTab] = useState<'all' | 'videos' | 'photos' | 'text'>('all');
+    const [postNotifyLevel, setPostNotifyLevel] = useState<ProfilePostNotifyLevel>('off');
+    const [postNotifySheetMode, setPostNotifySheetMode] = useState<ProfilePostNotifySheetMode | null>(null);
+    const [showShareProfileSheet, setShowShareProfileSheet] = useState(false);
     const socialLinks = (profileUser?.socialLinks || profileUser?.social_links || {}) as Record<string, string | undefined>;
     const decodedHandle = decodeURIComponent(handle || '');
     const isOwnProfile = Boolean(user?.handle && decodedHandle === user.handle);
+
+    useEffect(() => {
+        if (!user?.id || !decodedHandle || isOwnProfile) {
+            setPostNotifyLevel('off');
+            return;
+        }
+        const viewerId = user.id != null ? String(user.id) : getStableUserId(user);
+        void getProfilePostNotifyLevelMobile(viewerId, decodedHandle).then(setPostNotifyLevel);
+    }, [user?.id, decodedHandle, isOwnProfile]);
+
+    const profileNotifyDisplayName = React.useMemo(() => {
+        const name = typeof profileUser?.name === 'string' ? profileUser.name.trim() : '';
+        if (name) return name;
+        const h = String(profileUser?.handle || decodedHandle || '')
+            .replace(/^@/, '')
+            .trim();
+        const short = h.split('@')[0];
+        return short || h || 'this user';
+    }, [profileUser?.name, profileUser?.handle, decodedHandle]);
+
+    const applyPostNotifyLevel = (level: ProfilePostNotifyLevel) => {
+        if (!user?.id || !user?.handle) return;
+        const viewerId = user.id != null ? String(user.id) : getStableUserId(user);
+        void setProfilePostNotifyLevelMobile(viewerId, user.handle, decodedHandle, level).then(() => {
+            setPostNotifyLevel(level);
+            if (level === 'all') {
+                setPostNotifySheetMode('confirm');
+            } else {
+                setPostNotifySheetMode(null);
+            }
+        });
+    };
     const profileCoverUrl =
         profileUser?.profileBackgroundUrl ||
         profileUser?.profile_background_url ||
@@ -177,11 +223,18 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 if (posts[0]?.id) {
                     await toggleFollowForPost(user.id, posts[0].id);
                 }
-                setIsFollowing(!isCurrentlyFollowing);
+                const nextFollowing = !isCurrentlyFollowing;
+                setIsFollowing(nextFollowing);
                 setHasPendingRequest(false);
-                if (!isCurrentlyFollowing && profilePrivate) {
+                if (!nextFollowing && user?.handle) {
+                    const viewerId = String(user.id);
+                    void clearProfilePostNotifyForCreatorMobile(viewerId, user.handle, decodedHandle);
+                    setPostNotifyLevel('off');
+                    setPostNotifySheetMode(null);
+                }
+                if (nextFollowing && profilePrivate) {
                     setCanView(true);
-                } else if (isCurrentlyFollowing && profilePrivate) {
+                } else if (!nextFollowing && profilePrivate) {
                     setCanView(false);
                 }
                 return;
@@ -193,6 +246,11 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                 }
                 setIsFollowing(false);
                 setHasPendingRequest(false);
+                if (user?.handle) {
+                    void clearProfilePostNotifyForCreatorMobile(String(user.id), user.handle, decodedHandle);
+                    setPostNotifyLevel('off');
+                    setPostNotifySheetMode(null);
+                }
                 if (profilePrivate) {
                     setCanView(false);
                 }
@@ -477,28 +535,67 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     {profileUser?.bio && (
                         <Text style={styles.bio}>{profileUser.bio}</Text>
                     )}
-                    {(socialLinks.website || socialLinks.podcast) && (
+                    {(socialLinks.website ||
+                        socialLinks.x ||
+                        socialLinks.instagram ||
+                        socialLinks.tiktok ||
+                        socialLinks.podcast) && (
                         <View style={styles.socialLinksRow}>
                             {socialLinks.website ? (
                                 <TouchableOpacity
-                                    style={styles.socialLinkButton}
-                                    onPress={() => {
-                                        void openExternalLink(socialLinks.website);
-                                    }}
+                                    style={styles.socialLinkIconButton}
+                                    onPress={() => void openExternalLink(socialLinks.website)}
+                                    accessibilityLabel="Website"
                                 >
-                                    <Icon name="link-outline" size={16} color="#FFFFFF" />
-                                    <Text style={styles.socialLinkText}>Website</Text>
+                                    <Icon name="link-outline" size={20} color="#FFFFFF" />
+                                </TouchableOpacity>
+                            ) : null}
+                            {socialLinks.x ? (
+                                <TouchableOpacity
+                                    style={styles.socialLinkIconButton}
+                                    onPress={() =>
+                                        void openExternalLink(
+                                            `https://twitter.com/${String(socialLinks.x).replace('@', '')}`,
+                                        )
+                                    }
+                                    accessibilityLabel="X"
+                                >
+                                    <Icon name="logo-twitter" size={20} color="#FFFFFF" />
+                                </TouchableOpacity>
+                            ) : null}
+                            {socialLinks.instagram ? (
+                                <TouchableOpacity
+                                    style={styles.socialLinkIconButton}
+                                    onPress={() =>
+                                        void openExternalLink(
+                                            `https://instagram.com/${String(socialLinks.instagram).replace('@', '')}`,
+                                        )
+                                    }
+                                    accessibilityLabel="Instagram"
+                                >
+                                    <Icon name="logo-instagram" size={20} color="#FFFFFF" />
+                                </TouchableOpacity>
+                            ) : null}
+                            {socialLinks.tiktok ? (
+                                <TouchableOpacity
+                                    style={styles.socialLinkIconButton}
+                                    onPress={() =>
+                                        void openExternalLink(
+                                            `https://tiktok.com/@${String(socialLinks.tiktok).replace('@', '')}`,
+                                        )
+                                    }
+                                    accessibilityLabel="TikTok"
+                                >
+                                    <Icon name="logo-tiktok" size={20} color="#FFFFFF" />
                                 </TouchableOpacity>
                             ) : null}
                             {socialLinks.podcast ? (
                                 <TouchableOpacity
-                                    style={styles.socialLinkButton}
-                                    onPress={() => {
-                                        void openExternalLink(socialLinks.podcast);
-                                    }}
+                                    style={styles.socialLinkIconButton}
+                                    onPress={() => void openExternalLink(socialLinks.podcast)}
+                                    accessibilityLabel="Podcast"
                                 >
-                                    <Icon name="mic-outline" size={16} color="#FFFFFF" />
-                                    <Text style={styles.socialLinkText}>Podcast</Text>
+                                    <Icon name="mic-outline" size={20} color="#FFFFFF" />
                                 </TouchableOpacity>
                             ) : null}
                         </View>
@@ -537,18 +634,48 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                         >
                             <Text style={styles.messageButtonText}>Message</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity
-                            onPress={() => setShowTraveledModal(true)}
-                            style={[
-                                styles.traveledButton,
-                                (!profileUser?.placesTraveled || !Array.isArray(profileUser.placesTraveled) || profileUser.placesTraveled.length === 0) && styles.traveledButtonDisabled,
-                            ]}
-                            disabled={!profileUser?.placesTraveled || !Array.isArray(profileUser.placesTraveled) || profileUser.placesTraveled.length === 0}
-                        >
-                            <Icon name="location" size={20} color="#FFFFFF" />
-                        </TouchableOpacity>
+                        {isFollowing && !hasPendingRequest ? (
+                            <TouchableOpacity
+                                style={[
+                                    styles.postNotifyButton,
+                                    postNotifyLevel === 'all' && styles.postNotifyButtonActive,
+                                ]}
+                                onPress={() => setPostNotifySheetMode('menu')}
+                                accessibilityLabel="Post notifications"
+                            >
+                                <ProfilePostNotifyBell active={postNotifyLevel === 'all'} />
+                            </TouchableOpacity>
+                        ) : null}
                     </View>
                 )}
+
+                <View style={styles.secondaryActions}>
+                    <TouchableOpacity
+                        onPress={() => setShowTraveledModal(true)}
+                        style={[
+                            styles.secondaryActionBtn,
+                            (!profileUser?.placesTraveled ||
+                                !Array.isArray(profileUser.placesTraveled) ||
+                                profileUser.placesTraveled.length === 0) &&
+                                styles.secondaryActionBtnDisabled,
+                        ]}
+                        disabled={
+                            !profileUser?.placesTraveled ||
+                            !Array.isArray(profileUser.placesTraveled) ||
+                            profileUser.placesTraveled.length === 0
+                        }
+                    >
+                        <Icon name="location" size={18} color="#FFFFFF" />
+                        <Text style={styles.secondaryActionText}>Places</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={styles.secondaryActionBtn}
+                        onPress={() => setShowShareProfileSheet(true)}
+                    >
+                        <Icon name="share-social" size={18} color="#FFFFFF" />
+                        <Text style={styles.secondaryActionText}>Share</Text>
+                    </TouchableOpacity>
+                </View>
 
                 {/* Posts Grid */}
                 <View style={styles.contentTabsRow}>
@@ -694,19 +821,9 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                             {/* Share Profile */}
                             <TouchableOpacity
                                 style={styles.menuButton}
-                                onPress={async () => {
+                                onPress={() => {
                                     setShowProfileMenu(false);
-                                    const profileUrl = `https://gazetteer.app/user/${encodeURIComponent(handle || '')}`;
-                                    try {
-                                        await Share.share({
-                                            message: `Check out ${profileUser?.name || handle}'s profile on Gazetteer: ${profileUrl}`,
-                                            url: profileUrl,
-                                        });
-                                    } catch (err: any) {
-                                        if (err.message !== 'User did not share') {
-                                            console.error('Error sharing:', err);
-                                        }
-                                    }
+                                    setShowShareProfileSheet(true);
                                 }}
                             >
                                 <View style={styles.menuIconContainer}>
@@ -869,6 +986,16 @@ export default function ViewProfileScreen({ route, navigation }: any) {
                     </View>
                 </View>
             </Modal>
+
+            <ProfilePostNotifySheet
+                visible={postNotifySheetMode !== null}
+                mode={postNotifySheetMode === 'confirm' ? 'confirm' : 'menu'}
+                activeLevel={postNotifyLevel}
+                displayName={profileNotifyDisplayName}
+                onClose={() => setPostNotifySheetMode(null)}
+                onChooseAll={() => applyPostNotifyLevel('all')}
+                onChooseNone={() => applyPostNotifyLevel('off')}
+            />
         </GazetteerScreenShell>
     );
 }
@@ -940,27 +1067,61 @@ const styles = StyleSheet.create({
         gap: 8,
         marginTop: 10,
     },
-    socialLinkButton: {
-        flexDirection: 'row',
+    socialLinkIconButton: {
+        width: 44,
+        height: 44,
         alignItems: 'center',
-        gap: 6,
+        justifyContent: 'center',
         backgroundColor: '#000000',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.2)',
-        borderRadius: 10,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+        borderRadius: 12,
     },
-    socialLinkText: {
-        color: '#FFFFFF',
-        fontSize: 13,
-        fontWeight: '600',
+    postNotifyButton: {
+        width: 44,
+        paddingVertical: FEED_UI.spacing.compactV,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.3)',
+        backgroundColor: '#000000',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    postNotifyButtonActive: {
+        borderColor: 'rgba(217,27,92,0.5)',
+        backgroundColor: 'rgba(217,27,92,0.15)',
     },
     actionButtons: {
         flexDirection: 'row',
         paddingHorizontal: FEED_UI.spacing.inset,
         gap: FEED_UI.spacing.groupGapTight,
+        marginBottom: FEED_UI.spacing.groupGapTight,
+    },
+    secondaryActions: {
+        flexDirection: 'row',
+        paddingHorizontal: FEED_UI.spacing.inset,
+        gap: FEED_UI.spacing.groupGapTight,
         marginBottom: FEED_UI.spacing.normalV,
+    },
+    secondaryActionBtn: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        paddingVertical: 11,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.3)',
+        backgroundColor: '#000000',
+    },
+    secondaryActionBtnDisabled: {
+        opacity: 0.45,
+    },
+    secondaryActionText: {
+        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '600',
     },
     followButton: {
         flex: 1,

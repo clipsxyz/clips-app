@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
     View,
     Text,
@@ -6,41 +6,78 @@ import {
     Image,
     TouchableOpacity,
     Linking,
-    Animated,
     Dimensions,
     ActivityIndicator,
     Modal,
-    TextInput,
-    ScrollView,
-    Share,
     Alert,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
+import StoriesPopIcon from '../components/StoriesPopIcon.native';
+import StoryViewerMedia from '../components/stories/StoryViewerMedia.native';
+import StorySharedPostViewer from '../components/stories/StorySharedPostViewer.native';
+import StoryProfileCard from '../components/stories/StoryProfileCard.native';
+import StoryDeliveryFx, {
+    type StoryDeliveryFxState,
+} from '../components/stories/StoryDeliveryFx.native';
+import StorySwipeLayer from '../components/stories/StorySwipeLayer.native';
+import StoryShareSheet from '../components/stories/StoryShareSheet.native';
+import StoryInsightsSheet from '../components/stories/StoryInsightsSheet.native';
+import StoryBottomBar from '../components/stories/StoryBottomBar.native';
+import StoryViewerHeader from '../components/stories/StoryViewerHeader.native';
+import StoryTextOverlay from '../components/stories/StoryTextOverlay.native';
 import { gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import { useAuth } from '../context/Auth';
 import { 
-    fetchFollowedUsersStoryGroups, 
+    fetchFollowedUsersStoryGroups,
+    fetchStoryGroupByHandle,
     fetchUserStories, 
     markStoryViewed, 
     incrementStoryViews,
     addStoryReaction,
     addStoryReply,
 } from '../api/stories';
-import { getFollowedUsers, getPostById } from '../api/posts';
+import {
+    STORIES24_LOADING_HOLD_MS,
+    clearStories24RailOpenHandle,
+    persistStories24RailReturn,
+    readStories24RailOpenHandle,
+} from '../utils/stories24Rail';
+import { isGazetteerWorldGroup, withGazetteerWorldGroup } from '../utils/gazetteerWorldStories';
+import { isStoryVideo } from '../utils/storyMediaNative';
+import { getStoryTextContent } from '../utils/storyTextStyleNative';
+import {
+    buildStoryMetadataItems,
+    getStoryOverlayText,
+    shouldShowSharedStoryCredit,
+} from '../utils/storyViewerMeta';
+import {
+    getGlobalVideoMutedNative,
+    setGlobalVideoMutedNative,
+    subscribeGlobalVideoMuted,
+} from '../utils/globalVideoMuteNative';
+import { getFollowedUsers, getPostById, getState, getFollowState, setFollowState } from '../api/posts';
+import { toggleFollow } from '../api/client';
 import { getAvatarForHandle } from '../api/users';
 import { appendMessage } from '../api/messages';
-import type { Story, StoryGroup } from '../types';
+import type { Post, Story, StoryGroup } from '../types';
 import Avatar from '../components/Avatar';
 
 const { width, height } = Dimensions.get('window');
 const STORY_DURATION = 15000; // 15 seconds
 const STORY_SAFE_ZONE_TOP = 18;
 const STORY_SAFE_ZONE_BOTTOM = 82;
-const QUICK_REACTIONS = ['❤️', '😂', '🔥'];
-
 export default function StoriesScreen({ route, navigation }: any) {
-    const { openUserHandle, openStoryId } = route.params || {};
+    const {
+        openUserHandle,
+        openStoryId,
+        fromStories24Rail,
+        railHandles: railHandlesParam,
+        previewThumb: routePreviewThumb,
+        previewVideoUrl: routePreviewVideoUrl,
+    } = route.params || {};
+    const railHandles = Array.isArray(railHandlesParam) ? railHandlesParam : [];
+    const railHandlesKey = railHandles.join('|');
     const normalizedOpenUserHandle = React.useMemo(() => {
         if (!openUserHandle || typeof openUserHandle !== 'string') return '';
         try {
@@ -55,17 +92,30 @@ export default function StoriesScreen({ route, navigation }: any) {
     const [currentStoryIndex, setCurrentStoryIndex] = useState(0);
     const [loading, setLoading] = useState(true);
     const [viewingStories, setViewingStories] = useState(false);
+    const [stories24OpenFromFeedRail, setStories24OpenFromFeedRail] = useState(fromStories24Rail === true);
+    const [stories24HoldMinReady, setStories24HoldMinReady] = useState(false);
     const [progress, setProgress] = useState(0);
     const [paused, setPaused] = useState(false);
     const [isMuted, setIsMuted] = useState(true);
     const [showInlineReplyComposer, setShowInlineReplyComposer] = useState(false);
     const [isSendingReply, setIsSendingReply] = useState(false);
-    const [showShareModal, setShowShareModal] = useState(false);
-    const [showInsightsModal, setShowInsightsModal] = useState(false);
-    const [insightsTab, setInsightsTab] = useState<'viewers' | 'replies'>('viewers');
+    const [showStoryShareModal, setShowStoryShareModal] = useState(false);
+    const [showInsightsSheet, setShowInsightsSheet] = useState(false);
     const [replyText, setReplyText] = useState('');
     const [insightsAvatarMap, setInsightsAvatarMap] = useState<Record<string, string | undefined>>({});
     const [isHoldingToPause, setIsHoldingToPause] = useState(false);
+    const [originalPost, setOriginalPost] = useState<Post | null>(null);
+    const [sharedPostFetchFailed, setSharedPostFetchFailed] = useState(false);
+    const [showStoryProfileCard, setShowStoryProfileCard] = useState(false);
+    const [isFollowingStoryUser, setIsFollowingStoryUser] = useState(false);
+    const [isFollowLoading, setIsFollowLoading] = useState(false);
+    const [showSharedPostModal, setShowSharedPostModal] = useState(false);
+    const [deliveryFx, setDeliveryFx] = useState<StoryDeliveryFxState | null>(null);
+    const [localReactionByStoryId, setLocalReactionByStoryId] = useState<Record<string, string>>({});
+    const avatarRef = useRef<View>(null);
+    const lastLikeTapAtRef = useRef(0);
+    const lastMuteToggleAtRef = useRef(0);
+    const deliveryFxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const progressRef = useRef(0);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
     const formatRelativeTime = (timestamp?: number) => {
@@ -101,8 +151,130 @@ export default function StoriesScreen({ route, navigation }: any) {
     }, [storyGroups, currentGroupIndex, currentStoryIndex]);
 
     useEffect(() => {
-        loadStories();
+        let mounted = true;
+        void getGlobalVideoMutedNative().then((muted) => {
+            if (mounted) setIsMuted(muted);
+        });
+        return subscribeGlobalVideoMuted((muted) => setIsMuted(muted));
     }, []);
+
+    const currentGroup = storyGroups[currentGroupIndex];
+    const currentStory = currentGroup?.stories[currentStoryIndex];
+    const isViewingOwnStory = Boolean(
+        user?.id && currentStory && currentGroup && currentStory.userId === user.id,
+    );
+
+    useEffect(() => {
+        if (!viewingStories || !currentStory?.sharedFromPost || !user?.id) {
+            setOriginalPost(null);
+            setSharedPostFetchFailed(false);
+            return;
+        }
+        setSharedPostFetchFailed(false);
+        let cancelled = false;
+        const timeoutId = setTimeout(() => {
+            if (!cancelled) {
+                setOriginalPost(null);
+                setSharedPostFetchFailed(true);
+            }
+        }, 8000);
+        void getPostById(currentStory.sharedFromPost, user.id)
+            .then((post) => {
+                if (cancelled) return;
+                clearTimeout(timeoutId);
+                if (post) setOriginalPost(post);
+                else {
+                    setOriginalPost(null);
+                    setSharedPostFetchFailed(true);
+                }
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    clearTimeout(timeoutId);
+                    setOriginalPost(null);
+                    setSharedPostFetchFailed(true);
+                }
+            });
+        return () => {
+            cancelled = true;
+            clearTimeout(timeoutId);
+        };
+    }, [viewingStories, currentStory?.sharedFromPost, currentStory?.id, user?.id]);
+
+    useEffect(() => {
+        if (!viewingStories || !currentGroup?.userHandle || !user?.id) {
+            setIsFollowingStoryUser(false);
+            return;
+        }
+        if (currentGroup.userHandle === user.handle) {
+            setIsFollowingStoryUser(false);
+            return;
+        }
+        if (user?.id) {
+            const cached = getFollowState(getState(user.id).follows || {}, currentGroup.userHandle);
+            setIsFollowingStoryUser(cached);
+        }
+    }, [viewingStories, currentGroup?.userHandle, user?.id, user?.handle]);
+
+    useEffect(() => {
+        if (
+            showInsightsSheet ||
+            showStoryShareModal ||
+            showSharedPostModal ||
+            showStoryProfileCard ||
+            deliveryFx
+        ) {
+            setPaused(true);
+        }
+    }, [showInsightsSheet, showStoryShareModal, showSharedPostModal, showStoryProfileCard, deliveryFx]);
+
+    useEffect(() => {
+        return () => {
+            if (deliveryFxTimerRef.current) clearTimeout(deliveryFxTimerRef.current);
+        };
+    }, []);
+
+    useEffect(() => {
+        let cancelled = false;
+        if (fromStories24Rail === true) {
+            setStories24OpenFromFeedRail(true);
+            return;
+        }
+        if (!normalizedOpenUserHandle) {
+            setStories24OpenFromFeedRail(false);
+            return;
+        }
+        void readStories24RailOpenHandle().then((stored) => {
+            if (cancelled) return;
+            const match =
+                !!stored &&
+                stored.trim().toLowerCase() === normalizedOpenUserHandle.trim().toLowerCase();
+            setStories24OpenFromFeedRail(match);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [fromStories24Rail, normalizedOpenUserHandle]);
+
+    useEffect(() => {
+        if (!stories24OpenFromFeedRail || !normalizedOpenUserHandle) {
+            setStories24HoldMinReady(false);
+            return;
+        }
+        setStories24HoldMinReady(false);
+        const t = setTimeout(() => setStories24HoldMinReady(true), STORIES24_LOADING_HOLD_MS);
+        return () => clearTimeout(t);
+    }, [stories24OpenFromFeedRail, normalizedOpenUserHandle]);
+
+    const stories24ContentReady = !loading && viewingStories;
+    const showStories24HoldScreen =
+        stories24OpenFromFeedRail &&
+        !!normalizedOpenUserHandle &&
+        (!stories24ContentReady || !stories24HoldMinReady);
+
+    useEffect(() => {
+        loadStories();
+    }, [user?.id, normalizedOpenUserHandle, railHandlesKey]);
 
     useEffect(() => {
         if (normalizedOpenUserHandle && storyGroups.length > 0) {
@@ -118,20 +290,51 @@ export default function StoriesScreen({ route, navigation }: any) {
             setLoading(false);
             return;
         }
+        setLoading(true);
         try {
+            const requestedHandles = Array.from(
+                new Set(
+                    [...railHandles, ...(normalizedOpenUserHandle ? [normalizedOpenUserHandle] : [])]
+                        .map((h) => (h || '').trim())
+                        .filter(Boolean),
+                ),
+            );
+
             const followedUserHandles = await getFollowedUsers(user.id);
-            let groups = await fetchFollowedUsersStoryGroups(user.id, followedUserHandles);
-            
-            if (normalizedOpenUserHandle) {
-                // Add specific user's stories if not already included
-                const existingGroup = groups.find(g => g.userHandle === normalizedOpenUserHandle);
-                if (!existingGroup) {
-                    // Fetch and add this user's story group
-                    // Implementation would fetch from API
+
+            const [mainGroups, requestedGroupsResults] = await Promise.all([
+                fetchFollowedUsersStoryGroups(user.id, followedUserHandles),
+                requestedHandles.length > 0
+                    ? Promise.all(requestedHandles.map((handle) => fetchStoryGroupByHandle(handle)))
+                    : Promise.resolve([] as (StoryGroup | null)[]),
+            ]);
+
+            let groups = mainGroups;
+            for (const storyGroup of requestedGroupsResults) {
+                if (!storyGroup) continue;
+                const existingGroupIndex = groups.findIndex((g) => g.userHandle === storyGroup.userHandle);
+                if (existingGroupIndex === -1) {
+                    groups.push(storyGroup);
+                } else {
+                    groups[existingGroupIndex] = storyGroup;
                 }
             }
-            
-            setStoryGroups(groups);
+
+            if (requestedHandles.length > 0) {
+                const orderMap = new Map<string, number>(
+                    requestedHandles.map((h, idx) => [h.toLowerCase(), idx]),
+                );
+                groups = [...groups].sort((a, b) => {
+                    const aRank = orderMap.get((a.userHandle || '').toLowerCase());
+                    const bRank = orderMap.get((b.userHandle || '').toLowerCase());
+                    if (aRank === undefined && bRank === undefined) return 0;
+                    if (aRank === undefined) return 1;
+                    if (bRank === undefined) return -1;
+                    return aRank - bRank;
+                });
+            }
+
+            setStoryGroups(withGazetteerWorldGroup(groups));
         } catch (error) {
             console.error('Error loading stories:', error);
         } finally {
@@ -141,6 +344,22 @@ export default function StoriesScreen({ route, navigation }: any) {
 
     const startViewingStories = async (group: StoryGroup, preferredStoryId?: string) => {
         if (!group || !user?.id || !group.stories || group.stories.length === 0) return;
+
+        if (isGazetteerWorldGroup(group)) {
+            const groupIndex = storyGroups.findIndex((g) => isGazetteerWorldGroup(g));
+            if (groupIndex === -1) return;
+            const initialStoryIndex = preferredStoryId
+                ? Math.max(0, (group.stories || []).findIndex((s) => s.id === preferredStoryId))
+                : 0;
+            setCurrentGroupIndex(groupIndex);
+            setCurrentStoryIndex(initialStoryIndex);
+            setViewingStories(true);
+            setProgress(0);
+            setPaused(false);
+            progressRef.current = 0;
+            startProgress();
+            return;
+        }
 
         const followedUserHandles = await getFollowedUsers(user.id);
         const stories = await fetchUserStories(user.id, group.userId, followedUserHandles || []);
@@ -237,6 +456,26 @@ export default function StoriesScreen({ route, navigation }: any) {
         if (timerRef.current) {
             clearInterval(timerRef.current);
         }
+
+        if (stories24OpenFromFeedRail && normalizedOpenUserHandle) {
+            const currentStory = storyGroups[currentGroupIndex]?.stories?.[currentStoryIndex];
+            const mediaUrl = currentStory?.mediaUrl;
+            const isVideo =
+                currentStory?.mediaType === 'video' ||
+                (!!mediaUrl && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(mediaUrl));
+            const previewThumb =
+                routePreviewThumb ||
+                (!isVideo && mediaUrl ? mediaUrl : undefined) ||
+                undefined;
+
+            void persistStories24RailReturn({
+                handle: normalizedOpenUserHandle,
+                previewThumb,
+                previewVideoUrl: routePreviewVideoUrl,
+            });
+            void clearStories24RailOpenHandle();
+        }
+
         setViewingStories(false);
         setProgress(0);
         setPaused(false);
@@ -279,16 +518,108 @@ export default function StoriesScreen({ route, navigation }: any) {
         }
     };
 
+    const toggleGlobalMute = useCallback(() => {
+        const now = Date.now();
+        if (now - lastLikeTapAtRef.current < 420) return;
+        if (now - lastMuteToggleAtRef.current < 260) return;
+        lastMuteToggleAtRef.current = now;
+        setIsMuted((prev) => {
+            const next = !prev;
+            void setGlobalVideoMutedNative(next);
+            return next;
+        });
+    }, []);
+
+    const handleStoryFollowQuickToggle = async () => {
+        if (!currentGroup?.userHandle || !user?.id || isFollowLoading) return;
+        const handle = currentGroup.userHandle;
+        setIsFollowLoading(true);
+        try {
+            const result = await toggleFollow(handle);
+            const resolved =
+                typeof result?.following === 'boolean'
+                    ? result.following
+                    : result?.status === 'accepted'
+                      ? true
+                      : result?.status === 'unfollowed'
+                        ? false
+                        : !isFollowingStoryUser;
+            setIsFollowingStoryUser(resolved);
+            setFollowState(user.id, handle, resolved);
+        } catch {
+            const fallback = !isFollowingStoryUser;
+            setIsFollowingStoryUser(fallback);
+            setFollowState(user.id, handle, fallback);
+        } finally {
+            setIsFollowLoading(false);
+        }
+    };
+
+    const openFullPostFromStory = () => {
+        if (!originalPost) return;
+        setShowSharedPostModal(false);
+        const video =
+            originalPost.mediaType === 'video' ||
+            originalPost.mediaItems?.some((m) => m.type === 'video');
+        if (video) {
+            navigation.navigate('Scenes', {
+                initialPostId: originalPost.id,
+                posts: [originalPost],
+            });
+        } else {
+            navigation.navigate('PostDetail', { postId: originalPost.id });
+        }
+    };
+
+    const startDeliveryFx = useCallback((kind: 'message' | 'like', toHandle: string) => {
+        if (deliveryFxTimerRef.current) clearTimeout(deliveryFxTimerRef.current);
+        setPaused(true);
+        const startX = width / 2;
+        const startY = height - 112;
+        const applyTarget = (targetX: number, targetY: number) => {
+            setDeliveryFx({
+                kind,
+                toHandle,
+                startX,
+                startY,
+                targetX,
+                targetY,
+                phase: 'start',
+            });
+            deliveryFxTimerRef.current = setTimeout(() => {
+                setDeliveryFx((prev) => (prev ? { ...prev, phase: 'fly' } : null));
+            }, 14);
+        };
+        const node = avatarRef.current;
+        if (node && typeof node.measureInWindow === 'function') {
+            node.measureInWindow((x, y, w, h) => {
+                applyTarget(x + w / 2, y + h / 2);
+            });
+        } else {
+            applyTarget(40, 42);
+        }
+    }, []);
+
     const handleReaction = async (emoji: string) => {
-        const currentGroup = storyGroups[currentGroupIndex];
-        const currentStory = currentGroup?.stories[currentStoryIndex];
         if (!currentStory || !user?.id || !user?.handle) return;
-        
+        setPaused(true);
         try {
             await addStoryReaction(currentStory.id, user.id, user.handle, emoji);
+            setLocalReactionByStoryId((prev) => ({ ...prev, [currentStory.id]: emoji }));
         } catch (error) {
             console.error('Error adding reaction:', error);
+            if (!deliveryFx) setPaused(false);
         }
+    };
+
+    const triggerLikeAction = () => {
+        const now = Date.now();
+        if (now - lastLikeTapAtRef.current < 260) return;
+        lastLikeTapAtRef.current = now;
+        if (currentGroup?.userHandle) {
+            startDeliveryFx('like', currentGroup.userHandle);
+        }
+        void handleReaction('👍');
     };
 
     const handleReply = async () => {
@@ -369,36 +700,14 @@ export default function StoriesScreen({ route, navigation }: any) {
             );
             setReplyText('');
             setShowInlineReplyComposer(false);
+            if (currentGroup?.userHandle) {
+                startDeliveryFx('message', currentGroup.userHandle);
+            }
         } catch (error) {
             console.error('Error adding reply:', error);
+            setPaused(false);
         } finally {
-            setTimeout(() => {
-                setIsSendingReply(false);
-                setPaused(false);
-            }, 900);
-        }
-    };
-
-    const handleShareStory = async () => {
-        const currentGroup = storyGroups[currentGroupIndex];
-        const currentStory = currentGroup?.stories[currentStoryIndex];
-        if (!currentStory) return;
-
-        const textBits = [
-            `Story by ${currentGroup?.userHandle || currentStory.userHandle}`,
-            currentStory.text ? `"${currentStory.text}"` : undefined,
-            currentStory.location ? `Location: ${currentStory.location}` : undefined,
-            currentStory.mediaUrl ? currentStory.mediaUrl : undefined,
-        ].filter(Boolean);
-
-        try {
-            await Share.share({
-                message: textBits.join('\n'),
-                title: 'Share Story',
-            });
-            setShowShareModal(false);
-        } catch (error) {
-            console.error('Error sharing story:', error);
+            setIsSendingReply(false);
         }
     };
 
@@ -432,31 +741,52 @@ export default function StoriesScreen({ route, navigation }: any) {
         };
     }, [viewingStories, paused, currentGroupIndex, currentStoryIndex]);
 
-    if (loading) {
+    if (showStories24HoldScreen) {
         return (
-            <GazetteerScreenShell contentStyle={styles.loadingShell}>
-                <ActivityIndicator size="large" color="#f472b6" />
+            <GazetteerScreenShell contentStyle={styles.loadingShell} ambientVariant="goldChrome">
+                <StoriesPopIcon size={80} />
+                <Text style={styles.storiesOpeningText}>Opening stories…</Text>
+                <Text style={styles.stories24HoldSubtext}>Stories 24</Text>
             </GazetteerScreenShell>
         );
     }
 
-    const currentGroup = storyGroups[currentGroupIndex];
-    const currentStory = currentGroup?.stories[currentStoryIndex];
-    const showMuteControl = Boolean(
-        currentStory &&
-            (currentStory.mediaType === 'video' ||
-                (currentStory.mediaUrl && /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(currentStory.mediaUrl)))
+    if (loading) {
+        return (
+            <GazetteerScreenShell contentStyle={styles.loadingShell}>
+                {normalizedOpenUserHandle && !stories24OpenFromFeedRail ? (
+                    <>
+                        <ActivityIndicator size="large" color="#f472b6" />
+                        <Text style={styles.storiesOpeningText}>Opening story...</Text>
+                    </>
+                ) : (
+                    <ActivityIndicator size="large" color="#f472b6" />
+                )}
+            </GazetteerScreenShell>
+        );
+    }
+
+    const isCurrentStoryVideo = isStoryVideo(currentStory, originalPost);
+    const storyDisplayText = getStoryTextContent(currentStory);
+    const currentStoryText = getStoryOverlayText(currentStory);
+    const storyMetadataItems = buildStoryMetadataItems(currentStory, originalPost);
+    const sharedCredit = shouldShowSharedStoryCredit(
+        currentStory,
+        originalPost,
+        currentGroup?.userHandle,
     );
-    const currentStoryAudienceLabel = currentStory?.audience === 'close_friends'
-        ? 'Followers'
-        : currentStory?.audience === 'only_me'
-            ? 'Only me'
-            : 'Public';
-    const currentStoryAudienceStyles = currentStory?.audience === 'close_friends'
-        ? { borderColor: 'rgba(110, 231, 183, 0.8)', backgroundColor: 'rgba(16, 185, 129, 0.28)', textColor: '#d1fae5' }
-        : currentStory?.audience === 'only_me'
-            ? { borderColor: 'rgba(226, 232, 240, 0.65)', backgroundColor: 'rgba(100, 116, 139, 0.28)', textColor: '#f1f5f9' }
-            : { borderColor: 'rgba(255, 255, 255, 0.35)', backgroundColor: 'rgba(0, 0, 0, 0.45)', textColor: '#FFFFFF' };
+    const showTextOnlyOverlay =
+        !!storyDisplayText &&
+        !currentStory?.sharedFromPost &&
+        !(currentStory?.mediaUrl && currentStory.mediaUrl.trim());
+    const showMediaTextOverlay =
+        !!currentStoryText &&
+        !currentStory?.sharedFromPost &&
+        !!currentStory?.mediaUrl &&
+        !currentStory.mediaUrl.startsWith('data:image');
+    const hasStoryReaction = Boolean(
+        (currentStory && localReactionByStoryId[currentStory.id]) || currentStory?.userReaction,
+    );
 
     if (!viewingStories) {
         // Story list view
@@ -466,7 +796,7 @@ export default function StoriesScreen({ route, navigation }: any) {
                     <TouchableOpacity onPress={() => navigation.goBack()}>
                         <Icon name="arrow-back" size={24} color="#FFFFFF" />
                     </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Shorts</Text>
+                    <Text style={styles.headerTitle}>Clips 24</Text>
                     <View style={{ width: 24 }} />
                 </View>
 
@@ -504,51 +834,145 @@ export default function StoriesScreen({ route, navigation }: any) {
             </View>
 
             {/* Story content */}
-            {currentStory && (
+            {currentStory && currentGroup && (
                 <>
-                    <Image
-                        source={{ uri: currentStory.mediaUrl }}
-                        style={styles.storyImage}
-                        resizeMode="cover"
-                    />
+                    <StorySwipeLayer
+                        enabled={!showInlineReplyComposer && !deliveryFx}
+                        style={styles.mediaLayer}
+                        onSwipeLeft={nextStory}
+                        onSwipeRight={previousStory}
+                        onHoldStart={pauseForHold}
+                        onHoldEnd={releaseHold}
+                    >
+                        {currentStory.sharedFromPost ? (
+                            <StorySharedPostViewer
+                                story={currentStory}
+                                originalPost={originalPost}
+                                sharedPostFetchFailed={sharedPostFetchFailed}
+                                isMuted={isMuted}
+                                paused={paused || !!deliveryFx}
+                                onOpenModal={() => {
+                                    setPaused(true);
+                                    setShowSharedPostModal(true);
+                                }}
+                                onOpenProfile={(handle) => {
+                                    closeStories();
+                                    setTimeout(() => {
+                                        navigation.navigate('ViewProfile', { handle });
+                                    }, 100);
+                                }}
+                            />
+                        ) : (
+                            <StoryViewerMedia
+                                story={currentStory}
+                                isMuted={isMuted}
+                                paused={paused || !!deliveryFx}
+                            />
+                        )}
+                    </StorySwipeLayer>
 
-                    {/* Header */}
-                    <View style={styles.storyHeader}>
-                        <View style={styles.storyHeaderLeft}>
+                    <StoryViewerHeader
+                        avatarRef={avatarRef}
+                        avatarUrl={currentGroup.avatarUrl}
+                        userHandle={currentGroup.userHandle}
+                        showFollowBadge={
+                            !!currentGroup.userHandle &&
+                            !!user?.handle &&
+                            currentGroup.userHandle !== user.handle &&
+                            !isFollowingStoryUser
+                        }
+                        metadataItems={storyMetadataItems}
+                        showVideoMute={isCurrentStoryVideo}
+                        isMuted={isMuted}
+                        onAvatarPress={() => {
+                            setShowStoryProfileCard((v) => !v);
+                            setPaused(true);
+                        }}
+                        onToggleMute={toggleGlobalMute}
+                        onClose={closeStories}
+                    />
+                    {showStoryProfileCard && currentGroup.userHandle !== user?.handle ? (
+                        <View style={styles.profileCardHost}>
+                            <StoryProfileCard
+                                isFollowing={isFollowingStoryUser}
+                                followLoading={isFollowLoading}
+                                isOwnStory={false}
+                                onViewProfile={() => {
+                                    setShowStoryProfileCard(false);
+                                    closeStories();
+                                    setTimeout(() => {
+                                        navigation.navigate('ViewProfile', {
+                                            handle: currentGroup.userHandle,
+                                        });
+                                    }, 100);
+                                }}
+                                onToggleFollow={() => void handleStoryFollowQuickToggle()}
+                                onClose={() => {
+                                    setShowStoryProfileCard(false);
+                                    if (!showInlineReplyComposer && !isSendingReply) setPaused(false);
+                                }}
+                            />
+                        </View>
+                    ) : null}
+
+                    {isViewingOwnStory ? (
+                        <TouchableOpacity
+                            style={styles.ownerInsightsBar}
+                            onPress={() => {
+                                setShowInsightsSheet(true);
+                                setPaused(true);
+                            }}
+                        >
+                            <Text style={styles.ownerInsightsText}>
+                                {(currentStory.views ?? 0)} views • {(currentStory.replies?.length ?? 0)} replies • tap for insights
+                            </Text>
+                        </TouchableOpacity>
+                    ) : null}
+
+                    {showTextOnlyOverlay ? (
+                        <StoryTextOverlay
+                            text={storyDisplayText}
+                            taggedUsers={currentStory.taggedUsers}
+                            textColor={currentStory.textColor || '#fff'}
+                            onMentionPress={(handle) => {
+                                closeStories();
+                                setTimeout(() => {
+                                    navigation.navigate('ViewProfile', { handle });
+                                }, 100);
+                            }}
+                        />
+                    ) : null}
+
+                    {showMediaTextOverlay ? (
+                        <View style={styles.mediaTextCard}>
+                            <StoryTextOverlay
+                                embedded
+                                text={currentStoryText}
+                                taggedUsers={currentStory.taggedUsers}
+                                textColor={currentStory.textColor || '#fff'}
+                                onMentionPress={(handle) => {
+                                    closeStories();
+                                    setTimeout(() => {
+                                        navigation.navigate('ViewProfile', { handle });
+                                    }, 100);
+                                }}
+                            />
+                        </View>
+                    ) : null}
+
+                    {sharedCredit.show && currentStoryText ? (
+                        <View style={styles.sharedCredit}>
                             <Avatar
-                                src={currentGroup.avatarUrl}
-                                name={currentGroup.userHandle.split('@')[0]}
+                                src={getAvatarForHandle(currentStory.sharedFromUser || '')}
+                                name={sharedCredit.authorDisplay}
                                 size="sm"
                             />
-                            <Text style={styles.storyHeaderName}>{currentGroup.userHandle}</Text>
-                            <View style={[styles.audienceBadge, { borderColor: currentStoryAudienceStyles.borderColor, backgroundColor: currentStoryAudienceStyles.backgroundColor }]}>
-                                <Text style={[styles.audienceBadgeText, { color: currentStoryAudienceStyles.textColor }]}>{currentStoryAudienceLabel}</Text>
-                            </View>
-                            <Text style={styles.storyHeaderTime}>{formatRelativeTime(currentStory.createdAt)}</Text>
-                        </View>
-                        <TouchableOpacity onPress={closeStories}>
-                            <Icon name="close" size={24} color="#FFFFFF" />
-                        </TouchableOpacity>
-                    </View>
-                    {/* Story text overlay */}
-                    {currentStory.text && (
-                        <View style={styles.storyTextOverlay}>
-                            <Text style={styles.storyText}>{currentStory.text}</Text>
-                        </View>
-                    )}
-                    {!!currentStory.sharedFromUser && !currentStory.mediaUrl && currentStory.mediaType !== 'image' && currentStory.mediaType !== 'video' && (
-                        <View style={styles.sharedAuthorInline}>
-                            <Image
-                                source={{ uri: getAvatarForHandle(currentStory.sharedFromUser) }}
-                                style={styles.sharedAuthorAvatar}
-                            />
-                            <Text style={styles.storyTextCredit}>
-                                Shared from {(currentStory.sharedFromUser || '').startsWith('@')
-                                    ? currentStory.sharedFromUser.slice(1)
-                                    : currentStory.sharedFromUser}
+                            <Text style={styles.sharedCreditText}>
+                                Shared from{' '}
+                                <Text style={styles.sharedCreditBold}>{sharedCredit.authorDisplay}</Text>
                             </Text>
                         </View>
-                    )}
+                    ) : null}
 
                     {Array.isArray(currentStory.stickers) &&
                         currentStory.stickers
@@ -587,247 +1011,119 @@ export default function StoriesScreen({ route, navigation }: any) {
                                 );
                             })}
 
-                    {/* Bottom actions */}
-                    <View style={[styles.storyActions, isHoldingToPause && styles.storyActionsHidden]}>
-                        {!showInlineReplyComposer && (
-                            <TouchableOpacity
-                                onPress={() => handleReaction('❤️')}
-                                style={styles.actionButton}
-                            >
-                                <Icon name="heart" size={28} color="#FFFFFF" />
-                            </TouchableOpacity>
-                        )}
-                        <TouchableOpacity
-                            onPress={() => {
-                                setShowInlineReplyComposer(true);
-                                setPaused(true);
+                    <StoryBottomBar
+                        hidden={isHoldingToPause}
+                        showReplyComposer={showInlineReplyComposer}
+                        replyText={replyText}
+                        replyPlaceholder={`Reply to ${currentGroup.userHandle || 'story'}`}
+                        isSending={isSendingReply}
+                        hasReaction={hasStoryReaction}
+                        onReplyTextChange={setReplyText}
+                        onOpenReply={() => {
+                            setShowInlineReplyComposer(true);
+                            setPaused(true);
+                        }}
+                        onCancelReply={() => {
+                            setShowInlineReplyComposer(false);
+                            setReplyText('');
+                            setPaused(false);
+                        }}
+                        onSendReply={() => void handleReply()}
+                        onLike={triggerLikeAction}
+                        onShare={() => {
+                            setShowStoryShareModal(true);
+                            setPaused(true);
+                        }}
+                    />
+
+                    {deliveryFx ? (
+                        <StoryDeliveryFx
+                            fx={deliveryFx}
+                            onComplete={() => {
+                                setDeliveryFx(null);
+                                if (!showInlineReplyComposer && !isSendingReply) setPaused(false);
                             }}
-                            style={styles.actionButton}
-                        >
-                            <Icon name="chatbubble" size={28} color="#FFFFFF" />
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            onPress={() => setShowShareModal(true)}
-                            style={styles.actionButton}
-                        >
-                            <Icon name="paper-plane" size={24} color="#FFFFFF" />
-                        </TouchableOpacity>
-                        {showMuteControl && (
-                            <TouchableOpacity
-                                onPress={() => setIsMuted(!isMuted)}
-                                style={styles.actionButton}
-                            >
-                                <Icon name={isMuted ? "volume-mute" : "volume-high"} size={28} color="#FFFFFF" />
-                            </TouchableOpacity>
-                        )}
-                        {currentStory?.userId === user?.id && (
-                            <TouchableOpacity
-                                onPress={() => {
-                                    setInsightsTab('viewers');
-                                    setShowInsightsModal(true);
-                                }}
-                                style={styles.actionButton}
-                            >
-                                <Icon name="bar-chart" size={24} color="#FFFFFF" />
-                            </TouchableOpacity>
-                        )}
-                    </View>
-
-                    {showInlineReplyComposer && (
-                        <View style={styles.inlineReplyComposer}>
-                            <View style={styles.inlineReplyActions}>
-                                <TextInput
-                                    value={replyText}
-                                    onChangeText={setReplyText}
-                                    placeholder="Reply to story..."
-                                    placeholderTextColor="#9CA3AF"
-                                    style={styles.inlineReplyInput}
-                                    multiline={false}
-                                    returnKeyType="send"
-                                    onFocus={() => setPaused(true)}
-                                    onSubmitEditing={() => {
-                                        if (!isSendingReply && replyText.trim()) {
-                                            handleReply();
-                                        }
-                                    }}
-                                />
-                                {QUICK_REACTIONS.map((emoji) => (
-                                    <TouchableOpacity
-                                        key={emoji}
-                                        onPress={() => handleReaction(emoji)}
-                                        style={styles.quickReactionButton}
-                                        disabled={isSendingReply}
-                                    >
-                                        <Text style={styles.quickReactionText}>{emoji}</Text>
-                                    </TouchableOpacity>
-                                ))}
-                                <TouchableOpacity
-                                    onPress={() => {
-                                        if (isSendingReply) return;
-                                        setShowInlineReplyComposer(false);
-                                        setPaused(false);
-                                    }}
-                                    style={styles.inlineReplyCancelButton}
-                                    disabled={isSendingReply}
-                                >
-                                    <Text style={styles.inlineReplyCancelText}>Cancel</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    onPress={handleReply}
-                                    style={[styles.inlineReplySendButton, isSendingReply && styles.replySendButtonDisabled]}
-                                    disabled={isSendingReply || !replyText.trim()}
-                                >
-                                    <Text style={styles.replySendText}>{isSendingReply ? 'Sending...' : 'Send'}</Text>
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-                    )}
-
-                    {/* Navigation areas */}
-                    <TouchableOpacity
-                        style={styles.leftTapArea}
-                        onPressIn={pauseForHold}
-                        onPressOut={releaseHold}
-                        onPress={previousStory}
-                        activeOpacity={1}
-                    />
-                    <TouchableOpacity
-                        style={styles.rightTapArea}
-                        onPressIn={pauseForHold}
-                        onPressOut={releaseHold}
-                        onPress={nextStory}
-                        activeOpacity={1}
-                    />
+                        />
+                    ) : null}
                 </>
             )}
 
-            {/* Share Modal */}
             <Modal
-                visible={showShareModal}
+                visible={showSharedPostModal}
                 transparent
                 animationType="fade"
-                onRequestClose={() => setShowShareModal(false)}
+                onRequestClose={() => {
+                    setShowSharedPostModal(false);
+                    if (!showInlineReplyComposer) setPaused(false);
+                }}
             >
                 <View style={styles.replyModal}>
                     <View style={styles.replyModalContent}>
-                        <Text style={styles.replyModalTitle}>Share story</Text>
-                        <TouchableOpacity style={styles.sheetActionButton} onPress={handleShareStory}>
-                            <Icon name="share-social-outline" size={18} color="#FFFFFF" />
-                            <Text style={styles.sheetActionText}>Share via device apps</Text>
+                        <Text style={styles.replyModalTitle}>View original post</Text>
+                        {originalPost ? (
+                            <Text style={styles.sharedModalSub}>
+                                This story was shared from {originalPost.userHandle}
+                            </Text>
+                        ) : null}
+                        <TouchableOpacity style={styles.sheetActionButton} onPress={openFullPostFromStory}>
+                            <Text style={styles.sheetActionText}>View full post</Text>
                         </TouchableOpacity>
+                        {originalPost ? (
+                            <TouchableOpacity
+                                style={[styles.sheetActionButton, styles.sheetActionSecondary]}
+                                onPress={() => {
+                                    setShowSharedPostModal(false);
+                                    closeStories();
+                                    setTimeout(() => {
+                                        navigation.navigate('ViewProfile', {
+                                            handle: originalPost.userHandle,
+                                        });
+                                    }, 100);
+                                }}
+                            >
+                                <Text style={styles.sheetActionTextSecondary}>View profile</Text>
+                            </TouchableOpacity>
+                        ) : null}
                         <TouchableOpacity
-                            style={styles.sheetActionButton}
                             onPress={() => {
-                                const mediaUrl = currentStory?.mediaUrl || '';
-                                if (mediaUrl) {
-                                    Linking.openURL(mediaUrl).catch(() => {});
-                                }
-                                setShowShareModal(false);
+                                setShowSharedPostModal(false);
+                                if (!showInlineReplyComposer) setPaused(false);
                             }}
+                            style={styles.replyCancelButton}
                         >
-                            <Icon name="copy-outline" size={18} color="#FFFFFF" />
-                            <Text style={styles.sheetActionText}>Open media link</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity onPress={() => setShowShareModal(false)} style={styles.replyCancelButton}>
                             <Text style={styles.replyCancelText}>Close</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
             </Modal>
 
-            {/* Owner Insights Modal */}
-            <Modal
-                visible={showInsightsModal}
-                transparent
-                animationType="slide"
-                onRequestClose={() => setShowInsightsModal(false)}
-            >
-                <View style={styles.replyModal}>
-                    <View style={styles.replyModalContent}>
-                        <Text style={styles.replyModalTitle}>Story insights</Text>
-                        <View style={styles.insightsTabRow}>
-                            <TouchableOpacity
-                                onPress={() => setInsightsTab('viewers')}
-                                style={[styles.insightsTabBtn, insightsTab === 'viewers' && styles.insightsTabBtnActive]}
-                            >
-                                <Text style={[styles.insightsTabBtnText, insightsTab === 'viewers' && styles.insightsTabBtnTextActive]}>
-                                    Viewers ({currentStory?.viewerHandles?.length || 0})
-                                </Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                onPress={() => setInsightsTab('replies')}
-                                style={[styles.insightsTabBtn, insightsTab === 'replies' && styles.insightsTabBtnActive]}
-                            >
-                                <Text style={[styles.insightsTabBtnText, insightsTab === 'replies' && styles.insightsTabBtnTextActive]}>
-                                    Replies ({currentStory?.replies?.length || 0})
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
+            {currentStory && currentGroup ? (
+                <StoryShareSheet
+                    visible={showStoryShareModal}
+                    onClose={() => {
+                        setShowStoryShareModal(false);
+                        if (!showInlineReplyComposer) setPaused(false);
+                    }}
+                    userHandle={currentGroup.userHandle}
+                    storyId={currentStory.id}
+                />
+            ) : null}
 
-                        <ScrollView style={styles.insightsScroll} contentContainerStyle={styles.insightsScrollContent}>
-                            {insightsTab === 'viewers' ? (
-                                (currentStory?.viewerHandles?.length ? currentStory.viewerHandles : []).map((viewerHandle) => (
-                                    <TouchableOpacity
-                                        key={viewerHandle}
-                                        style={styles.insightRow}
-                                        onPress={() => navigation.navigate('ViewProfile', { handle: viewerHandle })}
-                                    >
-                                        <View style={styles.insightRowInner}>
-                                            <Avatar
-                                                src={insightsAvatarMap[viewerHandle] || getAvatarForHandle(viewerHandle)}
-                                                name={viewerHandle.split('@')[0] || viewerHandle}
-                                                size="sm"
-                                            />
-                                            <View style={styles.insightTextWrap}>
-                                                <Text style={styles.insightPrimary}>{viewerHandle}</Text>
-                                                <Text style={styles.insightSecondary}>Viewed this story</Text>
-                                            </View>
-                                        </View>
-                                        <Icon name="chevron-forward" size={16} color="#9CA3AF" />
-                                    </TouchableOpacity>
-                                ))
-                            ) : (
-                                (currentStory?.replies?.length ? currentStory.replies : []).map((reply) => (
-                                    <TouchableOpacity
-                                        key={reply.id}
-                                        style={styles.insightRow}
-                                        onPress={() => navigation.navigate('ViewProfile', { handle: reply.userHandle })}
-                                    >
-                                        <View style={styles.insightRowInner}>
-                                            <Avatar
-                                                src={insightsAvatarMap[reply.userHandle] || getAvatarForHandle(reply.userHandle)}
-                                                name={reply.userHandle.split('@')[0] || reply.userHandle}
-                                                size="sm"
-                                            />
-                                            <View style={styles.insightTextWrap}>
-                                                <Text style={styles.insightPrimary}>{reply.userHandle}</Text>
-                                                <Text style={styles.insightSecondary} numberOfLines={2}>
-                                                    {reply.text}
-                                                </Text>
-                                                <Text style={styles.insightTertiary}>
-                                                    {formatRelativeTime(reply.createdAt)}
-                                                </Text>
-                                            </View>
-                                        </View>
-                                        <Icon name="chevron-forward" size={16} color="#9CA3AF" />
-                                    </TouchableOpacity>
-                                ))
-                            )}
-
-                            {insightsTab === 'viewers' && !(currentStory?.viewerHandles?.length) && (
-                                <Text style={styles.emptyInsightsText}>No viewers yet.</Text>
-                            )}
-                            {insightsTab === 'replies' && !(currentStory?.replies?.length) && (
-                                <Text style={styles.emptyInsightsText}>No replies yet.</Text>
-                            )}
-                        </ScrollView>
-
-                        <TouchableOpacity onPress={() => setShowInsightsModal(false)} style={styles.replyCancelButton}>
-                            <Text style={styles.replyCancelText}>Close</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </Modal>
+            {isViewingOwnStory && currentStory && user?.id && user?.handle ? (
+                <StoryInsightsSheet
+                    visible={showInsightsSheet}
+                    onClose={() => {
+                        setShowInsightsSheet(false);
+                        if (!showInlineReplyComposer) setPaused(false);
+                    }}
+                    story={currentStory}
+                    currentUserId={user.id}
+                    currentUserHandle={user.handle}
+                    avatarMap={insightsAvatarMap}
+                    navigation={navigation}
+                    onBeforeNavigate={closeStories}
+                />
+            ) : null}
         </View>
     );
 }
@@ -836,6 +1132,18 @@ const styles = StyleSheet.create({
     loadingShell: {
         justifyContent: 'center',
         alignItems: 'center',
+        gap: 16,
+    },
+    storiesOpeningText: {
+        marginTop: 8,
+        fontSize: 14,
+        fontWeight: '600',
+        color: 'rgba(255,255,255,0.7)',
+    },
+    stories24HoldSubtext: {
+        marginTop: 4,
+        fontSize: 11,
+        color: 'rgba(255,255,255,0.35)',
     },
     header: {
         flexDirection: 'row',
@@ -867,6 +1175,33 @@ const styles = StyleSheet.create({
     storyViewer: {
         flex: 1,
         backgroundColor: '#000000',
+    },
+    mediaLayer: {
+        ...StyleSheet.absoluteFillObject,
+    },
+    profileCardHost: {
+        position: 'absolute',
+        top: 72,
+        left: 16,
+        zIndex: 70,
+    },
+    ownerInsightsBar: {
+        position: 'absolute',
+        top: 72,
+        left: 16,
+        right: 16,
+        zIndex: 65,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.2)',
+        backgroundColor: 'rgba(0,0,0,0.45)',
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+    },
+    ownerInsightsText: {
+        color: 'rgba(255,255,255,0.9)',
+        fontSize: 11,
+        textAlign: 'center',
     },
     progressContainer: {
         flexDirection: 'row',
@@ -944,6 +1279,38 @@ const styles = StyleSheet.create({
         textShadowOffset: { width: 0, height: 1 },
         textShadowRadius: 3,
     },
+    mediaTextCard: {
+        position: 'absolute',
+        left: 16,
+        right: 16,
+        bottom: 128,
+        zIndex: 55,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.1)',
+        backgroundColor: 'rgba(0,0,0,0.3)',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        maxWidth: 400,
+        alignSelf: 'center',
+    },
+    sharedCredit: {
+        position: 'absolute',
+        bottom: 126,
+        alignSelf: 'center',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.25)',
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        zIndex: 75,
+    },
+    sharedCreditText: { color: 'rgba(255,255,255,0.9)', fontSize: 12 },
+    sharedCreditBold: { fontWeight: '700', color: '#fff' },
     storyTextCredit: {
         fontSize: 12,
         color: 'rgba(255,255,255,0.9)',
@@ -1179,6 +1546,19 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         fontSize: 14,
         fontWeight: '600',
+    },
+    sheetActionSecondary: {
+        backgroundColor: '#1f2937',
+    },
+    sheetActionTextSecondary: {
+        color: '#e5e7eb',
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    sharedModalSub: {
+        color: '#9ca3af',
+        fontSize: 13,
+        marginBottom: 12,
     },
     insightsTabRow: {
         flexDirection: 'row',

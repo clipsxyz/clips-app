@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import DiscoverAmbientCanvas from './DiscoverAmbientCanvas.native';
 import { INTEREST_OPTIONS, MAX_INTEREST_SELECTIONS } from '../constants/interestOptions';
 
 type Props = {
@@ -16,6 +17,8 @@ export default function InterestsFeedCard({ selected, onToggle, onSave, onSkip, 
 
   return (
     <View style={styles.card}>
+      <DiscoverAmbientCanvas variant="discover" />
+      <View style={styles.content}>
       <View style={styles.header}>
         <View style={styles.headerText}>
           <Text style={styles.title}>Your interests</Text>
@@ -64,6 +67,7 @@ export default function InterestsFeedCard({ selected, onToggle, onSave, onSkip, 
           )}
         </TouchableOpacity>
       </View>
+      </View>
     </View>
   );
 }
@@ -75,8 +79,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#0b0711',
     overflow: 'hidden',
+  },
+  content: {
+    zIndex: 2,
   },
   header: {
     flexDirection: 'row',

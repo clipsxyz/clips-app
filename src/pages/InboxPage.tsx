@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile, FiUserPlus, FiUser, FiX, FiPlus, FiCheck, FiMoreHorizontal, FiBellOff, FiTrash2, FiBookmark } from 'react-icons/fi';
+import { FiChevronLeft, FiMessageCircle, FiCornerUpLeft, FiSmile, FiUserPlus, FiUser, FiX, FiPlus, FiCheck, FiMoreHorizontal, FiBell, FiBellOff, FiTrash2, FiBookmark } from 'react-icons/fi';
 import Avatar from '../components/Avatar';
 import { useAuth } from '../context/Auth';
 import { getAvatarForHandle } from '../api/users';
@@ -1051,7 +1051,11 @@ export default function InboxPage() {
             setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
         }
 
-        if (notif.type === 'sticker' || notif.type === 'reply') {
+        if (notif.type === 'new_post') {
+            navigate(`/user/${encodeURIComponent(notif.fromHandle)}`, {
+                state: notif.postId ? { sourcePostId: notif.postId } : undefined,
+            });
+        } else if (notif.type === 'sticker' || notif.type === 'reply') {
             navigate(`/messages/${encodeURIComponent(notif.fromHandle)}`);
         } else if (notif.type === 'dm') {
             if (notif.chatGroupId) {
@@ -1083,6 +1087,8 @@ export default function InboxPage() {
                 return notif.message || 'Sent you a message';
             case 'follow_request':
                 return `wants to follow you`;
+            case 'new_post':
+                return notif.message || 'posted a new clip';
             default:
                 return notif.message || '';
         }
@@ -1099,6 +1105,8 @@ export default function InboxPage() {
                 return <FiMessageCircle className={cls} />;
             case 'follow_request':
                 return <FiUserPlus className={cls} />;
+            case 'new_post':
+                return <FiBell className={cls} />;
             default:
                 return <FiMessageCircle className={cls} />;
         }

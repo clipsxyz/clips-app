@@ -1,5 +1,6 @@
 import React from 'react';
 import { FiX } from 'react-icons/fi';
+import DiscoverAmbientCanvas from './DiscoverAmbientCanvas';
 import { INTEREST_OPTIONS, MAX_INTEREST_SELECTIONS } from '../constants/interestOptions';
 
 type Props = {
@@ -15,7 +16,10 @@ export default function InterestsFeedCard({ selected, onToggle, onSave, onSkip, 
   const atMax = selected.length >= MAX_INTEREST_SELECTIONS;
 
   return (
-    <article className="mx-2.5 mb-3 overflow-hidden rounded-2xl border border-white/10 bg-[#0a0a0a] shadow-lg">
+    <article className="relative mx-2.5 mb-3 overflow-hidden rounded-2xl border border-white/10 bg-[#0b0711] shadow-lg">
+      <DiscoverAmbientCanvas fixed={false} />
+
+      <div className="relative z-[2]">
       <div className="flex items-start justify-between gap-3 border-b border-white/10 px-4 py-3">
           <div>
           <h2 className="text-base font-semibold text-white">Your interests</h2>
@@ -79,6 +83,7 @@ export default function InterestsFeedCard({ selected, onToggle, onSave, onSkip, 
         >
           {saving ? 'Saving…' : atMax ? 'Done' : 'Save'}
         </button>
+      </div>
       </div>
     </article>
   );

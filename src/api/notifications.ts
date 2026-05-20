@@ -1,6 +1,14 @@
 import { getNotificationPreferences, isNotificationTypeEnabled } from '../services/notifications';
 
-export type NotificationType = 'sticker' | 'reply' | 'dm' | 'like' | 'comment' | 'follow' | 'follow_request';
+export type NotificationType =
+    | 'sticker'
+    | 'reply'
+    | 'dm'
+    | 'like'
+    | 'comment'
+    | 'follow'
+    | 'follow_request'
+    | 'new_post';
 
 export interface Notification {
     id: string;
@@ -74,9 +82,10 @@ export async function createNotification(notification: Omit<Notification, 'id' |
     userNotifications.unshift(notif); // Add to beginning (newest first)
     notifications.set(notification.toHandle, userNotifications);
 
-    // Dispatch event for UI updates
-    window.dispatchEvent(new CustomEvent('notificationCreated', { detail: notif }));
-    window.dispatchEvent(new CustomEvent('notificationsUpdated', { detail: { handle: notification.toHandle } }));
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('notificationCreated', { detail: notif }));
+        window.dispatchEvent(new CustomEvent('notificationsUpdated', { detail: { handle: notification.toHandle } }));
+    }
 
     return notif;
 }
@@ -98,6 +107,8 @@ function normalizeNotificationChannel(notification: Pick<Notification, 'type' | 
             return 'follow' as const;
         case 'follow_request':
             return 'follow_request' as const;
+        case 'new_post':
+            return 'follow' as const;
         default:
             return 'dm' as const;
     }

@@ -15,7 +15,15 @@ import ScenesModal from './components/ScenesModal';
 import CreateModal from './components/CreateModal';
 import AboutProfileModal from './components/AboutProfileModal';
 import InterestsFeedCard from './components/InterestsFeedCard';
+import DiscoverAmbientCanvas from './components/DiscoverAmbientCanvas';
+import SuggestedFollowerFeedCard from './components/SuggestedFollowerFeedCard';
 import { INTERESTS_ONBOARDING_DISMISSED_KEY, MAX_INTEREST_SELECTIONS } from './constants/interestOptions';
+import {
+  SUGGESTED_FOLLOWER_DISMISSED_KEY,
+  SUGGESTED_FOLLOWER_HIDDEN_HANDLES_KEY,
+  buildSuggestedFollowerFromPosts,
+  type SuggestedFollowerSuggestion,
+} from './utils/suggestedFollowerFeed';
 import TaggedUsersBottomSheet from './components/TaggedUsersBottomSheet';
 import TaggedAvatars from './components/TaggedAvatars';
 import Avatar from './components/Avatar';
@@ -5995,7 +6003,9 @@ function Stories24FeedRail({
       className="mx-3 my-3 rounded-2xl p-[1.5px] shadow-[0_8px_24px_rgba(0,0,0,0.35)]"
       style={{ background: 'linear-gradient(135deg, #f6e27a 0%, #d4af37 24%, #f4f4f4 48%, #bfc5cc 72%, #ffe8a3 100%)' }}
     >
-      <div className="rounded-2xl bg-[#0a1323] p-3">
+      <div className="relative overflow-hidden rounded-2xl bg-[#0a1323] p-3">
+      <DiscoverAmbientCanvas fixed={false} variant="goldChrome" />
+      <div className="relative z-[2]">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-white text-base font-semibold flex items-center gap-1.5">
           <span className="relative inline-flex h-4 w-4 shrink-0" aria-hidden>
@@ -6095,6 +6105,7 @@ function Stories24FeedRail({
         ))}
       </div>
       </div>
+      </div>
       {expandingStory &&
         createPortal(
           <div className="fixed inset-0 z-[140] pointer-events-none">
@@ -6118,14 +6129,7 @@ function Stories24FeedRail({
                   className="absolute inset-0 w-full h-full object-cover"
                 />
               ) : null}
-              <div className="absolute inset-0 bg-black/10" />
-              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none px-4">
-                <p className="text-center text-2xl sm:text-3xl font-bold tracking-tight text-white/95 [text-shadow:0_2px_28px_rgba(0,0,0,0.55)]">
-                  <span className="bg-gradient-to-r from-teal-200 via-white to-fuchsia-300 bg-clip-text text-transparent">Gazetter</span>
-                  <span className="text-white/95"> 24</span>
-                </p>
-                <p className="mt-2 text-[11px] uppercase tracking-[0.22em] text-teal-200/80">Stories</p>
-              </div>
+              <div className="absolute inset-0 bg-black/20" />
             </div>
           </div>,
           document.body
@@ -6320,6 +6324,21 @@ function FeedPageWrapper() {
   const [interestsDraft, setInterestsDraft] = React.useState<string[]>([]);
   const [interestsSaving, setInterestsSaving] = React.useState(false);
   const [interestsCardDismissed, setInterestsCardDismissed] = React.useState(false);
+  const [suggestedFollowerDismissed, setSuggestedFollowerDismissed] = React.useState(() => {
+    try {
+      return localStorage.getItem(SUGGESTED_FOLLOWER_DISMISSED_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const [hiddenFollowerHandles, setHiddenFollowerHandles] = React.useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem(SUGGESTED_FOLLOWER_HIDDEN_HANDLES_KEY);
+      return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+    } catch {
+      return new Set();
+    }
+  });
   // In-feed DM sheet (TikTok-style: compose without leaving feed)
   const [dmSheetOpen, setDmSheetOpen] = React.useState(false);
   const [dmSheetRecipientHandle, setDmSheetRecipientHandle] = React.useState<string | null>(null);
@@ -7758,23 +7777,45 @@ function FeedPageWrapper() {
     return true;
   }, [user, interestsCardDismissed]);
 
+  const suggestedFollowerSuggestion = React.useMemo((): SuggestedFollowerSuggestion | null => {
+    if (!user || customLocation || suggestedFollowerDismissed) return null;
+    const posts = flatWithSuggested
+      .filter((x): x is { type: 'post'; item: Post; createdAt: number } => x.type === 'post')
+      .map((x) => x.item);
+    return buildSuggestedFollowerFromPosts(posts, user, hiddenFollowerHandles);
+  }, [flatWithSuggested, user, customLocation, suggestedFollowerDismissed, hiddenFollowerHandles]);
+
+  const showSuggestedFollowerCard = Boolean(suggestedFollowerSuggestion);
+
   const flatForRender = React.useMemo(() => {
-    if (!showInterestsFeedCard) return flatWithSuggested;
-    const out: typeof flatWithSuggested = [];
+    type ExtraRow =
+      | { type: 'interests_onboarding'; item: null; createdAt: 0 }
+      | { type: 'suggested_follower'; item: SuggestedFollowerSuggestion; createdAt: 0 };
+    const out: Array<(typeof flatWithSuggested)[number] | ExtraRow> = [];
     let postCount = 0;
-    let inserted = false;
+    let interestsInserted = false;
+    let followerInserted = false;
     for (const item of flatWithSuggested) {
       out.push(item);
-      if (!inserted && item.type === 'post') {
+      if (item.type === 'post') {
         postCount += 1;
-        if (postCount === 4) {
-          out.push({ type: 'interests_onboarding' as const, item: null, createdAt: 0 });
-          inserted = true;
+        if (!interestsInserted && showInterestsFeedCard && postCount === 4) {
+          out.push({ type: 'interests_onboarding', item: null, createdAt: 0 });
+          interestsInserted = true;
+        }
+        if (
+          !followerInserted &&
+          showSuggestedFollowerCard &&
+          suggestedFollowerSuggestion &&
+          postCount === 3
+        ) {
+          out.push({ type: 'suggested_follower', item: suggestedFollowerSuggestion, createdAt: 0 });
+          followerInserted = true;
         }
       }
     }
     return out;
-  }, [flatWithSuggested, showInterestsFeedCard]);
+  }, [flatWithSuggested, showInterestsFeedCard, showSuggestedFollowerCard, suggestedFollowerSuggestion]);
 
   const saveInterests = React.useCallback(
     (next: string[]) => {
@@ -8460,6 +8501,40 @@ function FeedPageWrapper() {
         let postCounter = 0;
 
         return flatForRender.map((feedItem, index) => {
+          if (feedItem.type === 'suggested_follower') {
+            const sug = feedItem.item;
+            return (
+              <SuggestedFollowerFeedCard
+                key={`suggested-follower-${sug.userHandle}`}
+                suggestion={sug}
+                onFollow={handleMainFeedFollow}
+                onDismiss={() => {
+                  try {
+                    localStorage.setItem(SUGGESTED_FOLLOWER_DISMISSED_KEY, '1');
+                  } catch {
+                    /* ignore */
+                  }
+                  setSuggestedFollowerDismissed(true);
+                }}
+                onNotInterested={() => {
+                  const key = String(sug.userHandle || '').trim().toLowerCase();
+                  setHiddenFollowerHandles((prev) => {
+                    const next = new Set(prev);
+                    next.add(key);
+                    try {
+                      localStorage.setItem(
+                        SUGGESTED_FOLLOWER_HIDDEN_HANDLES_KEY,
+                        JSON.stringify([...next]),
+                      );
+                    } catch {
+                      /* ignore */
+                    }
+                    return next;
+                  });
+                }}
+              />
+            );
+          }
           if (feedItem.type === 'interests_onboarding') {
             return (
               <InterestsFeedCard

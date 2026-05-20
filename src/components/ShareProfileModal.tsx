@@ -1,9 +1,16 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FiX, FiCopy, FiShare2 } from 'react-icons/fi';
+import { FiX, FiLink, FiMail, FiPlay } from 'react-icons/fi';
+import { SiWhatsapp, SiFacebook, SiX, SiLinkedin, SiInstagram } from 'react-icons/si';
 import { useAuth } from '../context/Auth';
 import { createStory } from '../api/stories';
 import { showToast } from '../utils/toast';
+import Avatar from './Avatar';
+import {
+    buildProfileShareUrl,
+    formatProfileDisplayHandle,
+    getProfileShareMessage,
+} from '../utils/profileShareUrl';
 
 interface ShareProfileModalProps {
     isOpen: boolean;
@@ -21,23 +28,25 @@ const ShareProfileModal: React.FC<ShareProfileModalProps> = ({ isOpen, onClose, 
 
     if (!isOpen) return null;
 
-    const profileUrl = `${window.location.origin}/user/${encodeURIComponent(handle)}`;
-    const shareText = `Check out ${name}'s profile on Gazetteer`;
+    const displayHandle = formatProfileDisplayHandle(handle);
+    const profileUrl = buildProfileShareUrl(handle);
+    const shareText = getProfileShareMessage(name);
 
     const handleCopyLink = async () => {
         try {
             await navigator.clipboard.writeText(profileUrl);
             setCopied(true);
+            showToast?.('Profile link copied');
             setTimeout(() => setCopied(false), 2000);
         } catch (err) {
             console.error('Failed to copy link:', err);
+            showToast?.('Could not copy link');
         }
     };
 
     const handleShare = (platform: string) => {
         const encodedUrl = encodeURIComponent(profileUrl);
         const encodedText = encodeURIComponent(shareText);
-
         let shareUrl = '';
 
         switch (platform) {
@@ -61,65 +70,55 @@ const ShareProfileModal: React.FC<ShareProfileModalProps> = ({ isOpen, onClose, 
         }
 
         window.open(shareUrl, '_blank', 'width=600,height=400');
+        onClose();
     };
 
     const handleShareToStory = async () => {
         if (!user) {
-            alert('Please sign in to share to stories.');
+            showToast?.('Sign in to share to Stories');
             return;
         }
 
         setIsSharing(true);
 
         try {
-            // Create an image from the profile for the story
             let mediaUrl = avatarUrl;
             let mediaType: 'image' | 'video' = 'image';
 
-            // If no avatar, create a text-based image
             if (!mediaUrl) {
                 mediaUrl = await generateProfileImage(name, handle);
             }
 
-            // Create the story with profile information
-            // Tag the profile user so their name can be clickable
             await createStory(
                 user.id,
                 user.handle || '',
                 mediaUrl,
                 mediaType,
                 `Check out @${handle}'s profile!`,
-                undefined, // location
-                undefined, // textColor
-                undefined, // textSize
-                undefined, // sharedFromPost
-                handle, // sharedFromUser (the profile being shared)
-                undefined, // textStyle
-                undefined, // stickers
-                [handle] // taggedUsers - tag the profile so name can be clickable
+                undefined,
+                undefined,
+                undefined,
+                handle,
+                undefined,
+                undefined,
+                [handle],
             );
 
-            // Close the modal
             onClose();
-
-            // Show success toast
-            showToast?.('Profile shared to stories!');
-
-            // Navigate to stories page
+            showToast?.('Profile shared to Stories');
             navigate('/stories', {
                 state: {
-                    openUserHandle: user.handle // Open current user's stories
-                }
+                    openUserHandle: user.handle,
+                },
             });
         } catch (e) {
             console.error('Failed to share profile to stories:', e);
-            alert('Failed to share profile to stories. Please try again.');
+            showToast?.('Failed to share to Stories');
         } finally {
             setIsSharing(false);
         }
     };
 
-    // Generate a profile image for stories if no avatar
     async function generateProfileImage(profileName: string, profileHandle: string): Promise<string> {
         const width = 1080;
         const height = 1920;
@@ -132,158 +131,179 @@ const ShareProfileModal: React.FC<ShareProfileModalProps> = ({ isOpen, onClose, 
             throw new Error('Could not get canvas context');
         }
 
-        // Gradient background
         const gradient = ctx.createLinearGradient(0, 0, width, height);
-        gradient.addColorStop(0, '#ec4899');
-        gradient.addColorStop(0.5, '#a855f7');
-        gradient.addColorStop(1, '#7c3aed');
+        gradient.addColorStop(0, '#0b0711');
+        gradient.addColorStop(0.45, '#201138');
+        gradient.addColorStop(1, '#d91b5c');
         ctx.fillStyle = gradient;
         ctx.fillRect(0, 0, width, height);
 
-        // Text styling
         ctx.fillStyle = '#FFFFFF';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-
-        // Profile name
         ctx.font = 'bold 72px Arial';
         const nameY = height / 2 - 100;
         ctx.fillText(profileName.toUpperCase(), width / 2, nameY);
-
-        // Handle
         ctx.font = '48px Arial';
-        ctx.fillText(`@${profileHandle}`, width / 2, nameY + 100);
-
-        // "View Profile" text
+        ctx.fillText(displayHandle, width / 2, nameY + 100);
         ctx.font = '36px Arial';
-        ctx.fillText('View Profile on Gazetteer', width / 2, nameY + 200);
+        ctx.fillText('View on Gazetteer', width / 2, nameY + 200);
 
         return canvas.toDataURL('image/png');
     }
 
+    const iconWrap = (children: React.ReactNode, bg: string, extra = '') => (
+        <div
+            className={`w-12 h-12 min-w-[48px] min-h-[48px] rounded-full flex items-center justify-center flex-shrink-0 shadow-lg border border-white/10 ${bg} ${extra}`}
+        >
+            {children}
+        </div>
+    );
+
     const shareOptions = [
         {
             id: 'story',
-            name: 'Share to Stories',
-            icon: (
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
+            label: isSharing ? 'Sharing…' : 'Stories',
+            icon: iconWrap(
+                isSharing ? (
+                    <div className="w-5 h-5 border-2 border-white/80 border-t-transparent rounded-full animate-spin" />
+                ) : (
+                    <FiPlay className="w-5 h-5 text-white" aria-hidden />
+                ),
+                'bg-gradient-to-br from-[#d91b5c] to-[#201138]',
             ),
-            color: 'bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white',
             action: handleShareToStory,
-            isLoading: isSharing
-        },
-        {
-            id: 'copy',
-            name: 'Copy Link',
-            icon: <FiCopy className="w-6 h-6" />,
-            color: copied ? 'bg-green-100 text-green-800' : 'bg-gray-100 hover:bg-gray-200 text-gray-800',
-            action: handleCopyLink
+            keepOpen: true,
         },
         {
             id: 'whatsapp',
-            name: 'WhatsApp',
-            icon: (
-                <div className="w-6 h-6 bg-green-500 rounded flex items-center justify-center">
-                    <span className="text-white text-xs font-bold">W</span>
-                </div>
-            ),
-            color: 'bg-green-50 hover:bg-green-100 text-green-800',
-            action: () => handleShare('whatsapp')
+            label: 'WhatsApp',
+            icon: iconWrap(<SiWhatsapp className="w-6 h-6 text-white" aria-hidden />, 'bg-[#25D366]'),
+            action: () => handleShare('whatsapp'),
+        },
+        {
+            id: 'x',
+            label: 'X',
+            icon: iconWrap(<SiX className="w-5 h-5 text-white" aria-hidden />, 'bg-black'),
+            action: () => handleShare('twitter'),
         },
         {
             id: 'facebook',
-            name: 'Facebook',
-            icon: (
-                <div className="w-6 h-6 bg-blue-600 rounded flex items-center justify-center">
-                    <span className="text-white text-xs font-bold">f</span>
-                </div>
-            ),
-            color: 'bg-blue-50 hover:bg-blue-100 text-blue-800',
-            action: () => handleShare('facebook')
+            label: 'Facebook',
+            icon: iconWrap(<SiFacebook className="w-6 h-6 text-white" aria-hidden />, 'bg-[#1877F2]'),
+            action: () => handleShare('facebook'),
         },
         {
-            id: 'twitter',
-            name: 'X (Twitter)',
-            icon: (
-                <div className="w-6 h-6 bg-black rounded flex items-center justify-center">
-                    <span className="text-white text-xs font-bold">X</span>
-                </div>
+            id: 'instagram',
+            label: copied ? 'Copied' : 'Instagram',
+            icon: iconWrap(
+                <SiInstagram className="w-6 h-6 text-white" aria-hidden />,
+                'bg-gradient-to-br from-[#833AB4] via-[#E1306C] to-[#F77737]',
             ),
-            color: 'bg-gray-50 hover:bg-gray-100 text-gray-800',
-            action: () => handleShare('twitter')
+            action: async () => {
+                await handleCopyLink();
+                showToast?.('Link copied — paste in Instagram');
+            },
+            keepOpen: true,
         },
         {
             id: 'gmail',
-            name: 'Gmail',
-            icon: (
-                <div className="w-6 h-6 bg-red-500 rounded flex items-center justify-center">
-                    <span className="text-white text-xs font-bold">G</span>
-                </div>
-            ),
-            color: 'bg-red-50 hover:bg-red-100 text-red-800',
-            action: () => handleShare('gmail')
+            label: 'Email',
+            icon: iconWrap(<FiMail className="w-5 h-5 text-white" aria-hidden />, 'bg-[#EA4335]'),
+            action: () => handleShare('gmail'),
         },
         {
             id: 'linkedin',
-            name: 'LinkedIn',
-            icon: (
-                <div className="w-6 h-6 bg-blue-700 rounded flex items-center justify-center">
-                    <span className="text-white text-xs font-bold">in</span>
-                </div>
-            ),
-            color: 'bg-blue-50 hover:bg-blue-100 text-blue-800',
-            action: () => handleShare('linkedin')
-        }
+            label: 'LinkedIn',
+            icon: iconWrap(<SiLinkedin className="w-5 h-5 text-white" aria-hidden />, 'bg-[#0A66C2]'),
+            action: () => handleShare('linkedin'),
+        },
+        {
+            id: 'copy',
+            label: copied ? 'Copied!' : 'Copy link',
+            icon: iconWrap(<FiLink className="w-5 h-5 text-white" aria-hidden />, 'bg-white/10'),
+            action: handleCopyLink,
+            keepOpen: true,
+        },
     ];
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-            {/* Backdrop */}
+        <div
+            className="fixed inset-0 z-[280] flex items-end justify-center bg-black/65 backdrop-blur-sm"
+            onClick={onClose}
+            role="presentation"
+        >
             <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={onClose}
-            />
+                className="relative w-full max-w-md rounded-t-2xl border border-white/10 border-b-0 bg-[#1a1524] shadow-2xl max-h-[88vh] flex flex-col overflow-hidden"
+                onClick={(e) => e.stopPropagation()}
+                role="dialog"
+                aria-labelledby="share-profile-title"
+            >
+                <div className="flex justify-center pt-3 pb-1">
+                    <div className="h-1 w-10 rounded-full bg-white/20" />
+                </div>
 
-            {/* Modal */}
-            <div className="relative w-full max-w-md mx-4 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl overflow-hidden">
-                {/* Header */}
-                <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Share Profile</h2>
+                <div className="flex items-center justify-between gap-3 px-4 pb-3 border-b border-white/10">
+                    <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-[#d91b5c]/90">
+                            Gazetteer
+                        </p>
+                        <h2 id="share-profile-title" className="text-lg font-semibold text-white">
+                            Share profile
+                        </h2>
+                    </div>
                     <button
+                        type="button"
                         onClick={onClose}
-                        className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                        className="rounded-full p-2 text-gray-400 hover:bg-white/10 hover:text-white transition-colors"
                         aria-label="Close"
                     >
-                        <FiX className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+                        <FiX className="w-5 h-5" />
                     </button>
                 </div>
 
-                {/* Share Options Grid */}
-                <div className="p-6">
-                    <div className="grid grid-cols-4 gap-4">
-                        {shareOptions.map((option) => (
-                            <button
-                                key={option.id}
-                                onClick={() => {
-                                    if (option.action) {
-                                        option.action();
-                                    }
-                                }}
-                                disabled={option.isLoading}
-                                className={`flex flex-col items-center gap-2 p-4 rounded-xl transition-all ${option.color} ${
-                                    option.isLoading ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105 active:scale-95'
-                                }`}
-                            >
-                                {option.isLoading ? (
-                                    <div className="w-6 h-6 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                                ) : (
-                                    option.icon
-                                )}
-                                <span className="text-xs font-medium text-center">{option.name}</span>
-                            </button>
-                        ))}
+                <div className="px-4 py-4 border-b border-white/10">
+                    <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/30 px-3 py-3">
+                        <Avatar src={avatarUrl} name={name} size="lg" className="ring-2 ring-[#d91b5c]/30" />
+                        <div className="min-w-0 flex-1">
+                            <p className="truncate text-base font-semibold text-white">{name}</p>
+                            <p className="truncate text-sm text-gray-400">{displayHandle}</p>
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={handleCopyLink}
+                        className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/[0.04] py-2.5 text-sm font-medium text-gray-200 hover:bg-white/10 transition-colors"
+                    >
+                        <FiLink className="w-4 h-4 shrink-0" />
+                        <span className="truncate">{copied ? 'Link copied' : profileUrl.replace(/^https?:\/\//, '')}</span>
+                    </button>
+                </div>
+
+                <div className="flex-shrink-0 bg-[#1a1524] pb-[max(1rem,env(safe-area-inset-bottom))]">
+                    <p className="px-4 pt-3 pb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                        Share to
+                    </p>
+                    <div className="overflow-x-auto overflow-y-hidden scrollbar-hide px-2 pb-4">
+                        <div className="flex items-start gap-5 min-w-max px-2">
+                            {shareOptions.map(({ id, label, icon, action, keepOpen }) => (
+                                <button
+                                    key={id}
+                                    type="button"
+                                    disabled={id === 'story' && isSharing}
+                                    onClick={() => {
+                                        void action();
+                                        if (!keepOpen) onClose();
+                                    }}
+                                    className="flex flex-col items-center gap-2 flex-shrink-0 min-w-[56px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#d91b5c]/60 rounded-lg disabled:opacity-50"
+                                >
+                                    {icon}
+                                    <span className="text-[10px] sm:text-xs text-gray-400 whitespace-nowrap max-w-[72px] text-center truncate">
+                                        {label}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -292,4 +312,3 @@ const ShareProfileModal: React.FC<ShareProfileModalProps> = ({ isOpen, onClose, 
 };
 
 export default ShareProfileModal;
-

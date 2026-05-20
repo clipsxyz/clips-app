@@ -80,7 +80,22 @@ import FeedEngagementRow from '../components/FeedEngagementRow';
 import FeedShareModal from '../components/FeedShareModal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import InterestsFeedCard from '../components/InterestsFeedCard.native';
+import SuggestedFollowerFeedCard from '../components/SuggestedFollowerFeedCard.native';
+import Stories24FeedRail from '../components/Stories24FeedRail.native';
+import {
+    buildStories24RailItems,
+    consumeStories24RailReturn,
+    persistStories24RailOpenHandle,
+    type Stories24RailItem,
+    type Stories24RailReturnPayload,
+} from '../utils/stories24Rail';
 import { INTERESTS_ONBOARDING_DISMISSED_KEY, MAX_INTEREST_SELECTIONS } from '../constants/interestOptions';
+import {
+    SUGGESTED_FOLLOWER_DISMISSED_KEY,
+    SUGGESTED_FOLLOWER_HIDDEN_HANDLES_KEY,
+    buildSuggestedFollowerFromPosts,
+    type SuggestedFollowerSuggestion,
+} from '../utils/suggestedFollowerFeed';
 import PostOverflowMenuModal from '../components/PostOverflowMenuModal';
 import PostCommentsSheet from '../components/PostCommentsSheet';
 import {
@@ -1193,7 +1208,11 @@ const FeedCard = React.memo(function FeedCard({
     );
 });
 
-type FeedListRow = { kind: 'post'; post: Post } | { kind: 'interests'; id: string };
+type FeedListRow =
+    | { kind: 'post'; post: Post }
+    | { kind: 'stories24'; id: string }
+    | { kind: 'interests'; id: string }
+    | { kind: 'suggested_follower'; suggestion: SuggestedFollowerSuggestion };
 
 function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const { user, login } = useAuth();
@@ -1869,6 +1888,55 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [interestsSaving, setInterestsSaving] = React.useState(false);
     const [interestsCardDismissed, setInterestsCardDismissed] = React.useState(false);
     const [onboardingDismissed, setOnboardingDismissed] = React.useState<boolean | null>(null);
+    const [suggestedFollowerDismissed, setSuggestedFollowerDismissed] = React.useState(false);
+    const [hiddenFollowerHandles, setHiddenFollowerHandles] = React.useState<Set<string>>(new Set());
+    const [stories24Items, setStories24Items] = React.useState<Stories24RailItem[]>([]);
+    const [stories24CollapsePayload, setStories24CollapsePayload] =
+        React.useState<Stories24RailReturnPayload | null>(null);
+
+    useFocusEffect(
+        useCallback(() => {
+            let active = true;
+            void consumeStories24RailReturn().then((payload) => {
+                if (active && payload) setStories24CollapsePayload(payload);
+            });
+            return () => {
+                active = false;
+            };
+        }, []),
+    );
+
+    React.useEffect(() => {
+        if (!user?.id || customLocation || showFollowingFeed) {
+            setStories24Items([]);
+            return;
+        }
+        let cancelled = false;
+        const load = () => {
+            void buildStories24RailItems(user.id, user.handle).then((items) => {
+                if (!cancelled) setStories24Items(items);
+            });
+        };
+        load();
+        const interval = setInterval(load, 12000);
+        return () => {
+            cancelled = true;
+            clearInterval(interval);
+        };
+    }, [user?.id, user?.handle, customLocation, showFollowingFeed]);
+
+    React.useEffect(() => {
+        void AsyncStorage.getItem(SUGGESTED_FOLLOWER_DISMISSED_KEY).then((v) => {
+            if (v === '1') setSuggestedFollowerDismissed(true);
+        });
+        void AsyncStorage.getItem(SUGGESTED_FOLLOWER_HIDDEN_HANDLES_KEY).then((raw) => {
+            try {
+                setHiddenFollowerHandles(new Set(raw ? JSON.parse(raw) : []));
+            } catch {
+                setHiddenFollowerHandles(new Set());
+            }
+        });
+    }, []);
 
     React.useEffect(() => {
         setInterestsDraft(user?.interests ?? []);
@@ -1901,23 +1969,59 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         [login, user],
     );
 
+    const suggestedFollowerSuggestion = React.useMemo((): SuggestedFollowerSuggestion | null => {
+        if (!user || customLocation || suggestedFollowerDismissed) return null;
+        return buildSuggestedFollowerFromPosts(flat, user, hiddenFollowerHandles);
+    }, [flat, user, customLocation, suggestedFollowerDismissed, hiddenFollowerHandles]);
+
+    const showSuggestedFollowerCard = Boolean(suggestedFollowerSuggestion);
+
+    const showStories24Rail = !customLocation && !showFollowingFeed && stories24Items.length > 0;
+
+    const openStoryFromRail = React.useCallback(
+        (item: Stories24RailItem, railHandles: string[]) => {
+            void persistStories24RailOpenHandle(item.handle);
+            navigation.navigate('Stories', {
+                openUserHandle: item.handle,
+                fromStories24Rail: true,
+                railHandles,
+                previewThumb: item.thumb,
+                previewVideoUrl: item.previewVideoUrl,
+            });
+        },
+        [navigation],
+    );
+
     const flatForRender = React.useMemo((): FeedListRow[] => {
-        if (!showInterestsFeedCard) {
-            return flat.map((post) => ({ kind: 'post', post }));
-        }
         const out: FeedListRow[] = [];
         let postCount = 0;
-        let inserted = false;
+        let interestsInserted = false;
+        let followerInserted = false;
+        let stories24Inserted = false;
         for (const post of flat) {
             out.push({ kind: 'post', post });
             postCount += 1;
-            if (!inserted && postCount === 4) {
+            if (!stories24Inserted && showStories24Rail && postCount === 1) {
+                out.push({ kind: 'stories24', id: 'stories24-feed-rail' });
+                stories24Inserted = true;
+            }
+            if (!followerInserted && showSuggestedFollowerCard && suggestedFollowerSuggestion && postCount === 3) {
+                out.push({ kind: 'suggested_follower', suggestion: suggestedFollowerSuggestion });
+                followerInserted = true;
+            }
+            if (!interestsInserted && showInterestsFeedCard && postCount === 4) {
                 out.push({ kind: 'interests', id: 'interests-onboarding-feed-card' });
-                inserted = true;
+                interestsInserted = true;
             }
         }
         return out;
-    }, [flat, showInterestsFeedCard]);
+    }, [
+        flat,
+        showInterestsFeedCard,
+        showSuggestedFollowerCard,
+        suggestedFollowerSuggestion,
+        showStories24Rail,
+    ]);
 
     const videoPostsForScenes = React.useMemo(() => flat.filter(postHasVideoMedia), [flat]);
 
@@ -2035,6 +2139,53 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     // Memoize renderItem to prevent recreation on every render
     const renderItem = React.useCallback(
         ({ item }: { item: FeedListRow }) => {
+            if (item.kind === 'suggested_follower') {
+                const sug = item.suggestion;
+                return (
+                    <SuggestedFollowerFeedCard
+                        suggestion={sug}
+                        onFollow={async (post) => {
+                            if (!user) return;
+                            try {
+                                const updated = await toggleFollowForPost(userId, post.id, post.userHandle);
+                                setPages((prev) =>
+                                    prev.map((page) => page.map((p) => (p.id === post.id ? updated : p))),
+                                );
+                            } catch (err) {
+                                console.error('Follow from suggested card failed:', err);
+                            }
+                        }}
+                        onDismiss={() => {
+                            void AsyncStorage.setItem(SUGGESTED_FOLLOWER_DISMISSED_KEY, '1');
+                            setSuggestedFollowerDismissed(true);
+                        }}
+                        onNotInterested={() => {
+                            const key = String(sug.userHandle || '').trim().toLowerCase();
+                            setHiddenFollowerHandles((prev) => {
+                                const next = new Set(prev);
+                                next.add(key);
+                                void AsyncStorage.setItem(
+                                    SUGGESTED_FOLLOWER_HIDDEN_HANDLES_KEY,
+                                    JSON.stringify([...next]),
+                                );
+                                return next;
+                            });
+                        }}
+                        onOpenProfile={(handle) => navigation.navigate('ViewProfile', { handle })}
+                    />
+                );
+            }
+            if (item.kind === 'stories24') {
+                return (
+                    <Stories24FeedRail
+                        items={stories24Items}
+                        onOpenStory={openStoryFromRail}
+                        onAddYours={() => navigation.navigate('CreateComposer', { addYours: true })}
+                        collapsePayload={stories24CollapsePayload}
+                        onCollapseHandled={() => setStories24CollapsePayload(null)}
+                    />
+                );
+            }
             if (item.kind === 'interests') {
                 return (
                     <InterestsFeedCard
@@ -2231,6 +2382,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             interestsDraft,
             interestsSaving,
             saveInterests,
+            stories24Items,
+            openStoryFromRail,
+            stories24CollapsePayload,
         ]
     );
 
@@ -2289,7 +2443,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             <FlatList
                 data={flatForRender}
                 renderItem={renderItem}
-                keyExtractor={(item) => (item.kind === 'interests' ? item.id : item.post.id)}
+                keyExtractor={(item) =>
+                    item.kind === 'interests' || item.kind === 'stories24'
+                        ? item.id
+                        : item.kind === 'suggested_follower'
+                          ? `suggested-follower-${item.suggestion.userHandle}`
+                          : item.post.id
+                }
                 extraData={`${activeVideoPostId}-${pendingUploadTick}`}
                 onViewableItemsChanged={onViewableItemsChanged}
                 viewabilityConfig={viewabilityConfigRef.current}

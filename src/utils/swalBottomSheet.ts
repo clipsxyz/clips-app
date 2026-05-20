@@ -16,6 +16,9 @@ const ICON_ALERT_SVG = `<svg width="48" height="48" viewBox="0 0 24 24" fill="no
 /** Icon: check (success) */
 const ICON_SUCCESS_SVG = `<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`;
 
+/** Icon: bell (post notifications on) */
+const ICON_BELL_SVG = `<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>`;
+
 const BOTTOM_SHEET_BASE: Pick<SweetAlertOptions, 'position' | 'buttonsStyling' | 'background' | 'width' | 'padding' | 'customClass'> = {
   position: 'bottom',
   buttonsStyling: false,
@@ -138,6 +141,26 @@ function escapeHtml(s: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+/** Profile bell: "All posts" notifications enabled for a creator */
+export function postNotifyEnabledBottomSheet(displayName: string): SweetAlertOptions {
+  const who = escapeHtml(displayName.trim() || 'this user');
+  return {
+    ...BOTTOM_SHEET_BASE,
+    showConfirmButton: true,
+    confirmButtonText: 'Got it',
+    showCancelButton: false,
+    title: undefined,
+    html: `
+      <div class="swal-bottom-sheet-content">
+        <p class="swal-bottom-sheet-gazetteer gazetteer-shimmer">Gazetteer says</p>
+        <div class="swal-bottom-sheet-icon">${ICON_BELL_SVG}</div>
+        <h3 class="swal-bottom-sheet-title-text">Notifications on</h3>
+        <p class="swal-bottom-sheet-message">You'll get notified when <strong>${who}</strong> posts.</p>
+      </div>
+    `,
+  };
 }
 
 export function followRequestSentBottomSheet(): SweetAlertOptions {
