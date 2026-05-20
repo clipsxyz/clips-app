@@ -1,0 +1,74 @@
+            <div className="space-y-3">
+              <p className="text-xs text-gray-400 px-1">Your home area for news feeds</p>
+
+              <div>
+                <p className="text-[11px] text-gray-500 mb-1.5 px-1">National area</p>
+                <PlaceAutocompleteField
+                  value={nationalQuery}
+                  onChange={(v) => {
+                    setNationalQuery(v);
+                    setNational('');
+                    setRegional('');
+                    setRegionalQuery('');
+                    setLocal('');
+                    setLocalQuery('');
+                  }}
+                  onSelectSuggestion={selectNational}
+                  signupLevel="country"
+                  mode="location"
+                  showIcon
+                  placeholder="National area"
+                  inputClassName={`${signupPlaceInputClass} pl-10`}
+                />
+                {signupFieldErrors.national && (
+                  <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.national}</p>
+                )}
+              </motion.div>
+
+              <motion.div>
+                <p className="text-[11px] text-gray-500 mb-1.5 px-1">Regional area</p>
+                <PlaceAutocompleteField
+                  value={regionalQuery}
+                  onChange={(v) => {
+                    setRegionalQuery(v);
+                    setRegional('');
+                    setLocal('');
+                    setLocalQuery('');
+                  }}
+                  onSelectSuggestion={selectRegional}
+                  signupLevel="region"
+                  parentCountry={national}
+                  disabled={!national}
+                  mode="location"
+                  showIcon
+                  placeholder={national ? `Regional area in ${national}` : 'Select national area first'}
+                  inputClassName={`${signupPlaceInputClass} pl-10`}
+                />
+                {signupFieldErrors.regional && (
+                  <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.regional}</p>
+                )}
+              </motion.div>
+
+              <motion.div>
+                <p className="text-[11px] text-gray-500 mb-1.5 px-1">Local area</p>
+                <PlaceAutocompleteField
+                  value={localQuery}
+                  onChange={(v) => {
+                    setLocalQuery(v);
+                    setLocal('');
+                  }}
+                  onSelectSuggestion={selectLocal}
+                  signupLevel="local"
+                  parentCountry={national}
+                  parentRegion={regional}
+                  disabled={!national || !regional}
+                  mode="location"
+                  showIcon
+                  placeholder={regional ? `Local area in ${regional}` : 'Select regional area first'}
+                  inputClassName={`${signupPlaceInputClass} pl-10`}
+                />
+                {signupFieldErrors.local && (
+                  <p className="text-xs text-red-400 mt-1.5 px-1">{signupFieldErrors.local}</p>
+                )}
+              </motion.div>
+            </motion.div>
