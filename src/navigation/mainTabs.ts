@@ -1,4 +1,4 @@
-export type MainTabName = 'Home' | 'Discover' | 'Create' | 'Search' | 'Inbox';
+export type MainTabName = 'Home' | 'Boost' | 'Create' | 'Search' | 'Inbox';
 
 /** Navigate to a primary tab from stack or nested tab screens. */
 export function navigateMainTab(

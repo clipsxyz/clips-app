@@ -1,11 +1,16 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, TouchableOpacity, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import type { Post } from '../types';
 import { userHasStoriesByHandle } from '../api/stories';
+import { getAvatarForHandle } from '../api/users';
+import { useAuth } from '../context/Auth';
 import { useMutualFollow } from '../hooks/useMutualFollow';
+import { getReclipDisplay } from '../utils/feedPostMeta';
 import Avatar from './Avatar';
+import FeedPostHeader from './FeedPostHeader.native';
 import FeedTextOnlyCard from './FeedTextOnlyCard.native';
+import TaggedAvatars from './TaggedAvatars.native';
 
 type Props = {
     post: Post;
@@ -17,7 +22,9 @@ type Props = {
     onProfileMenuPress?: () => void;
     onOverflowPress?: () => void;
     onDoubleLike: () => void;
+    onHeartAnimation?: (pageX: number, pageY: number) => void;
     onRegisterDmAnchor?: (key: string, ref: View | null) => void;
+    onShowTaggedUsers?: () => void;
 };
 
 export default function FeedTextOnlyFeedLayout({
@@ -30,14 +37,19 @@ export default function FeedTextOnlyFeedLayout({
     onProfileMenuPress,
     onOverflowPress,
     onDoubleLike,
+    onHeartAnimation,
     onRegisterDmAnchor,
+    onShowTaggedUsers,
 }: Props) {
+    const { user } = useAuth();
     const [hasStory, setHasStory] = useState(false);
 
     const isFromViewer =
         !!viewerHandle &&
         post.userHandle.replace(/^@+/, '').toLowerCase() === viewerHandle.replace(/^@+/, '').toLowerCase();
 
+    const { profileHandle } = getReclipDisplay(post, viewerHandle ?? user?.handle);
+    const avatarSrc = isCurrentUser ? user?.avatarUrl : getAvatarForHandle(profileHandle);
     const isFollowing = post.isFollowing === true;
     const isMutualFollow = useMutualFollow(post, isCurrentUser);
 
@@ -46,12 +58,12 @@ export default function FeedTextOnlyFeedLayout({
             onRegisterDmAnchor?.(`post:${post.id}`, ref);
             onRegisterDmAnchor?.(`handle:${post.userHandle}`, ref);
         },
-        [onRegisterDmAnchor, post.id, post.userHandle]
+        [onRegisterDmAnchor, post.id, post.userHandle],
     );
 
     useEffect(() => {
         let cancelled = false;
-        userHasStoriesByHandle(post.userHandle)
+        userHasStoriesByHandle(profileHandle)
             .then((v) => {
                 if (!cancelled) setHasStory(v);
             })
@@ -59,27 +71,34 @@ export default function FeedTextOnlyFeedLayout({
         return () => {
             cancelled = true;
         };
-    }, [post.userHandle]);
-
-    const displayHandle =
-        post.isReclipped && post.originalUserHandle ? post.originalUserHandle : post.userHandle;
+    }, [profileHandle]);
 
     return (
         <View style={styles.root}>
-            <View style={styles.topRow}>
-                <View style={styles.authorCol}>
-                    <TouchableOpacity onPress={onProfileMenuPress} activeOpacity={0.85}>
-                        <View
-                            style={styles.avatarWrap}
-                            ref={(r) => registerAnchor(r)}
-                            collapsable={false}
-                        >
-                            <Avatar
-                                src={undefined}
-                                name={displayHandle.split('@')[0]}
-                                size={32}
-                                hasStory={hasStory}
-                            />
+            <FeedPostHeader
+                post={post}
+                viewerHandle={viewerHandle}
+                isCurrentUser={isCurrentUser}
+                variant="textOnlyChrome"
+                onFollow={onFollow}
+                onOpenDM={onOpenDM}
+                onProfileMenuPress={onProfileMenuPress}
+                onOverflowPress={onOverflowPress}
+                onRegisterDmAnchor={onRegisterDmAnchor}
+            />
+
+            <View style={[styles.bubbleRow, isFromViewer ? styles.bubbleRowMe : styles.bubbleRowOther]}>
+                {!isFromViewer ? (
+                    <View style={styles.bubbleAvatarSpacer}>
+                        <View ref={(r) => registerAnchor(r)} collapsable={false} style={styles.avatarWrap}>
+                            <TouchableOpacity onPress={onProfileMenuPress} activeOpacity={0.85}>
+                                <Avatar
+                                    src={avatarSrc}
+                                    name={profileHandle.split('@')[0]}
+                                    size={28}
+                                    hasStory={hasStory}
+                                />
+                            </TouchableOpacity>
                             {!isCurrentUser && onFollow && !isFollowing ? (
                                 <TouchableOpacity style={styles.followPlus} onPress={() => void onFollow()}>
                                     <Icon name="add" size={12} color="#FFFFFF" />
@@ -99,38 +118,23 @@ export default function FeedTextOnlyFeedLayout({
                                 </View>
                             ) : null}
                         </View>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={onProfileMenuPress} style={styles.handleWrap}>
-                        <Text style={styles.handleText} numberOfLines={1}>
-                            {displayHandle}
-                        </Text>
-                    </TouchableOpacity>
-                </View>
-                {onOverflowPress ? (
-                    <TouchableOpacity onPress={onOverflowPress} hitSlop={8}>
-                        <Icon name="ellipsis-horizontal" size={20} color="#9CA3AF" />
-                    </TouchableOpacity>
-                ) : null}
-            </View>
-
-            <View style={[styles.bubbleRow, isFromViewer ? styles.bubbleRowMe : styles.bubbleRowOther]}>
-                {!isFromViewer ? (
-                    <View style={styles.bubbleAvatarSpacer}>
-                        <Avatar
-                            src={undefined}
-                            name={displayHandle.split('@')[0]}
-                            size={28}
-                            hasStory={hasStory}
-                        />
                     </View>
                 ) : null}
                 <FeedTextOnlyCard
                     post={post}
                     isFromViewer={isFromViewer}
                     onDoubleLike={onDoubleLike}
+                    onHeartAnimation={onHeartAnimation}
                     width={cardWidth - (isFromViewer ? 8 : 44)}
                 />
             </View>
+
+            {post.taggedUsers && post.taggedUsers.length > 0 ? (
+                <TaggedAvatars
+                    taggedUserHandles={post.taggedUsers}
+                    onShowTaggedUsers={onShowTaggedUsers ?? (() => {})}
+                />
+            ) : null}
         </View>
     );
 }
@@ -140,19 +144,20 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
         paddingBottom: 8,
     },
-    topRow: {
+    bubbleRow: {
         flexDirection: 'row',
-        alignItems: 'flex-start',
-        justifyContent: 'space-between',
-        marginBottom: 8,
-        zIndex: 10,
-    },
-    authorCol: {
-        flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-end',
         gap: 8,
-        flex: 1,
-        minWidth: 0,
+    },
+    bubbleRowMe: {
+        justifyContent: 'flex-end',
+    },
+    bubbleRowOther: {
+        justifyContent: 'flex-end',
+    },
+    bubbleAvatarSpacer: {
+        width: 32,
+        alignItems: 'center',
     },
     avatarWrap: {
         position: 'relative',
@@ -195,28 +200,5 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         borderWidth: 1.5,
         borderColor: '#030712',
-    },
-    handleWrap: {
-        flex: 1,
-        minWidth: 0,
-    },
-    handleText: {
-        color: '#F3F4F6',
-        fontSize: 14,
-        fontWeight: '600',
-    },
-    bubbleRow: {
-        flexDirection: 'row',
-        alignItems: 'flex-end',
-        gap: 8,
-    },
-    bubbleRowMe: {
-        justifyContent: 'flex-end',
-    },
-    bubbleRowOther: {
-        justifyContent: 'flex-start',
-    },
-    bubbleAvatarSpacer: {
-        marginBottom: 4,
     },
 });

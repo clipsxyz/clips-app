@@ -13,6 +13,7 @@ class DatabaseSeeder extends Seeder
     {
         $this->call([
             GazetteerSeeder::class,
+            PostLikesSeeder::class,
         ]);
     }
 }

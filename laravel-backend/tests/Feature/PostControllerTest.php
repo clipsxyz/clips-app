@@ -161,6 +161,36 @@ class PostControllerTest extends TestCase
         $response->assertStatus(404);
     }
 
+    public function test_can_list_post_likes(): void
+    {
+        $author = User::factory()->create();
+        $liker1 = User::factory()->create(['handle' => 'Liker1@Dublin']);
+        $liker2 = User::factory()->create(['handle' => 'Liker2@Dublin']);
+        $viewer = User::factory()->create();
+        $post = Post::factory()->create([
+            'user_id' => $author->id,
+            'user_handle' => $author->handle,
+            'likes_count' => 2,
+            'views_count' => 5,
+        ]);
+
+        $liker1->postLikes()->attach($post->id);
+        $liker2->postLikes()->attach($post->id);
+        $liker1->followers()->attach($viewer->id, ['status' => 'accepted']);
+
+        $response = $this->getJson("/api/posts/{$post->id}/likes?userId={$viewer->id}&limit=10");
+
+        $response->assertStatus(200)
+            ->assertJsonPath('likes_count', 2)
+            ->assertJsonPath('views_count', 5)
+            ->assertJsonCount(2, 'items');
+
+        $items = collect($response->json('items'));
+        $first = $items->firstWhere('handle', 'Liker1@Dublin');
+        $this->assertNotNull($first);
+        $this->assertTrue($first['is_following']);
+    }
+
     public function test_share_assigns_public_token_and_returns_public_url(): void
     {
         $user = User::factory()->create();

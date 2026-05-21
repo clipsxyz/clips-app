@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import {
     View,
     Text,
@@ -20,7 +20,9 @@ import {
     STORIES24_ADD_YOURS_HANDLE,
     STORIES24_COLLAPSE_MS,
     STORIES24_EXPAND_MS,
+    isStories24AddYoursHandle,
     normalizeStories24Handle,
+    pickFirstStories24RailStory,
 } from '../utils/stories24Rail';
 
 const CARD_W = 112;
@@ -33,6 +35,11 @@ type ExpandingStory = {
     item: Stories24RailItem;
     railHandles: string[];
     rect: CardRect;
+};
+
+export type Stories24FeedRailHandle = {
+    /** Same path as tapping the first real story card in the rail (expand → Stories). */
+    openFirstStory: () => boolean;
 };
 
 type Props = {
@@ -293,13 +300,10 @@ function Stories24CollapseOverlay({
     );
 }
 
-export default function Stories24FeedRail({
-    items,
-    onOpenStory,
-    onAddYours,
-    collapsePayload,
-    onCollapseHandled,
-}: Props) {
+const Stories24FeedRail = forwardRef<Stories24FeedRailHandle, Props>(function Stories24FeedRail(
+    { items, onOpenStory, onAddYours, collapsePayload, onCollapseHandled },
+    ref,
+) {
     const [expanding, setExpanding] = useState<ExpandingStory | null>(null);
     const [collapsing, setCollapsing] = useState<{
         payload: Stories24RailReturnPayload;
@@ -370,6 +374,33 @@ export default function Stories24FeedRail({
         onOpenStory(current.item, current.railHandles);
     };
 
+    const openFirstStoryFromRail = React.useCallback(() => {
+        const first = pickFirstStories24RailStory(items);
+        if (!first || isStories24AddYoursHandle(first.handle)) {
+            return false;
+        }
+        const handleKey = normalizeStories24Handle(first.handle);
+        const node = cardRefs.current[handleKey];
+        const startExpand = (rect: CardRect) => {
+            if (expandingRef.current) return;
+            setExpanding({ item: first, railHandles, rect });
+        };
+        if (!node) {
+            onOpenStory(first, railHandles);
+            return true;
+        }
+        node.measureInWindow((x, y, width, height) => {
+            if (width < 8 || height < 8) {
+                onOpenStory(first, railHandles);
+                return;
+            }
+            startExpand({ x, y, width, height });
+        });
+        return true;
+    }, [items, onOpenStory, railHandles]);
+
+    useImperativeHandle(ref, () => ({ openFirstStory: openFirstStoryFromRail }), [openFirstStoryFromRail]);
+
     return (
         <>
             <LinearGradient
@@ -427,7 +458,9 @@ export default function Stories24FeedRail({
             ) : null}
         </>
     );
-}
+});
+
+export default Stories24FeedRail;
 
 const styles = StyleSheet.create({
     outerBorder: {
@@ -545,7 +578,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0,0,0,0.28)',
     },
     collapseVeil: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: 'rgba(0,0,0,0.12)',
     },
     expandCard: {
@@ -559,7 +592,7 @@ const styles = StyleSheet.create({
         elevation: 16,
     },
     expandDim: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: 'rgba(0,0,0,0.2)',
     },
 });

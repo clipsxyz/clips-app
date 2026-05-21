@@ -20,6 +20,10 @@ laravel-backend/.env
 laravel-backend/database/database.sqlite
 laravel-backend/storage/
 
+# Local debug/release APKs (build artifacts)
+*.apk
+app-debug.apk
+
 # Android Studio local SDK path (machine-specific)
 android/local.properties
 android/.gradle/

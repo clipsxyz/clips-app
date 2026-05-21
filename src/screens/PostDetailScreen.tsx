@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
     View,
     Text,
@@ -35,12 +35,27 @@ import { timeAgo } from '../utils/timeAgo';
 import { getInstagramImageDimensions } from '../utils/imageDimensions';
 import { FEED_UI } from '../constants/feedUiTokens';
 import FeedPostMedia from '../components/FeedPostMedia.native';
+import FeedMediaCarouselThumbs from '../components/FeedMediaCarouselThumbs.native';
+import ImageFullscreenModal from '../components/ImageFullscreenModal.native';
+import { imageFullscreenIndexForCarousel } from '../utils/feedImageFullscreen';
+import {
+    hideFeedPostMobile,
+    markNotInterestedFeedPostMobile,
+    muteFeedAuthorMobile,
+} from '../utils/feedContentPrefsMobile';
 import type { Post } from '../types';
 import { isTextOnlyPost, isVideoPost } from '../utils/effectiveTextPostStyleNative';
 import Avatar from '../components/Avatar';
 import FeedShareModal from '../components/FeedShareModal';
 import PostOverflowMenuModal from '../components/PostOverflowMenuModal';
+import EditPostModal from '../components/EditPostModal.native';
+import SavePostModal from '../components/SavePostModal.native';
+import QRCodeModal from '../components/QRCodeModal.native';
+import CreateGroupModal from '../components/CreateGroupModal.native';
+import PickGroupToInviteFeedUserModal from '../components/PickGroupToInviteFeedUserModal.native';
 import PostCommentsSheet from '../components/PostCommentsSheet';
+import { updatePost as apiUpdatePost } from '../api/client';
+import { toggleFollowForPost } from '../api/posts';
 
 export default function PostDetailScreen({ route, navigation }: any) {
     const { postId } = route.params;
@@ -54,18 +69,40 @@ export default function PostDetailScreen({ route, navigation }: any) {
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [commentsOpen, setCommentsOpen] = useState(false);
     const [overflowVisible, setOverflowVisible] = useState(false);
+    const [editModalVisible, setEditModalVisible] = useState(false);
+    const [saveModalVisible, setSaveModalVisible] = useState(false);
+    const [qrVisible, setQrVisible] = useState(false);
+    const [createGroupOpen, setCreateGroupOpen] = useState(false);
+    const [inviteGroupOpen, setInviteGroupOpen] = useState(false);
     const [overflowSaved, setOverflowSaved] = useState(false);
     const [overflowNotify, setOverflowNotify] = useState(false);
+    const [carouselIndex, setCarouselIndex] = useState(0);
+    const [imageFullscreenOpen, setImageFullscreenOpen] = useState(false);
 
     useEffect(() => {
         loadPost();
     }, [postId]);
 
-    const mediaSizingUrl = React.useMemo(() => {
+    useEffect(() => {
+        setCarouselIndex(0);
+    }, [postId]);
+
+    const carouselThumbItems = useMemo(
+        () =>
+            (post?.mediaItems || []).filter(
+                (item) => item?.type === 'image' || item?.type === 'video',
+            ),
+        [post?.mediaItems],
+    );
+
+    const mediaSizingUrl = useMemo(() => {
         if (!post || isTextOnlyPost(post)) return null;
+        const first = carouselThumbItems[0];
+        if (first?.type === 'video' && post.videoPosterUrl) return post.videoPosterUrl;
+        if (first?.url) return first.url;
         if (isVideoPost(post) && post.videoPosterUrl) return post.videoPosterUrl;
         return post.mediaUrl || post.mediaItems?.[0]?.url || null;
-    }, [post]);
+    }, [post, carouselThumbItems]);
 
     useEffect(() => {
         if (!mediaSizingUrl) return;
@@ -81,7 +118,7 @@ export default function PostDetailScreen({ route, navigation }: any) {
                 setMediaHeight(screenWidth * FEED_UI.media.maxAspect);
             }
         );
-    }, [mediaSizingUrl, screenWidth]);
+    }, [mediaSizingUrl, screenWidth, postId]);
 
     useEffect(() => {
         if (!overflowVisible || !post) return;
@@ -245,14 +282,26 @@ export default function PostDetailScreen({ route, navigation }: any) {
                 </View>
 
                 {hasPostMedia ? (
-                    <View style={styles.mediaWrap}>
-                        <FeedPostMedia
-                            post={post}
-                            width={screenWidth}
-                            height={textOnlyPost ? screenWidth * 0.5 : mediaHeight}
-                            mode="detail"
-                        />
-                    </View>
+                    <>
+                        <View style={styles.mediaWrap}>
+                            <FeedPostMedia
+                                post={post}
+                                carouselIndex={carouselIndex}
+                                onCarouselIndexChange={setCarouselIndex}
+                                width={screenWidth}
+                                height={textOnlyPost ? screenWidth * 0.5 : mediaHeight}
+                                mode="detail"
+                                onPress={() => setImageFullscreenOpen(true)}
+                            />
+                        </View>
+                        {carouselThumbItems.length > 1 ? (
+                            <FeedMediaCarouselThumbs
+                                items={carouselThumbItems}
+                                activeIndex={carouselIndex}
+                                onSelect={setCarouselIndex}
+                            />
+                        ) : null}
+                    </>
                 ) : null}
 
                 {!textOnlyPost && post.text?.trim() ? (
@@ -331,11 +380,15 @@ export default function PostDetailScreen({ route, navigation }: any) {
                 hasNotifications={overflowNotify}
                 onClose={() => setOverflowVisible(false)}
                 onShare={openShare}
+                onOpenSave={() => setSaveModalVisible(true)}
                 onSaveToggle={async () => {
                     await toggleCollectionsSave();
                     const cols = await getCollectionsForPost(userId, post.id);
                     setOverflowSaved(cols.length > 0);
                 }}
+                onCreateGroup={() => setCreateGroupOpen(true)}
+                onInviteToGroup={() => setInviteGroupOpen(true)}
+                onShowQRCode={() => setQrVisible(true)}
                 onBoost={() => {
                     setOverflowVisible(false);
                     navigation.navigate('Boost');
@@ -350,6 +403,30 @@ export default function PostDetailScreen({ route, navigation }: any) {
                     setOverflowNotify(next);
                 }}
                 onReclip={tryReclip}
+                isFollowing={!!post.isFollowing}
+                onEdit={() => {
+                    setOverflowVisible(false);
+                    setEditModalVisible(true);
+                }}
+                onUnfollow={async () => {
+                    const updated = await toggleFollowForPost(userId, post.id, post.userHandle);
+                    setPost((p) =>
+                        p ? { ...p, isFollowing: updated?.isFollowing ?? !p.isFollowing } : null
+                    );
+                }}
+                onMute={async () => {
+                    await muteFeedAuthorMobile(userId, post.userHandle);
+                    Alert.alert('Muted', `${post.userHandle} was muted.`);
+                    navigation.goBack();
+                }}
+                onHide={async () => {
+                    await hideFeedPostMobile(userId, post.id);
+                    navigation.goBack();
+                }}
+                onNotInterested={async () => {
+                    await markNotInterestedFeedPostMobile(userId, post.id);
+                    navigation.goBack();
+                }}
                 onDelete={() =>
                     new Promise<void>((resolve) => {
                         if (!user?.handle) {
@@ -379,7 +456,9 @@ export default function PostDetailScreen({ route, navigation }: any) {
                     })
                 }
                 onReport={async () => {
-                    Alert.alert('Reported', 'Thanks for reporting. We will review this content.');
+                    if (!post) return;
+                    const { promptReportPostNative } = await import('../utils/promptReportPostNative');
+                    promptReportPostNative(post.id, () => setOverflowVisible(false));
                 }}
                 onBlock={() =>
                     new Promise<void>((resolve) => {
@@ -408,6 +487,86 @@ export default function PostDetailScreen({ route, navigation }: any) {
                     })
                 }
             />
+
+            {post && saveModalVisible ? (
+                <SavePostModal
+                    post={post}
+                    userId={userId}
+                    visible={saveModalVisible}
+                    onClose={() => setSaveModalVisible(false)}
+                    onSaved={async () => {
+                        const cols = await getCollectionsForPost(userId, post.id);
+                        setOverflowSaved(cols.length > 0);
+                        setPost((p) => (p ? { ...p, isBookmarked: cols.length > 0 } : null));
+                    }}
+                />
+            ) : null}
+
+            {post && qrVisible ? (
+                <QRCodeModal post={post} visible={qrVisible} onClose={() => setQrVisible(false)} />
+            ) : null}
+
+            <CreateGroupModal
+                visible={createGroupOpen}
+                onClose={() => setCreateGroupOpen(false)}
+                onCreated={(g) => {
+                    setCreateGroupOpen(false);
+                    navigation.navigate('Messages', { chatGroupId: g.id, kind: 'group' });
+                }}
+            />
+
+            <PickGroupToInviteFeedUserModal
+                visible={inviteGroupOpen}
+                inviteeHandle={post?.userHandle || ''}
+                onClose={() => setInviteGroupOpen(false)}
+            />
+
+            <ImageFullscreenModal
+                post={post}
+                visible={imageFullscreenOpen}
+                initialIndex={imageFullscreenIndexForCarousel(post, carouselIndex)}
+                onClose={() => setImageFullscreenOpen(false)}
+                onLike={handleLike}
+                onComment={() => setCommentsOpen(true)}
+                onReclip={tryReclip}
+            />
+
+            {post && editModalVisible ? (
+                <EditPostModal
+                    post={post}
+                    visible={editModalVisible}
+                    onClose={() => setEditModalVisible(false)}
+                    onSave={async (text, location, venue, landmark) => {
+                        try {
+                            await apiUpdatePost(post.id, {
+                                text,
+                                location,
+                                venue: venue || undefined,
+                                landmark: landmark || undefined,
+                            });
+                        } catch (err: unknown) {
+                            const msg = err instanceof Error ? err.message : '';
+                            const offline =
+                                msg.includes('Failed to fetch') ||
+                                msg.includes('Network') ||
+                                msg === 'CONNECTION_REFUSED';
+                            if (!offline) throw err;
+                        }
+                        setPost((p) =>
+                            p
+                                ? {
+                                      ...p,
+                                      text,
+                                      caption: text,
+                                      locationLabel: location || p.locationLabel || '',
+                                      venue: venue || undefined,
+                                      landmark: landmark || undefined,
+                                  }
+                                : null
+                        );
+                    }}
+                />
+            ) : null}
         </GazetteerScreenShell>
     );
 }

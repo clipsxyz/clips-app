@@ -22,6 +22,7 @@ export const ENDPOINT_AUTH_EXPECTATIONS: EndpointAuthExpectation[] = [
 
     { method: 'GET', path: '/posts', auth: 'public', area: 'feed' },
     { method: 'GET', path: '/posts/{id}', auth: 'public', area: 'feed' },
+    { method: 'GET', path: '/posts/{id}/likes', auth: 'public', area: 'feed' },
     { method: 'POST', path: '/posts', auth: 'auth', area: 'create' },
     { method: 'PUT', path: '/posts/{id}', auth: 'auth', area: 'create' },
     { method: 'DELETE', path: '/posts/{id}', auth: 'auth', area: 'create' },

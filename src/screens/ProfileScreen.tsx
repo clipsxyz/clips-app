@@ -37,7 +37,12 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/Auth';
 import { approveHiddenComment, deleteHiddenComment, fetchHiddenCommentsForOwner, fetchPostsByUser, toggleLike, fetchComments, addComment, toggleCommentLike, toggleReplyLike, addReply, type HiddenCommentReviewItem } from '../api/posts';
-import { getCollectionThumbnailUrl, getUserCollections } from '../api/collections';
+import {
+    getCollectionThumbnailUrl,
+    getUserCollections,
+    savePostToDefaultCollection,
+    unsavePost,
+} from '../api/collections';
 import { getDrafts, deleteDraft, type Draft } from '../api/drafts';
 import { buildFilterInfo, type InstantFilterName } from '../utils/instantFiltersNative';
 import { getUnreadTotal } from '../api/messages';
@@ -46,7 +51,27 @@ import { updateAuthProfile, sendPhoneVerificationCode, verifyPhoneVerificationCo
 import type { Post, Collection } from '../types';
 import Avatar from '../components/Avatar';
 import FeedPostMeta from '../components/FeedPostMeta';
-import MyFeedPostCard from '../components/MyFeedPostCard';
+import { FeedCard } from './FeedScreen';
+import PostOverflowMenuModal from '../components/PostOverflowMenuModal';
+import SavePostModal from '../components/SavePostModal.native';
+import EditPostModal from '../components/EditPostModal.native';
+import QRCodeModal from '../components/QRCodeModal.native';
+import CreateGroupModal from '../components/CreateGroupModal.native';
+import FeedShareModal from '../components/FeedShareModal';
+import {
+    incrementViews,
+    deletePost,
+    reclipPost,
+    incrementShares,
+} from '../api/posts';
+import { getCollectionsForPost } from '../api/collections';
+import { updatePost as apiUpdatePost } from '../api/client';
+import {
+    markFeedPostArchivedMobile,
+    setPostNotificationsPrefMobile,
+    hasPostNotificationsPrefMobile,
+} from '../utils/feedEngagementPrefsMobile';
+import { buildShareablePostUrl } from '../utils/shareUrls';
 import ProfileGridThumb from '../components/ProfileGridThumb.native';
 import {
     getNotificationPreferences,
@@ -75,6 +100,15 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     const [commentSafetyOpen, setCommentSafetyOpen] = useState(false);
     const [inviteFriendsOpen, setInviteFriendsOpen] = useState(false);
     const [myFeedOpen, setMyFeedOpen] = useState(false);
+    const [myFeedOverflowPost, setMyFeedOverflowPost] = useState<Post | null>(null);
+    const [myFeedOverflowVisible, setMyFeedOverflowVisible] = useState(false);
+    const [myFeedOverflowSaved, setMyFeedOverflowSaved] = useState(false);
+    const [myFeedOverflowNotify, setMyFeedOverflowNotify] = useState(false);
+    const [myFeedSavePost, setMyFeedSavePost] = useState<Post | null>(null);
+    const [myFeedEditPost, setMyFeedEditPost] = useState<Post | null>(null);
+    const [myFeedQrPost, setMyFeedQrPost] = useState<Post | null>(null);
+    const [myFeedSharePost, setMyFeedSharePost] = useState<Post | null>(null);
+    const [myFeedCreateGroupOpen, setMyFeedCreateGroupOpen] = useState(false);
     const [myFeedCommentsOpen, setMyFeedCommentsOpen] = useState(false);
     const [myFeedCommentsPost, setMyFeedCommentsPost] = useState<Post | null>(null);
     const [myFeedComments, setMyFeedComments] = useState<any[]>([]);
@@ -1349,23 +1383,55 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                         keyExtractor={(item) => item.id}
                         contentContainerStyle={styles.myFeedListContent}
                         renderItem={({ item }) => (
-                            <MyFeedPostCard
+                            <FeedCard
                                 post={item}
-                                user={user}
-                                onPress={() => navigation.navigate('PostDetail', { postId: item.id })}
-                                onCommentPress={() => {
-                                    void openMyFeedComments(item);
-                                }}
-                                onLikePress={() => {
+                                isCurrentUser
+                                viewerHandle={user?.handle}
+                                viewerUserId={user?.id}
+                                onLike={async () => {
                                     if (!user?.id) return;
-                                    void (async () => {
-                                        try {
-                                            const updated = await toggleLike(user.id, item.id, item);
-                                            setPosts((prev) => prev.map((p) => (p.id === item.id ? updated : p)));
-                                        } catch (error) {
-                                            console.error('Failed to toggle like in My feed:', error);
-                                        }
-                                    })();
+                                    const updated = await toggleLike(user.id, item.id, item);
+                                    setPosts((prev) => prev.map((p) => (p.id === item.id ? updated : p)));
+                                }}
+                                onView={async () => {
+                                    if (!user?.id) return;
+                                    await incrementViews(user.id, item.id);
+                                }}
+                                onComment={() => void openMyFeedComments(item)}
+                                onShare={async () => {
+                                    setMyFeedSharePost(item);
+                                }}
+                                onReclip={async () => {}}
+                                onBookmark={async () => {
+                                    setMyFeedSavePost(item);
+                                }}
+                                onOverflowPress={() => {
+                                    setMyFeedOverflowPost(item);
+                                    setMyFeedOverflowVisible(true);
+                                    void getCollectionsForPost(user?.id || 'anon', item.id).then((cols) =>
+                                        setMyFeedOverflowSaved(cols.length > 0),
+                                    );
+                                    void hasPostNotificationsPrefMobile(user?.id || 'anon', item.id).then(
+                                        setMyFeedOverflowNotify,
+                                    );
+                                }}
+                                onPostPress={() =>
+                                    navigation.navigate('PostDetail', { postId: item.id })
+                                }
+                                onShareSuccess={(postId) => {
+                                    setPosts((prev) =>
+                                        prev.map((p) =>
+                                            p.id === postId
+                                                ? {
+                                                      ...p,
+                                                      stats: {
+                                                          ...p.stats,
+                                                          shares: (p.stats?.shares ?? 0) + 1,
+                                                      },
+                                                  }
+                                                : p,
+                                        ),
+                                    );
                                 }}
                             />
                         )}
@@ -1377,6 +1443,135 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                     />
                 </SafeAreaView>
             </Modal>
+
+            <PostOverflowMenuModal
+                visible={myFeedOverflowVisible}
+                post={myFeedOverflowPost}
+                viewerUserId={user?.id || 'anon'}
+                viewerHandle={user?.handle}
+                isSaved={myFeedOverflowSaved}
+                hasNotifications={myFeedOverflowNotify}
+                onClose={() => {
+                    setMyFeedOverflowVisible(false);
+                    setMyFeedOverflowPost(null);
+                }}
+                onOpenSave={() => myFeedOverflowPost && setMyFeedSavePost(myFeedOverflowPost)}
+                onShare={async () => {
+                    if (!myFeedOverflowPost) return;
+                    setMyFeedSharePost(myFeedOverflowPost);
+                }}
+                onBoost={() => {
+                    setMyFeedOverflowVisible(false);
+                    navigation.navigate('Boost');
+                }}
+                onEdit={() => myFeedOverflowPost && setMyFeedEditPost(myFeedOverflowPost)}
+                onCreateGroup={() => setMyFeedCreateGroupOpen(true)}
+                onArchive={async () => {
+                    if (!myFeedOverflowPost || !user?.id) return;
+                    await markFeedPostArchivedMobile(user.id, myFeedOverflowPost.id);
+                    setPosts((prev) => prev.filter((p) => p.id !== myFeedOverflowPost.id));
+                }}
+                onToggleNotifications={async () => {
+                    if (!myFeedOverflowPost || !user?.id) return;
+                    const next = !myFeedOverflowNotify;
+                    await setPostNotificationsPrefMobile(user.id, myFeedOverflowPost.id, next);
+                    setMyFeedOverflowNotify(next);
+                }}
+                onDelete={() =>
+                    new Promise<void>((resolve) => {
+                        if (!myFeedOverflowPost || !user?.handle) {
+                            resolve();
+                            return;
+                        }
+                        Alert.alert('Delete post?', 'This cannot be undone.', [
+                            { text: 'Cancel', style: 'cancel', onPress: () => resolve() },
+                            {
+                                text: 'Delete',
+                                style: 'destructive',
+                                onPress: () => {
+                                    void (async () => {
+                                        try {
+                                            await deletePost(user.id, myFeedOverflowPost.id, user.handle);
+                                            setPosts((prev) =>
+                                                prev.filter((p) => p.id !== myFeedOverflowPost.id),
+                                            );
+                                        } finally {
+                                            resolve();
+                                        }
+                                    })();
+                                },
+                            },
+                        ]);
+                    })
+                }
+            />
+
+            {myFeedSavePost ? (
+                <SavePostModal
+                    post={myFeedSavePost}
+                    userId={user?.id || 'anon'}
+                    visible={!!myFeedSavePost}
+                    onClose={() => setMyFeedSavePost(null)}
+                    onSaved={async () => {
+                        const cols = await getCollectionsForPost(user?.id || 'anon', myFeedSavePost.id);
+                        const saved = cols.length > 0;
+                        setPosts((prev) =>
+                            prev.map((p) =>
+                                p.id === myFeedSavePost.id ? { ...p, isBookmarked: saved } : p,
+                            ),
+                        );
+                    }}
+                />
+            ) : null}
+
+            {myFeedEditPost ? (
+                <EditPostModal
+                    post={myFeedEditPost}
+                    visible={!!myFeedEditPost}
+                    onClose={() => setMyFeedEditPost(null)}
+                    onSave={async (text, location, venue, landmark) => {
+                        await apiUpdatePost(myFeedEditPost.id, {
+                            text,
+                            location,
+                            venue: venue || undefined,
+                            landmark: landmark || undefined,
+                        });
+                        setPosts((prev) =>
+                            prev.map((p) =>
+                                p.id === myFeedEditPost.id
+                                    ? {
+                                          ...p,
+                                          text,
+                                          caption: text,
+                                          locationLabel: location,
+                                          venue,
+                                          landmark,
+                                      }
+                                    : p,
+                            ),
+                        );
+                    }}
+                />
+            ) : null}
+
+            {myFeedQrPost ? (
+                <QRCodeModal post={myFeedQrPost} visible={!!myFeedQrPost} onClose={() => setMyFeedQrPost(null)} />
+            ) : null}
+
+            <CreateGroupModal
+                visible={myFeedCreateGroupOpen}
+                onClose={() => setMyFeedCreateGroupOpen(false)}
+                onCreated={(g) => {
+                    setMyFeedCreateGroupOpen(false);
+                    navigation.navigate('Messages', { chatGroupId: g.id, kind: 'group' });
+                }}
+            />
+
+            <FeedShareModal
+                post={myFeedSharePost || ({} as Post)}
+                isOpen={!!myFeedSharePost}
+                onClose={() => setMyFeedSharePost(null)}
+            />
 
             {/* My Feed Comments Modal */}
             <Modal

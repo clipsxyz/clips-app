@@ -418,14 +418,12 @@ class PostController extends Controller
 
             // Attach tagged users if provided
             if ($request->taggedUsers && is_array($request->taggedUsers) && count($request->taggedUsers) > 0) {
-                $taggedUserIds = User::whereIn('handle', $request->taggedUsers)
+                $pivot = User::whereIn('handle', $request->taggedUsers)
                     ->get()
-                    ->mapWithKeys(function ($taggedUser) {
-                        return [$taggedUser->id => ['user_handle' => $taggedUser->handle]];
-                    })
-                    ->toArray();
-                
-                $post->taggedUsers()->attach($taggedUserIds);
+                    ->mapWithKeys(fn ($taggedUser) => [$taggedUser->id => $taggedUser->handle])
+                    ->all();
+
+                $post->attachTaggedUsersPivot($pivot);
             }
 
             // Update user posts count
@@ -604,6 +602,63 @@ class PostController extends Controller
         });
 
         return response()->json($result);
+    }
+
+    /**
+     * List users who liked a post (for feed "Likes and views" sheet).
+     */
+    public function listLikes(Request $request, string $id): JsonResponse
+    {
+        $validator = Validator::make(
+            ['id' => $id, 'limit' => $request->query('limit')],
+            [
+                'id' => 'required|uuid|exists:posts,id',
+                'limit' => 'nullable|integer|min:1|max:100',
+            ]
+        );
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 400);
+        }
+
+        $limit = (int) ($request->query('limit', 100));
+        $viewerId = $request->query('userId');
+
+        $post = Post::findOrFail($id);
+
+        $query = $post->likes()
+            ->select('users.id', 'users.handle', 'users.display_name', 'users.avatar_url')
+            ->orderByDesc('post_likes.created_at');
+
+        if (!empty($viewerId)) {
+            $query->selectRaw(
+                "exists(
+                    select 1 from user_follows uf
+                    where uf.following_id = users.id
+                    and uf.follower_id = ?
+                    and uf.status = 'accepted'
+                ) as is_following",
+                [$viewerId]
+            );
+        }
+
+        $likers = $query->limit($limit)->get();
+
+        $items = $likers->map(function ($user) use ($viewerId) {
+            return [
+                'handle' => $user->handle,
+                'display_name' => $user->display_name,
+                'avatar_url' => $user->avatar_url,
+                'is_following' => !empty($viewerId) ? (bool) ($user->is_following ?? false) : false,
+            ];
+        })->values();
+
+        return response()->json([
+            'items' => $items,
+            'total' => (int) $post->likes_count,
+            'likes_count' => (int) $post->likes_count,
+            'views_count' => (int) $post->views_count,
+        ]);
     }
 
     /**

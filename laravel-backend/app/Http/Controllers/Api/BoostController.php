@@ -391,7 +391,7 @@ class BoostController extends Controller
 
         $boost = Boost::where('post_id', $postId)
             ->where('user_id', $viewer->id)
-            ->orderByRaw('CASE WHEN expires_at > NOW() THEN 0 ELSE 1 END')
+            ->orderByRaw('CASE WHEN expires_at > ? THEN 0 ELSE 1 END', [now()])
             ->orderByDesc('activated_at')
             ->first();
 

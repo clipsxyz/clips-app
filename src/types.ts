@@ -37,6 +37,17 @@ export type User = {
   accountType?: 'personal' | 'business';
 };
 
+export type PostMediaItem = {
+  url: string;
+  type: 'image' | 'video' | 'text';
+  duration?: number;
+  /** Per-slide video poster in carousels (when type is video). */
+  posterUrl?: string;
+  effects?: Array<{ type: string; intensity?: number; duration?: number; startTime?: number; [key: string]: any }>;
+  text?: string;
+  textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string; fontFamily?: string };
+};
+
 export type Post = {
   id: string;
   publicShareToken?: string;
@@ -60,7 +71,7 @@ export type Post = {
   mediaType?: 'image' | 'video'; // New field to distinguish media types (deprecated, use mediaItems for carousel)
   /** Video framing preference chosen at upload time. */
   videoFrameMode?: 'crop' | 'fit' | 'original';
-  mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; effects?: Array<{ type: string; intensity?: number; duration?: number; startTime?: number;[key: string]: any }>; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string; fontFamily?: string } }>; // Multiple media items for carousel with effects/templates, including text-only clips
+  mediaItems?: PostMediaItem[]; // Multiple media items for carousel with effects/templates, including text-only clips
   text?: string; // Text content of the post (maps to text_content in DB)
   text_content?: string; // Backend field
   imageText?: string; // Text overlay on images

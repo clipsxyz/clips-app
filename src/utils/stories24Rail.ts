@@ -33,6 +33,64 @@ export function normalizeStories24Handle(handle: string): string {
     return (handle || '').trim().toLowerCase().replace(/^@/, '');
 }
 
+/** Web sessionStorage key — must match App.tsx / StoriesPage. */
+export const STORIES24_WEB_FROM_RAIL_HANDLE_KEY = 'clips:stories24OpenedFromRailHandle';
+
+export function getStories24RailHandles(items: Stories24RailItem[]): string[] {
+    return items
+        .map((item) => item.handle)
+        .filter((handle) => handle && handle !== STORIES24_ADD_YOURS_HANDLE);
+}
+
+export function isStories24AddYoursHandle(handle: string | undefined | null): boolean {
+    if (!handle) return false;
+    return normalizeStories24Handle(handle) === normalizeStories24Handle(STORIES24_ADD_YOURS_HANDLE);
+}
+
+/** First real story card in the rail (same order as feed strip; skips Add yours). */
+export function getFirstStories24StoryItem(items: Stories24RailItem[]): Stories24RailItem | null {
+    return pickFirstStories24RailStory(items);
+}
+
+/** First story card in rail scroll order (never the Add yours placeholder). */
+export function pickFirstStories24RailStory(items: Stories24RailItem[]): Stories24RailItem | null {
+    return (
+        items.find((item) => item.handle && !isStories24AddYoursHandle(item.handle)) ?? null
+    );
+}
+
+export type Stories24OpenTarget = {
+    item: Stories24RailItem;
+    railHandles: string[];
+};
+
+/** Resolve header / play-button open target from current rail items. */
+export function resolveStories24OpenTarget(items: Stories24RailItem[]): Stories24OpenTarget | null {
+    const item = pickFirstStories24RailStory(items);
+    if (!item) return null;
+    return { item, railHandles: getStories24RailHandles(items) };
+}
+
+/** Navigation params shared by feed rail cards and header play (RN Stories screen). */
+export function buildStories24StoryNavParams(
+    item: Stories24RailItem,
+    railHandles: string[],
+): {
+    openUserHandle: string;
+    fromStories24Rail: boolean;
+    railHandles: string[];
+    previewThumb?: string;
+    previewVideoUrl?: string;
+} {
+    return {
+        openUserHandle: item.handle,
+        fromStories24Rail: true,
+        railHandles,
+        previewThumb: item.thumb,
+        previewVideoUrl: item.previewVideoUrl,
+    };
+}
+
 export async function buildStories24RailItems(
     userId: string,
     userHandle?: string | null,

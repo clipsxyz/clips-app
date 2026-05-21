@@ -6,7 +6,8 @@ import { showToast } from '../utils/toast';
 import { showUploadOverlay } from '../utils/uploadOverlay';
 import ShareToStoriesFeedIcon from './ShareToStoriesFeedIcon';
 import type { Post } from '../types';
-import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
+import { buildSharePostToStoriesPayload } from '../utils/sharePostToStories';
+import { generateShareTextImage } from '../utils/generateShareTextImage';
 
 interface ShareToStoriesModalProps {
   isOpen: boolean;
@@ -19,70 +20,6 @@ interface ShareToStoriesModalProps {
 const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClose, post, onShareSuccess }) => {
   const { user } = useAuth();
   const [isSharing, setIsSharing] = useState(false);
-
-  async function generateImageFromText(text: string): Promise<string> {
-    const width = 1080;
-    const height = 1920;
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d')!;
-
-    // Background gradient
-    const grad = ctx.createLinearGradient(0, 0, width, height);
-    grad.addColorStop(0, '#0ea5e9');
-    grad.addColorStop(0.5, '#8b5cf6');
-    grad.addColorStop(1, '#f43f5e');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, width, height);
-
-    // Text styles
-    ctx.fillStyle = '#ffffff';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const margin = 96;
-    const maxWidth = width - margin * 2;
-    let fontSize = 64;
-    ctx.font = `${fontSize}px Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial`;
-
-    // Wrap text into lines
-    function wrapLines(t: string): string[] {
-      const words = t.split(/\s+/);
-      const lines: string[] = [];
-      let line = '';
-      for (const w of words) {
-        const test = line ? line + ' ' + w : w;
-        const metrics = ctx.measureText(test);
-        if (metrics.width > maxWidth) {
-          if (line) lines.push(line);
-          line = w;
-        } else {
-          line = test;
-        }
-      }
-      if (line) lines.push(line);
-      return lines;
-    }
-
-    const safeText = (text || 'Shared from the feed').slice(0, TEXT_POST_BODY_MAX_LENGTH);
-    let lines = wrapLines(safeText);
-    // If too many lines, reduce font size
-    while (lines.length > 10 && fontSize > 36) {
-      fontSize -= 6;
-      ctx.font = `${fontSize}px Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial`;
-      lines = wrapLines(safeText);
-    }
-
-    const lineHeight = fontSize * 1.35;
-    const totalHeight = lines.length * lineHeight;
-    let y = height / 2 - totalHeight / 2;
-    for (const ln of lines) {
-      ctx.fillText(ln, width / 2, y);
-      y += lineHeight;
-    }
-
-    return canvas.toDataURL('image/png');
-  }
 
   if (!isOpen) return null;
 
@@ -99,29 +36,18 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
     onShareSuccess?.(post.id);
 
     try {
-      const maxLength = TEXT_POST_BODY_MAX_LENGTH;
-      const postText = post.text || post.text_content || post.caption || post.imageText || '';
-      const truncatedText = postText && postText.length > maxLength
-        ? postText.substring(0, maxLength) + '...'
-        : postText;
+      let payload = buildSharePostToStoriesPayload(post);
 
-      let mediaUrl = post.mediaUrl;
-      let mediaType: 'image' | 'video' = (post.mediaType || 'image');
-      const hasRealMediaItems = !!post.mediaItems?.some((m) => m.type === 'image' || m.type === 'video');
-      const isTextOnlyShare = !mediaUrl && !hasRealMediaItems;
-      const shareText = (truncatedText || 'Shared from feed').trim();
-
-      // Keep text-only shares as text stories so their feed style/template can be preserved on Stories.
-      // Only generate an image fallback when the post is not clearly text-only.
-      if (!mediaUrl && !isTextOnlyShare) {
-        mediaUrl = await generateImageFromText(truncatedText || '');
-        mediaType = 'image';
+      // Canvas fallback for posts with text but no media (non text-only bubble layout).
+      if (!payload.mediaUrl && !payload.isTextOnlyShare) {
+        const generated = await generateShareTextImage(payload.shareText || '');
+        payload = { ...payload, mediaUrl: generated, mediaType: 'image' };
       }
 
       // Mirror create-page story UX: close immediately and continue upload in mini overlay.
       const overlay = showUploadOverlay({
-        thumbUrl: mediaUrl,
-        thumbType: mediaType === 'video' ? 'video' : 'image',
+        thumbUrl: payload.mediaUrl,
+        thumbType: payload.mediaType === 'video' ? 'video' : 'image',
         initialMessage: 'Sharing to Stories 24...',
         uploadingTitle: 'Preparing story...',
         successTitle: 'Story shared!',
@@ -133,25 +59,21 @@ const ShareToStoriesModal: React.FC<ShareToStoriesModalProps> = ({ isOpen, onClo
       await createStory(
         user.id,
         user.handle || '',
-        mediaUrl,
-        isTextOnlyShare ? undefined : mediaType,
-        shareText,
-        post.locationLabel,
-        undefined, // textColor
-        undefined, // textSize
-        isTextOnlyShare ? undefined : post.id, // sharedFromPost (text-only uses normal story path)
-        post.userHandle, // sharedFromUser (always keep author credit, including text-only shares)
-        post.textStyle ?? {
-          color: '#ffffff',
-          size: 'medium',
-          background: 'linear-gradient(135deg, #0f172a 0%, #1d4ed8 50%, #8b5cf6 100%)'
-        }, // preserve text look for text-only shares
-        undefined, // stickers
-        undefined, // taggedUsers
-        undefined, // poll
-        undefined, // taggedUsersPositions
-        undefined, // question
-        post.venue // venue for story metadata carousel
+        payload.mediaUrl,
+        payload.mediaType,
+        payload.shareText,
+        payload.locationLabel,
+        undefined,
+        undefined,
+        payload.sharedFromPost,
+        payload.sharedFromUser,
+        payload.textStyle,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        payload.venue,
       );
 
       // Persist share count (mock storage / API) so it stays correct when user returns to feed

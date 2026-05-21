@@ -141,8 +141,35 @@ class Post extends Model
     public function taggedUsers()
     {
         return $this->belongsToMany(User::class, 'post_tagged_users')
-                    ->withPivot('user_handle')
+                    ->withPivot('id', 'user_handle')
                     ->withTimestamps();
+    }
+
+    /**
+     * Attach tagged users with required pivot UUID (post_tagged_users.id is NOT NULL).
+     *
+     * @param  array<string, string>  $userIdToHandle  user id => handle
+     */
+    public function attachTaggedUsersPivot(array $userIdToHandle): void
+    {
+        if ($userIdToHandle === []) {
+            return;
+        }
+
+        $payload = [];
+        foreach ($userIdToHandle as $userId => $handle) {
+            if ($this->taggedUsers()->where('user_id', $userId)->exists()) {
+                continue;
+            }
+            $payload[$userId] = [
+                'id' => (string) Str::uuid(),
+                'user_handle' => $handle,
+            ];
+        }
+
+        if ($payload !== []) {
+            $this->taggedUsers()->attach($payload);
+        }
     }
 
     // Music track relationship

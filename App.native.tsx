@@ -47,6 +47,7 @@ import ClipScreen from './src/screens/ClipScreen';
 import ScenesScreen from './src/screens/ScenesScreen';
 import { initializeNotifications, teardownNotifications } from './src/services/notifications';
 import { hydrateAuthTokenFromStorage } from './src/utils/authTokenBridge';
+import UploadProgressToast from './src/components/UploadProgressToast.native';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -94,8 +95,8 @@ function MainTabs() {
           let iconName: string;
           if (route.name === 'Home') {
             iconName = focused ? 'home' : 'home-outline';
-          } else if (route.name === 'Discover') {
-            iconName = focused ? 'compass' : 'compass-outline';
+          } else if (route.name === 'Boost') {
+            iconName = focused ? 'flash' : 'flash-outline';
           } else if (route.name === 'Create') {
             iconName = focused ? 'add-circle' : 'add-circle-outline';
           } else if (route.name === 'Search') {
@@ -114,7 +115,7 @@ function MainTabs() {
       })}
     >
       <Tab.Screen name="Home" component={FeedScreen} options={{ title: 'Home' }} />
-      <Tab.Screen name="Discover" component={DiscoverScreen} options={{ title: 'Discover' }} />
+      <Tab.Screen name="Boost" component={BoostScreen} options={{ title: 'Boost' }} />
       <Tab.Screen name="Create" component={InstantCreateScreen} options={{ title: 'Create' }} />
       <Tab.Screen name="Search" component={SearchScreen} options={{ title: 'Search' }} />
       <Tab.Screen
@@ -179,6 +180,7 @@ function App(): React.JSX.Element {
     <AuthProvider>
       <SafeAreaProvider>
         <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
+        <UploadProgressToast />
         <NavigationContainer ref={navigationRef}>
           <Stack.Navigator
             screenOptions={{
@@ -187,6 +189,7 @@ function App(): React.JSX.Element {
             }}
           >
           <Stack.Screen name="MainTabs" component={MainTabs} />
+          <Stack.Screen name="Discover" component={DiscoverScreen} />
           <Stack.Screen name="Profile" component={ProfileScreen} />
           <Stack.Screen name="ProfileCover" component={ProfileCoverScreen} />
           <Stack.Screen
@@ -208,7 +211,7 @@ function App(): React.JSX.Element {
           />
           <Stack.Screen
             name="Scenes"
-            component={ScenesScreen}
+            component={ScenesScreen as React.ComponentType}
             options={{ presentation: 'fullScreenModal' }}
           />
           <Stack.Screen name="ViewProfile" component={ViewProfileScreen} />

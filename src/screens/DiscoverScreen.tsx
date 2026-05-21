@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
     View,
     Text,
@@ -7,9 +7,11 @@ import {
     TouchableOpacity,
     FlatList,
     ActivityIndicator,
+    Keyboard,
     KeyboardAvoidingView,
     Platform,
     ScrollView,
+    Animated,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/Auth';
@@ -26,6 +28,11 @@ const popularCities = [
     'Paris', 'Berlin', 'Amsterdam', 'Rome', 'Madrid', 'Lisbon',
     'New York', 'Los Angeles', 'Toronto', 'Tokyo', 'Seoul', 'Sydney'
 ];
+
+const ROTATING_PLACEHOLDER_CITIES = [
+    'Paris', 'London', 'Rome', 'Dublin', 'Tokyo', 'New York', 'Sydney', 'Berlin',
+];
+const PLACEHOLDER_ROTATE_MS = 2800;
 
 const DISCOVER_RECENT_KEY = 'discoverRecentQueriesV1';
 const DISCOVER_SAVED_KEY = 'discoverSavedQueriesV1';
@@ -68,6 +75,9 @@ export default function DiscoverScreen({ navigation }: any) {
     const [savedSearches, setSavedSearches] = useState<DiscoverHistoryItem[]>([]);
     const [topSections, setTopSections] = useState<SearchSections>({});
     const [scopePicker, setScopePicker] = useState<LocationSuggestion | null>(null);
+    const [placeholderCityIndex, setPlaceholderCityIndex] = useState(0);
+    const [keyboardOpen, setKeyboardOpen] = useState(false);
+    const placeholderOpacity = useRef(new Animated.Value(1)).current;
     const modePlaceholder: Record<'city' | 'landmark' | 'venue', string> = {
         city: 'Discover other locations...',
         landmark: 'Discover landmarks...',
@@ -85,6 +95,40 @@ export default function DiscoverScreen({ navigation }: any) {
     const results = popularCities.filter(city => 
         city.toLowerCase().includes(query.toLowerCase())
     );
+
+    useEffect(() => {
+        const id = setInterval(() => {
+            Animated.sequence([
+                Animated.timing(placeholderOpacity, {
+                    toValue: 0,
+                    duration: 180,
+                    useNativeDriver: true,
+                }),
+                Animated.timing(placeholderOpacity, {
+                    toValue: 1,
+                    duration: 220,
+                    useNativeDriver: true,
+                }),
+            ]).start();
+            setPlaceholderCityIndex((i) => (i + 1) % ROTATING_PLACEHOLDER_CITIES.length);
+        }, PLACEHOLDER_ROTATE_MS);
+        return () => clearInterval(id);
+    }, [placeholderOpacity]);
+
+    useEffect(() => {
+        const showSub = Keyboard.addListener(
+            Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+            () => setKeyboardOpen(true),
+        );
+        const hideSub = Keyboard.addListener(
+            Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+            () => setKeyboardOpen(false),
+        );
+        return () => {
+            showSub.remove();
+            hideSub.remove();
+        };
+    }, []);
 
     useEffect(() => {
         let mounted = true;
@@ -241,6 +285,10 @@ export default function DiscoverScreen({ navigation }: any) {
         : [];
     const topPosts = Array.isArray(topSections.posts?.items) ? topSections.posts!.items.slice(0, 3) : [];
     const isCurrentSaved = savedSearches.some((x) => x.q.toLowerCase() === query.trim().toLowerCase() && x.mode === discoverMode);
+    const hasSearchQuery = query.trim().length > 0;
+    const showPlaceholderCarousel = query.trim().length < 2;
+    const showSuggestionsPanel = query.trim().length >= 2;
+    const keyboardLayout = keyboardOpen && hasSearchQuery;
 
     const chooseFromQuery = () => {
         const trimmed = query.trim();
@@ -279,7 +327,8 @@ export default function DiscoverScreen({ navigation }: any) {
                             );
                         })}
                     </ScrollView>
-                    {/* Popular cities */}
+                    {/* Popular cities — hidden while actively searching */}
+                    {!showSuggestionsPanel ? (
                     <View style={styles.citiesContainer}>
                         <View style={styles.citiesGrid}>
                             {popularCities.map((city, index) => {
@@ -299,8 +348,10 @@ export default function DiscoverScreen({ navigation }: any) {
                             );})}
                         </View>
                     </View>
+                    ) : null}
 
-                    {/* Greeting */}
+                    {/* Greeting — compact while keyboard + active search (web parity) */}
+                    {!keyboardLayout ? (
                     <View style={styles.greetingContainer}>
                         <Text style={styles.greetingText}>{`Hi ${firstName},`}</Text>
                         <Text style={styles.greetingTextLine2}>let's go social traveling</Text>
@@ -309,6 +360,7 @@ export default function DiscoverScreen({ navigation }: any) {
                             <Icon name="location" size={16} color="rgba(227, 227, 227, 0.72)" />
                         </View>
                     </View>
+                    ) : null}
 
                     {/* Search input */}
                     <View style={styles.searchContainer}>
@@ -365,14 +417,30 @@ export default function DiscoverScreen({ navigation }: any) {
                         )}
                         <View style={styles.searchInputWrapper}>
                             <Icon name="search" size={20} color="#9CA3AF" style={styles.searchIcon} />
+                            {showPlaceholderCarousel && !query.trim() ? (
+                                <Animated.View
+                                    style={[styles.placeholderCarousel, { opacity: placeholderOpacity }]}
+                                    pointerEvents="none"
+                                >
+                                    <Text style={styles.placeholderPrefix}>Discover</Text>
+                                    <Text style={styles.placeholderDot}> · </Text>
+                                    <Text style={styles.placeholderCity}>
+                                        {ROTATING_PLACEHOLDER_CITIES[placeholderCityIndex]}
+                                    </Text>
+                                </Animated.View>
+                            ) : null}
                             <TextInput
                                 value={query}
                                 onChangeText={(text) => {
                                     setQuery(text);
                                     setActiveIndex(-1);
                                 }}
-                                placeholder={modePlaceholder[discoverMode]}
-                                placeholderTextColor="#6B7280"
+                                placeholder={
+                                    query.trim().length > 0
+                                        ? modePlaceholder[discoverMode]
+                                        : ' '
+                                }
+                                placeholderTextColor="transparent"
                                 style={styles.searchInput}
                                 selectionColor="#d91b5c"
                                 onSubmitEditing={chooseFromQuery}
@@ -435,7 +503,7 @@ export default function DiscoverScreen({ navigation }: any) {
                         </View>
                     )}
 
-                    {!query.trim() && (
+                    {!query.trim() && !keyboardLayout && (
                         <View style={styles.historyCardsWrap}>
                             <View style={styles.historyCard}>
                                 <Text style={styles.historyTitle}>Recent</Text>
@@ -590,6 +658,28 @@ const styles = StyleSheet.create({
         flex: 1,
         fontSize: 15,
         color: '#F3F4F6',
+    },
+    placeholderCarousel: {
+        position: 'absolute',
+        left: 44,
+        right: 40,
+        top: 0,
+        bottom: 0,
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    placeholderPrefix: {
+        color: '#6B7280',
+        fontSize: 15,
+    },
+    placeholderDot: {
+        color: '#6B7280',
+        fontSize: 15,
+    },
+    placeholderCity: {
+        color: '#9CA3AF',
+        fontSize: 15,
+        fontWeight: '600',
     },
     saveBtn: {
         marginRight: 6,

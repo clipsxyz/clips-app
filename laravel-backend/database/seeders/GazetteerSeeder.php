@@ -106,15 +106,18 @@ class GazetteerSeeder extends Seeder
         ];
 
         foreach ($users as $userData) {
-            User::create($userData);
+            User::firstOrCreate(
+                ['email' => $userData['email']],
+                $userData
+            );
         }
 
         // Ava@galway follows Barry (so when Barry follows Ava back they are mutual → DM icon)
         $barry = User::whereRaw('LOWER(handle) = ?', ['barry@cork'])->first();
-        $ava = User::whereRaw('LOWER(handle) = ?', ['ava@galway'])->first();
-        if ($barry && $ava) {
-            $barry->followers()->attach($ava->id, ['status' => 'accepted']);
-            $ava->increment('following_count');
+        $avaGalway = User::whereRaw('LOWER(handle) = ?', ['ava@galway'])->first();
+        if ($barry && $avaGalway && !$barry->followers()->where('follower_id', $avaGalway->id)->exists()) {
+            $barry->followers()->attach($avaGalway->id, ['status' => 'accepted']);
+            $avaGalway->increment('following_count');
             $barry->increment('followers_count');
         }
 
@@ -136,9 +139,9 @@ class GazetteerSeeder extends Seeder
             'comments_count' => 3,
         ]);
         // Tag users in this post
-        $post1->taggedUsers()->attach([
-            $bob->id => ['user_handle' => $bob->handle],
-            $charlie->id => ['user_handle' => $charlie->handle],
+        $post1->attachTaggedUsersPivot([
+            $bob->id => $bob->handle,
+            $charlie->id => $charlie->handle,
         ]);
 
         // Regular post
@@ -197,8 +200,8 @@ class GazetteerSeeder extends Seeder
             'comments_count' => 5,
         ]);
         // Tag user in text-only post
-        $post4->taggedUsers()->attach([
-            $alice->id => ['user_handle' => $alice->handle],
+        $post4->attachTaggedUsersPivot([
+            $alice->id => $alice->handle,
         ]);
 
         // Mock post from Ava (Ireland national feed – visible to barry@cork)

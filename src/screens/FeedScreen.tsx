@@ -45,7 +45,6 @@ import {
     setCommentModerationState,
     decorateForUser,
 } from '../api/posts';
-import { userHasUnviewedStoriesByHandle, userHasStoriesByHandle } from '../api/stories';
 import { getUnreadTotal } from '../api/messages';
 import { blockUser } from '../api/messages';
 import { isUserBlocked } from '../api/messages';
@@ -74,18 +73,36 @@ import GazetteerAmbientBackground from '../components/GazetteerAmbientBackground
 import { glassPanel, glassSurface } from '../theme/gazetteerAmbientNative';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { navigateMainTab } from '../navigation/mainTabs';
+import Stories24HeaderIcon from '../components/Stories24HeaderIcon.native';
 import { Dimensions } from 'react-native';
-import FeedPostMeta from '../components/FeedPostMeta';
 import FeedEngagementRow from '../components/FeedEngagementRow';
+import FeedPostHeader from '../components/FeedPostHeader.native';
+import FeedCaptionText from '../components/FeedCaptionText.native';
+import FeedPostTagRow from '../components/FeedPostTagRow.native';
+import FeedMediaCarouselThumbs from '../components/FeedMediaCarouselThumbs.native';
+import FeedNewsTicker from '../components/FeedNewsTicker.native';
+import FeedHeartDrop from '../components/FeedHeartDrop.native';
+import { imageFullscreenIndexForCarousel } from '../utils/feedImageFullscreen';
+import FeedLikesSheet from '../components/FeedLikesSheet.native';
+import FeedTaggedMediaBadge from '../components/FeedTaggedMediaBadge.native';
+import TaggedUsersBottomSheet from '../components/TaggedUsersBottomSheet.native';
+import { getPostDisplayCaption, getReclipDisplay } from '../utils/feedPostMeta';
 import FeedShareModal from '../components/FeedShareModal';
+import ShareToStoriesModal from '../components/ShareToStoriesModal.native';
+import BoostMetricsPanel from '../components/BoostMetricsPanel.native';
+import { subscribeStoriesRefresh } from '../utils/storiesRefreshNative';
+import { getActiveBoost } from '../api/boost';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import InterestsFeedCard from '../components/InterestsFeedCard.native';
 import SuggestedFollowerFeedCard from '../components/SuggestedFollowerFeedCard.native';
-import Stories24FeedRail from '../components/Stories24FeedRail.native';
+import Stories24FeedRail, { type Stories24FeedRailHandle } from '../components/Stories24FeedRail.native';
 import {
     buildStories24RailItems,
     consumeStories24RailReturn,
     persistStories24RailOpenHandle,
+    buildStories24StoryNavParams,
+    isStories24AddYoursHandle,
+    resolveStories24OpenTarget,
     type Stories24RailItem,
     type Stories24RailReturnPayload,
 } from '../utils/stories24Rail';
@@ -97,6 +114,12 @@ import {
     type SuggestedFollowerSuggestion,
 } from '../utils/suggestedFollowerFeed';
 import PostOverflowMenuModal from '../components/PostOverflowMenuModal';
+import EditPostModal from '../components/EditPostModal.native';
+import SavePostModal from '../components/SavePostModal.native';
+import QRCodeModal from '../components/QRCodeModal.native';
+import CreateGroupModal from '../components/CreateGroupModal.native';
+import PickGroupToInviteFeedUserModal from '../components/PickGroupToInviteFeedUserModal.native';
+import { updatePost as apiUpdatePost } from '../api/client';
 import PostCommentsSheet from '../components/PostCommentsSheet';
 import {
     getCollectionsForPost,
@@ -109,6 +132,15 @@ import {
     setPostNotificationsPrefMobile,
     hasPostNotificationsPrefMobile,
 } from '../utils/feedEngagementPrefsMobile';
+import {
+    filterPostsByContentPrefs,
+    hideFeedPostMobile,
+    loadFeedContentPrefsMobile,
+    markNotInterestedFeedPostMobile,
+    muteFeedAuthorMobile,
+    blockFeedAuthorMobile,
+    type FeedContentPrefs,
+} from '../utils/feedContentPrefsMobile';
 import {
     dismissPendingFeedUpload,
     getPendingFeedUploads,
@@ -152,7 +184,7 @@ function PillTabs({
     userRegional = 'Dublin',
     userNational = 'Ireland',
     hasNotifications = false,
-    onOpenBoost,
+    onOpenStories24,
     onOpenPassport,
     onOpenDiscover,
     onSearchLocation,
@@ -168,7 +200,7 @@ function PillTabs({
     userRegional?: string;
     userNational?: string;
     hasNotifications?: boolean;
-    onOpenBoost: () => void;
+    onOpenStories24?: () => void;
     onOpenPassport: () => void;
     onOpenDiscover: () => void;
     onSearchLocation?: (
@@ -182,6 +214,9 @@ function PillTabs({
     ) => void;
     onClearCustom?: () => void;
 }) {
+    const { user } = useAuth();
+    const passportInitials = ((user?.name || user?.handle || 'U').trim().split(/\s+/).map((s) => s[0]).slice(0, 2).join('') || 'U').toUpperCase();
+
     type HeaderSuggestion = {
         name: string;
         type: 'location' | 'venue' | 'landmark';
@@ -470,8 +505,15 @@ function PillTabs({
     return (
         <View style={styles.tabContainer}>
             <View style={styles.feedHeaderPickerRow}>
-                <TouchableOpacity onPress={onOpenBoost} style={styles.feedHeaderIconButton}>
-                    <Icon name="flash" size={18} color="#FBBF24" />
+                <TouchableOpacity
+                    onPress={() => onOpenStories24?.()}
+                    style={styles.feedHeaderSideAction}
+                    accessibilityLabel="Stories 24"
+                >
+                    <View style={styles.feedHeaderNotifWrap}>
+                        <Stories24HeaderIcon size={32} />
+                        <Text style={styles.feedHeaderPassportLabel}>Stories</Text>
+                    </View>
                 </TouchableOpacity>
 
                 <View style={styles.feedHeaderCenter}>
@@ -608,9 +650,22 @@ function PillTabs({
                             />
                         </>
                     ) : null}
-                    <TouchableOpacity onPress={onOpenPassport} style={styles.feedHeaderIconButton}>
+                    <TouchableOpacity
+                        onPress={onOpenPassport}
+                        style={styles.feedHeaderSideAction}
+                        accessibilityLabel="My Passport"
+                    >
                         <View style={styles.feedHeaderNotifWrap}>
-                            <Icon name="person-circle-outline" size={22} color="#FFFFFF" />
+                            <View style={styles.feedHeaderPassportAvatarWrap}>
+                                {user?.avatarUrl ? (
+                                    <Image
+                                        source={{ uri: user.avatarUrl }}
+                                        style={styles.feedHeaderPassportAvatarImage}
+                                    />
+                                ) : (
+                                    <Text style={styles.feedHeaderPassportInitials}>{passportInitials}</Text>
+                                )}
+                            </View>
                             <Text style={styles.feedHeaderPassportLabel}>Passport</Text>
                         </View>
                     </TouchableOpacity>
@@ -682,130 +737,6 @@ function Avatar({
     );
 }
 
-function PostHeader({
-    post,
-    onFollow,
-    isCurrentUser,
-    onProfileMenuPress,
-    onHasStoryChange,
-    onOverflowPress,
-    onRegisterDmAnchor,
-}: {
-    post: Post;
-    onFollow?: () => Promise<void>;
-    isCurrentUser: boolean;
-    onProfileMenuPress?: () => void;
-    onHasStoryChange?: (hasStory: boolean) => void;
-    onOverflowPress?: () => void;
-    onRegisterDmAnchor?: (key: string, ref: View | null) => void;
-}) {
-    const [hasStory, setHasStory] = useState(false);
-    const [showFollowCheck, setShowFollowCheck] = useState(post.isFollowing === true);
-
-    useEffect(() => {
-        async function checkStory() {
-            try {
-                // For profile quick-actions, we want "View stories" whenever the user has
-                // any active 24h story (not only unviewed).
-                const hasAnyActiveStory = await userHasStoriesByHandle(post.userHandle);
-                setHasStory(hasAnyActiveStory);
-                onHasStoryChange?.(hasAnyActiveStory);
-            } catch (error) {
-                console.error('Error checking story:', error);
-            }
-        }
-        checkStory();
-    }, [post.userHandle, isCurrentUser]);
-
-    // Show the follow checkmark briefly after following, then hide it
-    useEffect(() => {
-        let timer: any;
-        if (!isCurrentUser && onFollow && post.isFollowing) {
-            setShowFollowCheck(true);
-            timer = setTimeout(() => {
-                setShowFollowCheck(false);
-            }, 2500);
-        } else {
-            setShowFollowCheck(false);
-        }
-
-        return () => {
-            if (timer) clearTimeout(timer);
-        };
-    }, [post.isFollowing, isCurrentUser, onFollow]);
-
-    return (
-        <View style={styles.postHeader}>
-            <View style={styles.postHeaderLeft}>
-                <TouchableOpacity
-                    style={styles.avatarWrapper}
-                    onPress={onProfileMenuPress}
-                    ref={(r) => {
-                        onRegisterDmAnchor?.(`post:${post.id}`, r);
-                        onRegisterDmAnchor?.(`handle:${post.userHandle}`, r);
-                    }}
-                    collapsable={false}
-                >
-                    <Avatar
-                        src={undefined}
-                        name={post.userHandle.split('@')[0]}
-                        size={32}
-                        hasStory={hasStory}
-                    />
-                    {/* + icon overlay on profile picture */}
-                    {!isCurrentUser && onFollow && (post.isFollowing === false || post.isFollowing === undefined) && (
-                        <TouchableOpacity
-                            onPress={onFollow}
-                            style={styles.followPlusButton}
-                        >
-                            <Icon name="add" size={12} color="#FFFFFF" />
-                        </TouchableOpacity>
-                    )}
-                    {/* Checkmark when following */}
-                    {!isCurrentUser && onFollow && post.isFollowing === true && showFollowCheck && (
-                        <View style={styles.followCheckButton}>
-                            <Icon name="checkmark" size={12} color="#FFFFFF" />
-                        </View>
-                    )}
-                </TouchableOpacity>
-                <TouchableOpacity 
-                    style={styles.postHeaderInfo}
-                    onPress={onProfileMenuPress}
-                >
-                    <FeedPostMeta
-                        handle={post.userHandle}
-                        timeText={post.createdAt ? timeAgo(post.createdAt) : undefined}
-                        locationText={
-                            (post.locationLabel || post.venue)
-                                ? `${post.locationLabel || ''}${post.venue ? ` · ${post.venue}` : ''}`.trim()
-                                : undefined
-                        }
-                    />
-                </TouchableOpacity>
-            </View>
-            <View style={styles.postHeaderRight}>
-                {onOverflowPress ? (
-                    <TouchableOpacity
-                        onPress={(e) => {
-                            e?.stopPropagation?.();
-                            onOverflowPress();
-                        }}
-                        style={styles.postOverflowButton}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                        <Icon name="ellipsis-horizontal" size={20} color="#9CA3AF" />
-                    </TouchableOpacity>
-                ) : null}
-                {post.locationLabel && (
-                    <TouchableOpacity style={styles.locationButton}>
-                        <Icon name="location" size={12} color="#f472b6" />
-                    </TouchableOpacity>
-                )}
-            </View>
-        </View>
-    );
-}
-
 // Memoized FeedCard for better performance - prevents unnecessary re-renders
 const FeedCard = React.memo(function FeedCard({
     post,
@@ -818,21 +749,21 @@ const FeedCard = React.memo(function FeedCard({
     onBookmark,
     onPostPress,
     onVisitProfile,
+    onVisitHandle,
     onViewStories,
     onBlockUser,
     onReportUser,
-    onNotificationsPress,
-    unreadCount,
-    hasInbox,
     isCurrentUser,
     onOverflowPress,
     isVideoActive,
     feedVideoMuted,
     viewerHandle,
+    viewerUserId,
     onOpenDM,
     onRegisterDmAnchor,
     onOpenImageFullscreen,
     onOpenScenes,
+    onShareSuccess,
 }: {
     post: Post;
     onLike: () => Promise<void>;
@@ -843,30 +774,40 @@ const FeedCard = React.memo(function FeedCard({
     onReclip: () => Promise<void>;
     onBookmark: () => Promise<void>;
     onPostPress?: () => void;
-    onOpenImageFullscreen?: () => void;
+    onOpenImageFullscreen?: (startIndex?: number) => void;
     onOpenScenes?: () => void;
     onVisitProfile?: () => void;
+    onVisitHandle?: (handle: string) => void;
     onViewStories?: () => void;
     onBlockUser?: () => Promise<void>;
     onReportUser?: () => Promise<void>;
-    onNotificationsPress?: () => void;
-    unreadCount?: number;
-    hasInbox?: boolean;
     isCurrentUser: boolean;
     onOverflowPress?: () => void;
     isVideoActive?: boolean;
     feedVideoMuted?: boolean;
     viewerHandle?: string | null;
+    viewerUserId?: string;
     onOpenDM?: (handle: string, postId: string) => void;
     onRegisterDmAnchor?: (key: string, ref: View | null) => void;
+    onShareSuccess?: (postId: string) => void;
 }) {
     const [imageDimensions, setImageDimensions] = React.useState<{ width: number; height: number } | null>(null);
     const [profileMenuVisible, setProfileMenuVisible] = React.useState(false);
     const [headerHasStory, setHeaderHasStory] = React.useState(false);
+    const [carouselIndex, setCarouselIndex] = React.useState(0);
+    const [heartDrop, setHeartDrop] = React.useState<{ startX: number; startY: number } | null>(null);
+    const likeButtonRef = React.useRef<View>(null);
+    const mediaWrapRef = React.useRef<View>(null);
+    const [likesSheetVisible, setLikesSheetVisible] = React.useState(false);
+    const [taggedSheetVisible, setTaggedSheetVisible] = React.useState(false);
+    const [shareToStoriesVisible, setShareToStoriesVisible] = React.useState(false);
+    const [isMetricsOpen, setIsMetricsOpen] = React.useState(false);
+    const [boostMetricsActive, setBoostMetricsActive] = React.useState(Boolean(post.isBoosted));
     const isMutualFollow = useMutualFollow(post, isCurrentUser);
     const lastMediaTapRef = React.useRef(0);
     const singleMediaTapTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const videoMediaRef = React.useRef<FeedPostMediaHandle>(null);
+    const postViewRecordedRef = React.useRef(false);
     const screenWidth = Dimensions.get('window').width;
     const cardMediaWidth = screenWidth - 20;
     const DOUBLE_TAP_DELAY_MS = 260;
@@ -876,15 +817,53 @@ const FeedCard = React.memo(function FeedCard({
     const isClientUploadFailed = post.clientUploadStatus === 'failed';
     const textOnlyPost = isTextOnlyPost(post);
     const hasFeedMedia = !textOnlyPost && Boolean(post.mediaUrl || (post.mediaItems && post.mediaItems.length > 0));
+    const hasTaggedUsers = Boolean(post.taggedUsers && post.taggedUsers.length > 0);
+    const showVideoMuteOnMedia = hasFeedMedia && postHasVideoMedia(post);
+    const carouselThumbItems = React.useMemo(
+        () =>
+            (post.mediaItems || []).filter(
+                (item) => item?.type === 'image' || item?.type === 'video',
+            ),
+        [post.mediaItems],
+    );
+    const displayCaption = React.useMemo(() => getPostDisplayCaption(post), [post]);
+    const { profileHandle } = getReclipDisplay(post, viewerHandle);
+    const postTags = Array.isArray(post.tags) ? post.tags : [];
+    const showBoostMetrics =
+        isCurrentUser && !post.originalUserHandle && (post.isBoosted || boostMetricsActive);
+
+    React.useEffect(() => {
+        setCarouselIndex(0);
+        postViewRecordedRef.current = false;
+    }, [post.id]);
+
+    React.useEffect(() => {
+        if (!isCurrentUser || post.originalUserHandle) {
+            setBoostMetricsActive(false);
+            return;
+        }
+        let cancelled = false;
+        void getActiveBoost(post.id).then((boost) => {
+            if (!cancelled) setBoostMetricsActive(Boolean(boost?.isActive));
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [post.id, isCurrentUser, post.originalUserHandle, post.isBoosted]);
+
+    /** Lock frame size to first carousel slide so swiping does not resize the card (web parity). */
     const mediaSizingUrl = React.useMemo(() => {
         if (!hasFeedMedia) return null;
+        const first = carouselThumbItems[0];
+        if (first?.type === 'video' && post.videoPosterUrl) return post.videoPosterUrl;
+        if (first?.url) return first.url;
         if (isVideoPost(post) && post.videoPosterUrl) return post.videoPosterUrl;
         return post.mediaUrl || post.mediaItems?.[0]?.url || null;
-    }, [hasFeedMedia, post]);
+    }, [hasFeedMedia, post, carouselThumbItems]);
 
     React.useEffect(() => {
         setImageDimensions(null);
-    }, [mediaSizingUrl]);
+    }, [post.id]);
 
     React.useEffect(() => {
         if (mediaSizingUrl && !imageDimensions) {
@@ -924,30 +903,58 @@ const FeedCard = React.memo(function FeedCard({
         };
     }, [imageDimensions, cardMediaWidth]);
 
-    const handleMediaPress = React.useCallback(() => {
-        const now = Date.now();
-        if (now - lastMediaTapRef.current <= DOUBLE_TAP_DELAY_MS) {
-            if (singleMediaTapTimerRef.current) {
-                clearTimeout(singleMediaTapTimerRef.current);
-                singleMediaTapTimerRef.current = null;
-            }
-            lastMediaTapRef.current = 0;
-            // Match web behavior: double tap should only like, not unlike.
-            if (!post.userLiked) {
-                onLike().catch((error) => console.error('Error in media double-tap like:', error));
-            }
-            return;
+    const triggerHeartDrop = React.useCallback((pageX: number, pageY: number) => {
+        setHeartDrop({ startX: pageX, startY: pageY });
+    }, []);
+
+    const resolveTapCoords = React.useCallback((pageX?: number, pageY?: number): Promise<{ x: number; y: number }> => {
+        if (typeof pageX === 'number' && typeof pageY === 'number') {
+            return Promise.resolve({ x: pageX, y: pageY });
         }
-        lastMediaTapRef.current = now;
-        singleMediaTapTimerRef.current = setTimeout(() => {
-            if (postHasVideoMedia(post)) {
-                videoMediaRef.current?.toggleVideoMute();
-            } else {
-                onOpenImageFullscreen?.();
+        return new Promise((resolve) => {
+            mediaWrapRef.current?.measureInWindow((x, y, w, h) => {
+                resolve({ x: x + w / 2, y: y + h / 2 });
+            });
+        });
+    }, []);
+
+    const handleMediaPress = React.useCallback(
+        (event?: { nativeEvent?: { pageX?: number; pageY?: number } }) => {
+            const now = Date.now();
+            if (now - lastMediaTapRef.current <= DOUBLE_TAP_DELAY_MS) {
+                if (singleMediaTapTimerRef.current) {
+                    clearTimeout(singleMediaTapTimerRef.current);
+                    singleMediaTapTimerRef.current = null;
+                }
+                lastMediaTapRef.current = 0;
+                if (!post.userLiked) {
+                    onLike().catch((error) => console.error('Error in media double-tap like:', error));
+                }
+                const { pageX, pageY } = event?.nativeEvent || {};
+                void resolveTapCoords(pageX, pageY).then(({ x, y }) => triggerHeartDrop(x, y));
+                return;
             }
-            singleMediaTapTimerRef.current = null;
-        }, DOUBLE_TAP_DELAY_MS + 20);
-    }, [DOUBLE_TAP_DELAY_MS, onLike, onOpenImageFullscreen, post]);
+            lastMediaTapRef.current = now;
+            singleMediaTapTimerRef.current = setTimeout(() => {
+                if (postHasVideoMedia(post)) {
+                    videoMediaRef.current?.toggleVideoMute();
+                } else {
+                    const startIndex = imageFullscreenIndexForCarousel(post, carouselIndex);
+                    onOpenImageFullscreen?.(startIndex);
+                }
+                singleMediaTapTimerRef.current = null;
+            }, DOUBLE_TAP_DELAY_MS + 20);
+        },
+        [
+            DOUBLE_TAP_DELAY_MS,
+            carouselIndex,
+            onLike,
+            onOpenImageFullscreen,
+            post,
+            resolveTapCoords,
+            triggerHeartDrop,
+        ],
+    );
 
     React.useEffect(() => {
         return () => {
@@ -958,11 +965,9 @@ const FeedCard = React.memo(function FeedCard({
     }, []);
 
     return (
-        <TouchableOpacity
-            style={styles.feedCard}
-            onPress={onPostPress}
-            activeOpacity={0.95}
-        >
+        <View style={styles.feedCard}>
+            <FeedPostTagRow tags={postTags} />
+
             {post.isBoosted && (
                 <View style={styles.sponsoredBadge}>
                     <Text style={styles.sponsoredText}>Sponsored</Text>
@@ -987,34 +992,50 @@ const FeedCard = React.memo(function FeedCard({
                             void onLike();
                         }
                     }}
+                    onHeartAnimation={(pageX, pageY) => triggerHeartDrop(pageX, pageY)}
                     onRegisterDmAnchor={onRegisterDmAnchor}
+                    onShowTaggedUsers={() => setTaggedSheetVisible(true)}
                 />
             ) : (
                 <>
-                    <PostHeader
-                        post={post}
-                        onFollow={onFollow}
-                        isCurrentUser={isCurrentUser}
-                        onProfileMenuPress={() => setProfileMenuVisible(true)}
-                        onHasStoryChange={setHeaderHasStory}
-                        onOverflowPress={onOverflowPress}
-                        onRegisterDmAnchor={onRegisterDmAnchor}
-                    />
                     {hasFeedMedia ? (
-                        <View style={styles.mediaWrap}>
+                        <View style={styles.mediaWrap} ref={mediaWrapRef} collapsable={false}>
                             <FeedPostMedia
                                 ref={videoMediaRef}
                                 post={post}
+                                carouselIndex={carouselIndex}
+                                onCarouselIndexChange={setCarouselIndex}
+                                stickers={post.stickers}
                                 width={cardMediaWidth}
                                 height={typeof imageStyle.height === 'number' ? imageStyle.height : cardMediaWidth}
                                 onPress={isClientUploading || isClientUploadFailed ? undefined : handleMediaPress}
-                                onMediaLoad={isClientUploading ? undefined : onView}
+                                onMediaLoad={
+                                    isClientUploading
+                                        ? undefined
+                                        : () => {
+                                              if (postViewRecordedRef.current) return;
+                                              postViewRecordedRef.current = true;
+                                              void onView();
+                                          }
+                                }
                                 mode="feed"
                                 isActive={isVideoActive && !isClientUploading}
                                 muted={feedVideoMuted}
                                 onOpenScenes={
                                     isClientUploading || isClientUploadFailed ? undefined : onOpenScenes
                                 }
+                            />
+                            <FeedPostHeader
+                                post={post}
+                                viewerHandle={viewerHandle}
+                                isCurrentUser={isCurrentUser}
+                                isOverlaid
+                                onFollow={onFollow}
+                                onOpenDM={onOpenDM}
+                                onProfileMenuPress={() => setProfileMenuVisible(true)}
+                                onHasStoryChange={setHeaderHasStory}
+                                onOverflowPress={onOverflowPress}
+                                onRegisterDmAnchor={onRegisterDmAnchor}
                             />
                             {isClientUploading ? (
                                 <View style={styles.uploadingOverlay} pointerEvents="none">
@@ -1032,67 +1053,143 @@ const FeedCard = React.memo(function FeedCard({
                                     </Text>
                                 </View>
                             ) : null}
+                            {hasTaggedUsers ? (
+                                <FeedTaggedMediaBadge
+                                    count={post.taggedUsers!.length}
+                                    aboveMuteControl={showVideoMuteOnMedia}
+                                    onPress={() => setTaggedSheetVisible(true)}
+                                />
+                            ) : null}
                         </View>
+                    ) : (
+                        <FeedPostHeader
+                            post={post}
+                            viewerHandle={viewerHandle}
+                            isCurrentUser={isCurrentUser}
+                            onFollow={onFollow}
+                            onOpenDM={onOpenDM}
+                            onProfileMenuPress={() => setProfileMenuVisible(true)}
+                            onHasStoryChange={setHeaderHasStory}
+                            onOverflowPress={onOverflowPress}
+                            onRegisterDmAnchor={onRegisterDmAnchor}
+                        />
+                    )}
+
+                    {carouselThumbItems.length > 1 ? (
+                        <FeedMediaCarouselThumbs
+                            items={carouselThumbItems}
+                            activeIndex={carouselIndex}
+                            onSelect={setCarouselIndex}
+                        />
                     ) : null}
+
                 </>
             )}
 
-            {!textOnlyPost && post.text?.trim() && hasFeedMedia ? (
+            {!textOnlyPost && displayCaption.length > 0 && hasFeedMedia ? (
                 <View style={styles.captionWrap}>
-                    <Text style={styles.captionText} numberOfLines={4}>
-                        {post.text}
-                    </Text>
+                    <FeedCaptionText
+                        caption={displayCaption}
+                        onHandlePress={(handle) => {
+                            if (onVisitHandle) onVisitHandle(handle);
+                            else onVisitProfile?.();
+                        }}
+                    />
                 </View>
             ) : null}
+
+            <FeedHeartDrop
+                visible={heartDrop != null}
+                startX={heartDrop?.startX ?? 0}
+                startY={heartDrop?.startY ?? 0}
+                targetRef={likeButtonRef}
+                onComplete={() => setHeartDrop(null)}
+            />
 
             <View style={[styles.engagementBar, (isClientUploading || isClientUploadFailed) && styles.engagementBarDimmed]}>
                 <View style={styles.actionButtons}>
                     <FeedEngagementRow
+                        likeButtonRef={likeButtonRef}
                         likes={post.stats.likes}
                         comments={post.stats.comments}
+                        shares={post.stats.shares}
                         reclips={post.stats.reclips}
                         views={post.stats.views}
                         userLiked={post.userLiked}
                         userReclipped={post.userReclipped}
+                        isSaved={post.isBookmarked}
                         onLike={() => { void onLike(); }}
+                        onLikesPress={() => {
+                            if (post.stats.likes > 0) setLikesSheetVisible(true);
+                        }}
                         onComment={onComment}
+                        onShareToStories={() => setShareToStoriesVisible(true)}
                         onReclip={!isCurrentUser ? () => { void onReclip(); } : undefined}
-                        onShare={() => { void onShare(); }}
+                        onSave={() => { void onBookmark(); }}
                         showReclip={!isCurrentUser}
-                        showShare
                         showViews
+                        tone="feed"
                     />
                 </View>
 
                 <View style={styles.rightActions}>
-                    {onNotificationsPress && (
+                    {showBoostMetrics ? (
                         <TouchableOpacity
-                            onPress={onNotificationsPress}
-                            style={styles.notificationButton}
+                            onPress={() => setIsMetricsOpen((v) => !v)}
+                            style={styles.externalShareButton}
+                            accessibilityLabel="Toggle boost metrics"
                         >
                             <Icon
-                                name="notifications"
-                                size={FEED_UI.icon.action}
-                                color={hasInbox ? "#3B82F6" : "#6B7280"}
+                                name="bar-chart-outline"
+                                size={24}
+                                color={isMetricsOpen ? '#7A8AF0' : '#FFFFFF'}
                             />
-                            {hasInbox && unreadCount && unreadCount > 0 && (
-                                <View style={styles.notificationBadge}>
-                                    <Text style={styles.notificationBadgeText}>
-                                        {unreadCount > 9 ? '9+' : unreadCount}
-                                    </Text>
-                                </View>
-                            )}
                         </TouchableOpacity>
-                    )}
-                    <TouchableOpacity onPress={onBookmark}>
-                        <Icon
-                            name={post.isBookmarked ? "bookmark" : "bookmark-outline"}
-                            size={FEED_UI.icon.action}
-                            color={post.isBookmarked ? "#7A8AF0" : "#6B7280"}
-                        />
+                    ) : null}
+                    <TouchableOpacity
+                        onPress={() => { void onShare(); }}
+                        style={styles.externalShareButton}
+                        accessibilityLabel="Share post"
+                    >
+                        <Icon name="share-social-outline" size={24} color="#FFFFFF" />
                     </TouchableOpacity>
                 </View>
             </View>
+
+            {showBoostMetrics ? (
+                <BoostMetricsPanel post={post} isOpen={isMetricsOpen} />
+            ) : null}
+
+            <ShareToStoriesModal
+                visible={shareToStoriesVisible}
+                post={post}
+                onClose={() => setShareToStoriesVisible(false)}
+                onShareSuccess={() => {
+                    onShareSuccess?.(post.id);
+                }}
+            />
+
+            {post.bannerText ? <FeedNewsTicker text={post.bannerText} /> : null}
+
+            <FeedLikesSheet
+                visible={likesSheetVisible}
+                postId={String(post.id)}
+                userId={viewerUserId || 'anon'}
+                viewerHandle={viewerHandle}
+                likeCount={post.stats.likes}
+                viewCount={post.stats.views}
+                onClose={() => setLikesSheetVisible(false)}
+                onVisitProfile={onVisitHandle}
+            />
+
+            {hasTaggedUsers ? (
+                <TaggedUsersBottomSheet
+                    visible={taggedSheetVisible}
+                    taggedUserHandles={post.taggedUsers!}
+                    onClose={() => setTaggedSheetVisible(false)}
+                    onVisitProfile={onVisitHandle}
+                />
+            ) : null}
 
             {/* Profile quick actions menu (Visit profile / Follow-Unfollow / View stories) */}
             {profileMenuVisible && (
@@ -1101,7 +1198,8 @@ const FeedCard = React.memo(function FeedCard({
                         style={styles.profileMenuItem}
                         onPress={() => {
                             setProfileMenuVisible(false);
-                            onVisitProfile?.();
+                            if (onVisitHandle) onVisitHandle(profileHandle);
+                            else onVisitProfile?.();
                         }}
                     >
                         <Icon name="person-outline" size={18} color="#FFFFFF" />
@@ -1127,7 +1225,7 @@ const FeedCard = React.memo(function FeedCard({
                         </TouchableOpacity>
                     )}
 
-                    {onViewStories && (
+                    {onViewStories && headerHasStory && (
                         <TouchableOpacity
                             style={styles.profileMenuItem}
                             onPress={() => {
@@ -1177,7 +1275,7 @@ const FeedCard = React.memo(function FeedCard({
                     )}
                 </View>
             )}
-        </TouchableOpacity>
+        </View>
     );
 }, (prev, next) => {
     const a = prev.post;
@@ -1191,22 +1289,29 @@ const FeedCard = React.memo(function FeedCard({
         a.stats.comments === b.stats.comments &&
         a.stats.views === b.stats.views &&
         a.stats.reclips === b.stats.reclips &&
+        a.stats.shares === b.stats.shares &&
         a.mediaUrl === b.mediaUrl &&
         a.videoPosterUrl === b.videoPosterUrl &&
         a.templateId === b.templateId &&
         a.text === b.text &&
         JSON.stringify(a.textStyle) === JSON.stringify(b.textStyle) &&
         a.isBoosted === b.isBoosted &&
+        a.originalUserHandle === b.originalUserHandle &&
         prev.isCurrentUser === next.isCurrentUser &&
-        prev.unreadCount === next.unreadCount &&
-        prev.hasInbox === next.hasInbox &&
         prev.isVideoActive === next.isVideoActive &&
         prev.feedVideoMuted === next.feedVideoMuted &&
         a.clientUploadStatus === b.clientUploadStatus &&
         a.clientUploadError === b.clientUploadError &&
-        a.clientLocalMediaUri === b.clientLocalMediaUri
+        a.clientLocalMediaUri === b.clientLocalMediaUri &&
+        JSON.stringify(a.mediaItems) === JSON.stringify(b.mediaItems) &&
+        JSON.stringify(a.taggedUsers) === JSON.stringify(b.taggedUsers) &&
+        JSON.stringify(a.tags) === JSON.stringify(b.tags) &&
+        a.bannerText === b.bannerText &&
+        JSON.stringify(a.stickers) === JSON.stringify(b.stickers)
     );
 });
+
+export { FeedCard };
 
 type FeedListRow =
     | { kind: 'post'; post: Post }
@@ -1223,6 +1328,12 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const [active, setActive] = useState<Tab>(defaultNational);
     const [pages, setPages] = useState<Post[][]>([]);
+    const feedContentPrefsRef = useRef<FeedContentPrefs>({
+        mutedHandles: new Set(),
+        blockedHandles: new Set(),
+        hiddenPostIds: new Set(),
+        notInterestedPostIds: new Set(),
+    });
     const [cursor, setCursor] = useState<string | number | null>(0);
     const [loading, setLoading] = useState(false);
     const [end, setEnd] = useState(false);
@@ -1237,6 +1348,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
     const [selectedPostForComments, setSelectedPostForComments] = useState<Post | null>(null);
     const [imageFullscreenPost, setImageFullscreenPost] = useState<Post | null>(null);
+    const [imageFullscreenStartIndex, setImageFullscreenStartIndex] = useState(0);
     const [shareModalOpen, setShareModalOpen] = useState(false);
     const [selectedPostForShare, setSelectedPostForShare] = useState<Post | null>(null);
     const [unreadCount, setUnreadCount] = useState(0);
@@ -1259,6 +1371,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [savedByPostId, setSavedByPostId] = useState<Record<string, boolean>>({});
     const [overflowVisible, setOverflowVisible] = useState(false);
     const [overflowPost, setOverflowPost] = useState<Post | null>(null);
+    const [editPost, setEditPost] = useState<Post | null>(null);
+    const [saveModalPost, setSaveModalPost] = useState<Post | null>(null);
+    const [qrPost, setQrPost] = useState<Post | null>(null);
+    const [createGroupOpen, setCreateGroupOpen] = useState(false);
+    const [inviteGroupHandle, setInviteGroupHandle] = useState<string | null>(null);
     const [overflowSaved, setOverflowSaved] = useState(false);
     const [overflowNotify, setOverflowNotify] = useState(false);
     const [activeVideoPostId, setActiveVideoPostId] = useState<string | null>(null);
@@ -1394,9 +1511,29 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         ));
     };
 
+    useFocusEffect(
+        React.useCallback(() => {
+            let cancelled = false;
+            void loadFeedContentPrefsMobile(userId).then((prefs) => {
+                if (cancelled) return;
+                feedContentPrefsRef.current = prefs;
+                setPages((prev) =>
+                    prev
+                        .map((page) => filterPostsByContentPrefs(page, prefs))
+                        .filter((page) => page.length > 0)
+                );
+            });
+            return () => {
+                cancelled = true;
+            };
+        }, [userId])
+    );
+
     const hideUserFromFeed = React.useCallback((handleToHide: string) => {
-        const normalized = String(handleToHide || '').trim().toLowerCase();
+        const normalized = String(handleToHide || '').replace(/^@/, '').trim().toLowerCase();
         if (!normalized) return;
+        feedContentPrefsRef.current.mutedHandles.add(normalized);
+        void muteFeedAuthorMobile(userId, handleToHide);
         setPages((prev) =>
             prev
                 .map((page) => page.filter((p) => String(p.userHandle || '').trim().toLowerCase() !== normalized))
@@ -1421,6 +1558,41 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         setOverflowVisible(false);
         setOverflowPost((prev) => (prev?.id === postId ? null : prev));
     }, []);
+
+    const hidePostFromFeed = React.useCallback(
+        (postId: string) => {
+            feedContentPrefsRef.current.hiddenPostIds.add(postId);
+            void hideFeedPostMobile(userId, postId);
+            removePostFromFeed(postId);
+        },
+        [removePostFromFeed, userId]
+    );
+
+    const markPostNotInterested = React.useCallback(
+        (postId: string) => {
+            feedContentPrefsRef.current.notInterestedPostIds.add(postId);
+            void markNotInterestedFeedPostMobile(userId, postId);
+            removePostFromFeed(postId);
+        },
+        [removePostFromFeed, userId]
+    );
+
+    const applyPostEditToFeed = React.useCallback(
+        (postId: string, fields: { text: string; location: string; venue: string; landmark: string }) => {
+            const patch = (p: Post): Post => ({
+                ...p,
+                text: fields.text,
+                caption: fields.text,
+                locationLabel: fields.location || undefined,
+                venue: fields.venue || undefined,
+                landmark: fields.landmark || undefined,
+            });
+            updatePost(postId, patch);
+            setEditPost((prev) => (prev?.id === postId ? patch(prev) : prev));
+            setOverflowPost((prev) => (prev?.id === postId ? patch(prev) : prev));
+        },
+        []
+    );
 
     const toggleCollectionsSaveForPost = React.useCallback(
         async (target: Post) => {
@@ -1465,21 +1637,19 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         };
     }, [overflowVisible, overflowPost?.id, userId]);
 
-    const openShareForPost = React.useCallback(
-        async (p: Post) => {
-            setSelectedPostForShare(p);
-            setShareModalOpen(true);
-            try {
-                await incrementShares(userId, p.id);
-                updatePost(p.id, (prev) => ({
-                    ...prev,
-                    stats: { ...prev.stats, shares: prev.stats.shares + 1 },
-                }));
-            } catch (err) {
-                console.error('Error sharing post:', err);
-            }
+    const openShareForPost = React.useCallback(async (p: Post) => {
+        setSelectedPostForShare(p);
+        setShareModalOpen(true);
+    }, []);
+
+    const handleShareToStoriesSuccess = React.useCallback(
+        (postId: string) => {
+            updatePost(postId, (prev) => ({
+                ...prev,
+                stats: { ...prev.stats, shares: prev.stats.shares + 1 },
+            }));
         },
-        [userId, updatePost]
+        [updatePost],
     );
 
     const tryReclipPost = React.useCallback(
@@ -1492,6 +1662,17 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 Alert.alert('Already reclipped', 'You have already reclipped this post');
                 return;
             }
+            const confirmed = await new Promise<boolean>((resolve) => {
+                Alert.alert(
+                    'Reshare this to followers?',
+                    'This post will be shared to your followers in their Following feed.',
+                    [
+                        { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+                        { text: 'OK', onPress: () => resolve(true) },
+                    ],
+                );
+            });
+            if (!confirmed) return;
             const newReclips = p.stats.reclips + 1;
             setReclipState(userId, p.id, true);
             updatePost(p.id, (prev) => ({
@@ -1693,6 +1874,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 }))
             );
             visibleItems = archivedRows.filter((row) => !row.archived).map((row) => row.item);
+            visibleItems = filterPostsByContentPrefs(visibleItems, feedContentPrefsRef.current);
 
             if (visibleItems.length === 0) {
                 setEnd(true);
@@ -1893,6 +2075,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
     const [stories24Items, setStories24Items] = React.useState<Stories24RailItem[]>([]);
     const [stories24CollapsePayload, setStories24CollapsePayload] =
         React.useState<Stories24RailReturnPayload | null>(null);
+    const stories24RailRef = React.useRef<Stories24FeedRailHandle>(null);
 
     useFocusEffect(
         useCallback(() => {
@@ -1919,9 +2102,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
         };
         load();
         const interval = setInterval(load, 12000);
+        const unsubRefresh = subscribeStoriesRefresh(load);
         return () => {
             cancelled = true;
             clearInterval(interval);
+            unsubRefresh();
         };
     }, [user?.id, user?.handle, customLocation, showFollowingFeed]);
 
@@ -1980,17 +2165,40 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
 
     const openStoryFromRail = React.useCallback(
         (item: Stories24RailItem, railHandles: string[]) => {
+            if (isStories24AddYoursHandle(item.handle)) {
+                return;
+            }
             void persistStories24RailOpenHandle(item.handle);
-            navigation.navigate('Stories', {
-                openUserHandle: item.handle,
-                fromStories24Rail: true,
-                railHandles,
-                previewThumb: item.thumb,
-                previewVideoUrl: item.previewVideoUrl,
-            });
+            navigation.navigate('Stories', buildStories24StoryNavParams(item, railHandles));
         },
         [navigation],
     );
+
+    const openStories24FromHeader = React.useCallback(async () => {
+        if (stories24RailRef.current?.openFirstStory()) {
+            return;
+        }
+
+        let items = stories24Items;
+        let target = resolveStories24OpenTarget(items);
+
+        if (!target && user?.id) {
+            try {
+                items = await buildStories24RailItems(user.id, user.handle);
+                setStories24Items(items);
+                target = resolveStories24OpenTarget(items);
+            } catch (err) {
+                console.warn('Stories24 header: failed to refresh rail items', err);
+            }
+        }
+
+        if (!target) {
+            navigation.navigate('Stories');
+            return;
+        }
+
+        openStoryFromRail(target.item, target.railHandles);
+    }, [stories24Items, user?.id, user?.handle, navigation, openStoryFromRail]);
 
     const flatForRender = React.useMemo((): FeedListRow[] => {
         const out: FeedListRow[] = [];
@@ -2178,6 +2386,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             if (item.kind === 'stories24') {
                 return (
                     <Stories24FeedRail
+                        ref={stories24RailRef}
                         items={stories24Items}
                         onOpenStory={openStoryFromRail}
                         onAddYours={() => navigation.navigate('CreateComposer', { addYours: true })}
@@ -2291,7 +2500,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     }}
                     onBookmark={async () => {
                         if (isPendingUpload) return;
-                        await toggleCollectionsSaveForPost(mergedPost);
+                        setSaveModalPost(mergedPost);
                     }}
                     onOverflowPress={() => {
                         if (isPendingUpload) {
@@ -2303,8 +2512,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         setOverflowPost(mergedPost);
                         setOverflowVisible(true);
                     }}
-                    onOpenImageFullscreen={() => {
+                    onOpenImageFullscreen={(startIndex = 0) => {
                         if (isPendingUpload) return;
+                        setImageFullscreenStartIndex(startIndex);
                         setImageFullscreenPost(mergedPost);
                     }}
                     onOpenScenes={() => {
@@ -2326,6 +2536,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     onVisitProfile={() =>
                         navigation.navigate('ViewProfile', { handle: mergedPost.userHandle })
                     }
+                    onVisitHandle={(handle) =>
+                        navigation.navigate('ViewProfile', { handle })
+                    }
                     onViewStories={() =>
                         navigation.navigate('Stories', { openUserHandle: mergedPost.userHandle })
                     }
@@ -2338,6 +2551,10 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                 style: 'destructive',
                                 onPress: async () => {
                                     await blockUser(user.handle, mergedPost.userHandle);
+                                    await blockFeedAuthorMobile(userId, mergedPost.userHandle);
+                                    feedContentPrefsRef.current.blockedHandles.add(
+                                        String(mergedPost.userHandle || '').replace(/^@/, '').trim().toLowerCase(),
+                                    );
                                     hideUserFromFeed(mergedPost.userHandle);
                                     Alert.alert(
                                         'Blocked',
@@ -2348,13 +2565,13 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                         ]);
                     }}
                     onReportUser={async () => {
-                        Alert.alert('Reported', 'Thanks for reporting. We will review this content.');
+                        const { promptReportPostNative } = await import('../utils/promptReportPostNative');
+                        promptReportPostNative(mergedPost.id);
                     }}
-                    onNotificationsPress={() => navigateMainTab(navigation, 'Inbox', { initialTab: 'notifications' })}
-                    unreadCount={unreadCount}
-                    hasInbox={hasInbox}
+                    onShareSuccess={handleShareToStoriesSuccess}
                     isCurrentUser={user?.handle === mergedPost.userHandle}
                     viewerHandle={user?.handle}
+                    viewerUserId={userId}
                     onOpenDM={user?.handle ? openDmSheet : undefined}
                     onRegisterDmAnchor={registerDmAnchor}
                 />
@@ -2365,9 +2582,8 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             user,
             showFollowingFeed,
             currentFilter,
-            unreadCount,
-            hasInbox,
             navigation,
+            handleShareToStoriesSuccess,
             updatePost,
             loadMore,
             savedByPostId,
@@ -2425,9 +2641,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     userRegional={defaultRegional}
                     userNational={defaultNational}
                     hasNotifications={hasInbox || unreadCount > 0}
-                    onOpenBoost={() => setShowBoostPrompt(true)}
+                    onOpenStories24={openStories24FromHeader}
                     onOpenPassport={() => navigation.navigate('Profile')}
-                    onOpenDiscover={() => navigateMainTab(navigation, 'Discover')}
+                    onOpenDiscover={() => navigation.navigate('Discover')}
                     onSearchLocation={handleHeaderLocationSearch}
                     onHeaderPlacePick={handleHeaderPlacePick}
                     onClearCustom={clearCustomLocation}
@@ -2558,7 +2774,11 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
             <ImageFullscreenModal
                 post={imageFullscreenPost}
                 visible={Boolean(imageFullscreenPost)}
-                onClose={() => setImageFullscreenPost(null)}
+                initialIndex={imageFullscreenStartIndex}
+                onClose={() => {
+                    setImageFullscreenPost(null);
+                    setImageFullscreenStartIndex(0);
+                }}
                 onLike={
                     imageFullscreenPost
                         ? async () => {
@@ -2678,12 +2898,35 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     if (!overflowPost) return;
                     await openShareForPost(overflowPost);
                 }}
+                onOpenSave={() => {
+                    if (!overflowPost) return;
+                    setSaveModalPost(overflowPost);
+                }}
                 onSaveToggle={async () => {
                     if (!overflowPost) return;
                     await toggleCollectionsSaveForPost(overflowPost);
                     const cols = await getCollectionsForPost(userId, overflowPost.id);
                     setOverflowSaved(cols.length > 0);
                 }}
+                onCreateGroup={
+                    overflowPost &&
+                    user?.handle &&
+                    overflowPost.userHandle.replace(/^@/, '').trim().toLowerCase() ===
+                        user.handle.replace(/^@/, '').trim().toLowerCase()
+                        ? () => setCreateGroupOpen(true)
+                        : undefined
+                }
+                onInviteToGroup={
+                    overflowPost &&
+                    user?.handle &&
+                    overflowPost.userHandle.replace(/^@/, '').trim().toLowerCase() !==
+                        user.handle.replace(/^@/, '').trim().toLowerCase()
+                        ? () => setInviteGroupHandle(overflowPost.userHandle)
+                        : undefined
+                }
+                onShowQRCode={
+                    overflowPost ? () => setQrPost(overflowPost) : undefined
+                }
                 onBoost={() => {
                     setShowBoostPrompt(true);
                 }}
@@ -2701,6 +2944,36 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                 onReclip={async () => {
                     if (!overflowPost) return;
                     await tryReclipPost(overflowPost);
+                }}
+                isFollowing={!!overflowPost?.isFollowing}
+                onEdit={() => {
+                    if (!overflowPost) return;
+                    setEditPost(overflowPost);
+                }}
+                onUnfollow={async () => {
+                    if (!overflowPost || !userId) return;
+                    const updated = await toggleFollowForPost(
+                        userId,
+                        overflowPost.id,
+                        overflowPost.userHandle
+                    );
+                    updatePost(overflowPost.id, (p) => ({
+                        ...p,
+                        isFollowing: updated?.isFollowing ?? !p.isFollowing,
+                    }));
+                }}
+                onMute={async () => {
+                    if (!overflowPost) return;
+                    hideUserFromFeed(overflowPost.userHandle);
+                    Alert.alert('Muted', `${overflowPost.userHandle} was muted and hidden from your feed.`);
+                }}
+                onHide={() => {
+                    if (!overflowPost) return;
+                    hidePostFromFeed(overflowPost.id);
+                }}
+                onNotInterested={() => {
+                    if (!overflowPost) return;
+                    markPostNotInterested(overflowPost.id);
                 }}
                 onDelete={() =>
                     new Promise<void>((resolve) => {
@@ -2733,7 +3006,9 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     })
                 }
                 onReport={async () => {
-                    Alert.alert('Reported', 'Thanks for reporting. We will review this content.');
+                    if (!overflowPost) return;
+                    const { promptReportPostNative } = await import('../utils/promptReportPostNative');
+                    promptReportPostNative(overflowPost.id, () => setOverflowVisible(false));
                 }}
                 onBlock={() =>
                     new Promise<void>((resolve) => {
@@ -2750,6 +3025,7 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                                 onPress: () => {
                                     void (async () => {
                                         await blockUser(user.handle, blockedHandle);
+                                        await blockFeedAuthorMobile(userId, blockedHandle);
                                         hideUserFromFeed(blockedHandle);
                                         Alert.alert(
                                             'Blocked',
@@ -2763,6 +3039,73 @@ function FeedScreen({ navigation, route }: { navigation?: any; route?: any }) {
                     })
                 }
             />
+
+            {saveModalPost ? (
+                <SavePostModal
+                    post={saveModalPost}
+                    userId={userId}
+                    visible={!!saveModalPost}
+                    onClose={() => setSaveModalPost(null)}
+                    onSaved={async () => {
+                        const cols = await getCollectionsForPost(userId, saveModalPost.id);
+                        const saved = cols.length > 0;
+                        setSavedByPostId((prev) => ({ ...prev, [saveModalPost.id]: saved }));
+                        updatePost(saveModalPost.id, (p) => ({ ...p, isBookmarked: saved }));
+                    }}
+                />
+            ) : null}
+
+            {qrPost ? (
+                <QRCodeModal
+                    post={qrPost}
+                    visible={!!qrPost}
+                    onClose={() => setQrPost(null)}
+                />
+            ) : null}
+
+            <CreateGroupModal
+                visible={createGroupOpen}
+                onClose={() => setCreateGroupOpen(false)}
+                onCreated={(g) => {
+                    setCreateGroupOpen(false);
+                    navigation.navigate('Messages', { chatGroupId: g.id, kind: 'group' });
+                }}
+            />
+
+            <PickGroupToInviteFeedUserModal
+                visible={!!inviteGroupHandle}
+                inviteeHandle={inviteGroupHandle || ''}
+                onClose={() => setInviteGroupHandle(null)}
+            />
+
+            {editPost ? (
+                <EditPostModal
+                    post={editPost}
+                    visible={!!editPost}
+                    onClose={() => setEditPost(null)}
+                    onSave={async (text, location, venue, landmark) => {
+                        const target = editPost;
+                        if (!target) return;
+                        const fields = { text, location, venue, landmark };
+                        try {
+                            await apiUpdatePost(target.id, {
+                                text,
+                                location,
+                                venue: venue || undefined,
+                                landmark: landmark || undefined,
+                            });
+                        } catch (err: unknown) {
+                            const msg = err instanceof Error ? err.message : '';
+                            const offline =
+                                msg.includes('Failed to fetch') ||
+                                msg.includes('Network') ||
+                                msg === 'CONNECTION_REFUSED';
+                            if (!offline) throw err;
+                        }
+                        applyPostEditToFeed(target.id, fields);
+                    }}
+                />
+            ) : null}
 
             <Modal visible={showBoostPrompt} transparent animationType="fade" onRequestClose={() => setShowBoostPrompt(false)}>
                 <View style={styles.modalOverlay}>
@@ -2934,6 +3277,11 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    feedHeaderSideAction: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 2,
+    },
     feedHeaderRightActions: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -3056,6 +3404,26 @@ const styles = StyleSheet.create({
         position: 'relative',
         alignItems: 'center',
     },
+    feedHeaderPassportAvatarWrap: {
+        width: 32,
+        height: 32,
+        borderRadius: 8,
+        overflow: 'hidden',
+        backgroundColor: '#374151',
+        borderWidth: 2,
+        borderColor: '#FFFFFF',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    feedHeaderPassportAvatarImage: {
+        width: '100%',
+        height: '100%',
+    },
+    feedHeaderPassportInitials: {
+        fontSize: 10,
+        fontWeight: '600',
+        color: '#FFFFFF',
+    },
     feedHeaderPassportLabel: {
         marginTop: 1,
         fontSize: 9,
@@ -3069,7 +3437,7 @@ const styles = StyleSheet.create({
         marginHorizontal: 10,
         marginBottom: FEED_UI.spacing.cardGap,
         borderRadius: 16,
-        overflow: 'hidden',
+        overflow: 'visible',
         ...glassPanel,
     },
     mediaWrap: {
@@ -3104,11 +3472,6 @@ const styles = StyleSheet.create({
         paddingHorizontal: FEED_UI.spacing.inset,
         paddingTop: 8,
         paddingBottom: 4,
-    },
-    captionText: {
-        fontSize: 14,
-        lineHeight: 20,
-        color: '#E5E7EB',
     },
     sponsoredBadge: {
         flexDirection: 'row',
@@ -3311,6 +3674,13 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: FEED_UI.spacing.groupGapTight,
+    },
+    externalShareButton: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     errorContainer: {
         padding: 16,

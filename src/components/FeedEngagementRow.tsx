@@ -1,67 +1,133 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import LinearGradient from 'react-native-linear-gradient';
+import FeedLikeThumbsIcon from './FeedLikeThumbsIcon.native';
+import ShareToStoriesFeedIcon from './ShareToStoriesFeedIcon.native';
 
 type FeedEngagementRowProps = {
     likes: number;
     comments: number;
+    shares?: number;
     reclips?: number;
     views?: number;
     userLiked?: boolean;
     userReclipped?: boolean;
+    isSaved?: boolean;
     onLike?: () => void;
+    onLikesPress?: () => void;
     onComment?: () => void;
+    onShareToStories?: () => void;
     onReclip?: () => void;
-    onShare?: () => void;
-    showShare?: boolean;
+    onSave?: () => void;
+    showShareToStories?: boolean;
     showViews?: boolean;
     showReclip?: boolean;
+    showSave?: boolean;
+    likeButtonRef?: React.RefObject<View | null>;
+    /** White icons for feed bar (web EngagementBar); gray for profile cards. */
+    tone?: 'feed' | 'muted';
 };
 
 export default function FeedEngagementRow({
     likes,
     comments,
+    shares = 0,
     reclips = 0,
     views = 0,
     userLiked = false,
     userReclipped = false,
+    isSaved = false,
     onLike,
+    onLikesPress,
     onComment,
+    onShareToStories,
     onReclip,
-    onShare,
-    showShare = false,
+    onSave,
+    showShareToStories = true,
     showViews = false,
     showReclip = true,
+    showSave = true,
+    likeButtonRef,
+    tone = 'feed',
 }: FeedEngagementRowProps) {
+    const iconColor = tone === 'feed' ? '#FFFFFF' : '#D1D5DB';
+    const countColor = tone === 'feed' ? '#FFFFFF' : '#D1D5DB';
+    const reclipIdleColor = tone === 'feed' ? '#9CA3AF' : '#D1D5DB';
+    const saveColor = isSaved ? '#7A8AF0' : iconColor;
+
     return (
         <View style={styles.row}>
-            <TouchableOpacity onPress={onLike} style={styles.item} disabled={!onLike}>
-                <Icon name={userLiked ? 'heart' : 'heart-outline'} size={14} color={userLiked ? '#EF4444' : '#D1D5DB'} />
-                <Text style={styles.text}>{likes}</Text>
+            <View ref={likeButtonRef} collapsable={false}>
+                <TouchableOpacity
+                    onPress={onLike}
+                    style={styles.item}
+                    disabled={!onLike}
+                >
+                    <FeedLikeThumbsIcon size={24} filled={userLiked} color={iconColor} />
+                </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+                onPress={onLikesPress || onLike}
+                style={styles.item}
+                disabled={!(onLikesPress || onLike)}
+            >
+                <Text style={[styles.text, { color: countColor }]}>{likes}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity onPress={onComment} style={styles.item} disabled={!onComment}>
-                <Icon name="chatbubble-outline" size={14} color="#D1D5DB" />
-                <Text style={styles.text}>{comments}</Text>
+                <Icon name="chatbubble-outline" size={24} color={iconColor} />
+                <Text style={[styles.text, { color: countColor }]}>{comments}</Text>
             </TouchableOpacity>
 
-            {showReclip ? (
-                <TouchableOpacity onPress={onReclip} style={styles.item} disabled={!onReclip}>
-                    <Icon name="repeat-outline" size={14} color={userReclipped ? '#8B5CF6' : '#D1D5DB'} />
-                    <Text style={styles.text}>{reclips}</Text>
+            {showShareToStories ? (
+                <TouchableOpacity
+                    onPress={onShareToStories}
+                    style={styles.item}
+                    disabled={!onShareToStories}
+                >
+                    <ShareToStoriesFeedIcon size={24} color={iconColor} />
+                    <Text style={[styles.text, { color: countColor }]}>{shares}</Text>
                 </TouchableOpacity>
             ) : null}
 
-            {showShare ? (
-                <TouchableOpacity onPress={onShare} style={styles.item} disabled={!onShare}>
-                    <Icon name="share-outline" size={14} color="#D1D5DB" />
+            {showReclip ? (
+                <TouchableOpacity onPress={onReclip} style={styles.item} disabled={!onReclip}>
+                    {userReclipped ? (
+                        <LinearGradient
+                            colors={['#22d3ee', '#06b6d4']}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.reclipGradientRing}
+                        >
+                            <View style={styles.reclipInner}>
+                                <Icon name="repeat" size={14} color="#FFFFFF" />
+                            </View>
+                        </LinearGradient>
+                    ) : (
+                        <Icon name="repeat-outline" size={24} color={reclipIdleColor} />
+                    )}
+                    <Text style={[styles.text, { color: countColor }]}>{reclips}</Text>
+                </TouchableOpacity>
+            ) : null}
+
+            {showSave ? (
+                <TouchableOpacity onPress={onSave} style={styles.item} disabled={!onSave}>
+                    <Icon
+                        name={isSaved ? 'bookmark' : 'bookmark-outline'}
+                        size={24}
+                        color={saveColor}
+                    />
+                    <Text style={[styles.text, { color: countColor }]}>
+                        {isSaved ? 'Saved' : 'Save'}
+                    </Text>
                 </TouchableOpacity>
             ) : null}
 
             {showViews ? (
                 <View style={styles.item}>
-                    <Icon name="eye-outline" size={14} color="#D1D5DB" />
-                    <Text style={styles.text}>{views}</Text>
+                    <Icon name="eye-outline" size={24} color={iconColor} />
+                    <Text style={[styles.text, { color: countColor }]}>{views}</Text>
                 </View>
             ) : null}
         </View>
@@ -72,16 +138,31 @@ const styles = StyleSheet.create({
     row: {
         flexDirection: 'row',
         alignItems: 'center',
-        columnGap: 12,
+        columnGap: 16,
+        flexShrink: 1,
+        flexWrap: 'wrap',
     },
     item: {
         flexDirection: 'row',
         alignItems: 'center',
         columnGap: 4,
+        minHeight: 40,
+        paddingHorizontal: 2,
     },
     text: {
-        color: '#D1D5DB',
         fontSize: 12,
         fontWeight: '600',
+    },
+    reclipGradientRing: {
+        padding: 1.5,
+        borderRadius: 999,
+    },
+    reclipInner: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        backgroundColor: '#000000',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
 });

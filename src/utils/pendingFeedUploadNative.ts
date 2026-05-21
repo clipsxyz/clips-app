@@ -2,6 +2,13 @@ import type { Post } from '../types';
 import type { StickerOverlay } from '../types';
 import type { InstantFilterInfo } from './instantFiltersNative';
 
+export type PendingCarouselLocalItem = {
+    uri: string;
+    type: 'image' | 'video';
+    videoCoverTime?: number;
+    durationSec?: number;
+};
+
 export type PendingFeedUploadJob = {
     tempId: string;
     status: 'uploading' | 'failed';
@@ -13,6 +20,8 @@ export type PendingFeedUploadJob = {
     location: string;
     localMediaUri: string | null;
     localThumbUri: string | null;
+    /** When length > 1, feed shows carousel while uploading (web parity). */
+    localMediaItems?: PendingCarouselLocalItem[];
     mediaType: 'image' | 'video' | null;
     videoCoverTime: number;
     filterForExport: InstantFilterInfo | null;
@@ -101,6 +110,14 @@ export function completePendingFeedUpload(tempId: string, post: Post): void {
 
 export function pendingUploadToPost(job: PendingFeedUploadJob): Post {
     const previewUri = job.localThumbUri || job.localMediaUri || undefined;
+    const carouselLocal =
+        job.localMediaItems && job.localMediaItems.length > 1
+            ? job.localMediaItems.map((item) => ({
+                  url: item.uri,
+                  type: item.type,
+              }))
+            : undefined;
+    const firstCarousel = job.localMediaItems?.[0];
     return {
         id: job.tempId,
         user_id: job.userId,
@@ -110,8 +127,10 @@ export function pendingUploadToPost(job: PendingFeedUploadJob): Post {
         landmark: job.landmark,
         tags: [],
         mediaUrl: previewUri,
+        mediaItems: carouselLocal,
         mediaType: job.mediaType || undefined,
-        videoPosterUrl: job.mediaType === 'video' ? previewUri : undefined,
+        videoPosterUrl:
+            firstCarousel?.type === 'video' || job.mediaType === 'video' ? previewUri : undefined,
         text: job.text || undefined,
         caption: job.text || undefined,
         createdAt: job.createdAt,

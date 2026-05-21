@@ -1,4 +1,5 @@
 import { createPost } from '../api/posts';
+import { prepareCarouselMediaForPostNative } from './prepareCarouselMediaForPostNative';
 import { prepareMediaForPostNative } from './prepareMediaForPostNative';
 import {
     completePendingFeedUpload,
@@ -6,8 +7,67 @@ import {
     getPendingFeedUpload,
     type PendingFeedUploadJob,
 } from './pendingFeedUploadNative';
+import { getUploadOverlayForJob } from './uploadOverlayNative';
 
 async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void> {
+    const isCarousel =
+        Array.isArray(job.localMediaItems) && job.localMediaItems.length > 1;
+
+    if (isCarousel && job.localMediaItems) {
+        const videoFilter =
+            job.mediaType === 'video' || job.localMediaItems.some((i) => i.type === 'video')
+                ? job.filterForExport
+                : null;
+        const { items: uploaded, videoPosterUrl } = await prepareCarouselMediaForPostNative(
+            job.localMediaItems,
+            {
+                filterInfo: job.filterForExport,
+                videoFilterInfo: videoFilter,
+                videoCoverTime: job.videoCoverTime,
+            },
+        );
+        if (uploaded.length === 0) {
+            throw new Error('No carousel media to upload.');
+        }
+        const first = uploaded[0];
+        const carouselVideoPoster =
+            videoPosterUrl ||
+            uploaded.find((item) => item.type === 'video' && item.posterUrl)?.posterUrl;
+        const createdPost = await createPost(
+            job.userId,
+            job.userHandle,
+            job.text,
+            job.location,
+            first.url,
+            first.type,
+            undefined,
+            job.text || undefined,
+            job.userLocal,
+            job.userRegional,
+            job.userNational,
+            job.stickers && job.stickers.length > 0 ? job.stickers : undefined,
+            undefined,
+            uploaded,
+            undefined,
+            undefined,
+            job.taggedUsers && job.taggedUsers.length > 0 ? job.taggedUsers : undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            job.venue,
+            job.landmark,
+            undefined,
+            undefined,
+            carouselVideoPoster,
+        );
+        completePendingFeedUpload(job.tempId, createdPost);
+        getUploadOverlayForJob(job.tempId)?.success();
+        return;
+    }
+
     let preparedMedia: Awaited<ReturnType<typeof prepareMediaForPostNative>> = {};
 
     if (job.localMediaUri && job.mediaType) {
@@ -62,6 +122,7 @@ async function executePendingFeedUpload(job: PendingFeedUploadJob): Promise<void
     );
 
     completePendingFeedUpload(job.tempId, createdPost);
+    getUploadOverlayForJob(job.tempId)?.success();
 }
 
 /**
@@ -76,5 +137,6 @@ export function startBackgroundFeedUpload(tempId: string): void {
             err instanceof Error ? err.message : 'Failed to create post. Please try again.';
         console.error('runBackgroundFeedUploadNative:', err);
         failPendingFeedUpload(tempId, message);
+        getUploadOverlayForJob(tempId)?.error(message);
     });
 }

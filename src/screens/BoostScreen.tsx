@@ -1,5 +1,13 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
+import {
+    View,
+    Text,
+    StyleSheet,
+    FlatList,
+    TouchableOpacity,
+    ActivityIndicator,
+    Alert,
+} from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { chipActiveMagenta, chipActiveMagentaText, glassPanel, glassSurface, gazetteerHeader } from '../theme/gazetteerAmbientNative';
@@ -7,33 +15,18 @@ import { useAuth } from '../context/Auth';
 import { fetchPostsByUser, decorateForUser } from '../api/posts';
 import type { Post } from '../types';
 import BoostSelectionModal from '../components/BoostSelectionModal';
-import ProfileGridThumb from '../components/ProfileGridThumb.native';
-import { getBoostAnalytics, type BoostAnalytics } from '../api/boost';
+import BoostPostTile, { boostTileSize } from '../components/BoostPostTile.native';
+import { getActiveBoost, getBoostAnalytics, type BoostAnalytics } from '../api/boost';
+import {
+    classifyBoostStatus,
+    getQualityLabel,
+    getQualityReason,
+    estimateReachTeaser,
+    boostStatusLabel,
+} from '../utils/boostPostGrid';
 
-function buildInstantAnalytics(post: Post): BoostAnalytics {
-    return {
-        hasBoost: !!post.isBoosted || !!post.boostFeedType,
-        isActive: !!post.isBoosted,
-        postId: post.id,
-        range: 'all',
-        feedType: (post.boostFeedType as any) || null,
-        activatedAt: null,
-        expiresAt: null,
-        spendEur: 0,
-        analytics: {
-            impressions: Number(post.stats.views || 0),
-            likes: Number(post.stats.likes || 0),
-            comments: Number(post.stats.comments || 0),
-            shares: Number(post.stats.shares || 0),
-            profileVisits: 0,
-            messageStarts: 0,
-            costPerProfileVisit: null,
-            costPerMessageStart: null,
-            trend: { impressions: [] },
-            sourceMatchedEventsCount: 0,
-        },
-    };
-}
+import { buildInstantAnalytics } from '../utils/boostInsightsNative';
+import BoostInsightsSheet from '../components/BoostInsightsSheet.native';
 
 const BoostScreen: React.FC = ({ navigation }: any) => {
     const { user } = useAuth();
@@ -44,10 +37,11 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
     const [selectedPost, setSelectedPost] = useState<Post | null>(null);
     const [showBoostModal, setShowBoostModal] = useState(false);
     const [analyticsByPostId, setAnalyticsByPostId] = useState<Record<string, BoostAnalytics>>({});
-    const [analyticsLoadingPostId, setAnalyticsLoadingPostId] = useState<string | null>(null);
     const [boostFilter, setBoostFilter] = useState<'all' | 'ready' | 'active' | 'ended'>('all');
     const [boostSort, setBoostSort] = useState<'best' | 'recent'>('best');
     const [insightsRange, setInsightsRange] = useState<'24h' | '7d' | 'all'>('24h');
+    const [insightsPost, setInsightsPost] = useState<Post | null>(null);
+    const [insightsVisible, setInsightsVisible] = useState(false);
     const analyticsCacheRef = useRef<Map<string, { data: BoostAnalytics; ts: number }>>(new Map());
 
     useEffect(() => {
@@ -73,21 +67,30 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
         }
     };
 
-    const openBoostModal = (post: Post) => {
+    const openBoostModal = useCallback(async (post: Post) => {
         setSelectedPost(post);
         setShowBoostModal(true);
-    };
+        try {
+            const existing = await getActiveBoost(post.id);
+            if (existing?.isActive) {
+                setShowBoostModal(false);
+                setSelectedPost(null);
+                Alert.alert(
+                    'Already boosted',
+                    'This post is already boosted. It will expire in 6 hours.',
+                );
+            }
+        } catch {
+            // Keep modal open if status check fails offline
+        }
+    }, []);
 
     const closeBoostModal = () => {
         setShowBoostModal(false);
         setSelectedPost(null);
     };
 
-    const classifyBoostStatus = useCallback((p: Post): 'ready' | 'active' | 'ended' => {
-        if (p.isBoosted) return 'active';
-        if (p.boostFeedType && !p.isBoosted) return 'ended';
-        return 'ready';
-    }, []);
+    const tileSize = useMemo(() => boostTileSize(3, 6, 8), []);
 
     const qualityScore = useCallback((p: Post): number => {
         const views = Math.max(1, p.stats.views || 1);
@@ -138,20 +141,13 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
         });
     }, [sortedPosts, getInsightsCached]);
 
-    const handleLoadInsights = async (postId: string) => {
-        const post = posts.find((p) => p.id === postId);
-        if (post) {
-            setAnalyticsByPostId((prev) => ({ ...prev, [postId]: prev[postId] || buildInstantAnalytics(post) }));
-        }
-        setAnalyticsLoadingPostId(postId);
-        try {
-            const analytics = await getInsightsCached(postId);
-            setAnalyticsByPostId((prev) => ({ ...prev, [postId]: analytics }));
-        } catch (err) {
-            console.error('Failed to load boost insights', err);
-        } finally {
-            setAnalyticsLoadingPostId(null);
-        }
+    const openInsights = (post: Post) => {
+        setInsightsPost(post);
+        setInsightsVisible(true);
+        setAnalyticsByPostId((prev) => ({
+            ...prev,
+            [post.id]: prev[post.id] || buildInstantAnalytics(post),
+        }));
     };
 
     if (!user) {
@@ -256,90 +252,78 @@ const BoostScreen: React.FC = ({ navigation }: any) => {
                 <FlatList
                     data={sortedPosts}
                     keyExtractor={(item) => item.id}
-                    renderItem={({ item }) => (
-                        <View
-                            style={[
-                                styles.postCard,
-                                showBoostModal && selectedPost?.id === item.id ? styles.postCardSelected : null,
-                            ]}
-                        >
-                            <View style={styles.postHeader}>
-                                <View style={styles.postThumbnail}>
-                                    <ProfileGridThumb post={item} />
-                                </View>
-                                <View style={styles.postInfo}>
-                                    <Text style={styles.postText} numberOfLines={2}>
-                                        {item.text || 'No caption'}
-                                    </Text>
-                                    <View style={styles.postStats}>
-                                        <Icon name="eye" size={16} color="#9CA3AF" />
-                                        <Text style={styles.statText}>{item.stats.views} views</Text>
-                                        <Icon name="heart" size={16} color="#9CA3AF" />
-                                        <Text style={styles.statText}>{item.stats.likes} likes</Text>
+                    numColumns={3}
+                    columnWrapperStyle={styles.gridRow}
+                    contentContainerStyle={styles.gridContent}
+                    renderItem={({ item }) => {
+                        const status = classifyBoostStatus(item);
+                        const quality = getQualityLabel(item);
+                        const qualityToneStyle =
+                            quality.tone === 'emerald'
+                                ? styles.qualityEmerald
+                                : quality.tone === 'sky'
+                                  ? styles.qualitySky
+                                  : styles.qualityAmber;
+                        const statusToneStyle =
+                            status === 'active'
+                                ? styles.statusActive
+                                : status === 'ended'
+                                  ? styles.statusEnded
+                                  : styles.statusReady;
+
+                        return (
+                            <View style={[styles.gridCell, { width: tileSize }]}>
+                                <View style={styles.tileMetaCard}>
+                                    <View style={styles.tileMetaRow}>
+                                        <Text style={[styles.qualityPill, qualityToneStyle]}>
+                                            {quality.label}
+                                        </Text>
+                                        <Text style={[styles.statusPill, statusToneStyle]}>
+                                            {boostStatusLabel(status)}
+                                        </Text>
                                     </View>
-                                    {showBoostModal && selectedPost?.id === item.id ? (
-                                        <Text style={styles.selectedHintText}>Selected for boost</Text>
-                                    ) : null}
+                                    <Text style={styles.tileMetaReason} numberOfLines={2}>
+                                        {getQualityReason(item)}
+                                    </Text>
+                                    <Text style={styles.tileMetaReach} numberOfLines={1}>
+                                        {estimateReachTeaser(item)} from base EUR 4.99
+                                    </Text>
                                 </View>
-                            </View>
-                            <View style={styles.postActionsRow}>
                                 <TouchableOpacity
-                                    onPress={() => {
-                                        void handleLoadInsights(item.id);
-                                    }}
-                                    style={styles.secondaryButton}
+                                    onPress={() => openInsights(item)}
+                                    style={styles.insightsBtn}
                                 >
-                                    {analyticsLoadingPostId === item.id ? (
-                                        <ActivityIndicator size="small" color="#93C5FD" />
-                                    ) : (
-                                        <>
-                                            <Icon name="stats-chart" size={16} color="#93C5FD" />
-                                            <Text style={styles.secondaryButtonText}>View Insights</Text>
-                                        </>
-                                    )}
+                                    <Text style={styles.insightsBtnText}>View insights</Text>
                                 </TouchableOpacity>
+                                {analyticsByPostId[item.id]?.hasBoost &&
+                                analyticsByPostId[item.id]?.analytics ? (
+                                    <Text style={styles.tileInsightsHint} numberOfLines={1}>
+                                        {analyticsByPostId[item.id]?.analytics?.impressions ?? 0} imp ·{' '}
+                                        {analyticsByPostId[item.id]?.analytics?.likes ?? 0} likes
+                                    </Text>
+                                ) : null}
+                                <BoostPostTile
+                                    post={item}
+                                    size={tileSize}
+                                    showBoostIcon
+                                    onPress={() => {
+                                        void openBoostModal(item);
+                                    }}
+                                />
                             </View>
-                            {analyticsByPostId[item.id] && (
-                                <View style={styles.analyticsCard}>
-                                    {analyticsLoadingPostId === item.id ? (
-                                        <Text style={styles.analyticsUpdatingText}>Updating with latest analytics...</Text>
-                                    ) : null}
-                                    {analyticsByPostId[item.id]?.hasBoost && analyticsByPostId[item.id]?.analytics ? (
-                                        <>
-                                            <Text style={styles.analyticsTitle}>
-                                                {analyticsByPostId[item.id]?.isActive ? 'Boost Insights (Active)' : 'Boost Insights'}
-                                            </Text>
-                                            <View style={styles.analyticsGrid}>
-                                                <Text style={styles.analyticsMetric}>Impressions: {analyticsByPostId[item.id]?.analytics?.impressions ?? 0}</Text>
-                                                <Text style={styles.analyticsMetric}>Likes: {analyticsByPostId[item.id]?.analytics?.likes ?? 0}</Text>
-                                                <Text style={styles.analyticsMetric}>Comments: {analyticsByPostId[item.id]?.analytics?.comments ?? 0}</Text>
-                                                <Text style={styles.analyticsMetric}>Shares: {analyticsByPostId[item.id]?.analytics?.shares ?? 0}</Text>
-                                                <Text style={styles.analyticsMetric}>Profile visits: {analyticsByPostId[item.id]?.analytics?.profileVisits ?? 0}</Text>
-                                                <Text style={styles.analyticsMetric}>
-                                                    Spend: {analyticsByPostId[item.id]?.spendEur != null ? `EUR ${analyticsByPostId[item.id].spendEur!.toFixed(2)}` : '--'}
-                                                </Text>
-                                            </View>
-                                        </>
-                                    ) : (
-                                        <Text style={styles.analyticsEmptyText}>No boost analytics yet for this post.</Text>
-                                    )}
-                                </View>
-                            )}
-                            <TouchableOpacity
-                                onPress={() => {
-                                    openBoostModal(item);
-                                }}
-                                style={styles.boostButton}
-                            >
-                                <Icon name="flash" size={20} color="#FFFFFF" />
-                                <Text style={styles.boostButtonText}>
-                                    {item.isBoosted ? 'Boosted' : 'Boost Post'}
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
-                    )}
+                        );
+                    }}
                 />
             )}
+            <BoostInsightsSheet
+                visible={insightsVisible}
+                post={insightsPost}
+                range={insightsRange}
+                onClose={() => {
+                    setInsightsVisible(false);
+                    setInsightsPost(null);
+                }}
+            />
             <BoostSelectionModal
                 isOpen={showBoostModal}
                 post={selectedPost}
@@ -455,112 +439,106 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '600',
     },
-    postCard: {
-        marginHorizontal: 12,
-        marginVertical: 8,
-        padding: 16,
-        borderRadius: 12,
+    gridContent: {
+        paddingHorizontal: 8,
+        paddingBottom: 24,
+    },
+    gridRow: {
+        gap: 6,
+        marginBottom: 6,
+    },
+    gridCell: {
+        marginBottom: 10,
+    },
+    tileMetaCard: {
+        borderRadius: 10,
+        padding: 8,
+        marginBottom: 6,
         ...glassPanel,
     },
-    postCardSelected: {
-        borderColor: 'rgba(244, 114, 182, 0.65)',
-        backgroundColor: 'rgba(217, 27, 92, 0.15)',
-    },
-    postHeader: {
+    tileMetaRow: {
         flexDirection: 'row',
-        gap: 12,
-        marginBottom: 12,
+        flexWrap: 'wrap',
+        gap: 4,
+        marginBottom: 4,
     },
-    postThumbnail: {
-        width: 80,
-        height: 80,
-        borderRadius: 8,
-        backgroundColor: '#111827',
+    qualityPill: {
+        fontSize: 9,
+        fontWeight: '700',
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 999,
+        borderWidth: 1,
         overflow: 'hidden',
     },
-    postInfo: {
-        flex: 1,
+    qualityEmerald: {
+        color: '#6EE7B7',
+        borderColor: 'rgba(52, 211, 153, 0.4)',
+        backgroundColor: 'rgba(16, 185, 129, 0.12)',
     },
-    postText: {
-        fontSize: 14,
-        color: '#FFFFFF',
-        marginBottom: 8,
-    },
-    postStats: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-    },
-    statText: {
-        fontSize: 12,
-        color: '#9CA3AF',
-    },
-    selectedHintText: {
-        marginTop: 8,
-        fontSize: 12,
-        color: '#FBCFE8',
-        fontWeight: '600',
-    },
-    postActionsRow: {
-        flexDirection: 'row',
-        marginBottom: 10,
-    },
-    secondaryButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderRadius: 8,
-        ...glassSurface,
-    },
-    secondaryButtonText: {
-        color: '#FBCFE8',
-        fontSize: 13,
-        fontWeight: '600',
-    },
-    analyticsCard: {
-        borderRadius: 10,
-        padding: 10,
-        marginBottom: 10,
-        ...glassSurface,
-    },
-    analyticsTitle: {
-        color: '#E2E8F0',
-        fontSize: 13,
-        fontWeight: '700',
-        marginBottom: 6,
-    },
-    analyticsUpdatingText: {
+    qualitySky: {
         color: '#7DD3FC',
-        fontSize: 11,
-        marginBottom: 6,
-        fontWeight: '600',
+        borderColor: 'rgba(56, 189, 248, 0.4)',
+        backgroundColor: 'rgba(14, 165, 233, 0.12)',
     },
-    analyticsGrid: {
-        gap: 4,
+    qualityAmber: {
+        color: '#FCD34D',
+        borderColor: 'rgba(251, 191, 36, 0.4)',
+        backgroundColor: 'rgba(245, 158, 11, 0.12)',
     },
-    analyticsMetric: {
-        color: '#CBD5E1',
-        fontSize: 12,
+    statusPill: {
+        fontSize: 9,
+        fontWeight: '700',
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 999,
+        borderWidth: 1,
     },
-    analyticsEmptyText: {
-        color: '#94A3B8',
-        fontSize: 12,
+    statusActive: {
+        color: '#6EE7B7',
+        borderColor: 'rgba(52, 211, 153, 0.4)',
+        backgroundColor: 'rgba(16, 185, 129, 0.1)',
     },
-    boostButton: {
-        flexDirection: 'row',
+    statusEnded: {
+        color: '#D1D5DB',
+        borderColor: 'rgba(156, 163, 175, 0.35)',
+        backgroundColor: 'rgba(107, 114, 128, 0.15)',
+    },
+    statusReady: {
+        color: '#7DD3FC',
+        borderColor: 'rgba(56, 189, 248, 0.4)',
+        backgroundColor: 'rgba(14, 165, 233, 0.12)',
+    },
+    tileMetaReason: {
+        fontSize: 9,
+        color: '#6B7280',
+        lineHeight: 12,
+    },
+    tileMetaReach: {
+        fontSize: 9,
+        color: '#9CA3AF',
+        marginTop: 2,
+    },
+    insightsBtn: {
+        minHeight: 30,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(56, 189, 248, 0.35)',
+        backgroundColor: 'rgba(14, 165, 233, 0.12)',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 8,
-        paddingVertical: 12,
-        backgroundColor: '#d91b5c',
-        borderRadius: 8,
+        marginBottom: 6,
+        paddingHorizontal: 6,
     },
-    boostButtonText: {
-        color: '#FFFFFF',
-        fontSize: 16,
-        fontWeight: '600',
+    insightsBtnText: {
+        color: '#BAE6FD',
+        fontSize: 10,
+        fontWeight: '700',
+    },
+    tileInsightsHint: {
+        fontSize: 9,
+        color: '#94A3B8',
+        marginBottom: 4,
     },
     errorText: {
         fontSize: 16,

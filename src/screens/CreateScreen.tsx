@@ -42,6 +42,8 @@ import {
 import { captureFilteredPreviewFromRef } from '../utils/captureFilteredPreviewNative';
 import { addPendingFeedUpload } from '../utils/pendingFeedUploadNative';
 import { startBackgroundFeedUpload } from '../utils/runBackgroundFeedUploadNative';
+import { showUploadOverlayNative } from '../utils/uploadOverlayNative';
+import type { LocalCarouselItem } from '../utils/prepareCarouselMediaForPostNative';
 
 export default function CreateScreen({ navigation, route }: any) {
     const { user } = useAuth();
@@ -73,6 +75,16 @@ export default function CreateScreen({ navigation, route }: any) {
     
     const [selectedMedia, setSelectedMedia] = useState<string | null>(normalizeMediaUri(passedMedia));
     const [mediaType, setMediaType] = useState<'image' | 'video' | null>(passedMediaType);
+    const [carouselItems, setCarouselItems] = useState<LocalCarouselItem[]>([]);
+    const [carouselActiveIndex, setCarouselActiveIndex] = useState(0);
+    const isCarousel = carouselItems.length > 1;
+    const previewUri = isCarousel
+        ? carouselItems[carouselActiveIndex]?.uri ?? selectedMedia
+        : selectedMedia;
+    const previewType: 'image' | 'video' | null = isCarousel
+        ? carouselItems[carouselActiveIndex]?.type ?? mediaType
+        : mediaType;
+    const activeCarouselSlide = isCarousel ? carouselItems[carouselActiveIndex] : undefined;
     const [text, setText] = useState(route.params?.draftCaption || route.params?.draftTextBody || '');
     const [location, setLocation] = useState(route.params?.draftLocation || '');
     const [venue, setVenue] = useState(route.params?.draftVenue || '');
@@ -225,6 +237,165 @@ export default function CreateScreen({ navigation, route }: any) {
         setText((prev) => (prev && prev.trim().length > 0 ? prev : 'Add Yours: '));
     }, [isAddYoursFlow]);
 
+    useEffect(() => {
+        const initial = route.params?.carouselItems as LocalCarouselItem[] | undefined;
+        if (!Array.isArray(initial) || initial.length < 2) return;
+        setCarouselItems(initial);
+        setCarouselActiveIndex(0);
+        setSelectedMedia(initial[0]?.uri ?? null);
+        setMediaType(initial[0]?.type ?? null);
+        if (typeof route.params?.draftCaption === 'string' && route.params.draftCaption.trim()) {
+            setText(route.params.draftCaption);
+        }
+    }, [route.params?.carouselItems, route.params?.draftCaption]);
+
+    const applySingleMedia = useCallback((uri: string | null, type: 'image' | 'video') => {
+        setCarouselItems([]);
+        setCarouselActiveIndex(0);
+        setSelectedMedia(normalizeMediaUri(uri));
+        setMediaType(type);
+    }, []);
+
+    const assetIsVideo = (asset: { type?: string; uri?: string }) =>
+        Boolean(
+            asset.type?.startsWith('video') ||
+                asset.uri?.toLowerCase().endsWith('.mp4') ||
+                asset.uri?.toLowerCase().endsWith('.mov'),
+        );
+
+    const applyCarouselFromAssets = useCallback(
+        (assets: Array<{ uri?: string; type?: string; duration?: number }>) => {
+            const items: LocalCarouselItem[] = [];
+            for (const a of assets) {
+                if (items.length >= 10) break;
+                const uri = normalizeMediaUri(a.uri || null);
+                if (!uri) continue;
+                const isVideo = assetIsVideo(a);
+                const rawDuration = Number(a.duration || 0);
+                const durationSec =
+                    isVideo && Number.isFinite(rawDuration) && rawDuration > 0
+                        ? Math.max(0.1, Math.floor(rawDuration * 10) / 10)
+                        : undefined;
+                const slide: LocalCarouselItem = {
+                    uri,
+                    type: isVideo ? 'video' : 'image',
+                };
+                if (isVideo) {
+                    slide.videoCoverTime = 0;
+                    if (durationSec != null) slide.durationSec = durationSec;
+                }
+                items.push(slide);
+            }
+            if (items.length < 2) {
+                if (items.length === 1) {
+                    applySingleMedia(items[0].uri, items[0].type);
+                }
+                return;
+            }
+            setCarouselItems(items);
+            setCarouselActiveIndex(0);
+            setSelectedMedia(items[0].uri);
+            setMediaType(items[0].type);
+            setVideoCoverTime(0);
+        },
+        [applySingleMedia],
+    );
+
+    const removeCarouselItem = useCallback((index: number) => {
+        setCarouselItems((prev) => {
+            const next = prev.filter((_, i) => i !== index);
+            setCarouselActiveIndex((active) => {
+                if (next.length <= 1) return 0;
+                if (active > index) return active - 1;
+                if (active >= next.length) return Math.max(0, next.length - 1);
+                return active;
+            });
+            if (next.length === 0) {
+                setSelectedMedia(null);
+                setMediaType(null);
+            } else if (next.length === 1) {
+                setSelectedMedia(next[0].uri);
+                setMediaType(next[0].type);
+                return [];
+            }
+            setSelectedMedia(next[0].uri);
+            setMediaType(next[0].type);
+            return next;
+        });
+    }, []);
+
+    const previewCoverTime =
+        isCarousel && activeCarouselSlide?.type === 'video'
+            ? activeCarouselSlide.videoCoverTime ?? 0
+            : videoCoverTime;
+    const previewDurationSec =
+        isCarousel && activeCarouselSlide?.type === 'video'
+            ? activeCarouselSlide.durationSec ?? videoDurationSec
+            : videoDurationSec;
+
+    const setPreviewCoverTime = useCallback(
+        (timeSec: number) => {
+            if (isCarousel) {
+                setCarouselItems((prev) =>
+                    prev.map((item, i) =>
+                        i === carouselActiveIndex && item.type === 'video'
+                            ? { ...item, videoCoverTime: timeSec }
+                            : item,
+                    ),
+                );
+                return;
+            }
+            setVideoCoverTime(timeSec);
+        },
+        [carouselActiveIndex, isCarousel],
+    );
+
+    const updatePreviewVideoDuration = useCallback(
+        (duration: number) => {
+            const rounded = Math.max(0.1, Math.floor(duration * 10) / 10);
+            if (isCarousel) {
+                setCarouselItems((prev) =>
+                    prev.map((item, i) => {
+                        if (i !== carouselActiveIndex || item.type !== 'video') return item;
+                        const cover = Math.min(Math.max(0, item.videoCoverTime ?? 0), rounded);
+                        return { ...item, durationSec: rounded, videoCoverTime: cover };
+                    }),
+                );
+                return;
+            }
+            setVideoDurationSec(rounded);
+            setVideoCoverTime((prev) => Math.min(Math.max(0, prev), rounded));
+        },
+        [carouselActiveIndex, isCarousel],
+    );
+
+    useEffect(() => {
+        if (previewType !== 'video' || !previewUri) return;
+        videoRef.current?.seek(Math.max(0, previewCoverTime));
+    }, [previewCoverTime, previewType, previewUri, carouselActiveIndex]);
+
+    const pickCarouselMedia = useCallback(() => {
+        ImagePicker.launchImageLibrary(
+            { mediaType: 'mixed', selectionLimit: 10, quality: 0.9, videoQuality: 'high' },
+            (response) => {
+                if (response.didCancel) return;
+                if (response.errorCode) {
+                    Alert.alert(
+                        'Media error',
+                        response.errorMessage || 'Could not open your photo library.',
+                    );
+                    return;
+                }
+                const assets = response.assets || [];
+                if (assets.length < 2) {
+                    Alert.alert('Carousel', 'Select at least 2 photos or videos for a carousel post.');
+                    return;
+                }
+                applyCarouselFromAssets(assets);
+            },
+        );
+    }, [applyCarouselFromAssets]);
+
     const handleSelectMedia = () => {
         const pickPhotoWithFallback = async () => {
             try {
@@ -238,8 +409,7 @@ export default function CreateScreen({ navigation, route }: any) {
                     cropperCancelText: 'Cancel',
                     compressImageQuality: 0.9,
                 });
-                setSelectedMedia(normalizeMediaUri(image.path || null));
-                setMediaType('image');
+                applySingleMedia(normalizeMediaUri(image.path || null), 'image');
             } catch (err: any) {
                 if (err?.code === 'E_PICKER_CANCELLED') return;
                 console.error('Photo picker error (cropper), falling back:', err);
@@ -256,17 +426,18 @@ export default function CreateScreen({ navigation, route }: any) {
                             Alert.alert('Photo error', 'No photo was selected.');
                             return;
                         }
-                        setSelectedMedia(normalizeMediaUri(asset.uri));
-                        setMediaType('image');
-                    }
+                        applySingleMedia(normalizeMediaUri(asset.uri), 'image');
+                    },
                 );
             }
         };
 
-        Alert.alert('Choose media type', 'How would you like to add media?', [
+        const buttons: Array<{ text: string; onPress?: () => void; style?: 'cancel' }> = [
             {
                 text: 'Photo',
-                onPress: () => { void pickPhotoWithFallback(); },
+                onPress: () => {
+                    void pickPhotoWithFallback();
+                },
             },
             {
                 text: 'Video',
@@ -287,14 +458,20 @@ export default function CreateScreen({ navigation, route }: any) {
                                 Alert.alert('Video error', 'No video was selected.');
                                 return;
                             }
-                            setSelectedMedia(normalizeMediaUri(asset.uri));
-                            setMediaType('video');
-                        }
+                            applySingleMedia(normalizeMediaUri(asset.uri), 'video');
+                        },
                     );
                 },
             },
-            { text: 'Cancel', style: 'cancel' },
-        ]);
+        ];
+        if (!isStory24Flow) {
+            buttons.splice(2, 0, {
+                text: 'Carousel (2–10 photos & videos)',
+                onPress: pickCarouselMedia,
+            });
+        }
+        buttons.push({ text: 'Cancel', style: 'cancel' });
+        Alert.alert('Choose media type', 'How would you like to add media?', buttons);
     };
 
     const handleTakePhoto = async () => {
@@ -309,8 +486,7 @@ export default function CreateScreen({ navigation, route }: any) {
                 cropperCancelText: 'Cancel',
                 compressImageQuality: 0.9,
             });
-            setSelectedMedia(normalizeMediaUri(image.path || null));
-            setMediaType('image');
+            applySingleMedia(normalizeMediaUri(image.path || null), 'image');
         } catch (err: any) {
             if (err?.code !== 'E_PICKER_CANCELLED') {
                 console.error('Camera picker error:', err);
@@ -319,13 +495,13 @@ export default function CreateScreen({ navigation, route }: any) {
     };
 
     const captureVideoPoster = useCallback(async (): Promise<string> => {
-        if (mediaType === 'video') {
-            videoRef.current?.seek(Math.max(0, videoCoverTime));
+        if (previewType === 'video') {
+            videoRef.current?.seek(Math.max(0, previewCoverTime));
             setIsVideoPaused(true);
             await new Promise((resolve) => setTimeout(resolve, 400));
         }
         return captureFilteredPreviewFromRef(previewCaptureRef);
-    }, [mediaType, videoCoverTime]);
+    }, [previewCoverTime, previewType]);
 
     const prepareComposerMedia = useCallback(async () => {
         if (!selectedMedia || !mediaType) {
@@ -397,6 +573,7 @@ export default function CreateScreen({ navigation, route }: any) {
                 location: locationLabel,
                 localMediaUri: selectedMedia,
                 localThumbUri,
+                localMediaItems: isCarousel ? carouselItems : undefined,
                 mediaType,
                 videoCoverTime,
                 filterForExport,
@@ -407,6 +584,11 @@ export default function CreateScreen({ navigation, route }: any) {
                 taggedUsers: taggedUsers.length > 0 ? taggedUsers : undefined,
                 venue: venue.trim() || undefined,
                 landmark: landmark.trim() || undefined,
+            });
+            showUploadOverlayNative({
+                jobId: tempId,
+                thumbUri: localThumbUri ?? undefined,
+                thumbType: mediaType === 'video' ? 'video' : 'image',
             });
             hapticLight();
             navigation.navigate('Home', { forceRefreshAt: Date.now() });
@@ -654,18 +836,81 @@ export default function CreateScreen({ navigation, route }: any) {
                 {/* Media Preview */}
                 {selectedMedia && (
                     <View style={styles.mediaPreview}>
-                        {hasAppliedFilter ? (
+                        {isCarousel ? (
+                            <View style={styles.carouselBadge}>
+                                <Icon name="images" size={12} color="#FBCFE8" />
+                                <Text style={styles.carouselBadgeText}>
+                                    {carouselItems.length} slides · swipe in feed
+                                </Text>
+                            </View>
+                        ) : null}
+                        {hasAppliedFilter && !isCarousel ? (
                             <View style={styles.filterBadge}>
                                 <Icon name="color-filter" size={12} color="#FBCFE8" />
                                 <Text style={styles.filterBadgeText}>{activeFilterName}</Text>
                             </View>
                         ) : null}
+                        {hasAppliedFilter && isCarousel ? (
+                            <View style={styles.filterBadge}>
+                                <Icon name="color-filter" size={12} color="#FBCFE8" />
+                                <Text style={styles.filterBadgeText}>Filter on cover photo</Text>
+                            </View>
+                        ) : null}
+                        {isCarousel ? (
+                            <ScrollView
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                style={styles.carouselRail}
+                                contentContainerStyle={styles.carouselRailContent}
+                            >
+                                {carouselItems.map((item, index) => {
+                                    const isActive = index === carouselActiveIndex;
+                                    return (
+                                        <TouchableOpacity
+                                            key={`${item.uri}-${index}`}
+                                            activeOpacity={0.85}
+                                            onPress={() => setCarouselActiveIndex(index)}
+                                            style={[
+                                                styles.carouselThumbWrap,
+                                                isActive && styles.carouselThumbWrapActive,
+                                            ]}
+                                        >
+                                            {item.type === 'video' ? (
+                                                <View style={styles.carouselThumbVideo}>
+                                                    <Icon name="videocam" size={22} color="#E5E7EB" />
+                                                </View>
+                                            ) : (
+                                                <Image source={{ uri: item.uri }} style={styles.carouselThumb} />
+                                            )}
+                                            {item.type === 'video' ? (
+                                                <View style={styles.carouselVidBadge}>
+                                                    <Text style={styles.carouselVidBadgeText}>MP4</Text>
+                                                </View>
+                                            ) : null}
+                                            {isActive && item.type === 'video' ? (
+                                                <View style={styles.carouselCoverBadge}>
+                                                    <Text style={styles.carouselCoverBadgeText}>Cover</Text>
+                                                </View>
+                                            ) : null}
+                                            <TouchableOpacity
+                                                style={styles.carouselThumbRemove}
+                                                onPress={() => removeCarouselItem(index)}
+                                                hitSlop={8}
+                                            >
+                                                <Icon name="close" size={14} color="#FFFFFF" />
+                                            </TouchableOpacity>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </ScrollView>
+                        ) : null}
                         <View style={styles.videoPreviewWrap} onLayout={handlePreviewLayout}>
                             <View ref={previewCaptureRef} style={styles.previewCaptureFrame} collapsable={false}>
-                                {mediaType === 'video' ? (
+                                {previewType === 'video' && previewUri ? (
                                     <Video
+                                        key={isCarousel ? `carousel-${carouselActiveIndex}-${previewUri}` : previewUri}
                                         ref={videoRef}
-                                        source={{ uri: selectedMedia }}
+                                        source={{ uri: previewUri }}
                                         style={styles.previewImage}
                                         resizeMode="contain"
                                         paused={isVideoPaused}
@@ -675,18 +920,16 @@ export default function CreateScreen({ navigation, route }: any) {
                                         onLoad={(event) => {
                                             const duration = Number(event?.duration || 0);
                                             if (!Number.isFinite(duration) || duration <= 0) return;
-                                            const rounded = Math.max(0.1, Math.floor(duration * 10) / 10);
-                                            setVideoDurationSec(rounded);
-                                            setVideoCoverTime((prev) => Math.min(Math.max(0, prev), rounded));
+                                            updatePreviewVideoDuration(duration);
                                         }}
                                     />
-                                ) : (
+                                ) : previewUri ? (
                                     <Image
-                                        source={{ uri: selectedMedia }}
+                                        source={{ uri: previewUri }}
                                         style={styles.previewImage}
                                         resizeMode="contain"
                                     />
-                                )}
+                                ) : null}
                                 {filterOverlayStyle ? (
                                     <View pointerEvents="none" style={[styles.filterOverlay, filterOverlayStyle]} />
                                 ) : null}
@@ -708,7 +951,7 @@ export default function CreateScreen({ navigation, route }: any) {
                                         containerHeight={previewSize.height}
                                     />
                                 ))}
-                            {mediaType === 'video' ? (
+                            {previewType === 'video' ? (
                                 <TouchableOpacity
                                     style={styles.videoPauseBtn}
                                     onPress={() => setIsVideoPaused((v) => !v)}
@@ -733,7 +976,7 @@ export default function CreateScreen({ navigation, route }: any) {
                 )}
                 {selectedMedia && (
                     <View style={styles.composerTools}>
-                        {mediaType === 'video' ? (
+                        {previewType === 'video' && !isCarousel ? (
                             <TouchableOpacity style={styles.composerToolBtn} onPress={openFilters}>
                                 <Icon name="color-filter" size={18} color="#FBCFE8" />
                                 <Text style={styles.composerToolText}>Filters</Text>
@@ -756,7 +999,7 @@ export default function CreateScreen({ navigation, route }: any) {
                         ) : null}
                     </View>
                 )}
-                {selectedMedia && mediaType === 'image' && (
+                {selectedMedia && previewType === 'image' && !isCarousel && (
                     <ScrollView
                         horizontal
                         showsHorizontalScrollIndicator={false}
@@ -778,19 +1021,24 @@ export default function CreateScreen({ navigation, route }: any) {
                         })}
                     </ScrollView>
                 )}
-                {mediaType === 'video' && (
+                {previewType === 'video' ? (
                     <View style={styles.videoCoverWrap}>
+                        {isCarousel ? (
+                            <Text style={styles.carouselCoverHint}>
+                                Slide {carouselActiveIndex + 1} cover — tap another video to change
+                            </Text>
+                        ) : null}
                         <VideoCoverControls
-                            durationSec={videoDurationSec}
-                            coverTime={videoCoverTime}
-                            onCoverTimeChange={setVideoCoverTime}
+                            durationSec={previewDurationSec}
+                            coverTime={previewCoverTime}
+                            onCoverTimeChange={setPreviewCoverTime}
                             onScrubPreview={(timeSec) => {
                                 videoRef.current?.seek(Math.max(0, timeSec));
                                 setIsVideoPaused(true);
                             }}
                         />
                     </View>
-                )}
+                ) : null}
 
                 {/* Text Input */}
                 <View style={styles.inputContainer}>
@@ -1058,6 +1306,99 @@ const styles = StyleSheet.create({
     },
     filterOverlay: {
         ...StyleSheet.absoluteFill,
+    },
+    carouselBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        alignSelf: 'flex-start',
+        marginBottom: 8,
+        borderRadius: 999,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        backgroundColor: 'rgba(59, 130, 246, 0.25)',
+        borderWidth: 1,
+        borderColor: 'rgba(147, 197, 253, 0.45)',
+    },
+    carouselBadgeText: {
+        color: '#BFDBFE',
+        fontSize: 11,
+        fontWeight: '700',
+    },
+    carouselRail: {
+        marginBottom: 10,
+        maxHeight: 88,
+    },
+    carouselRailContent: {
+        gap: 8,
+        paddingRight: 8,
+    },
+    carouselThumbWrap: {
+        width: 72,
+        height: 72,
+        borderRadius: 10,
+        overflow: 'hidden',
+        backgroundColor: '#111827',
+        borderWidth: 2,
+        borderColor: 'transparent',
+    },
+    carouselThumbWrapActive: {
+        borderColor: '#F472B6',
+    },
+    carouselCoverBadge: {
+        position: 'absolute',
+        right: 4,
+        top: 4,
+        backgroundColor: 'rgba(244,114,182,0.9)',
+        borderRadius: 4,
+        paddingHorizontal: 4,
+        paddingVertical: 1,
+    },
+    carouselCoverBadgeText: {
+        color: '#FFFFFF',
+        fontSize: 8,
+        fontWeight: '700',
+    },
+    carouselCoverHint: {
+        color: '#9CA3AF',
+        fontSize: 12,
+        marginBottom: 8,
+    },
+    carouselThumb: {
+        width: '100%',
+        height: '100%',
+    },
+    carouselThumbVideo: {
+        width: '100%',
+        height: '100%',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#1F2937',
+    },
+    carouselVidBadge: {
+        position: 'absolute',
+        left: 4,
+        bottom: 4,
+        backgroundColor: 'rgba(0,0,0,0.7)',
+        borderRadius: 4,
+        paddingHorizontal: 4,
+        paddingVertical: 1,
+    },
+    carouselVidBadgeText: {
+        color: '#FFFFFF',
+        fontSize: 9,
+        fontWeight: '700',
+    },
+    carouselThumbRemove: {
+        position: 'absolute',
+        top: 4,
+        right: 4,
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        backgroundColor: 'rgba(0,0,0,0.65)',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     filterBadge: {
         position: 'absolute',

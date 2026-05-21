@@ -9,6 +9,7 @@ import {
   LayoutChangeEvent,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import LinearGradient from 'react-native-linear-gradient';
 import Avatar from './Avatar';
 import DiscoverAmbientCanvas from './DiscoverAmbientCanvas.native';
 import { getAvatarForHandle } from '../api/users';

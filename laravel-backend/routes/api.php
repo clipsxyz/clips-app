@@ -22,6 +22,8 @@ use App\Http\Controllers\Api\MusicController;
 use App\Http\Controllers\Api\MusicLibraryController;
 use App\Http\Controllers\Api\BoostController;
 use App\Http\Controllers\Api\SuggestedPlacesController;
+use App\Http\Controllers\Api\FeedContentPreferenceController;
+use App\Http\Controllers\Api\PostReportController;
 
 /*
 |--------------------------------------------------------------------------
@@ -202,6 +204,7 @@ Route::prefix('posts')->group(function () {
     // Must be registered before /{id} so "suggested-by-places" is not parsed as a UUID
     Route::match(['get', 'post'], '/suggested-by-places', [SuggestedPlacesController::class, 'index'])
         ->middleware('auth:sanctum');
+    Route::get('/{id}/likes', [PostController::class, 'listLikes']); // Public - likers list for feed sheet
     Route::get('/{id}', [PostController::class, 'show']); // Public - anyone can view single post
     Route::post('/{id}/view', [PostController::class, 'incrementView']); // Public - track views without auth
 });
@@ -213,6 +216,12 @@ Route::get('/public/posts/{token}', [PostController::class, 'showPublicByToken']
 // Protected routes
 Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])->group(function () {
     Route::get('/boost/analytics/{postId}', [BoostController::class, 'analytics']);
+
+    Route::get('/feed-content-preferences', [FeedContentPreferenceController::class, 'show']);
+    Route::post('/feed-content-preferences/mute', [FeedContentPreferenceController::class, 'mute']);
+    Route::post('/feed-content-preferences/block', [FeedContentPreferenceController::class, 'block']);
+    Route::post('/feed-content-preferences/hide', [FeedContentPreferenceController::class, 'hide']);
+    Route::post('/feed-content-preferences/not-interested', [FeedContentPreferenceController::class, 'notInterested']);
 
     // Auth routes
     Route::prefix('auth')->group(function () {
@@ -235,6 +244,7 @@ Route::middleware(['auth:sanctum', \App\Http\Middleware\TrackLastActive::class])
         Route::post('/{id}/share', [PostController::class, 'share']);
         Route::post('/{id}/share-token/regenerate', [PostController::class, 'regenerateShareToken']);
         Route::post('/{id}/reclip', [PostController::class, 'reclip']);
+        Route::post('/{id}/report', [PostReportController::class, 'store']);
     });
 
     // Render jobs routes (for checking status)

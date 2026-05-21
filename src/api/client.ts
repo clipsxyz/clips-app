@@ -308,6 +308,29 @@ export async function toggleLike(postId: string) {
     });
 }
 
+export type PostLikesApiResponse = {
+    items: Array<{
+        handle: string;
+        display_name?: string;
+        avatar_url?: string;
+        is_following?: boolean;
+    }>;
+    total?: number;
+    likes_count: number;
+    views_count: number;
+};
+
+export async function fetchPostLikes(
+    postId: string,
+    params?: { userId?: string; limit?: number },
+): Promise<PostLikesApiResponse> {
+    const search = new URLSearchParams();
+    if (params?.userId) search.set('userId', params.userId);
+    if (params?.limit != null) search.set('limit', String(params.limit));
+    const qs = search.toString();
+    return apiRequest(`/posts/${postId}/likes${qs ? `?${qs}` : ''}`);
+}
+
 export async function updatePost(postId: string, postData: {
     text?: string;
     location?: string;

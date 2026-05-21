@@ -24,14 +24,25 @@ export type PostOverflowMenuModalProps = {
     onClose: () => void;
     /** Opens system/share sheet (parent may also increment share count). */
     onShare: () => void | Promise<void>;
+    /** Opens collection picker (web SavePostModal parity). */
+    onOpenSave?: () => void;
     /** Quick save / unsave via collections */
-    onSaveToggle: () => Promise<void>;
+    onSaveToggle?: () => Promise<void>;
+    onCreateGroup?: () => void;
+    onInviteToGroup?: () => void;
+    onShowQRCode?: () => void;
     onCopyLink?: () => Promise<void>;
     onReclip?: () => Promise<void>;
     onBoost?: () => void;
     onArchive?: () => Promise<void>;
     onToggleNotifications?: () => Promise<void>;
     onDelete?: () => Promise<void>;
+    onEdit?: () => void;
+    onUnfollow?: () => Promise<void>;
+    onMute?: () => Promise<void>;
+    onHide?: () => void;
+    onNotInterested?: () => void;
+    isFollowing?: boolean;
     onReport?: () => Promise<void>;
     onBlock?: () => Promise<void>;
 };
@@ -44,13 +55,23 @@ export default function PostOverflowMenuModal({
     hasNotifications,
     onClose,
     onShare,
+    onOpenSave,
     onSaveToggle,
+    onCreateGroup,
+    onInviteToGroup,
+    onShowQRCode,
     onCopyLink,
     onReclip,
     onBoost,
     onArchive,
     onToggleNotifications,
     onDelete,
+    onEdit,
+    onUnfollow,
+    onMute,
+    onHide,
+    onNotInterested,
+    isFollowing = false,
     onReport,
     onBlock,
 }: PostOverflowMenuModalProps) {
@@ -123,6 +144,17 @@ export default function PostOverflowMenuModal({
                         <ActivityIndicator color="#8B5CF6" style={{ marginVertical: 12 }} />
                     ) : null}
                     <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">
+                        {isOwn && onCreateGroup ? (
+                            <Row
+                                icon="people-outline"
+                                label="Create group"
+                                onPress={() => {
+                                    onCreateGroup();
+                                    onClose();
+                                }}
+                            />
+                        ) : null}
+
                         <Row icon="link-outline" label="Copy link" onPress={() => run(async () => { await copyLink(); onClose(); })} />
 
                         <Row
@@ -130,8 +162,13 @@ export default function PostOverflowMenuModal({
                             label={isSaved ? 'Unsave' : 'Save'}
                             onPress={() =>
                                 run(async () => {
-                                    await onSaveToggle();
-                                    onClose();
+                                    if (onOpenSave) {
+                                        onOpenSave();
+                                        onClose();
+                                    } else if (onSaveToggle) {
+                                        await onSaveToggle();
+                                        onClose();
+                                    }
                                 })
                             }
                         />
@@ -146,6 +183,10 @@ export default function PostOverflowMenuModal({
                                 })
                             }
                         />
+
+                        {isOwn && !isReclip && onEdit ? (
+                            <Row icon="create-outline" label="Edit" onPress={() => { onEdit(); onClose(); }} />
+                        ) : null}
 
                         {isOwn && !isReclip && onBoost ? (
                             <Row icon="flash-outline" label="Boost" onPress={() => { onBoost(); onClose(); }} />
@@ -179,6 +220,27 @@ export default function PostOverflowMenuModal({
                             />
                         ) : null}
 
+                        {!isOwn && onInviteToGroup ? (
+                            <Row
+                                icon="person-add-outline"
+                                label="Invite to a group"
+                                onPress={() => {
+                                    onInviteToGroup();
+                                    onClose();
+                                }}
+                            />
+                        ) : null}
+
+                        {!isOwn && onShowQRCode ? (
+                            <Row
+                                icon="qr-code-outline"
+                                label="QR code"
+                                onPress={() => {
+                                    onShowQRCode();
+                                }}
+                            />
+                        ) : null}
+
                         {!isOwn && onReclip ? (
                             <Row
                                 icon="repeat-outline"
@@ -190,6 +252,54 @@ export default function PostOverflowMenuModal({
                                     })
                                 }
                                 disabled={post.userHandle === viewerHandle || !!post.userReclipped}
+                            />
+                        ) : null}
+
+                        {!isOwn && isFollowing && onUnfollow ? (
+                            <Row
+                                icon="person-remove-outline"
+                                label={`Unfollow ${post.userHandle.split('@')[0]}`}
+                                onPress={() =>
+                                    run(async () => {
+                                        await onUnfollow();
+                                        onClose();
+                                    })
+                                }
+                            />
+                        ) : null}
+
+                        {!isOwn && onMute ? (
+                            <Row
+                                icon="volume-mute-outline"
+                                label={`Mute ${post.userHandle.split('@')[0]}`}
+                                onPress={() =>
+                                    run(async () => {
+                                        await onMute();
+                                        onClose();
+                                    })
+                                }
+                            />
+                        ) : null}
+
+                        {!isOwn && onHide ? (
+                            <Row
+                                icon="eye-off-outline"
+                                label="Hide"
+                                onPress={() => {
+                                    onHide();
+                                    onClose();
+                                }}
+                            />
+                        ) : null}
+
+                        {!isOwn && onNotInterested ? (
+                            <Row
+                                icon="information-circle-outline"
+                                label="Not interested"
+                                onPress={() => {
+                                    onNotInterested();
+                                    onClose();
+                                }}
                             />
                         ) : null}
 

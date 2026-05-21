@@ -894,11 +894,22 @@ export function transformLaravelPost(response: any): Post {
   // Rewrite mediaItems URLs for network access
   let processedMediaItems = mediaItems;
   if (Array.isArray(mediaItems) && mediaItems.length > 0) {
-    processedMediaItems = mediaItems.map((item: any) =>
-      item && item.url
-        ? { ...item, url: rewriteMediaUrlForNetwork(String(item.url)) }
-        : item
-    );
+    processedMediaItems = mediaItems.map((item: any) => {
+      if (!item) return item;
+      const rawPoster = item.poster_url || item.posterUrl;
+      const posterUrl =
+        rawPoster && typeof rawPoster === 'string'
+          ? rewriteMediaUrlForNetwork(String(rawPoster))
+          : undefined;
+      if (item.url) {
+        return {
+          ...item,
+          url: rewriteMediaUrlForNetwork(String(item.url)),
+          ...(posterUrl ? { posterUrl } : {}),
+        };
+      }
+      return posterUrl ? { ...item, posterUrl } : item;
+    });
   }
 
   // If we've already seen this post locally (e.g. just after createPost),
@@ -2542,7 +2553,7 @@ export async function createPost(
   userNational?: string,
   stickers?: StickerOverlay[],
   templateId?: string,
-  mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>, // Multiple media items for carousel, including text-only clips
+  mediaItems?: Array<{ url: string; type: 'image' | 'video' | 'text'; duration?: number; posterUrl?: string; text?: string; textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string } }>, // Multiple media items for carousel, including text-only clips
   bannerText?: string, // News ticker banner text
   textStyle?: { color?: string; size?: 'small' | 'medium' | 'large'; background?: string }, // Text style for text-only posts
   taggedUsers?: string[], // Array of user handles tagged in the post

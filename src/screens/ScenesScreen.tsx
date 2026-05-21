@@ -32,13 +32,7 @@ function getVideoUrl(post: Post): string {
     return fromItems?.url || post.mediaUrl || '';
 }
 
-export default function ScenesScreen({
-    route,
-    navigation,
-}: {
-    route: { params: RouteParams };
-    navigation: { goBack: () => void };
-}) {
+export default function ScenesScreen({ route, navigation }: any) {
     const { initialPostId, posts: routePosts } = route.params;
     const insets = useSafeAreaInsets();
     const windowHeight = Dimensions.get('window').height;

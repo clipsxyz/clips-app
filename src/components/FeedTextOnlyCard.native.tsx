@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 import type { Post } from '../types';
+import FeedStickerOverlays from './FeedStickerOverlays.native';
 import { getEffectiveTextStyleForPost } from '../utils/effectiveTextPostStyle';
 import {
     getTextOnlyBackgroundColor,
@@ -18,11 +19,19 @@ type Props = {
     post: Post;
     isFromViewer: boolean;
     onDoubleLike: () => void;
+    onHeartAnimation?: (pageX: number, pageY: number) => void;
     width: number;
 };
 
-export default function FeedTextOnlyCard({ post, isFromViewer, onDoubleLike, width }: Props) {
+export default function FeedTextOnlyCard({
+    post,
+    isFromViewer,
+    onDoubleLike,
+    onHeartAnimation,
+    width,
+}: Props) {
     const [expanded, setExpanded] = useState(false);
+    const [bubbleSize, setBubbleSize] = useState({ width: 0, height: 0 });
     const lastTapRef = useRef(0);
     const text = post.text?.trim() || '';
     const shouldTruncate = text.length > 100;
@@ -46,11 +55,17 @@ export default function FeedTextOnlyCard({ post, isFromViewer, onDoubleLike, wid
         ? 'rgba(15, 23, 42, 0.92)'
         : 'rgba(30, 41, 55, 0.9)';
 
-    const handlePress = () => {
+    const handlePress = (e: GestureResponderEvent) => {
         const now = Date.now();
         if (now - lastTapRef.current < 300) {
             if (!post.userLiked) {
                 onDoubleLike();
+            }
+            const { pageX, pageY } = e.nativeEvent;
+            if (pageX && pageY) {
+                onHeartAnimation?.(pageX, pageY);
+            } else if (bubbleSize.width > 0) {
+                onHeartAnimation?.(bubbleSize.width / 2, bubbleSize.height / 2);
             }
             lastTapRef.current = 0;
             return;
@@ -58,9 +73,18 @@ export default function FeedTextOnlyCard({ post, isFromViewer, onDoubleLike, wid
         lastTapRef.current = now;
     };
 
+    const stickers = post.stickers;
+
     return (
         <View style={[styles.wrap, { width }, isFromViewer ? styles.alignEnd : styles.alignStart]}>
             <Pressable onPress={handlePress}>
+                <View
+                    style={styles.bubbleMeasure}
+                    onLayout={(ev) => {
+                        const { width: w, height: h } = ev.nativeEvent.layout;
+                        if (w > 0 && h > 0) setBubbleSize({ width: w, height: h });
+                    }}
+                >
                 <IMessageDmBubbleShell
                     isFromMe={isFromViewer}
                     tailBackgroundColor={tailColor}
@@ -97,6 +121,14 @@ export default function FeedTextOnlyCard({ post, isFromViewer, onDoubleLike, wid
                         </Pressable>
                     ) : null}
                 </IMessageDmBubbleShell>
+                {stickers && stickers.length > 0 && bubbleSize.width > 0 ? (
+                    <FeedStickerOverlays
+                        stickers={stickers}
+                        containerWidth={bubbleSize.width}
+                        containerHeight={bubbleSize.height}
+                    />
+                ) : null}
+                </View>
             </Pressable>
         </View>
     );
@@ -112,6 +144,10 @@ const styles = StyleSheet.create({
     },
     alignStart: {
         alignItems: 'flex-start',
+    },
+    bubbleMeasure: {
+        position: 'relative',
+        maxWidth: '100%',
     },
     byline: {
         fontSize: 10,

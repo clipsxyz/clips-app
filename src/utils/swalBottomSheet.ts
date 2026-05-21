@@ -42,6 +42,9 @@ export type BottomSheetOptions = {
   showCancelButton?: boolean;
   showGazetteer?: boolean;
   icon?: 'alert' | 'success' | 'none' | string;
+  input?: SweetAlertOptions['input'];
+  inputOptions?: SweetAlertOptions['inputOptions'];
+  inputPlaceholder?: string;
 };
 
 /** Generic bottom-sheet Swal options – use for all app alerts */
@@ -55,6 +58,9 @@ export function bottomSheet(opts: BottomSheetOptions): SweetAlertOptions {
     showCancelButton = false,
     showGazetteer = true,
     icon = 'alert',
+    input,
+    inputOptions,
+    inputPlaceholder,
   } = opts;
   const iconSvg = icon === 'alert' ? ICON_ALERT_SVG : icon === 'success' ? ICON_SUCCESS_SVG : icon === 'none' ? '' : icon;
   const gazetteerBlock = showGazetteer ? '<p class="swal-bottom-sheet-gazetteer gazetteer-shimmer">Gazetteer says</p>' : '';
@@ -76,6 +82,9 @@ export function bottomSheet(opts: BottomSheetOptions): SweetAlertOptions {
     cancelButtonText,
     title: undefined,
     html: content,
+    ...(input != null ? { input } : {}),
+    ...(inputOptions != null ? { inputOptions } : {}),
+    ...(inputPlaceholder != null ? { inputPlaceholder } : {}),
   };
 }
 
