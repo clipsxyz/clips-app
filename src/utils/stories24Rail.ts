@@ -23,6 +23,10 @@ export const STORIES24_ADD_YOURS_HANDLE = '__add_yours__';
 /** RN AsyncStorage — keep in sync with web `clips:stories24RailReturn`. */
 export const STORIES24_RAIL_RETURN_KEY = 'clips:rn:stories24RailReturn';
 
+/** RN AsyncStorage — keep in sync with web feed scroll restore keys. */
+export const STORIES24_FEED_SCROLL_Y_KEY = 'clips:rn:stories24FeedScrollY';
+export const STORIES24_RESTORE_FEED_SCROLL_FLAG = 'clips:rn:stories24RestoreFeedScroll';
+
 export type Stories24RailReturnPayload = {
     handle: string;
     previewThumb?: string;
@@ -192,6 +196,38 @@ export async function persistStories24RailReturn(payload: Stories24RailReturnPay
 }
 
 /** Read and clear collapse payload (feed runs shrink animation once). */
+export async function snapshotStories24FeedScroll(scrollY: number): Promise<void> {
+    const y = Number.isFinite(scrollY) && scrollY >= 0 ? Math.round(scrollY) : 0;
+    try {
+        await AsyncStorage.multiSet([
+            [STORIES24_FEED_SCROLL_Y_KEY, String(y)],
+            [STORIES24_RESTORE_FEED_SCROLL_FLAG, '1'],
+        ]);
+    } catch {
+        /* ignore */
+    }
+}
+
+/** Read and clear pending feed scroll restore (after returning from Stories 24). */
+export async function consumeStories24FeedScrollRestore(): Promise<number | null> {
+    try {
+        const pending = await AsyncStorage.getItem(STORIES24_RESTORE_FEED_SCROLL_FLAG);
+        if (pending !== '1') return null;
+        const raw = await AsyncStorage.getItem(STORIES24_FEED_SCROLL_Y_KEY);
+        await AsyncStorage.multiRemove([STORIES24_FEED_SCROLL_Y_KEY, STORIES24_RESTORE_FEED_SCROLL_FLAG]);
+        const top = raw != null ? parseInt(raw, 10) : 0;
+        if (!Number.isFinite(top) || top < 0) return null;
+        return top;
+    } catch {
+        try {
+            await AsyncStorage.multiRemove([STORIES24_FEED_SCROLL_Y_KEY, STORIES24_RESTORE_FEED_SCROLL_FLAG]);
+        } catch {
+            /* ignore */
+        }
+        return null;
+    }
+}
+
 export async function consumeStories24RailReturn(): Promise<Stories24RailReturnPayload | null> {
     try {
         const raw = await AsyncStorage.getItem(STORIES24_RAIL_RETURN_KEY);

@@ -14,7 +14,7 @@ import { chipActiveMagenta, chipActiveMagentaText, glassPanel, glassSurface, gaz
 import { useAuth } from '../context/Auth';
 import { fetchPostsByUser, decorateForUser } from '../api/posts';
 import type { Post } from '../types';
-import BoostSelectionModal from '../components/BoostSelectionModal';
+import BoostSelectionModal from '../components/BoostSelectionModal.native';
 import BoostPostTile, { boostTileSize } from '../components/BoostPostTile.native';
 import { getActiveBoost, getBoostAnalytics, type BoostAnalytics } from '../api/boost';
 import {

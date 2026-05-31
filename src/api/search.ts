@@ -1,4 +1,5 @@
 import { apiRequest } from './client';
+import { isLaravelApiEnabled } from '../config/runtimeEnv';
 
 export type SearchSections = {
     users?: { items: any[]; nextCursor: number | string | null; hasMore?: boolean };
@@ -48,9 +49,7 @@ export async function unifiedSearch(params: {
     locationsLimit?: number;
     postsLimit?: number;
 }) {
-    const useLaravelAPI =
-        typeof import.meta !== 'undefined' &&
-        (import.meta as any).env?.VITE_USE_LARAVEL_API !== 'false';
+    const useLaravelAPI = isLaravelApiEnabled();
 
     const searchParams = new URLSearchParams();
     searchParams.set('q', params.q);

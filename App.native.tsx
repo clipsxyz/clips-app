@@ -4,15 +4,16 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { StatusBar, useColorScheme } from 'react-native';
+import { ScrollView, StatusBar, Text, useColorScheme, View } from 'react-native';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/context/Auth';
-import Icon from 'react-native-vector-icons/Ionicons';
 import { getUnreadTotal } from './src/api/messages';
+import { getUnreadNotificationCount } from './src/api/notifications';
 import { navigateMainTab } from './src/navigation/mainTabs';
+import MainTabBar from './src/components/MainTabBar.native';
 
 // Import screens
 import FeedScreen from './src/screens/FeedScreen';
@@ -44,6 +45,7 @@ import LandingScreen from './src/screens/LandingScreen';
 import TermsScreen from './src/screens/TermsScreen';
 import PublicPostScreen from './src/screens/PublicPostScreen';
 import ClipScreen from './src/screens/ClipScreen';
+import ClipPollScreen from './src/screens/ClipPollScreen';
 import ScenesScreen from './src/screens/ScenesScreen';
 import { initializeNotifications, teardownNotifications } from './src/services/notifications';
 import { hydrateAuthTokenFromStorage } from './src/utils/authTokenBridge';
@@ -51,6 +53,43 @@ import UploadProgressToast from './src/components/UploadProgressToast.native';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
+
+type ErrorBoundaryState = { error: Error | null };
+
+class AppErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  ErrorBoundaryState
+> {
+  state: ErrorBoundaryState = { error: null };
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { error };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error('App render error:', error);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <View style={{ flex: 1, backgroundColor: '#0b0711', padding: 20, paddingTop: 48 }}>
+          <Text style={{ color: '#f87171', fontSize: 18, fontWeight: '700', marginBottom: 12 }}>
+            App failed to load
+          </Text>
+          <ScrollView>
+            <Text style={{ color: '#e5e7eb', fontSize: 13, fontFamily: 'monospace' }}>
+              {this.state.error.message}
+              {'\n\n'}
+              {this.state.error.stack}
+            </Text>
+          </ScrollView>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
 const navigationRef = createNavigationContainerRef();
 
 const TAB_BAR_STYLE = {
@@ -59,74 +98,91 @@ const TAB_BAR_STYLE = {
   borderTopWidth: 1,
 } as const;
 
+type FeedHomeBoundaryState = { error: Error | null };
+
+/** Catches Home feed crashes so the tab shows an error instead of a blank screen. */
+class FeedHomeErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  FeedHomeBoundaryState
+> {
+  state: FeedHomeBoundaryState = { error: null };
+
+  static getDerivedStateFromError(error: Error): FeedHomeBoundaryState {
+    return { error };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error('Home feed render error:', error);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <View style={{ flex: 1, backgroundColor: '#0b0711', padding: 20, paddingTop: 48 }}>
+          <Text style={{ color: '#f87171', fontSize: 18, fontWeight: '700', marginBottom: 12 }}>
+            Home feed failed
+          </Text>
+          <ScrollView>
+            <Text style={{ color: '#e5e7eb', fontSize: 13 }}>{this.state.error.message}</Text>
+          </ScrollView>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+/** Home uses FeedScreen.tsx (same as web feed logic); wrapped for render-error visibility. */
+function HomeTabScreen(props: React.ComponentProps<typeof FeedScreen>) {
+  return (
+    <FeedHomeErrorBoundary>
+      <FeedScreen {...props} />
+    </FeedHomeErrorBoundary>
+  );
+}
+
 function MainTabs() {
   const { user } = useAuth();
-  const [inboxUnread, setInboxUnread] = useState(0);
+  const [inboxBadgeCount, setInboxBadgeCount] = useState(0);
 
   useEffect(() => {
     if (!user?.handle) {
-      setInboxUnread(0);
+      setInboxBadgeCount(0);
       return;
     }
     let mounted = true;
     const refresh = async () => {
       try {
-        const total = await getUnreadTotal(user.handle);
-        if (mounted) setInboxUnread(total);
+        const [notificationUnread, messageUnread] = await Promise.all([
+          getUnreadNotificationCount(user.handle).catch(() => 0),
+          getUnreadTotal(user.handle).catch(() => 0),
+        ]);
+        if (mounted) setInboxBadgeCount(Math.max(0, notificationUnread + messageUnread));
       } catch {
-        // ignore polling errors
+        if (mounted) setInboxBadgeCount(0);
       }
     };
     void refresh();
-    const interval = setInterval(refresh, 30000);
+    const interval = setInterval(refresh, 12000);
     return () => {
       mounted = false;
       clearInterval(interval);
     };
   }, [user?.handle]);
 
-  const inboxBadge =
-    inboxUnread > 0 ? (inboxUnread > 99 ? '99+' : inboxUnread) : undefined;
-
   return (
     <Tab.Navigator
-      screenOptions={({ route }) => ({
-        tabBarIcon: ({ focused, color, size }) => {
-          let iconName: string;
-          if (route.name === 'Home') {
-            iconName = focused ? 'home' : 'home-outline';
-          } else if (route.name === 'Boost') {
-            iconName = focused ? 'flash' : 'flash-outline';
-          } else if (route.name === 'Create') {
-            iconName = focused ? 'add-circle' : 'add-circle-outline';
-          } else if (route.name === 'Search') {
-            iconName = focused ? 'search' : 'search-outline';
-          } else if (route.name === 'Inbox') {
-            iconName = focused ? 'chatbox-ellipses' : 'chatbox-ellipses-outline';
-          } else {
-            iconName = 'ellipse-outline';
-          }
-          return <Icon name={iconName} size={size} color={color} />;
-        },
-        tabBarActiveTintColor: '#f472b6',
-        tabBarInactiveTintColor: '#9CA3AF',
-        tabBarStyle: TAB_BAR_STYLE,
+      screenOptions={{
         headerShown: false,
-      })}
+        tabBarStyle: TAB_BAR_STYLE,
+      }}
+      tabBar={(props) => <MainTabBar {...props} inboxBadgeCount={inboxBadgeCount} />}
     >
-      <Tab.Screen name="Home" component={FeedScreen} options={{ title: 'Home' }} />
+      <Tab.Screen name="Home" component={HomeTabScreen} options={{ title: 'Home' }} />
       <Tab.Screen name="Boost" component={BoostScreen} options={{ title: 'Boost' }} />
       <Tab.Screen name="Create" component={InstantCreateScreen} options={{ title: 'Create' }} />
       <Tab.Screen name="Search" component={SearchScreen} options={{ title: 'Search' }} />
-      <Tab.Screen
-        name="Inbox"
-        component={InboxScreen}
-        options={{
-          title: 'Inbox',
-          tabBarBadge: inboxBadge,
-          tabBarBadgeStyle: { backgroundColor: '#EF4444', fontSize: 10 },
-        }}
-      />
+      <Tab.Screen name="Inbox" component={InboxScreen} options={{ title: 'Inbox' }} />
     </Tab.Navigator>
   );
 }
@@ -177,6 +233,7 @@ function App(): React.JSX.Element {
   }, [handleNotificationPress]);
 
   return (
+    <AppErrorBoundary>
     <AuthProvider>
       <SafeAreaProvider>
         <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
@@ -272,10 +329,16 @@ function App(): React.JSX.Element {
           <Stack.Screen name="Terms" component={TermsScreen} />
           <Stack.Screen name="PublicPost" component={PublicPostScreen} />
           <Stack.Screen name="Clip" component={ClipScreen} />
+          <Stack.Screen
+            name="ClipPoll"
+            component={ClipPollScreen}
+            options={{ presentation: 'modal' }}
+          />
           </Stack.Navigator>
         </NavigationContainer>
       </SafeAreaProvider>
     </AuthProvider>
+    </AppErrorBoundary>
   );
 }
 

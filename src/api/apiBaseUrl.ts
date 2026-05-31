@@ -2,7 +2,8 @@ import { getRuntimeEnv, getReactNativeDefaultApiBaseUrl } from '../config/runtim
 
 function isViteDev(): boolean {
     try {
-        return typeof import.meta !== 'undefined' && !!(import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV;
+        const env = (0, eval)('import.meta.env') as { DEV?: boolean; MODE?: string } | undefined;
+        return !!env?.DEV || env?.MODE === 'development';
     } catch {
         return false;
     }

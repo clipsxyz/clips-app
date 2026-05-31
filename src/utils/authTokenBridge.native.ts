@@ -45,3 +45,14 @@ export async function clearAuthToken(): Promise<void> {
         // ignore
     }
 }
+
+export function getAuthToken(): string | null {
+    try {
+        if (typeof globalThis.localStorage !== 'undefined') {
+            return globalThis.localStorage.getItem(AUTH_TOKEN_KEY);
+        }
+    } catch {
+        // ignore
+    }
+    return null;
+}

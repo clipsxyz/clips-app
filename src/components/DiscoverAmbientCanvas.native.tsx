@@ -1,113 +1,226 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, LayoutChangeEvent, StyleSheet, View, useWindowDimensions } from 'react-native';
-import LinearGradient from 'react-native-linear-gradient';
+import React, { useEffect, useId, useRef, useState } from 'react';
+import {
+    AccessibilityInfo,
+    AppState,
+    LayoutChangeEvent,
+    Platform,
+    StyleSheet,
+    View,
+    useWindowDimensions,
+} from 'react-native';
+import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 import HalftoneOverlay from './HalftoneOverlay.native';
-import type { DiscoverAmbientVariant } from '../utils/discoverAmbientPalette';
+import { GAZETTEER_ABYSS } from '../theme/gazetteerAmbientNative';
+import {
+    getAmbientPalette,
+    getDiscoverAmbientWaveGeometry,
+    type DiscoverAmbientVariant,
+} from '../utils/discoverAmbientPalette';
 
 type Props = {
-    /** Fill the parent (feed card). When false, fills the window (full screen). */
+    /** Fill the parent (feed card). When false, uses explicit or window size. */
     fillParent?: boolean;
     variant?: DiscoverAmbientVariant;
+    /** Explicit pixel size — used for full-screen feed background (from parent onLayout). */
+    width?: number;
+    height?: number;
 };
 
-/**
- * Native Discover-style ambient canvas (animated gradients + halftone).
- * `goldChrome` matches Stories 24 border colours.
- */
+const TIME_STEP_PER_MS = 0.006 / (1000 / 60);
+const FRAME_MS = Platform.OS === 'android' ? 33 : 16;
+/** Stories 24 card shell background — matches rail inner fill. */
+const GOLD_CHROME_BASE = '#0a1323';
+
 export default function DiscoverAmbientCanvas({
     fillParent = true,
     variant = 'discover',
+    width: widthProp,
+    height: heightProp,
 }: Props) {
     const { width: winW, height: winH } = useWindowDimensions();
     const [layout, setLayout] = useState({ width: 0, height: 0 });
-    const drift = useRef(new Animated.Value(0)).current;
+    const [time, setTime] = useState(0);
+    const timeRef = useRef(0);
+    const frameRef = useRef<number | undefined>(undefined);
+    const lastFrameAtRef = useRef(0);
+    const pausedRef = useRef(false);
+    const reducedMotionRef = useRef(false);
+    const uid = useId().replace(/:/g, '');
 
-    const width = fillParent ? layout.width : winW;
-    const height = fillParent ? layout.height : winH;
+    const width =
+        widthProp && widthProp > 0
+            ? widthProp
+            : fillParent
+              ? layout.width
+              : winW;
+    const height =
+        heightProp && heightProp > 0
+            ? heightProp
+            : fillParent
+              ? layout.height
+              : winH;
+
+    const palette = getAmbientPalette(variant);
+    const baseFill = variant === 'goldChrome' ? GOLD_CHROME_BASE : GAZETTEER_ABYSS;
+    const geometry =
+        width > 0 && height > 0 ? getDiscoverAmbientWaveGeometry(width, height, time) : null;
+    const useParentLayout = fillParent && !(widthProp && heightProp);
 
     useEffect(() => {
-        const loop = Animated.loop(
-            Animated.sequence([
-                Animated.timing(drift, {
-                    toValue: 1,
-                    duration: 5500,
-                    easing: Easing.inOut(Easing.sin),
-                    useNativeDriver: true,
-                }),
-                Animated.timing(drift, {
-                    toValue: 0,
-                    duration: 5500,
-                    easing: Easing.inOut(Easing.sin),
-                    useNativeDriver: true,
-                }),
-            ]),
-        );
-        loop.start();
-        return () => loop.stop();
-    }, [drift]);
+        let mounted = true;
+        void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
+            if (!mounted) return;
+            reducedMotionRef.current = enabled;
+            if (enabled) {
+                timeRef.current = 0;
+                setTime(0);
+            }
+        });
+        const reduceSub = AccessibilityInfo.addEventListener('reduceMotionChanged', (enabled) => {
+            reducedMotionRef.current = enabled;
+            if (enabled) {
+                timeRef.current = 0;
+                setTime(0);
+            }
+        });
+        return () => {
+            mounted = false;
+            reduceSub.remove();
+        };
+    }, []);
 
-    const translateX = drift.interpolate({
-        inputRange: [0, 1],
-        outputRange: [-width * 0.08, width * 0.12],
-    });
-    const translateY = drift.interpolate({
-        inputRange: [0, 1],
-        outputRange: [height * 0.06, -height * 0.1],
-    });
+    useEffect(() => {
+        let mounted = true;
+
+        const stopLoop = () => {
+            if (frameRef.current != null) {
+                cancelAnimationFrame(frameRef.current);
+                frameRef.current = undefined;
+            }
+        };
+
+        const startLoop = () => {
+            stopLoop();
+            lastFrameAtRef.current = 0;
+            const tick = (now: number) => {
+                if (!mounted) return;
+                if (!pausedRef.current && !reducedMotionRef.current && width > 0 && height > 0) {
+                    if (lastFrameAtRef.current === 0) {
+                        lastFrameAtRef.current = now;
+                    }
+                    if (now - lastFrameAtRef.current >= FRAME_MS) {
+                        const delta = now - lastFrameAtRef.current;
+                        lastFrameAtRef.current = now;
+                        timeRef.current += TIME_STEP_PER_MS * delta;
+                        setTime(timeRef.current);
+                    }
+                }
+                frameRef.current = requestAnimationFrame(tick);
+            };
+            frameRef.current = requestAnimationFrame(tick);
+        };
+
+        const onAppState = (next: string) => {
+            pausedRef.current = next !== 'active';
+            if (pausedRef.current) {
+                stopLoop();
+            } else {
+                startLoop();
+            }
+        };
+
+        const sub = AppState.addEventListener('change', onAppState);
+        pausedRef.current = AppState.currentState !== 'active';
+
+        if (reducedMotionRef.current) {
+            timeRef.current = 0;
+            setTime(0);
+        } else if (!pausedRef.current) {
+            startLoop();
+        }
+
+        return () => {
+            mounted = false;
+            sub.remove();
+            stopLoop();
+        };
+    }, [width, height]);
 
     const onLayout = (e: LayoutChangeEvent) => {
         const { width: w, height: h } = e.nativeEvent.layout;
         if (w > 0 && h > 0) setLayout({ width: w, height: h });
     };
 
-    const baseColors =
-        variant === 'goldChrome'
-            ? ['#0b0711', '#1a1530', '#0b0711']
-            : ['#0b0711', '#201138', '#0b0711'];
-
-    const glowColors =
-        variant === 'goldChrome'
-            ? ['rgba(11,7,17,0)', 'rgba(246,226,122,0.5)', 'rgba(191,197,204,0.3)']
-            : ['rgba(11,7,17,0)', 'rgba(217,27,92,0.55)', 'rgba(32,17,56,0.35)'];
+    const waveShell =
+        width > 0 && height > 0 && geometry ? (
+            <Svg width={width} height={height} style={StyleSheet.absoluteFill} pointerEvents="none">
+                <Defs>
+                    <RadialGradient
+                        id={`${uid}-wave1`}
+                        gradientUnits="userSpaceOnUse"
+                        cx={geometry.wave1.x}
+                        cy={geometry.wave1.y}
+                        fx={geometry.wave1.x}
+                        fy={geometry.wave1.y}
+                        r={geometry.wave1.radius}
+                    >
+                        <Stop offset="0" stopColor={palette.wavePrimary} />
+                        <Stop offset="0.4" stopColor={palette.waveMid} />
+                        <Stop offset="1" stopColor={palette.waveDeep} />
+                    </RadialGradient>
+                    <RadialGradient
+                        id={`${uid}-wave2`}
+                        gradientUnits="userSpaceOnUse"
+                        cx={geometry.wave2.x}
+                        cy={geometry.wave2.y}
+                        fx={geometry.wave2.x}
+                        fy={geometry.wave2.y}
+                        r={geometry.wave2.radius}
+                    >
+                        <Stop offset="0" stopColor={palette.wave2Primary} />
+                        <Stop offset="0.5" stopColor={palette.wave2Mid} />
+                        <Stop offset="1" stopColor={palette.wave2End} />
+                    </RadialGradient>
+                </Defs>
+                <Rect x={0} y={0} width={width} height={height} fill={baseFill} />
+                <Rect x={0} y={0} width={width} height={height} fill={`url(#${uid}-wave1)`} />
+                <Rect
+                    x={0}
+                    y={0}
+                    width={width}
+                    height={height}
+                    fill={`url(#${uid}-wave2)`}
+                    mixBlendMode="screen"
+                />
+            </Svg>
+        ) : null;
 
     const shell = (
-        <View style={StyleSheet.absoluteFill} pointerEvents="none">
-            <LinearGradient
-                colors={baseColors}
-                locations={[0, 0.55, 1]}
-                start={{ x: 0.1, y: 0 }}
-                end={{ x: 0.9, y: 1 }}
-                style={StyleSheet.absoluteFill}
-            />
-            {width > 0 && height > 0 ? (
-                <Animated.View
-                    style={[
-                        StyleSheet.absoluteFill,
-                        {
-                            transform: [{ translateX }, { translateY }],
-                            opacity: 0.92,
-                        },
-                    ]}
-                >
-                    <LinearGradient
-                        colors={glowColors}
-                        locations={[0, 0.45, 1]}
-                        start={{ x: 0, y: 1 }}
-                        end={{ x: 1, y: 0.2 }}
-                        style={[StyleSheet.absoluteFill, { width: width * 1.35, height: height * 1.2 }]}
-                    />
-                </Animated.View>
-            ) : null}
-            <HalftoneOverlay variant={variant} />
+        <View
+            style={[StyleSheet.absoluteFill, { width, height }]}
+            pointerEvents="none"
+            {...(Platform.OS === 'android' ? { needsOffscreenAlphaCompositing: true } : {})}
+        >
+            {waveShell}
+            <HalftoneOverlay variant={variant} width={width} height={height} idPrefix={uid} />
         </View>
     );
 
-    if (!fillParent) {
-        return shell;
+    if (useParentLayout) {
+        return (
+            <View
+                style={StyleSheet.absoluteFill}
+                onLayout={onLayout}
+                pointerEvents="none"
+                collapsable={false}
+            >
+                {shell}
+            </View>
+        );
     }
 
     return (
-        <View style={StyleSheet.absoluteFill} onLayout={onLayout} pointerEvents="none">
+        <View style={[StyleSheet.absoluteFill, { width, height }]} pointerEvents="none" collapsable={false}>
             {shell}
         </View>
     );

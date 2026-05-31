@@ -174,7 +174,8 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
     useFocusEffect(
         React.useCallback(() => {
             void loadData();
-            setSecurityModalOpen(true);
+            // Do not auto-open security phone prompt when entering Passport.
+            setSecurityModalOpen(false);
             setSecurityStep('phone');
             setSecurityBusy(false);
             setPhoneCountryCode('+353');
@@ -1709,6 +1710,22 @@ const ProfileScreen: React.FC = ({ navigation }: any) => {
                                     }}
                                 >
                                     <Text style={styles.smallActionButtonText}>Open preferences</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.safetySection}>
+                                <Text style={styles.safetySectionTitle}>Stories</Text>
+                                <Text style={styles.toggleDescription}>
+                                    Photo, video, text, and poll stories (Clip studio)
+                                </Text>
+                                <TouchableOpacity
+                                    style={[styles.smallActionButton, { alignSelf: 'flex-start', marginTop: 10 }]}
+                                    onPress={() => {
+                                        setSettingsOpen(false);
+                                        navigation.navigate('Clip');
+                                    }}
+                                >
+                                    <Text style={styles.smallActionButtonText}>Create story</Text>
                                 </TouchableOpacity>
                             </View>
 

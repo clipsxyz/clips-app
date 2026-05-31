@@ -8,6 +8,7 @@ type Props = {
 
 const HANDLE_RE = /\b[A-Za-z0-9._-]+@[A-Za-z0-9_-]+\b/g;
 
+/** Matches web CaptionText in App.tsx: text-gray-100 text-[13px] leading-snug */
 export default function FeedCaptionText({ caption, onHandlePress }: Props) {
     const [expanded, setExpanded] = useState(false);
     const hasMore = caption.length > 120 || caption.includes('\n');
@@ -69,12 +70,11 @@ const styles = StyleSheet.create({
     },
     handleLink: {
         color: '#7A8AF0',
-        fontWeight: '600',
     },
     more: {
         marginTop: 6,
         fontSize: 11,
-        fontWeight: '600',
+        fontWeight: '500',
         color: 'rgba(255,255,255,0.9)',
     },
 });

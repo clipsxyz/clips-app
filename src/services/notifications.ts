@@ -1,6 +1,12 @@
 // Notification service with Firebase Cloud Messaging support
 // Firebase imports are loaded dynamically to avoid errors if package not installed
 
+import { getReactNativeDefaultApiBaseUrl, getRuntimeEnv } from '../config/runtimeEnv';
+
+function notificationApiBase(): string {
+  return getRuntimeEnv('VITE_API_URL') || getReactNativeDefaultApiBaseUrl() || 'http://localhost:8000/api';
+}
+
 // Notification preferences storage key
 const NOTIFICATION_PREFS_KEY = 'notification_preferences';
 let inMemoryNotificationPrefs: NotificationPreferences | null = null;
@@ -138,7 +144,7 @@ async function syncPreferencesToBackend(prefs: NotificationPreferences): Promise
     const userId = userData.id || userData.handle;
 
     // Call API to save preferences
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000/api'}/notifications/preferences`, {
+    const response = await fetch(`${notificationApiBase()}/notifications/preferences`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -229,7 +235,7 @@ async function saveTokenToBackend(token: string): Promise<void> {
     const userId = userData.id || userData.handle;
 
     // Call API to save token
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000/api'}/notifications/fcm-token`, {
+    const response = await fetch(`${notificationApiBase()}/notifications/fcm-token`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

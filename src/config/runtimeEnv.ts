@@ -3,16 +3,22 @@
  * Also reads process.env for RN when babel/react-native-dotenv injects keys.
  */
 
-export function getRuntimeEnv(key: string): string | undefined {
+function readViteEnv(key: string): string | undefined {
   try {
-    if (typeof import.meta !== 'undefined') {
-      const env = (import.meta as ImportMeta & { env?: Record<string, string | boolean | undefined> }).env;
-      const v = env?.[key];
-      if (v !== undefined && v !== '') return String(v);
-    }
+    // Vite replaces import.meta.env at build time on web only — keep behind eval so Hermes never parses import.meta.
+    const env = (0, eval)('import.meta.env') as Record<string, string | boolean | undefined> | undefined;
+    const v = env?.[key];
+    if (v !== undefined && v !== '') return String(v);
   } catch {
-    /* ignore */
+    /* Metro / Hermes */
   }
+  return undefined;
+}
+
+export function getRuntimeEnv(key: string): string | undefined {
+  const fromVite = readViteEnv(key);
+  if (fromVite !== undefined) return fromVite;
+
   try {
     if (typeof process !== 'undefined' && process.env && process.env[key] !== undefined) {
       const v = process.env[key];
@@ -24,8 +30,33 @@ export function getRuntimeEnv(key: string): string | undefined {
   return undefined;
 }
 
+function isReactNativeRuntime(): boolean {
+  try {
+    if (typeof navigator !== 'undefined' && (navigator as any).product === 'ReactNative') {
+      return true;
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (typeof require !== 'undefined') {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const rn = require('react-native');
+      return !!rn?.Platform;
+    }
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
 export function isLaravelApiEnabled(): boolean {
-  return getRuntimeEnv('VITE_USE_LARAVEL_API') !== 'false';
+  const raw = getRuntimeEnv('VITE_USE_LARAVEL_API');
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  // On RN devices, default to mock/local mode unless explicitly enabled.
+  if (isReactNativeRuntime()) return false;
+  return true;
 }
 
 /** When true, some post actions skip Laravel and use local mock only. */

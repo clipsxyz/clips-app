@@ -20,6 +20,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import Video from 'react-native-video';
 import type { Post } from '../types';
 import { subscribeActiveFeedVideo } from '../utils/feedActiveVideoNative';
+import { setFeedVideoHandoff } from '../utils/feedScenesHandoffNative';
 import {
     getTextOnlyBackgroundColor,
     getTextOnlyFontSize,
@@ -167,6 +168,11 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
     const showScenesCta = mode === 'feed' && video && postHasVideoMedia(post) && Boolean(onOpenScenes);
     const feedShouldPlay = mode === 'feed' && video && isActive && !playFailed;
 
+    const onFeedVideoProgress = (currentTime: number) => {
+        if (mode !== 'feed' || !isActive) return;
+        setFeedVideoHandoff(post.id, { currentTime, muted: !soundOn });
+    };
+
     useImperativeHandle(
         ref,
         () => ({
@@ -230,7 +236,8 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
 
     const frameStyle = { width, height, backgroundColor: '#000000' };
 
-    const onVideoError = (url: string) => {
+    const onVideoError = (url: string, error?: unknown) => {
+        console.warn('Video playback failed:', url, error);
         setPlayFailed(true);
         markUrlLoaded(url);
     };
@@ -259,7 +266,7 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                     poster={slidePoster}
                     posterResizeMode="cover"
                     onLoad={() => markUrlLoaded(slideUrl)}
-                    onError={() => onVideoError(slideUrl)}
+                    onError={(e) => onVideoError(slideUrl, e)}
                 />
             ) : slideFeedPlay ? (
                 <Video
@@ -275,11 +282,12 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                     playWhenInactive={false}
                     ignoreSilentSwitch="ignore"
                     onLoad={() => markUrlLoaded(slideUrl)}
-                    onError={() => onVideoError(slideUrl)}
+                    onProgress={(e) => onFeedVideoProgress(e.currentTime)}
+                    onError={(e) => onVideoError(slideUrl, e)}
                 />
-            ) : slidePoster || playFailed ? (
+            ) : slidePoster ? (
                 <Image
-                    source={{ uri: slidePoster || slideUrl }}
+                    source={{ uri: slidePoster }}
                     style={frameStyle}
                     resizeMode="cover"
                     resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}
@@ -353,11 +361,12 @@ const FeedPostMedia = React.forwardRef<FeedPostMediaHandle, Props>(function Feed
                 playWhenInactive={false}
                 ignoreSilentSwitch="ignore"
                 onLoad={() => mediaUrl && markUrlLoaded(mediaUrl)}
-                onError={() => mediaUrl && onVideoError(mediaUrl)}
+                onProgress={(e) => onFeedVideoProgress(e.currentTime)}
+                onError={(e) => mediaUrl && onVideoError(mediaUrl, e)}
             />
-        ) : postLevelPoster || playFailed ? (
+        ) : postLevelPoster ? (
             <Image
-                source={{ uri: postLevelPoster || mediaUrl }}
+                source={{ uri: postLevelPoster }}
                 style={frameStyle}
                 resizeMode="cover"
                 resizeMethod={Platform.OS === 'android' ? 'resize' : undefined}

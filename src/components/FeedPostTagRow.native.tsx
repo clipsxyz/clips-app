@@ -5,6 +5,7 @@ type Props = {
     tags: string[];
 };
 
+/** Matches web TagRow in App.tsx: flex flex-wrap gap-2 px-4 pb-3 */
 export default function FeedPostTagRow({ tags }: Props) {
     if (!tags.length) return null;
     return (
@@ -24,19 +25,19 @@ const styles = StyleSheet.create({
         flexWrap: 'wrap',
         gap: 8,
         paddingHorizontal: 16,
-        paddingBottom: 8,
+        paddingBottom: 12,
     },
     pill: {
         paddingHorizontal: 10,
         paddingVertical: 4,
         borderRadius: 999,
-        backgroundColor: 'rgba(139, 92, 246, 0.2)',
+        backgroundColor: 'rgba(88, 28, 135, 0.3)',
         borderWidth: 1,
-        borderColor: 'rgba(167, 139, 250, 0.35)',
+        borderColor: 'rgba(126, 34, 206, 0.5)',
     },
     pillText: {
         fontSize: 12,
-        fontWeight: '600',
-        color: '#C4B5FD',
+        fontWeight: '500',
+        color: '#D8B4FE',
     },
 });

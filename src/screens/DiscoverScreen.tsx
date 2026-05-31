@@ -303,7 +303,7 @@ export default function DiscoverScreen({ navigation }: any) {
 
     return (
         <>
-        <GazetteerScreenShell edges={['top']}>
+        <GazetteerScreenShell edges={['top']} ambientVariant="discover">
             <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                 style={styles.keyboardView}

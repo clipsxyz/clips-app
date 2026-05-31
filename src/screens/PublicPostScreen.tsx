@@ -16,7 +16,7 @@ import Avatar from '../components/Avatar.native';
 import { useAuth } from '../context/Auth';
 import { loadSharedPost } from '../api/posts';
 import { FEED_UI } from '../constants/feedUiTokens';
-import { getInstagramImageDimensions } from '../utils/imageDimensions';
+import { getInstagramImageDimensions, isLikelyImageUri } from '../utils/imageDimensions';
 import { timeAgo } from '../utils/timeAgo';
 import type { Post } from '../types';
 import { glassPanel, glassSurface, gazetteerHeader } from '../theme/gazetteerAmbientNative';
@@ -75,7 +75,10 @@ export default function PublicPostScreen({ navigation, route }: any) {
     }, [post]);
 
     useEffect(() => {
-        if (!mediaSizingUrl) return;
+        if (!mediaSizingUrl || !isLikelyImageUri(mediaSizingUrl)) {
+            setMediaHeight(screenWidth * FEED_UI.media.maxAspect);
+            return;
+        }
         Image.getSize(
             mediaSizingUrl,
             (width, height) => {

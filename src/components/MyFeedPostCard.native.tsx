@@ -13,6 +13,7 @@ import FeedPostMedia from './FeedPostMedia.native';
 import FeedTextOnlyFeedLayout from './FeedTextOnlyFeedLayout.native';
 import FeedCaptionText from './FeedCaptionText.native';
 import FeedEngagementRow from './FeedEngagementRow';
+import FeedEngagementRightActions from './FeedEngagementRightActions.native';
 import FeedHeartDrop from './FeedHeartDrop.native';
 import FeedLikesSheet from './FeedLikesSheet.native';
 import FeedMediaCarouselThumbs from './FeedMediaCarouselThumbs.native';
@@ -95,9 +96,8 @@ export default function MyFeedPostCard({
                     cardWidth={cardMediaWidth}
                     isCurrentUser={isCurrentUser}
                     onDoubleLike={() => {
-                        if (!post.userLiked) onLikePress?.();
+                        onLikePress?.();
                     }}
-                    onHeartAnimation={triggerHeartDrop}
                     onShowTaggedUsers={() => setTaggedSheetVisible(true)}
                 />
             ) : (
@@ -172,27 +172,12 @@ export default function MyFeedPostCard({
                     showReclip={Boolean(onReclipPress)}
                     tone="feed"
                 />
-                <View style={styles.rightActions}>
-                    {post.isBoosted ? (
-                        <TouchableOpacity
-                            style={styles.externalShareButton}
-                            onPress={() => setBoostMetricsOpen((v) => !v)}
-                            accessibilityLabel="Toggle boost metrics"
-                        >
-                            <Icon
-                                name="bar-chart-outline"
-                                size={24}
-                                color={boostMetricsOpen ? '#7A8AF0' : '#FFFFFF'}
-                            />
-                        </TouchableOpacity>
-                    ) : null}
-                    <TouchableOpacity
-                        style={styles.externalShareButton}
-                        onPress={() => setShareModalOpen(true)}
-                    >
-                        <Icon name="share-social-outline" size={24} color="#FFFFFF" />
-                    </TouchableOpacity>
-                </View>
+                <FeedEngagementRightActions
+                    showMetrics={Boolean(post.isBoosted)}
+                    metricsOpen={boostMetricsOpen}
+                    onToggleMetrics={() => setBoostMetricsOpen((v) => !v)}
+                    onShare={() => setShareModalOpen(true)}
+                />
             </View>
 
             {post.isBoosted ? (

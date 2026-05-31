@@ -5,6 +5,17 @@ export async function hydrateAuthTokenFromStorage(): Promise<void> {
     // no-op on web
 }
 
+export function getAuthToken(): string | null {
+    try {
+        if (typeof globalThis.localStorage !== 'undefined') {
+            return globalThis.localStorage.getItem(AUTH_TOKEN_KEY);
+        }
+    } catch {
+        // ignore
+    }
+    return null;
+}
+
 export async function persistAuthToken(token: string): Promise<void> {
     const value = token.trim();
     if (!value) return;

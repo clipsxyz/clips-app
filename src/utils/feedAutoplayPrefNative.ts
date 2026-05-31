@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 
@@ -12,11 +13,18 @@ const listeners = new Set<Listener>();
 export async function getFeedAutoplayPref(): Promise<FeedAutoplayPref> {
     try {
         const raw = await AsyncStorage.getItem(FEED_AUTOPLAY_PREF_KEY);
-        if (raw === 'always' || raw === 'wifi' || raw === 'never') return raw;
+        if (raw === 'always' || raw === 'wifi' || raw === 'never') {
+            // Legacy RN default was Wi‑Fi-only; allow feed video on cellular.
+            if (Platform.OS !== 'web' && raw === 'wifi') {
+                await AsyncStorage.setItem(FEED_AUTOPLAY_PREF_KEY, 'always');
+                return 'always';
+            }
+            return raw;
+        }
     } catch {
         /* ignore */
     }
-    return 'wifi';
+    return 'always';
 }
 
 export async function setFeedAutoplayPref(pref: FeedAutoplayPref): Promise<void> {

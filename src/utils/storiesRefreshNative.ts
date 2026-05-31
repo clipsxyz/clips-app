@@ -16,3 +16,8 @@ export function emitStoriesRefresh(): void {
         }
     });
 }
+
+/** After native story publish — refreshes Stories 24 rail on the feed. */
+export function notifyStoryCreated(_userHandle: string): void {
+    emitStoriesRefresh();
+}

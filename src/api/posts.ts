@@ -416,8 +416,9 @@ if (!postsInitialized) {
       userHandle: 'Sarah@Artane',
       locationLabel: 'Artane, Dublin',
       tags: [],
-      mediaUrl: 'https://lorem.video/720p',
+      mediaUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
       mediaType: 'video',
+      videoPosterUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800',
       caption: 'Stunning views from Howth Hill looking back towards Dublin',
       createdAt: artaneNow - 7200000, // 2 hours ago
       stats: { likes: 67, views: 445, comments: 8, shares: 4, reclips: 2 },
@@ -433,8 +434,9 @@ if (!postsInitialized) {
       userHandle: 'Sarah@Artane',
       locationLabel: 'Dublin City Centre',
       tags: [],
-      mediaUrl: 'https://lorem.video/cat_720p',
+      mediaUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
       mediaType: 'video',
+      videoPosterUrl: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800',
       caption: 'Walking through the vibrant streets of Dublin',
       createdAt: artaneNow - 86400000, // 1 day ago
       stats: { likes: 89, views: 678, comments: 15, shares: 7, reclips: 5 },
@@ -1018,8 +1020,9 @@ function getMockScenesVideoPosts(): Post[] {
       userHandle: 'Sarah@Artane',
       locationLabel: 'Artane, Dublin',
       tags: [],
-      mediaUrl: 'https://lorem.video/720p',
+      mediaUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
       mediaType: 'video',
+      videoPosterUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800',
       caption: 'Stunning views from Howth Hill looking back towards Dublin',
       createdAt: now - 7200000,
       stats: { likes: 67, views: 445, comments: 8, shares: 4, reclips: 2 },
@@ -1035,8 +1038,9 @@ function getMockScenesVideoPosts(): Post[] {
       userHandle: 'Sarah@Artane',
       locationLabel: 'Dublin City Centre',
       tags: [],
-      mediaUrl: 'https://lorem.video/cat_720p',
+      mediaUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
       mediaType: 'video',
+      videoPosterUrl: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800',
       caption: 'Walking through the vibrant streets of Dublin',
       createdAt: now - 86400000,
       stats: { likes: 89, views: 678, comments: 15, shares: 7, reclips: 5 },
@@ -1052,8 +1056,9 @@ function getMockScenesVideoPosts(): Post[] {
       userHandle: 'Bob@Ireland',
       locationLabel: 'Galway, Ireland',
       tags: [],
-      mediaUrl: 'https://lorem.video/corgi_480p_h264_30fps_10s',
+      mediaUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
       mediaType: 'video',
+      videoPosterUrl: 'https://images.unsplash.com/photo-1514996937319-344454492b37?w=1200',
       caption: 'Amazing sunset over Galway Bay!',
       createdAt: now - 9000000,
       stats: { likes: 56, views: 289, comments: 11, shares: 2, reclips: 1 },
@@ -1749,9 +1754,20 @@ export async function incrementViews(userId: string, id: string): Promise<Post> 
     }
   }
 
+  // Ava demo posts can be referenced by multiple ids across tabs/surfaces.
+  // Normalize to an existing in-memory post id to avoid noisy "not found" logs.
+  let resolvedId = id;
+  if (id === 'ava-normal-ireland-demo' || id.startsWith('ava-normal-')) {
+    const ava = posts.find((p) => p.id === id) || posts.find((p) => String(p.id).startsWith('ava-normal-'));
+    if (ava?.id) resolvedId = ava.id;
+  } else if (id === 'ava-boosted-discover-demo' || id.startsWith('ava-boosted-demo-')) {
+    const avaBoosted = posts.find((p) => p.id === id) || posts.find((p) => String(p.id).startsWith('ava-boosted-demo-'));
+    if (avaBoosted?.id) resolvedId = avaBoosted.id;
+  }
+
   // Mock implementation (fallback)
   await delay(100);
-  const p = posts.find(x => x.id === id);
+  const p = posts.find(x => x.id === resolvedId);
   if (!p) {
     console.error('Post not found for incrementViews:', id);
     console.log('Available post IDs:', posts.map(post => post.id));

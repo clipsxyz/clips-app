@@ -32,7 +32,7 @@ import {
     setPostNotificationsPrefMobile,
 } from '../utils/feedEngagementPrefsMobile';
 import { timeAgo } from '../utils/timeAgo';
-import { getInstagramImageDimensions } from '../utils/imageDimensions';
+import { getInstagramImageDimensions, isLikelyImageUri } from '../utils/imageDimensions';
 import { FEED_UI } from '../constants/feedUiTokens';
 import FeedPostMedia from '../components/FeedPostMedia.native';
 import FeedMediaCarouselThumbs from '../components/FeedMediaCarouselThumbs.native';
@@ -105,7 +105,10 @@ export default function PostDetailScreen({ route, navigation }: any) {
     }, [post, carouselThumbItems]);
 
     useEffect(() => {
-        if (!mediaSizingUrl) return;
+        if (!mediaSizingUrl || !isLikelyImageUri(mediaSizingUrl)) {
+            setMediaHeight(screenWidth * FEED_UI.media.maxAspect);
+            return;
+        }
         Image.getSize(
             mediaSizingUrl,
             (width, height) => {

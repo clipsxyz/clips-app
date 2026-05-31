@@ -202,7 +202,7 @@ export async function getActiveBoost(postId: string): Promise<BoostedPost | null
  * @returns Array of post IDs that are currently boosted for this feed type
  */
 export async function getActiveBoostedPostIds(feedType: BoostFeedType): Promise<string[]> {
-    const useLaravel = typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_LARAVEL_API !== 'false';
+    const useLaravel = (await import('../config/runtimeEnv')).isLaravelApiEnabled();
     if (useLaravel) {
         try {
             return await apiClient.getActiveBoostedPostIdsApi(feedType);

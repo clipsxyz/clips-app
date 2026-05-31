@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Image } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { chipActiveMagenta, chipActiveMagentaText, glassPanel, glassSearch, glassSurface } from '../theme/gazetteerAmbientNative';
@@ -69,6 +69,13 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
     const [placeSuggestions, setPlaceSuggestions] = useState<LocationSuggestion[]>([]);
     const [placeSuggestionsLoading, setPlaceSuggestionsLoading] = useState(false);
     const [scopePicker, setScopePicker] = useState<LocationSuggestion | null>(null);
+    const passportInitials = ((user?.name || user?.handle || 'U')
+        .trim()
+        .split(/\s+/)
+        .map((s) => s[0])
+        .slice(0, 2)
+        .join('') || 'U').toUpperCase();
+
     const modePlaceholder: Record<SearchMode, string> = {
         locations: 'Search by location',
         venues: 'Search by venue',
@@ -390,22 +397,35 @@ const SearchScreen: React.FC = ({ navigation }: any) => {
         <>
         <GazetteerScreenShell>
             <View style={styles.header}>
-                <View style={styles.searchContainer}>
-                    <Icon name="search" size={20} color="#6B7280" />
-                    <TextInput
-                        style={styles.searchInput}
-                        placeholder={modePlaceholder[searchMode]}
-                        value={searchQuery}
-                        onChangeText={setSearchQuery}
-                        onSubmitEditing={handleSubmitSearch}
-                        returnKeyType="search"
-                        placeholderTextColor="#9CA3AF"
-                    />
-                    {!!searchQuery && (
-                        <TouchableOpacity onPress={() => setSearchQuery('')}>
-                            <Icon name="close-circle" size={18} color="#6B7280" />
-                        </TouchableOpacity>
-                    )}
+                <View style={styles.searchHeaderRow}>
+                    <View style={styles.searchContainer}>
+                        <Icon name="search" size={20} color="#6B7280" />
+                        <TextInput
+                            style={styles.searchInput}
+                            placeholder={modePlaceholder[searchMode]}
+                            value={searchQuery}
+                            onChangeText={setSearchQuery}
+                            onSubmitEditing={handleSubmitSearch}
+                            returnKeyType="search"
+                            placeholderTextColor="#9CA3AF"
+                        />
+                        {!!searchQuery && (
+                            <TouchableOpacity onPress={() => setSearchQuery('')}>
+                                <Icon name="close-circle" size={18} color="#6B7280" />
+                            </TouchableOpacity>
+                        )}
+                    </View>
+                    <TouchableOpacity
+                        style={styles.passportButton}
+                        onPress={() => navigation.navigate('Profile')}
+                        accessibilityLabel="My Passport"
+                    >
+                        {user?.avatarUrl ? (
+                            <Image source={{ uri: user.avatarUrl }} style={styles.passportAvatar} />
+                        ) : (
+                            <Text style={styles.passportInitials}>{passportInitials}</Text>
+                        )}
+                    </TouchableOpacity>
                 </View>
                 {isPlaceSearchMode && searchQuery.trim().length >= 2 && (
                     <View style={styles.placeSuggestionsContainer}>
@@ -745,6 +765,32 @@ const styles = StyleSheet.create({
         borderBottomColor: 'rgba(255, 255, 255, 0.08)',
         backgroundColor: 'rgba(0, 0, 0, 0.25)',
     },
+    searchHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    passportButton: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: 'rgba(255, 255, 255, 0.12)',
+        borderWidth: 1,
+        borderColor: 'rgba(212, 175, 55, 0.45)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+    },
+    passportAvatar: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+    },
+    passportInitials: {
+        color: '#F9FAFB',
+        fontSize: 13,
+        fontWeight: '700',
+    },
     modeChipsRow: {
         marginTop: 10,
         maxHeight: 36,
@@ -825,6 +871,7 @@ const styles = StyleSheet.create({
         padding: 4,
     },
     searchContainer: {
+        flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
         ...glassSearch,

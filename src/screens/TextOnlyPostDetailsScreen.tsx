@@ -17,6 +17,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import GazetteerScreenShell from '../components/GazetteerScreenShell.native';
 import { glassPanel, glassSearch, gazetteerHeader } from '../theme/gazetteerAmbientNative';
 import { createPost } from '../api/posts';
+import { publishTextStory24 } from '../utils/publishStoryNative';
 import { saveDraft } from '../api/drafts';
 import { unifiedSearch } from '../api/search';
 import { useAuth } from '../context/Auth';
@@ -151,35 +152,48 @@ export default function TextOnlyPostDetailsScreen({ navigation, route }: any) {
     setIsSubmitting(true);
     try {
       const textStyle = activeTemplate ? buildTextStyleFromTemplate(activeTemplate) : undefined;
-      await createPost(
-        user.id,
-        user.handle,
-        text,
-        locationText.trim(),
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        user.local,
-        user.regional,
-        user.national,
-        undefined,
-        selectedTemplateId || undefined,
-        undefined,
-        undefined,
-        textStyle,
-        taggedUsers.length > 0 ? taggedUsers : undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        venueText.trim() || undefined,
-        landmarkText.trim() || undefined,
-      );
+      if (isStory24) {
+        await publishTextStory24({
+          userId: user.id,
+          userHandle: user.handle,
+          text,
+          location: locationText.trim() || undefined,
+          venue: venueText.trim() || undefined,
+          landmark: landmarkText.trim() || undefined,
+          taggedUsers: taggedUsers.length > 0 ? taggedUsers : undefined,
+          textStyle,
+        });
+      } else {
+        await createPost(
+          user.id,
+          user.handle,
+          text,
+          locationText.trim(),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          user.local,
+          user.regional,
+          user.national,
+          undefined,
+          selectedTemplateId || undefined,
+          undefined,
+          undefined,
+          textStyle,
+          taggedUsers.length > 0 ? taggedUsers : undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          venueText.trim() || undefined,
+          landmarkText.trim() || undefined,
+        );
+      }
       hapticSuccess();
-      Alert.alert('Posted', isStory24 ? 'Your Story 24 text post is live.' : 'Post created successfully!', [
+      Alert.alert('Posted', isStory24 ? 'Your story is live.' : 'Post created successfully!', [
         { text: 'OK', onPress: finishToFeed },
       ]);
     } catch (err: any) {

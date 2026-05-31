@@ -1,5 +1,4 @@
 import React from 'react';
-import * as Sentry from '@sentry/react';
 import { isLaravelApiEnabled } from '../config/runtimeEnv';
 import { User } from '../types';
 import { setProfilePrivacy, initializePrivateMockUser, isProfilePrivate } from '../api/privacy';
@@ -9,6 +8,17 @@ import { normalizeCountryFlagInput } from '../utils/countryFlag';
 import { clearAuthToken, hydrateAuthTokenFromStorage } from '../utils/authTokenBridge';
 
 const AVATAR_KEY = (id: string) => `clips_app_avatar_${id}`;
+
+function setSentryUser(user: { id: string; username?: string } | null) {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Sentry = require('@sentry/react');
+    if (user) Sentry.setUser(user);
+    else Sentry.setUser(null);
+  } catch {
+    /* Sentry optional on native */
+  }
+}
 type AuthCtx = { user: User | null; login: (userData: any) => void; logout: () => void };
 const Ctx = React.createContext<AuthCtx | null>(null);
 
@@ -232,7 +242,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         initializeNotifications();
       });
     }
-    Sentry.setUser({ id: u.id, username: u.name });
+    setSentryUser({ id: u.id, username: u.name });
   };
 
   const logout = () => {
@@ -247,7 +257,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       localStorage.removeItem('clips_app_stable_uid');
     } catch (_) {}
-    Sentry.setUser(null);
+    setSentryUser(null);
   };
 
   return <Ctx.Provider value={{ user, login, logout }}>{children}</Ctx.Provider>;

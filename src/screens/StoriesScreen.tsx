@@ -36,7 +36,9 @@ import {
     incrementStoryViews,
     addStoryReaction,
     addStoryReply,
+    voteOnPoll,
 } from '../api/stories';
+import StoryPollOverlay from '../components/stories/StoryPollOverlay.native';
 import {
     STORIES24_LOADING_HOLD_MS,
     clearStories24RailOpenHandle,
@@ -98,6 +100,9 @@ export default function StoriesScreen({ route, navigation }: any) {
     const [paused, setPaused] = useState(false);
     const [isMuted, setIsMuted] = useState(true);
     const [showInlineReplyComposer, setShowInlineReplyComposer] = useState(false);
+    const [optimisticPollVote, setOptimisticPollVote] = useState<
+        'option1' | 'option2' | 'option3' | null
+    >(null);
     const [isSendingReply, setIsSendingReply] = useState(false);
     const [showStoryShareModal, setShowStoryShareModal] = useState(false);
     const [showInsightsSheet, setShowInsightsSheet] = useState(false);
@@ -712,6 +717,10 @@ export default function StoriesScreen({ route, navigation }: any) {
     };
 
     useEffect(() => {
+        setOptimisticPollVote(null);
+    }, [currentGroupIndex, currentStoryIndex]);
+
+    useEffect(() => {
         const currentGroup = storyGroups[currentGroupIndex];
         const currentStory = currentGroup?.stories[currentStoryIndex];
         if (!currentStory || !user?.id || !viewingStories) return;
@@ -719,6 +728,53 @@ export default function StoriesScreen({ route, navigation }: any) {
         markStoryViewed(currentStory.id, user.id, user.handle).catch(console.error);
         incrementStoryViews(currentStory.id).catch(console.error);
     }, [currentGroupIndex, currentStoryIndex, viewingStories]);
+
+    const handlePollVote = useCallback(
+        async (option: 'option1' | 'option2' | 'option3') => {
+            const story = storyGroups[currentGroupIndex]?.stories[currentStoryIndex];
+            if (!story?.poll || !user?.id || story.poll.userVote) return;
+            setOptimisticPollVote(option);
+            setPaused(true);
+            try {
+                await voteOnPoll(story.id, user.id, option);
+                setStoryGroups((groups) =>
+                    groups.map((group, gi) => {
+                        if (gi !== currentGroupIndex) return group;
+                        return {
+                            ...group,
+                            stories: group.stories.map((s, si) => {
+                                if (si !== currentStoryIndex || !s.poll) return s;
+                                const prev = s.poll.userVote;
+                                let votes1 = s.poll.votes1 ?? 0;
+                                let votes2 = s.poll.votes2 ?? 0;
+                                let votes3 = s.poll.votes3 ?? 0;
+                                if (prev === 'option1') votes1 -= 1;
+                                if (prev === 'option2') votes2 -= 1;
+                                if (prev === 'option3') votes3 -= 1;
+                                if (option === 'option1') votes1 += 1;
+                                if (option === 'option2') votes2 += 1;
+                                if (option === 'option3') votes3 += 1;
+                                return {
+                                    ...s,
+                                    poll: {
+                                        ...s.poll,
+                                        votes1,
+                                        votes2,
+                                        votes3,
+                                        userVote: option,
+                                    },
+                                };
+                            }),
+                        };
+                    }),
+                );
+            } catch (error) {
+                console.error('Poll vote failed:', error);
+                setOptimisticPollVote(null);
+            }
+        },
+        [currentGroupIndex, currentStoryIndex, storyGroups, user?.id],
+    );
 
     useEffect(() => {
         if (!viewingStories) return;
@@ -940,6 +996,15 @@ export default function StoriesScreen({ route, navigation }: any) {
                                     navigation.navigate('ViewProfile', { handle });
                                 }, 100);
                             }}
+                        />
+                    ) : null}
+
+                    {currentStory.poll ? (
+                        <StoryPollOverlay
+                            story={currentStory}
+                            optimisticVote={optimisticPollVote}
+                            onVote={handlePollVote}
+                            onInteractionStart={() => setPaused(true)}
                         />
                     ) : null}
 

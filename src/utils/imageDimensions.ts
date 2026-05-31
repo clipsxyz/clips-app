@@ -84,6 +84,23 @@ export const needsClamping = (aspectRatio: number): boolean => {
 };
 
 /**
+ * Best-effort check to avoid calling Image.getSize on non-image URLs.
+ * This prevents noisy RN DecodeException logs for video/media endpoints.
+ */
+export const isLikelyImageUri = (uri?: string | null): boolean => {
+  if (!uri || typeof uri !== 'string') return false;
+  const value = uri.trim().toLowerCase();
+  if (!value) return false;
+  if (value.includes('lorem.video')) return false;
+  if (value.startsWith('data:image/')) return true;
+  if (value.startsWith('file://') || value.startsWith('content://')) return true;
+  if (/\.(mp4|mov|m4v|webm|m3u8)(\?|#|$)/i.test(value)) return false;
+  if (/\.(jpg|jpeg|png|gif|webp|bmp|heic|heif|avif)(\?|#|$)/i.test(value)) return true;
+  // Unknown extension: treat as likely image for CDN URLs.
+  return /^https?:\/\//.test(value);
+};
+
+/**
  * Convert an image source URL to a data URL constrained to Instagram feed bounds.
  * - Keeps image unchanged when already within range.
  * - Center-crops only when outside the supported ratio window.

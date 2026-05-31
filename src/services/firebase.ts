@@ -1,20 +1,22 @@
+import { getRuntimeEnv } from '../config/runtimeEnv';
+
 // Firebase types (will be any if package not installed)
 type FirebaseApp = any;
 type Messaging = any;
 
 // Firebase configuration from environment variables
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
+  apiKey: getRuntimeEnv('VITE_FIREBASE_API_KEY'),
+  authDomain: getRuntimeEnv('VITE_FIREBASE_AUTH_DOMAIN'),
+  projectId: getRuntimeEnv('VITE_FIREBASE_PROJECT_ID'),
+  storageBucket: getRuntimeEnv('VITE_FIREBASE_STORAGE_BUCKET'),
+  messagingSenderId: getRuntimeEnv('VITE_FIREBASE_MESSAGING_SENDER_ID'),
+  appId: getRuntimeEnv('VITE_FIREBASE_APP_ID'),
+  measurementId: getRuntimeEnv('VITE_FIREBASE_MEASUREMENT_ID'),
 };
 
 // VAPID key for web push
-const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
+const vapidKey = getRuntimeEnv('VITE_FIREBASE_VAPID_KEY');
 
 let app: FirebaseApp | null = null;
 let messaging: Messaging | null = null;

@@ -31,6 +31,10 @@ export async function isFeedPostArchivedMobile(viewerUserId: string, postId: str
     return s.has(postId);
 }
 
+export async function getArchivedFeedPostIdsMobile(viewerUserId: string): Promise<Set<string>> {
+    return readIdSet(archivedKey(viewerUserId));
+}
+
 export async function setPostNotificationsPrefMobile(
     viewerUserId: string,
     postId: string,

@@ -20,6 +20,7 @@ import Video, { type VideoRef } from 'react-native-video';
 import VideoCoverControls from '../components/VideoCoverControls.native';
 import { useAuth } from '../context/Auth';
 import { createPost } from '../api/posts';
+import { publishMediaStory24 } from '../utils/publishStoryNative';
 import { prepareMediaForPostNative } from '../utils/prepareMediaForPostNative';
 import { saveDraft } from '../api/drafts';
 import { TEXT_POST_BODY_MAX_LENGTH } from '../constants';
@@ -612,36 +613,21 @@ export default function CreateScreen({ navigation, route }: any) {
                 );
             }
 
-            await createPost(
-                user.id,
-                user.handle,
-                captionText,
-                locationLabel,
-                preparedMedia.mediaUrl,
-                preparedMedia.mediaType,
-                undefined,
-                preparedMedia.mediaUrl ? captionText || undefined : undefined,
-                user.local,
-                user.regional,
-                user.national,
-                stickers.length > 0 ? stickers : undefined,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                taggedUsers.length > 0 ? taggedUsers : undefined,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                venue.trim() || undefined,
-                landmark.trim() || undefined,
-                undefined,
-                undefined,
-                preparedMedia.videoPosterUrl,
-            );
+            if (!preparedMedia.mediaUrl || !preparedMedia.mediaType) {
+                throw new Error('Media is required for Story 24.');
+            }
+            await publishMediaStory24({
+                userId: user.id,
+                userHandle: user.handle,
+                mediaUrl: preparedMedia.mediaUrl,
+                mediaType: preparedMedia.mediaType,
+                caption: captionText,
+                location: locationLabel,
+                venue: venue.trim() || undefined,
+                stickers: stickers.length > 0 ? stickers : undefined,
+                taggedUsers: taggedUsers.length > 0 ? taggedUsers : undefined,
+                audience: storyAudience,
+            });
             hapticSuccess();
             const storyAudienceLabel =
                 storyAudience === 'close_friends' ? 'Close Friends' : storyAudience === 'only_me' ? 'Only Me' : 'Public';

@@ -29,13 +29,34 @@ if (typeof globalThis.localStorage === 'undefined') {
   };
 }
 
-import { AppRegistry } from 'react-native';
-import './global.css';
-import App from './App.native';
+import { AppRegistry, LogBox, Text, View } from 'react-native';
+import 'react-native-reanimated';
+// NativeWind global.css can prevent the first paint on some Android builds; styles live in StyleSheet on native screens.
+// import './global.css';
 import { name as appName } from './app.json';
 import { registerBackgroundMessageHandler } from './src/services/notifications';
+
+LogBox.ignoreLogs(['Sending `onAnimatedValueUpdate`']);
+
+function Root() {
+  try {
+    // Lazy-load so a bad import in the tree is caught and shown instead of a blank screen.
+    const App = require('./App.native').default;
+    return <App />;
+  } catch (err) {
+    console.error('App bootstrap failed:', err);
+    return (
+      <View style={{ flex: 1, backgroundColor: '#0b0711', padding: 20, paddingTop: 48 }}>
+        <Text style={{ color: '#f87171', fontSize: 18, fontWeight: '700', marginBottom: 12 }}>
+          App failed to start
+        </Text>
+        <Text style={{ color: '#e5e7eb', fontSize: 13 }}>{String(err?.message || err)}</Text>
+      </View>
+    );
+  }
+}
 
 // Register once at app entry so background notifications can be handled when supported.
 registerBackgroundMessageHandler().catch(() => {});
 
-AppRegistry.registerComponent(appName, () => App);
+AppRegistry.registerComponent(appName, () => Root);

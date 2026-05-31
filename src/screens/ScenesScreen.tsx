@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
-import Video from 'react-native-video';
+import Video, { type VideoRef } from 'react-native-video';
 import type { Post } from '../types';
 import { postHasVideoMedia } from '../utils/postMedia';
 import {
@@ -23,6 +23,9 @@ import {
 type RouteParams = {
     initialPostId: string;
     posts: Post[];
+    /** Resume feed playback position (web Scenes handoff). */
+    initialVideoTime?: number;
+    initialMuted?: boolean;
 };
 
 function getVideoUrl(post: Post): string {
@@ -33,7 +36,8 @@ function getVideoUrl(post: Post): string {
 }
 
 export default function ScenesScreen({ route, navigation }: any) {
-    const { initialPostId, posts: routePosts } = route.params;
+    const { initialPostId, posts: routePosts, initialVideoTime, initialMuted } =
+        route.params as RouteParams;
     const insets = useSafeAreaInsets();
     const windowHeight = Dimensions.get('window').height;
     const posts = useMemo(() => routePosts.filter(postHasVideoMedia), [routePosts]);
@@ -42,16 +46,26 @@ export default function ScenesScreen({ route, navigation }: any) {
         posts.findIndex((p) => p.id === initialPostId),
     );
     const [activeIndex, setActiveIndex] = useState(initialIndex);
-    const [muted, setMuted] = useState(true);
+    const [muted, setMuted] = useState(initialMuted ?? true);
     const listRef = useRef<FlatList<Post>>(null);
+    const videoRef = useRef<VideoRef>(null);
+    const didSeekInitialRef = useRef(false);
 
     React.useEffect(() => {
+        if (initialMuted !== undefined) {
+            setMuted(initialMuted);
+            return;
+        }
         let mounted = true;
         void getGlobalVideoMutedNative().then((m) => {
             if (mounted) setMuted(m);
         });
         return subscribeGlobalVideoMuted((m) => setMuted(m));
-    }, []);
+    }, [initialMuted]);
+
+    React.useEffect(() => {
+        didSeekInitialRef.current = false;
+    }, [initialPostId]);
 
     const onViewableItemsChanged = useRef(
         ({ viewableItems }: { viewableItems: ViewToken[] }) => {
@@ -68,6 +82,19 @@ export default function ScenesScreen({ route, navigation }: any) {
         });
     }, []);
 
+    const seekInitialIfNeeded = useCallback(() => {
+        if (
+            didSeekInitialRef.current ||
+            activeIndex !== initialIndex ||
+            initialVideoTime == null ||
+            initialVideoTime <= 0
+        ) {
+            return;
+        }
+        videoRef.current?.seek(initialVideoTime);
+        didSeekInitialRef.current = true;
+    }, [activeIndex, initialIndex, initialVideoTime]);
+
     const renderItem = useCallback(
         ({ item, index }: { item: Post; index: number }) => {
             const url = getVideoUrl(item);
@@ -78,6 +105,7 @@ export default function ScenesScreen({ route, navigation }: any) {
                 <View style={[styles.page, { height: windowHeight }]}>
                     {isActive && url ? (
                         <Video
+                            ref={isActive ? videoRef : undefined}
                             source={{ uri: url }}
                             style={StyleSheet.absoluteFill}
                             resizeMode="cover"
@@ -89,6 +117,7 @@ export default function ScenesScreen({ route, navigation }: any) {
                             playInBackground={false}
                             playWhenInactive={false}
                             ignoreSilentSwitch="ignore"
+                            onLoad={seekInitialIfNeeded}
                         />
                     ) : poster || url ? (
                         <Image
@@ -102,7 +131,7 @@ export default function ScenesScreen({ route, navigation }: any) {
                 </View>
             );
         },
-        [activeIndex, muted, windowHeight],
+        [activeIndex, muted, seekInitialIfNeeded, windowHeight],
     );
 
     if (!posts.length) {
@@ -124,15 +153,11 @@ export default function ScenesScreen({ route, navigation }: any) {
             <FlatList
                 ref={listRef}
                 data={posts}
-                renderItem={renderItem}
                 keyExtractor={(item) => item.id}
+                renderItem={renderItem}
                 pagingEnabled
                 showsVerticalScrollIndicator={false}
-                decelerationRate="fast"
-                snapToInterval={windowHeight}
-                snapToAlignment="start"
-                disableIntervalMomentum
-                initialScrollIndex={initialIndex > 0 ? initialIndex : undefined}
+                initialScrollIndex={initialIndex}
                 getItemLayout={(_, index) => ({
                     length: windowHeight,
                     offset: windowHeight * index,
@@ -144,50 +169,33 @@ export default function ScenesScreen({ route, navigation }: any) {
             <Pressable
                 style={[styles.closeBtn, { top: insets.top + 8 }]}
                 onPress={() => navigation.goBack()}
-                accessibilityLabel="Close Scenes"
             >
                 <Icon name="close" size={28} color="#FFFFFF" />
             </Pressable>
-            <Pressable style={[styles.muteBtn, { bottom: insets.bottom + 16 }]} onPress={toggleMute}>
-                <Icon name={muted ? 'volume-mute' : 'volume-high'} size={22} color="#FFFFFF" />
+            <Pressable
+                style={[styles.muteBtn, { top: insets.top + 8 }]}
+                onPress={toggleMute}
+            >
+                <Icon name={muted ? 'volume-mute' : 'volume-high'} size={26} color="#FFFFFF" />
             </Pressable>
         </View>
     );
 }
 
 const styles = StyleSheet.create({
-    root: {
-        flex: 1,
-        backgroundColor: '#000000',
-    },
-    page: {
-        width: '100%',
-        backgroundColor: '#000000',
-    },
-    fallback: {
-        flex: 1,
-        backgroundColor: '#111827',
-    },
+    root: { flex: 1, backgroundColor: '#000' },
+    page: { width: '100%', backgroundColor: '#000' },
+    fallback: { ...StyleSheet.absoluteFill, backgroundColor: '#111' },
     closeBtn: {
         position: 'absolute',
-        right: 14,
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'rgba(0,0,0,0.45)',
+        left: 12,
         zIndex: 20,
+        padding: 8,
     },
     muteBtn: {
         position: 'absolute',
-        right: 14,
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'rgba(0,0,0,0.45)',
+        right: 12,
         zIndex: 20,
+        padding: 8,
     },
 });

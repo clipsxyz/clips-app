@@ -1,4 +1,5 @@
 import { io, Socket } from 'socket.io-client';
+import { getRuntimeEnv } from '../config/runtimeEnv';
 
 let socket: Socket | null = null;
 
@@ -13,7 +14,7 @@ export function connectSocket(userHandle: string): Socket | null {
 
     // Only connect when a Socket.IO server URL is explicitly set (e.g. in .env as VITE_SOCKETIO_URL).
     // When unset, the app works without real-time socket and uses Custom Events fallback — no console spam.
-    const serverUrl = (import.meta.env.VITE_SOCKETIO_URL || '').trim();
+    const serverUrl = (getRuntimeEnv('VITE_SOCKETIO_URL') || '').trim();
     if (!serverUrl) {
         socket = null;
         return null;

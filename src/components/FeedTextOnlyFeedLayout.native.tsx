@@ -12,6 +12,9 @@ import FeedPostHeader from './FeedPostHeader.native';
 import FeedTextOnlyCard from './FeedTextOnlyCard.native';
 import TaggedAvatars from './TaggedAvatars.native';
 
+const AVATAR_COLUMN_WIDTH = 36;
+const BUBBLE_MAX_WIDTH = 480;
+
 type Props = {
     post: Post;
     viewerHandle?: string | null;
@@ -22,7 +25,6 @@ type Props = {
     onProfileMenuPress?: () => void;
     onOverflowPress?: () => void;
     onDoubleLike: () => void;
-    onHeartAnimation?: (pageX: number, pageY: number) => void;
     onRegisterDmAnchor?: (key: string, ref: View | null) => void;
     onShowTaggedUsers?: () => void;
 };
@@ -37,7 +39,6 @@ export default function FeedTextOnlyFeedLayout({
     onProfileMenuPress,
     onOverflowPress,
     onDoubleLike,
-    onHeartAnimation,
     onRegisterDmAnchor,
     onShowTaggedUsers,
 }: Props) {
@@ -52,6 +53,7 @@ export default function FeedTextOnlyFeedLayout({
     const avatarSrc = isCurrentUser ? user?.avatarUrl : getAvatarForHandle(profileHandle);
     const isFollowing = post.isFollowing === true;
     const isMutualFollow = useMutualFollow(post, isCurrentUser);
+    const bubbleMaxWidth = Math.min(Math.max(120, cardWidth - AVATAR_COLUMN_WIDTH - 8), BUBBLE_MAX_WIDTH);
 
     const registerAnchor = useCallback(
         (ref: View | null) => {
@@ -79,6 +81,7 @@ export default function FeedTextOnlyFeedLayout({
                 post={post}
                 viewerHandle={viewerHandle}
                 isCurrentUser={isCurrentUser}
+                isOverlaid
                 variant="textOnlyChrome"
                 onFollow={onFollow}
                 onOpenDM={onOpenDM}
@@ -87,53 +90,55 @@ export default function FeedTextOnlyFeedLayout({
                 onRegisterDmAnchor={onRegisterDmAnchor}
             />
 
-            <View style={[styles.bubbleRow, isFromViewer ? styles.bubbleRowMe : styles.bubbleRowOther]}>
-                {!isFromViewer ? (
-                    <View style={styles.bubbleAvatarSpacer}>
-                        <View ref={(r) => registerAnchor(r)} collapsable={false} style={styles.avatarWrap}>
-                            <TouchableOpacity onPress={onProfileMenuPress} activeOpacity={0.85}>
-                                <Avatar
-                                    src={avatarSrc}
-                                    name={profileHandle.split('@')[0]}
-                                    size={28}
-                                    hasStory={hasStory}
-                                />
+            {/* Web PostHeader textOnlyFeed: bubble then avatar, row aligned end. */}
+            <View style={styles.bubbleRow}>
+                <View style={[styles.bubbleSlot, { maxWidth: bubbleMaxWidth }]}>
+                    <FeedTextOnlyCard
+                        post={post}
+                        isFromViewer={isFromViewer}
+                        onDoubleLike={onDoubleLike}
+                        maxWidth={bubbleMaxWidth}
+                    />
+                </View>
+                <View style={styles.avatarColumn}>
+                    <View ref={(r) => registerAnchor(r)} collapsable={false} style={styles.avatarWrap}>
+                        <TouchableOpacity onPress={onProfileMenuPress} activeOpacity={0.85}>
+                            <Avatar
+                                src={avatarSrc}
+                                name={(profileHandle || post.userHandle || 'User').split('@')[0]}
+                                size={28}
+                                hasStory={hasStory}
+                            />
+                        </TouchableOpacity>
+                        {!isCurrentUser && onFollow && !isFollowing ? (
+                            <TouchableOpacity style={styles.followPlus} onPress={() => void onFollow()}>
+                                <Icon name="add" size={12} color="#FFFFFF" />
                             </TouchableOpacity>
-                            {!isCurrentUser && onFollow && !isFollowing ? (
-                                <TouchableOpacity style={styles.followPlus} onPress={() => void onFollow()}>
-                                    <Icon name="add" size={12} color="#FFFFFF" />
-                                </TouchableOpacity>
-                            ) : null}
-                            {!isCurrentUser && isMutualFollow && onOpenDM ? (
-                                <TouchableOpacity
-                                    style={styles.dmButton}
-                                    onPress={() => onOpenDM(post.userHandle, post.id)}
-                                >
-                                    <Icon name="paper-plane" size={11} color="#EF4444" />
-                                </TouchableOpacity>
-                            ) : null}
-                            {!isCurrentUser && isFollowing && !isMutualFollow ? (
-                                <View style={styles.followCheck}>
-                                    <Icon name="checkmark" size={12} color="#FFFFFF" />
-                                </View>
-                            ) : null}
-                        </View>
+                        ) : null}
+                        {!isCurrentUser && isMutualFollow && onOpenDM ? (
+                            <TouchableOpacity
+                                style={styles.dmButton}
+                                onPress={() => onOpenDM(post.userHandle, post.id)}
+                            >
+                                <Icon name="paper-plane" size={11} color="#EF4444" />
+                            </TouchableOpacity>
+                        ) : null}
+                        {!isCurrentUser && isFollowing && !isMutualFollow ? (
+                            <View style={styles.followCheck}>
+                                <Icon name="checkmark" size={12} color="#FFFFFF" />
+                            </View>
+                        ) : null}
                     </View>
-                ) : null}
-                <FeedTextOnlyCard
-                    post={post}
-                    isFromViewer={isFromViewer}
-                    onDoubleLike={onDoubleLike}
-                    onHeartAnimation={onHeartAnimation}
-                    width={cardWidth - (isFromViewer ? 8 : 44)}
-                />
+                </View>
             </View>
 
             {post.taggedUsers && post.taggedUsers.length > 0 ? (
-                <TaggedAvatars
-                    taggedUserHandles={post.taggedUsers}
-                    onShowTaggedUsers={onShowTaggedUsers ?? (() => {})}
-                />
+                <View style={styles.taggedFooter}>
+                    <TaggedAvatars
+                        taggedUserHandles={post.taggedUsers}
+                        onShowTaggedUsers={onShowTaggedUsers ?? (() => {})}
+                    />
+                </View>
             ) : null}
         </View>
     );
@@ -141,26 +146,32 @@ export default function FeedTextOnlyFeedLayout({
 
 const styles = StyleSheet.create({
     root: {
-        paddingHorizontal: 12,
-        paddingBottom: 8,
+        paddingHorizontal: 16,
+        paddingBottom: 12,
     },
     bubbleRow: {
         flexDirection: 'row',
         alignItems: 'flex-end',
+        justifyContent: 'flex-end',
         gap: 8,
+        marginTop: 8,
     },
-    bubbleRowMe: {
-        justifyContent: 'flex-end',
+    bubbleSlot: {
+        flexShrink: 1,
+        minWidth: 0,
     },
-    bubbleRowOther: {
-        justifyContent: 'flex-end',
-    },
-    bubbleAvatarSpacer: {
-        width: 32,
+    avatarColumn: {
+        width: AVATAR_COLUMN_WIDTH,
         alignItems: 'center',
+        flexShrink: 0,
     },
     avatarWrap: {
         position: 'relative',
+    },
+    taggedFooter: {
+        marginTop: 8,
+        alignItems: 'flex-end',
+        paddingRight: 2,
     },
     followPlus: {
         position: 'absolute',

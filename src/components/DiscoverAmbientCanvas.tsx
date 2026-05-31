@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import {
     type DiscoverAmbientVariant,
+    DISCOVER_AMBIENT_TIME_STEP,
     drawDiscoverAmbientWave,
     getAmbientPalette,
 } from '../utils/discoverAmbientPalette';
@@ -104,7 +105,7 @@ export default function DiscoverAmbientCanvas({
 
         const animate = () => {
             if (!paused && width > 0 && height > 0) {
-                timeRef.current += 0.006;
+                timeRef.current += DISCOVER_AMBIENT_TIME_STEP;
                 drawDiscoverAmbientWave(ctx, width, height, timeRef.current, palette);
             }
             frameRef.current = requestAnimationFrame(animate);

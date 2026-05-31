@@ -1,10 +1,9 @@
-import { get, set, del, keys } from 'idb-keyval';
+import { get, set } from 'idb-keyval';
 import type { StickerOverlay } from '../types';
 import type { InstantFilterName } from '../utils/instantFiltersNative';
 
 export interface Draft {
   id: string;
-  /** Persistent media URL (data URL or http(s)); supports both image and video. Empty for text-only drafts. */
   videoUrl: string;
   videoDuration: number;
   createdAt: number;
@@ -12,44 +11,26 @@ export interface Draft {
   caption?: string;
   location?: string;
   tags?: string[];
-  /** @deprecated Legacy trim fields; native no longer trims on upload. */
   trimStart?: number;
-  /** @deprecated Legacy trim fields; native no longer trims on upload. */
   trimEnd?: number;
-  /** When saving from gallery: 'image' | 'video'. Omit = treat as video (InstantCreate). */
   mediaType?: 'image' | 'video';
-  /** Feed thumbnail for video drafts (remote or data URL). */
   videoPosterUrl?: string;
-  /** Cover frame time in seconds when the draft was saved. */
   videoCoverTime?: number;
-  /** Instant filter name when overlay was not baked into media. */
   filterActive?: InstantFilterName;
-  /** True when filter was baked into `videoUrl` on save (do not re-apply overlay on resume). */
   filterBaked?: boolean;
-  /** Sticker overlays from the composer. */
   stickers?: StickerOverlay[];
-  /** Optional full carousel for multi-media drafts. */
   mediaItems?: Array<{ url: string; type: 'image' | 'video'; duration?: number }>;
-  /** True when this draft is text-only (no media). */
   isTextOnly?: boolean;
-  /** Main post text for text-only drafts. */
   textBody?: string;
-  /** Venue for text-only (and other) drafts. */
   venue?: string;
-  /** Named landmark for metadata carousel / landmark feeds. */
   landmark?: string;
-  /** Tagged user handles for text-only (and other) drafts. */
   taggedUsers?: string[];
-  /** Selected text template ID for text-only drafts. */
   textTemplateId?: string;
 }
 
 const DRAFTS_KEY = 'user_drafts';
 
-/**
- * Get all drafts for the current user
- */
-export async function getDrafts(): Promise<Draft[]> {
+async function readDrafts(): Promise<Draft[]> {
   try {
     const drafts = await get<Draft[]>(DRAFTS_KEY);
     return drafts || [];
@@ -59,75 +40,42 @@ export async function getDrafts(): Promise<Draft[]> {
   }
 }
 
-/**
- * Save a draft
- */
+async function writeDrafts(drafts: Draft[]): Promise<void> {
+  await set(DRAFTS_KEY, drafts);
+}
+
+export async function getDrafts(): Promise<Draft[]> {
+  return readDrafts();
+}
+
 export async function saveDraft(draft: Omit<Draft, 'id' | 'createdAt' | 'updatedAt'>): Promise<Draft> {
-  try {
-    const drafts = await getDrafts();
-    const newDraft: Draft = {
-      ...draft,
-      id: `draft_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    drafts.push(newDraft);
-    await set(DRAFTS_KEY, drafts);
-    return newDraft;
-  } catch (error) {
-    console.error('Error saving draft:', error);
-    throw error;
-  }
+  const drafts = await readDrafts();
+  const newDraft: Draft = {
+    ...draft,
+    id: `draft_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  drafts.push(newDraft);
+  await writeDrafts(drafts);
+  return newDraft;
 }
 
-/**
- * Delete a draft
- */
 export async function deleteDraft(draftId: string): Promise<void> {
-  try {
-    const drafts = await getDrafts();
-    const filtered = drafts.filter(d => d.id !== draftId);
-    await set(DRAFTS_KEY, filtered);
-  } catch (error) {
-    console.error('Error deleting draft:', error);
-    throw error;
-  }
+  const drafts = await readDrafts();
+  await writeDrafts(drafts.filter((d) => d.id !== draftId));
 }
 
-/**
- * Update a draft
- */
 export async function updateDraft(draftId: string, updates: Partial<Draft>): Promise<Draft | null> {
-  try {
-    const drafts = await getDrafts();
-    const index = drafts.findIndex(d => d.id === draftId);
-    if (index === -1) return null;
-    
-    drafts[index] = {
-      ...drafts[index],
-      ...updates,
-      updatedAt: Date.now(),
-    };
-    await set(DRAFTS_KEY, drafts);
-    return drafts[index];
-  } catch (error) {
-    console.error('Error updating draft:', error);
-    throw error;
-  }
+  const drafts = await readDrafts();
+  const index = drafts.findIndex((d) => d.id === draftId);
+  if (index === -1) return null;
+  drafts[index] = { ...drafts[index], ...updates, updatedAt: Date.now() };
+  await writeDrafts(drafts);
+  return drafts[index];
 }
 
-/**
- * Get a single draft by ID
- */
 export async function getDraft(draftId: string): Promise<Draft | null> {
-  try {
-    const drafts = await getDrafts();
-    return drafts.find(d => d.id === draftId) || null;
-  } catch (error) {
-    console.error('Error getting draft:', error);
-    return null;
-  }
+  const drafts = await readDrafts();
+  return drafts.find((d) => d.id === draftId) || null;
 }
-
-
-
